@@ -48,11 +48,36 @@ merge (see `fork/RUNBOOK.md`).
 
 | File / path | Change | Reason |
 | --- | --- | --- |
-| `fork/` (this directory) | Added | Fork docs — new files, no upstream conflict |
-| _(updated at each sync / change)_ | | |
+| `fork/` (this directory) | Added | Fork docs, brand.json, rebrand-sweep.mjs — new files, no upstream conflict |
+| 37 source files + packaging (see `git diff main --stat` on product) | "GenOffice"/"GenTeam" string sweep → current brand | Trademark compliance; run `node fork/rebrand-sweep.mjs` to re-apply after syncs or a name change |
+| `apps/shell/electron-builder.cjs` | appId, productName, executableName, deb/rpm names, maintainer/vendor | Trademark compliance |
+| `apps/shell/package.json` | productName | Electron app.name + userData dir |
+| `packages/ai-search/src/gsk.ts` | gsk backend default OFF (opt in with `AI_SEARCH_DISABLE_GSK=0`) | Do not route fork users through Genspark services |
+
+Protections verified after the sweep: `@genoffice/*` npm scope, `GENOFFICE_*`
+env-var prefix, and PDF format keys (`GenOfficeStaticFormFills`,
+`GenOfficeFormField`) are untouched; zero bare "GenOffice" strings remain in
+non-test sources.
 
 ## Branding swap status
 
-See the rebrand inventory in this file's companion notes from the rebrand
-scaffold work. Placeholder brand token is in use until the final brand name is
-confirmed.
+Placeholder brand **ExampleOffice** is applied everywhere except:
+- **Icons** — `apps/shell/build/` (icon.icns/.ico/png + icons/ set) still
+  carries upstream logos. Replace when real brand assets exist.
+- **Genspark sign-in UI** — gsk backend is now default-off, but the sign-in
+  UI flow (Home.tsx / SettingsModal.tsx / provider-logos.tsx) should be
+  hidden or reworded for the fork.
+- **Onboarding / star-prompt copy** — shell strings still encourage starring
+  upstream's GitHub repo and mention alpha status; copy needs a fork-specific
+  rewrite (functional, not just a name swap).
+- **README.md / repo docs** — still upstream's; rewrite before any public
+  distribution.
+
+## Safe-by-default packaging (verified in electron-builder.cjs)
+
+- Auto-update feed (`GENOFFICE_UPDATE_URL`): unset for fork builds → no
+  `app-update.yml` baked, auto-update disabled. Never point it at upstream's
+  feed.
+- GA4 analytics (`GENOFFICE_GA4_*`): unset → fully disabled.
+- Font CDN (`GENOFFICE_FONT_CDN_URL`): unset → download catalog hidden.
+

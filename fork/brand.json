@@ -1,0 +1,11 @@
+{
+  "_comment": "Fork brand identity — the single edit point for rebranding. After changing values, run: node fork/rebrand-sweep.mjs. 'previousNames' lists every product name ever used by this fork or upstream; the sweep migrates all of them to productName (idempotent).",
+  "productName": "ExampleOffice",
+  "appId": "com.exampleoffice.app",
+  "executableName": "exampleoffice",
+  "packageName": "exampleoffice",
+  "company": "Example Company",
+  "companyEmail": "team@example.com",
+  "previousNames": ["GenOffice"],
+  "genTeamName": "GenTeam"
+}

@@ -80,7 +80,7 @@ function electronCompatArgs(): string[] {
 
 /**
  * API key for Genspark LLM proxy / tool_cli auth; '' when not logged in.
- * Priority: GSK_API_KEY env → GenOffice's own key (bills to us via its
+ * Priority: GSK_API_KEY env → ExampleOffice's own key (bills to us via its
  * key_name) → shared gsk CLI login (bills to the Claw bucket).
  */
 export function gskApiKey(): string {
@@ -99,10 +99,12 @@ export function gskApiKey(): string {
 
 /**
  * Whether gsk is usable (CLI installed and logged in / has a key). Callers use this to decide fallback.
- * Set AI_SEARCH_DISABLE_GSK=1 to force-disable (test isolation / force Serper).
+ * Fork default is OFF — gsk runs on Genspark's infrastructure, so this build
+ * falls back to keyless/Serper search and BYOK AI unless explicitly opted in
+ * with AI_SEARCH_DISABLE_GSK=0.
  */
 export function hasGskAuth(): boolean {
-  if (process.env.AI_SEARCH_DISABLE_GSK === '1') return false
+  if (process.env.AI_SEARCH_DISABLE_GSK !== '0') return false
   return !!gskApiKey() && resolveGskEntry() !== null
 }
 
@@ -394,7 +396,7 @@ async function toolCliPost(
   try {
     const resp = await fetch(`${GSK_TOOL_CLI_BASE}${path}`, {
       method: 'POST',
-      // X-Agent-Type splits GenOffice usage out of the proxy's "Claw" billing bucket
+      // X-Agent-Type splits ExampleOffice usage out of the proxy's "Claw" billing bucket
       headers: {
         'X-Api-Key': key,
         'Content-Type': 'application/json',
