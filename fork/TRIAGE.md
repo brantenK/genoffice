@@ -12,7 +12,7 @@ Date: 2026-08-27 · Branch: `product` @ 5806e14 · Upstream: genspark-ai/genoffi
 | `npm run build:all` (all 6 apps) | ✅ exit 0 |
 | `npm run typecheck` (19 workspaces) | ✅ exit 0 — includes the 551-string rebrand sweep |
 | Unit tests, all 19 workspaces | ✅ green after fixes below (see "slides flake") |
-| `npm run test:e2e` | see bottom of file |
+| `npm run test:e2e` (Playwright-Electron, 37 specs) | ✅ 37/37 after fixes below |
 
 ## Issues found and fixed in this session (all committed on `product`)
 
@@ -97,5 +97,24 @@ raise the 90s per-test timeout or run slides first.
 
 ## e2e (Playwright-Electron) result
 
-Ran `npm run test:e2e` against the `build:all` output — see the final summary
-in this file's addendum below after completion.
+**37/37 passed on Windows (3.5 min)** against the `build:all` output, after
+two rounds of fixes:
+
+1. First run (18 passed): sheets e2e fixtures missing — CI generates them via
+   `npm run fixtures -w @genoffice/sheets` before e2e; our run skipped that
+   step. Fixed by generating them.
+2. Second run (32 passed, 5 failed):
+   - 2 fork-caused: e2e specs hardcoded the old brand (onboarding title,
+     default save-dir name). Fixed by extending `fork/rebrand-sweep.mjs` to
+     cover `e2e/` so brand assertions follow the brand automatically.
+   - 3 Windows-genuine: `sheets-xlsm`, `sheets-ribbon-batch`,
+     `slides-font-manager` shell out to the Unix `zip`/`unzip` CLIs (absent or
+     bracket-escaping-quirky on stock Windows). Replaced with `jszip`
+     (already in the dependency tree). **This is an upstream PR candidate:
+     their e2e cannot run on a stock Windows machine at all.**
+   - Note: several other specs use `unzip -p` and happen to work with Git
+     Bash's unzip; a follow-up PR could unify all of them on jszip.
+
+All e2e specs exercise the real packaged-layout Electron shell (launch,
+onboarding, every editor, save/reopen round-trips), so the app is verified
+working end-to-end on Windows.
