@@ -83,7 +83,7 @@ function namePattern(name) {
   return new RegExp(`${escaped}(?![A-Z])`, 'g')
 }
 
-const tracked = execFileSync('git', ['ls-files', 'apps/', 'packages/'], {
+const tracked = execFileSync('git', ['ls-files', 'apps/', 'packages/', 'e2e/'], {
   cwd: root,
   encoding: 'utf8',
 })
