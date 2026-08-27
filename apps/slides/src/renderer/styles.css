@@ -56,9 +56,9 @@
  * Chrome tokens (surface/text/border/…, AI panel --color-*) come from
  * @genoffice/ui/tokens.css; nothing here may shadow those names. */
 :root {
-  --accent: #c43e1c;
-  --accent-dark: #a33517;
-  --accent-soft: #fbeae5;
+  --accent: #16864a;
+  --accent-dark: #0f5c34;
+  --accent-soft: #e7f2ec;
 
   /* slides-local chrome shades */
   --slides-statusbar-bg: #f3f4f6;
@@ -101,7 +101,7 @@
   /* PowerPoint animation categories: entrance / emphasis / exit / motion path */
   --slides-anim-entr: #107c41;
   --slides-anim-emph: #c28e00;
-  --slides-anim-exit: #c43e1c;
+  --slides-anim-exit: #16864a;
   --slides-anim-path: #2b7cd3;
   --slides-choice-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 
@@ -191,9 +191,9 @@
 }
 
 [data-theme='dark'] {
-  --accent: #e8663f;
-  --accent-dark: #d4552f;
-  --accent-soft: #43261d;
+  --accent: #2fbd74;
+  --accent-dark: #8fe3b3;
+  --accent-soft: #1d3328;
   --slides-statusbar-bg: #252525;
   --slides-rail-bg: #252525;
   --slides-statusbar-border: #3a3a3a;
@@ -213,7 +213,7 @@
   --slides-select-hover-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
   --slides-select-active-bg: var(--accent-soft);
   --slides-cell-focus-bg: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  --slides-ok: #58b380;
+  --slides-ok: #8fe3b3;
   --slides-error: #e57373;
   --slides-error-bg: rgb(229 115 115 / 12%);
   --slides-danger-bg: #3a2020;
@@ -230,18 +230,18 @@
   --slides-scroll-thumb: rgb(255 255 255 / 28%);
   --slides-swatch-ring: rgb(255 255 255 / 25%);
   --slides-swatch-ring-strong: rgb(255 255 255 / 35%);
-  --slides-anim-entr: #58b380;
+  --slides-anim-entr: #8fe3b3;
   --slides-anim-emph: #d9a834;
-  --slides-anim-exit: #e8663f;
+  --slides-anim-exit: #2fbd74;
   --slides-anim-path: #5aa0e8;
   --slides-choice-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='%231e1e1e' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --accent: #e8663f;
-    --accent-dark: #d4552f;
-    --accent-soft: #43261d;
+    --accent: #2fbd74;
+    --accent-dark: #8fe3b3;
+    --accent-soft: #1d3328;
     --slides-statusbar-bg: #252525;
     --slides-rail-bg: #252525;
     --slides-statusbar-border: #3a3a3a;
@@ -261,7 +261,7 @@
     --slides-select-hover-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
     --slides-select-active-bg: var(--accent-soft);
     --slides-cell-focus-bg: color-mix(in srgb, var(--accent) 14%, var(--surface));
-    --slides-ok: #58b380;
+    --slides-ok: #8fe3b3;
     --slides-error: #e57373;
     --slides-error-bg: rgb(229 115 115 / 12%);
     --slides-danger-bg: #3a2020;
@@ -278,9 +278,9 @@
     --slides-scroll-thumb: rgb(255 255 255 / 28%);
     --slides-swatch-ring: rgb(255 255 255 / 25%);
     --slides-swatch-ring-strong: rgb(255 255 255 / 35%);
-    --slides-anim-entr: #58b380;
+    --slides-anim-entr: #8fe3b3;
     --slides-anim-emph: #d9a834;
-    --slides-anim-exit: #e8663f;
+    --slides-anim-exit: #2fbd74;
     --slides-anim-path: #5aa0e8;
     --slides-choice-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='%231e1e1e' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   }
@@ -1514,7 +1514,7 @@ body.vib .slide-list {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: var(--gs-panel-bg);
   border-right: 1px solid var(--border);
   box-shadow: var(--slides-shadow-copilot);
   font-family: var(--gs-font-sans);
@@ -1654,10 +1654,12 @@ body.vib .slide-list {
 }
 
 .ai-chat-empty-title {
-  font-size: var(--text-body-lg);
-  font-weight: 600;
+  font-family: var(--gs-font-display);
+  font-style: italic;
+  font-size: 26px;
+  font-weight: 400;
   color: var(--color-text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .ai-chat-empty-body {

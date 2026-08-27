@@ -61,17 +61,32 @@ non-test sources.
 
 ## Branding swap status
 
-Placeholder brand **ExampleOffice** is applied everywhere except:
-- **Icons** — `apps/shell/build/` (icon.icns/.ico/png + icons/ set) still
-  carries upstream logos. Replace when real brand assets exist.
-- **Genspark sign-in UI** — gsk backend is now default-off, but the sign-in
-  UI flow (Home.tsx / SettingsModal.tsx / provider-logos.tsx) should be
-  hidden or reworded for the fork.
-- **Onboarding / star-prompt copy** — shell strings still encourage starring
-  upstream's GitHub repo and mention alpha status; copy needs a fork-specific
-  rewrite (functional, not just a name swap).
-- **README.md / repo docs** — still upstream's; rewrite before any public
-  distribution.
+Brand: **Zano Office** (placeholder ExampleOffice fully retired; sweep
+`previousNames` migrates both). Design system ported from
+`brantenK/zano-suite-agno` (frontend tokens.css): warm cream surfaces, Zano
+green `#16864a` / dark `#2fbd74`, 18px radius curve, Plus Jakarta Sans (UI)
++ Instrument Serif (display moments: Home hero, AI-panel empty states),
+Zano logo + icon set. Applied via:
+
+- `packages/ui/src/tokens.css` — token values swapped, `--gs-panel-bg` and
+  `--gs-font-display` added (all three theme blocks)
+- per-app `styles.css` accents → Zano green; `.ai-panel`/`.copilot` surfaces
+  → `--gs-panel-bg`; empty-state titles → Instrument Serif italic
+- `apps/shell` Home lockup = `zano-logo.png` + text wordmark; hero serif
+- icons: `build/icon.png` (1024px Zano) + Linux hicolor set; electron-builder
+  generates ico/icns from the png
+- fonts self-hosted via `@fontsource/plus-jakarta-sans` +
+  `@fontsource/instrument-serif` (packages/ui deps; OFL, offline-safe)
+
+Still open:
+- **Icon raster sizes**: 48/128/256/512 px slots reuse the nearest available
+  Zano PNGs (16/32/64/80/1024 source sizes); regenerate exact sizes from the
+  1024px source with real image tooling before release.
+- **Onboarding / star-prompt copy** still points users at upstream's GitHub
+  (names are rebranded; URLs and the "give us a star" ask are not fork-ready).
+- **Genspark sign-in UI** still rendered (gsk engine path stays default-off).
+- **README.md** is still upstream's.
+- `e2e/` visual/theme specs re-verified after the redesign.
 
 ## Safe-by-default packaging (verified in electron-builder.cjs)
 

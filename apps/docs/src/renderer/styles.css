@@ -2,12 +2,12 @@
  * Chrome tokens (surface/text/border/…, AI panel --color-*) come from
  * @genoffice/ui/tokens.css; nothing here may shadow those names. */
 :root {
-  --word-blue: #185abd;
-  --word-blue-dark: #124a9e;
+  --word-blue: #16864a;
+  --word-blue-dark: #0f5c34;
   --word-heading: #2f5496;
   --accent: var(--word-blue);
   --accent-dark: var(--word-blue-dark);
-  --accent-soft: #e8f1fb;
+  --accent-soft: #e7f2ec;
 
   --docs-heading-3: #1f3864;
   --docs-accent-ghost: rgb(24 90 189 / 10%);
@@ -106,12 +106,12 @@
   --docs-paper-heading: #2f5496;
   --docs-paper-h3: #1f3864;
   --docs-paper-link: #0563c1;
-  --docs-paper-accent: #185abd;
+  --docs-paper-accent: #16864a;
   --docs-paper-mark: #2b7cd3;
   --docs-paper-grid: rgb(43 124 211 / 13%);
   --docs-paper-hf-line: #d0d0d0;
   --docs-paper-chip-bg: #fafafa;
-  --docs-paper-select-bg: #e8f1fb;
+  --docs-paper-select-bg: #e7f2ec;
   --docs-paper-stripe: #f0f0f0;
   --docs-paper-chart-grid: #e0e0e0;
   --docs-paper-chart-border: #d9d9d9;
@@ -144,10 +144,10 @@
 }
 
 [data-theme='dark'] {
-  --word-blue: #4a9eff;
-  --word-blue-dark: #3a8eef;
+  --word-blue: #2fbd74;
+  --word-blue-dark: #8fe3b3;
   --word-heading: #6cabf0;
-  --accent-soft: #1e3a5f;
+  --accent-soft: #1d3328;
 
   --docs-heading-3: #7fa8e0;
   --docs-accent-ghost: rgb(74 158 255 / 18%);
@@ -173,7 +173,7 @@
   --docs-brand-ring: rgb(74 158 255 / 45%);
   --docs-focus-ring: rgb(228 228 228 / 25%);
   --docs-focus-ring-blue: rgb(74 158 255 / 40%);
-  --docs-input-focus: #4a9eff;
+  --docs-input-focus: #2fbd74;
   --docs-input-ring: rgb(74 158 255 / 20%);
   --docs-error-ring: rgb(242 139 130 / 20%);
   --docs-scroll-thumb: rgb(255 255 255 / 28%);
@@ -215,10 +215,10 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --word-blue: #4a9eff;
-    --word-blue-dark: #3a8eef;
+    --word-blue: #2fbd74;
+    --word-blue-dark: #8fe3b3;
     --word-heading: #6cabf0;
-    --accent-soft: #1e3a5f;
+    --accent-soft: #1d3328;
 
     --docs-heading-3: #7fa8e0;
     --docs-accent-ghost: rgb(74 158 255 / 18%);
@@ -244,7 +244,7 @@
     --docs-brand-ring: rgb(74 158 255 / 45%);
     --docs-focus-ring: rgb(228 228 228 / 25%);
     --docs-focus-ring-blue: rgb(74 158 255 / 40%);
-    --docs-input-focus: #4a9eff;
+    --docs-input-focus: #2fbd74;
     --docs-input-ring: rgb(74 158 255 / 20%);
     --docs-error-ring: rgb(242 139 130 / 20%);
     --docs-scroll-thumb: rgb(255 255 255 / 28%);
@@ -5355,7 +5355,7 @@ body.docs-crop-active
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-page);
+  background: var(--gs-panel-bg);
   /* Same visible divider as the GenOffice Sheets panel: the editor canvas is gray, so the default border would drown */
   border-right: 1px solid var(--color-border-strong);
   font-family: var(--gs-font-sans);
@@ -5482,10 +5482,12 @@ body.docs-crop-active
 }
 
 .ai-chat-empty-title {
-  font-size: var(--text-body-lg);
-  font-weight: 600;
+  font-family: var(--gs-font-display);
+  font-style: italic;
+  font-size: 26px;
+  font-weight: 400;
   color: var(--color-text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .ai-chat-empty-body {

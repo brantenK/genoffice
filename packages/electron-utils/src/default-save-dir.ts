@@ -1,6 +1,6 @@
 /// The default folder where new/untitled files land on their first (silent)
 /// save and where AI-generated drafts go. Historically hardcoded to
-/// <Documents>/ExampleOffice; now user-configurable via the `defaultSaveDir` key
+/// <Documents>/Zano Office; now user-configurable via the `defaultSaveDir` key
 /// in userData/app-settings.json (set from the home screen's account menu).
 /// Every editor main module resolves through here so they all honor the same
 /// setting.
@@ -15,7 +15,7 @@ export interface PathProvider {
 export const DEFAULT_SAVE_DIR_KEY = 'defaultSaveDir'
 
 /** folder name created under <Documents> when no defaultSaveDir is configured */
-export const DEFAULT_SAVE_FOLDER = 'ExampleOffice'
+export const DEFAULT_SAVE_FOLDER = 'Zano Office'
 
 /** the configured folder from app-settings.json, or null when unset/unreadable */
 export function readDefaultSaveDirSetting(settingsPath: string): string | null {

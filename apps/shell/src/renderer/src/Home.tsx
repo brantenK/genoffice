@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
-import logoLockup from './assets/genoffice-logo.svg'
+import zanoLogo from './assets/zano-logo.png'
 import iconDocx from './assets/file-docx.svg'
 import iconXlsx from './assets/file-xlsx.svg'
 import iconPptx from './assets/file-pptx.svg'
@@ -2089,7 +2089,10 @@ export function Home() {
     <div className="home">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <img className="logo-lockup" src={logoLockup} alt="ExampleOffice" />
+          <div className="logo-lockup">
+            <img src={zanoLogo} alt="" />
+            <span>Zano Office</span>
+          </div>
         </div>
 
         <nav className="sidebar-nav">

@@ -1,188 +1,224 @@
-/* GenOffice design tokens — the single source of truth for UI chrome colors.
+/* Zano Office design tokens — the single source of truth for UI chrome colors.
+ * Visual identity ported from the Zano design system (frontend/src/styles/tokens.css
+ * in brantenK/zano-suite-agno): warm cream surfaces, Zano green accent, soft
+ * brand shadows, 18px radii, Plus Jakarta Sans UI type.
  * Theme switching: light defaults in :root, [data-theme='dark'] overrides,
  * prefers-color-scheme fallback for system mode (no data-theme attribute).
  * Per-app accents (--accent / --accent-dark / --accent-soft) live in each
  * app's styles.css. Document content colors (paper, cells, exports, chart
  * palettes) never live here and never reference these tokens. */
 
+/* Zano brand typefaces, self-hosted via @fontsource so the UI renders
+ * offline (same policy as the Zano widget). Latin subsets only — the suite's
+ * document text is rendered by the editors' own font stacks, this is chrome
+ * UI type only. */
+@import '@fontsource/plus-jakarta-sans/latin-400.css';
+@import '@fontsource/plus-jakarta-sans/latin-500.css';
+@import '@fontsource/plus-jakarta-sans/latin-600.css';
+@import '@fontsource/plus-jakarta-sans/latin-700.css';
+@import '@fontsource/instrument-serif/latin-400.css';
+@import '@fontsource/instrument-serif/latin-400-italic.css';
+
 :root {
-  /* chrome */
-  --surface: #ffffff;
-  --surface-subtle: #f6f7f9;
-  --chrome-bg: #ffffff;
-  --canvas: #e6e6e6;
-  --border: #e3e6ea;
-  --border-subtle: #efefef;
-  --border-strong: #d9d9d9;
-  --border-hover: #d3d7dd;
-  --text: #242424;
-  --text-primary: #232425;
-  --text-secondary: #606366;
-  --text-tertiary: #909499;
-  --text-muted: #878e96;
-  --text-dim: #605e5c;
-  --hover: #f5f5f5;
-  --pressed: #edebe9;
-  --active-bg: #eaeaea;
-  --bg-hover: #f5f5f5;
-  --bg-hover-subtle: #f0f2f5;
-  --bg-hover-strong: #e8eaee;
-  --bg-hover-accent: #e0e4ea;
-  --bg-content: #fafafa;
-  --icon-muted: #b9bfc7;
-  --danger: #d13438;
-  --danger-bg: #fdf3f3;
-  --danger-border: #f0c8c9;
-  --success: #107c41;
-  --success-bg: #eaf7ef;
-  --success-border: #c8e8d4;
-  --color-bg-overlay: rgb(0 0 0 / 50%);
-  --shadow-modal-strong: 0 20px 25px rgb(0 0 0 / 10%);
-  --shadow-btn-hover: 0 2px 8px rgb(35 36 37 / 15%);
-  --shadow-menu: 0 8px 24px rgb(0 0 0 / 18%);
+  /* chrome — Zano warm cream surfaces (zano-bg / zano-bg-2 / zano-border) */
+  --surface: #fafaf7;
+  --surface-subtle: #f3f2ed;
+  --chrome-bg: #fafaf7;
+  --canvas: #ecebe4;
+  --border: #e2dfda;
+  --border-subtle: #eae7e1;
+  --border-strong: #d6d2ca;
+  --border-hover: #cfcbc2;
+  --text: #131316;
+  --text-primary: #131316;
+  --text-secondary: #3d3d4a;
+  --text-tertiary: #6b6b7d;
+  --text-muted: #6b6b7d;
+  --text-dim: #6b6b7d;
+  --hover: #f3f2ed;
+  --pressed: #eae7e0;
+  --active-bg: #e6e2d9;
+  --bg-hover: #f3f2ed;
+  --bg-hover-subtle: #f6f5f0;
+  --bg-hover-strong: #eae7e0;
+  --bg-hover-accent: #e7f2ec;
+  --bg-content: #f6f5f0;
+  --icon-muted: #a9a8b0;
+  --danger: #be3737;
+  --danger-bg: #faecec;
+  --danger-border: #eec4c4;
+  --success: #16864a;
+  --success-bg: #e7f2ec;
+  --success-border: #c4dfce;
+  --color-bg-overlay: rgb(19 19 22 / 40%);
+  /* Zano shadow curve: soft, wide, low-alpha (spec 08 §5 / spec 09 §2) */
+  --shadow-modal-strong: 0 12px 40px rgb(0 0 0 / 16%);
+  --shadow-btn-hover: 0 2px 8px rgb(19 19 22 / 8%);
+  --shadow-menu: 0 10px 30px rgb(0 0 0 / 10%);
 
   /* AI panel (canonical names from the former per-app copies) */
   --gs-font-sans:
-    'Arial', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
-    sans-serif;
-  --color-btn-primary: #232425;
-  --color-btn-primary-hover: #393a3b;
+    'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --gs-font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  /* Primary actions wear Zano green with the tinted "lifted" shadow trick */
+  --color-btn-primary: #16864a;
+  --color-btn-primary-hover: #0f5c34;
   --color-btn-primary-text: #ffffff;
-  --color-ai-action: #e8663f;
-  --color-ai-action-hover: #d4552f;
+  --color-ai-action: #16864a;
+  --color-ai-action-hover: #0f5c34;
   --color-ai-action-text: #ffffff;
-  --color-brand-secondary: #0f7fff;
-  --color-text-primary: #232425;
-  --color-text-secondary: #606366;
-  --color-text-tertiary: #909499;
-  --color-bg-page: #ffffff;
-  --color-bg-subtle: #f5f5f5;
-  --color-border-default: #eaeaea;
-  --color-border-strong: #d0d3d8;
-  --color-border-brand: #0f7fff;
-  --color-error: #ef4444;
-  --color-error-hover: #dc2626;
+  --color-brand-secondary: #0f5c34;
+  --color-text-primary: #131316;
+  --color-text-secondary: #3d3d4a;
+  --color-text-tertiary: #6b6b7d;
+  --color-bg-page: #fafaf7;
+  --color-bg-subtle: #f3f2ed;
+  --color-border-default: #e2dfda;
+  --color-border-strong: #d6d2ca;
+  --color-border-brand: #16864a;
+  --color-error: #be3737;
+  --color-error-hover: #a02e2e;
 
-  /* non-color */
+  /* non-color — Zano radius curve (zano-radius 18 / radius-sm 12) */
   --radius-6: 6px;
   --radius-8: 8px;
   --radius-12: 12px;
-  --radius-16: 16px;
+  --radius-16: 18px;
   --radius-30: 30px;
-  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
   --text-body-lg: 18px;
   --text-small: 14px;
   --text-caption: 12px;
+
+  /* Zano surface backdrop: cream base + faint green radial (spec 09 §4) */
+  --gs-panel-bg:
+    radial-gradient(circle at 20% 0%, rgba(22, 134, 74, 0.04), transparent 45%),
+    #fafaf7;
 
   color-scheme: light;
 }
 
 [data-theme='dark'] {
-  --surface: #1e1e1e;
-  --surface-subtle: #2a2a2a;
-  --chrome-bg: #252525;
-  --canvas: #2b2b2b;
-  --border: #3a3a3a;
-  --border-subtle: #3a3a3a;
-  --border-strong: #555;
-  --border-hover: #555;
-  --text: #e4e4e4;
-  --text-primary: #e4e4e4;
-  --text-secondary: #a0a0a0;
-  --text-tertiary: #a0a0a0;
-  --text-muted: #8a8a8a;
-  --text-dim: #a0a0a0;
-  --hover: #333;
-  --pressed: #3c3c3c;
-  --active-bg: #454545;
-  --bg-hover: #333;
-  --bg-hover-subtle: #333;
-  --bg-hover-strong: #444;
-  --bg-hover-accent: #444;
-  --bg-content: #1a1a1a;
-  --icon-muted: #666;
-  --danger: #d13438;
-  --danger-bg: #3a2020;
+  /* Zano dark: warm, green-hued neutrals — never pure black/gray */
+  --surface: #141815;
+  --surface-subtle: #1b201c;
+  --chrome-bg: #141815;
+  --canvas: #1f241f;
+  --border: #2c332c;
+  --border-subtle: #272d27;
+  --border-strong: #3a423a;
+  --border-hover: #4a524a;
+  --text: #f3f2ed;
+  --text-primary: #f3f2ed;
+  --text-secondary: #c9cdc6;
+  --text-tertiary: #8b9389;
+  --text-muted: #8b9389;
+  --text-dim: #8b9389;
+  --hover: #222822;
+  --pressed: #292f29;
+  --active-bg: #313831;
+  --bg-hover: #222822;
+  --bg-hover-subtle: #1f251f;
+  --bg-hover-strong: #292f29;
+  --bg-hover-accent: #1d3328;
+  --bg-content: #121612;
+  --icon-muted: #6d756c;
+  --danger: #e54848;
+  --danger-bg: #3d2222;
   --danger-border: #5a3030;
-  --success: #52c082;
-  --success-bg: #20342a;
-  --success-border: #33543f;
+  --success: #2fbd74;
+  --success-bg: #1d3328;
+  --success-border: #2c4a3a;
   --color-bg-overlay: rgb(0 0 0 / 60%);
-  --shadow-modal-strong: 0 20px 25px rgb(0 0 0 / 30%);
+  --shadow-modal-strong: 0 12px 40px rgb(0 0 0 / 60%);
   --shadow-btn-hover: 0 2px 8px rgb(0 0 0 / 50%);
-  --shadow-menu: 0 8px 24px rgb(0 0 0 / 55%);
+  --shadow-menu: 0 10px 30px rgb(0 0 0 / 55%);
 
-  --color-btn-primary: #e4e4e4;
-  --color-btn-primary-hover: #d0d0d0;
-  --color-btn-primary-text: #1e1e1e;
-  --color-ai-action: #e8663f;
-  --color-ai-action-hover: #f07a55;
-  --color-ai-action-text: #ffffff;
-  --color-brand-secondary: #4a9eff;
-  --color-text-primary: #e4e4e4;
-  --color-text-secondary: #a0a0a0;
-  --color-text-tertiary: #8a8a8a;
-  --color-bg-page: #1e1e1e;
-  --color-bg-subtle: #2a2a2a;
-  --color-border-default: #3a3a3a;
-  --color-border-strong: #555;
-  --color-border-brand: #4a9eff;
+  /* dark uses the lighter, more saturated step of the same green hue */
+  --color-btn-primary: #2fbd74;
+  --color-btn-primary-hover: #43cf8a;
+  --color-btn-primary-text: #0d130f;
+  --color-ai-action: #2fbd74;
+  --color-ai-action-hover: #43cf8a;
+  --color-ai-action-text: #0d130f;
+  --color-brand-secondary: #8fe3b3;
+  --color-text-primary: #f3f2ed;
+  --color-text-secondary: #c9cdc6;
+  --color-text-tertiary: #8b9389;
+  --color-bg-page: #141815;
+  --color-bg-subtle: #1b201c;
+  --color-border-default: #2c332c;
+  --color-border-strong: #3a423a;
+  --color-border-brand: #2fbd74;
+  --color-error: #e54848;
+  --color-error-hover: #f06a6a;
+
+  --gs-panel-bg:
+    radial-gradient(circle at 20% 0%, rgba(47, 189, 116, 0.07), transparent 45%),
+    #141815;
 
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --surface: #1e1e1e;
-    --surface-subtle: #2a2a2a;
-    --chrome-bg: #252525;
-    --canvas: #2b2b2b;
-    --border: #3a3a3a;
-    --border-subtle: #3a3a3a;
-    --border-strong: #555;
-    --border-hover: #555;
-    --text: #e4e4e4;
-    --text-primary: #e4e4e4;
-    --text-secondary: #a0a0a0;
-    --text-tertiary: #a0a0a0;
-    --text-muted: #8a8a8a;
-    --text-dim: #a0a0a0;
-    --hover: #333;
-    --pressed: #3c3c3c;
-    --active-bg: #454545;
-    --bg-hover: #333;
-    --bg-hover-subtle: #333;
-    --bg-hover-strong: #444;
-    --bg-hover-accent: #444;
-    --bg-content: #1a1a1a;
-    --icon-muted: #666;
-    --danger: #d13438;
-    --danger-bg: #3a2020;
+    --surface: #141815;
+    --surface-subtle: #1b201c;
+    --chrome-bg: #141815;
+    --canvas: #1f241f;
+    --border: #2c332c;
+    --border-subtle: #272d27;
+    --border-strong: #3a423a;
+    --border-hover: #4a524a;
+    --text: #f3f2ed;
+    --text-primary: #f3f2ed;
+    --text-secondary: #c9cdc6;
+    --text-tertiary: #8b9389;
+    --text-muted: #8b9389;
+    --text-dim: #8b9389;
+    --hover: #222822;
+    --pressed: #292f29;
+    --active-bg: #313831;
+    --bg-hover: #222822;
+    --bg-hover-subtle: #1f251f;
+    --bg-hover-strong: #292f29;
+    --bg-hover-accent: #1d3328;
+    --bg-content: #121612;
+    --icon-muted: #6d756c;
+    --danger: #e54848;
+    --danger-bg: #3d2222;
     --danger-border: #5a3030;
-    --success: #52c082;
-    --success-bg: #20342a;
-    --success-border: #33543f;
+    --success: #2fbd74;
+    --success-bg: #1d3328;
+    --success-border: #2c4a3a;
     --color-bg-overlay: rgb(0 0 0 / 60%);
-    --shadow-modal-strong: 0 20px 25px rgb(0 0 0 / 30%);
+    --shadow-modal-strong: 0 12px 40px rgb(0 0 0 / 60%);
     --shadow-btn-hover: 0 2px 8px rgb(0 0 0 / 50%);
-    --shadow-menu: 0 8px 24px rgb(0 0 0 / 55%);
+    --shadow-menu: 0 10px 30px rgb(0 0 0 / 55%);
 
-    --color-btn-primary: #e4e4e4;
-    --color-btn-primary-hover: #d0d0d0;
-    --color-btn-primary-text: #1e1e1e;
-    --color-ai-action: #e8663f;
-    --color-ai-action-hover: #f07a55;
-    --color-ai-action-text: #ffffff;
-    --color-brand-secondary: #4a9eff;
-    --color-text-primary: #e4e4e4;
-    --color-text-secondary: #a0a0a0;
-    --color-text-tertiary: #8a8a8a;
-    --color-bg-page: #1e1e1e;
-    --color-bg-subtle: #2a2a2a;
-    --color-border-default: #3a3a3a;
-    --color-border-strong: #555;
-    --color-border-brand: #4a9eff;
+    --color-btn-primary: #2fbd74;
+    --color-btn-primary-hover: #43cf8a;
+    --color-btn-primary-text: #0d130f;
+    --color-ai-action: #2fbd74;
+    --color-ai-action-hover: #43cf8a;
+    --color-ai-action-text: #0d130f;
+    --color-brand-secondary: #8fe3b3;
+    --color-text-primary: #f3f2ed;
+    --color-text-secondary: #c9cdc6;
+    --color-text-tertiary: #8b9389;
+    --color-bg-page: #141815;
+    --color-bg-subtle: #1b201c;
+    --color-border-default: #2c332c;
+    --color-border-strong: #3a423a;
+    --color-border-brand: #2fbd74;
+    --color-error: #e54848;
+    --color-error-hover: #f06a6a;
 
-    color-scheme: dark;
+    --gs-panel-bg:
+    radial-gradient(circle at 20% 0%, rgba(47, 189, 116, 0.07), transparent 45%),
+    #141815;
+
+  color-scheme: dark;
   }
 }

@@ -1,4 +1,4 @@
-/** Main-process i18n strings for ExampleOffice Slides (dialogs, native menus, export, autosave prompts). */
+/** Main-process i18n strings for Zano Office Slides (dialogs, native menus, export, autosave prompts). */
 import { createI18n, getUiLang } from '@genoffice/i18n'
 
 export const tMain = createI18n({

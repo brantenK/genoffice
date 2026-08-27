@@ -109,7 +109,11 @@ describe('startGenofficeLogin', () => {
       key_id: 'kid-1',
       access_token: 'bearer-token',
     })
-    expect(statSync(genofficeAuthPath()).mode & 0o777).toBe(0o600)
+    // NTFS does not honor POSIX file modes; the 0o600 hardening is a
+    // unix-only guarantee and cannot be asserted on Windows.
+    if (process.platform !== 'win32') {
+      expect(statSync(genofficeAuthPath()).mode & 0o777).toBe(0o600)
+    }
     expect(genofficeApiKey()).toBe('gsk-genoffice-key')
     expect(genofficeLoginInFlight()).toBe(false)
 

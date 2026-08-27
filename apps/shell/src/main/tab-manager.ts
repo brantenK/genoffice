@@ -52,8 +52,8 @@ interface TabRecord {
 const TAB_STRIP_HEIGHT = 40
 const HOME_ID = 'home'
 /** user-visible tab titles — brand strings kept as constants so tests and the rebrand sweep stay in sync (see fork/brand.json) */
-export const HOME_TAB_TITLE = 'ExampleOffice'
-export const UNTITLED_DOCS_TAB_TITLE = 'ExampleOffice Docs'
+export const HOME_TAB_TITLE = 'Zano Office'
+export const UNTITLED_DOCS_TAB_TITLE = 'Zano Office Docs'
 
 /**
  * Owns every open tab (Home + docs + sheets) inside the shell's single

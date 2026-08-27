@@ -2,9 +2,9 @@
  * Chrome tokens (surface/text/border/…, AI panel --color-*) come from
  * @genoffice/ui/tokens.css; nothing here may shadow those names. */
 :root {
-  --accent: #185abd;
-  --accent-dark: #124a9e;
-  --accent-soft: #e8f1fb;
+  --accent: #16864a;
+  --accent-dark: #0f5c34;
+  --accent-soft: #e7f2ec;
   --word-blue: var(--accent);
 
   --md-link: #0a69da;
@@ -40,11 +40,11 @@
 }
 
 [data-theme='dark'] {
-  --accent: #4a9eff;
-  --accent-dark: #3a8eef;
-  --accent-soft: #1e3a5f;
+  --accent: #2fbd74;
+  --accent-dark: #8fe3b3;
+  --accent-soft: #1d3328;
 
-  --md-link: #4a9eff;
+  --md-link: #2fbd74;
   --md-code-bg: #23272e;
   --md-code-inline-bg: rgb(129 139 152 / 22%);
   --md-table-header-bg: #282c32;
@@ -76,11 +76,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --accent: #4a9eff;
-    --accent-dark: #3a8eef;
-    --accent-soft: #1e3a5f;
+    --accent: #2fbd74;
+    --accent-dark: #8fe3b3;
+    --accent-soft: #1d3328;
 
-    --md-link: #4a9eff;
+    --md-link: #2fbd74;
     --md-code-bg: #23272e;
     --md-code-inline-bg: rgb(129 139 152 / 22%);
     --md-table-header-bg: #282c32;
@@ -1026,10 +1026,12 @@ html.genoffice-popover-open .ribbon-tabs {
 }
 
 .ai-chat-empty-title {
-  font-size: var(--text-body-lg);
-  font-weight: 600;
+  font-family: var(--gs-font-display);
+  font-style: italic;
+  font-size: 26px;
+  font-weight: 400;
   color: var(--color-text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .ai-chat-empty-body {

@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
 /**
- * E2E config for the ExampleOffice Electron shell.
+ * E2E config for the Zano Office Electron shell.
  *
  * Tests launch the real built app (electron.launch), so they run serially —
  * parallel Electron instances fight over the GPU cache and dock on macOS.

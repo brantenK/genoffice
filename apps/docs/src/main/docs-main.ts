@@ -212,7 +212,7 @@ const tMain = createI18n({
     menuWindow: '窗口',
     menuHelp: '帮助',
     menuShortcuts: '键盘快捷键',
-    menuDocsHelp: 'ExampleOffice Docs 帮助',
+    menuDocsHelp: 'Zano Office Docs 帮助',
   },
   en: {
     dlgOpenDoc: 'Open Document',
@@ -306,7 +306,7 @@ const tMain = createI18n({
     menuWindow: 'Window',
     menuHelp: 'Help',
     menuShortcuts: 'Keyboard Shortcuts',
-    menuDocsHelp: 'ExampleOffice Docs Help',
+    menuDocsHelp: 'Zano Office Docs Help',
   },
   ja: {
     dlgOpenDoc: '文書を開く',
@@ -400,7 +400,7 @@ const tMain = createI18n({
     menuWindow: 'ウィンドウ',
     menuHelp: 'ヘルプ',
     menuShortcuts: 'キーボードショートカット',
-    menuDocsHelp: 'ExampleOffice Docs ヘルプ',
+    menuDocsHelp: 'Zano Office Docs ヘルプ',
   },
   ko: {
     dlgOpenDoc: '문서 열기',
@@ -495,7 +495,7 @@ const tMain = createI18n({
     menuWindow: '창',
     menuHelp: '도움말',
     menuShortcuts: '키보드 바로 가기',
-    menuDocsHelp: 'ExampleOffice Docs 도움말',
+    menuDocsHelp: 'Zano Office Docs 도움말',
   },
   fr: {
     dlgOpenDoc: 'Ouvrir un document',
@@ -591,7 +591,7 @@ const tMain = createI18n({
     menuWindow: 'Fenêtre',
     menuHelp: 'Aide',
     menuShortcuts: 'Raccourcis clavier',
-    menuDocsHelp: 'Aide ExampleOffice Docs',
+    menuDocsHelp: 'Aide Zano Office Docs',
   },
   de: {
     dlgOpenDoc: 'Dokument öffnen',
@@ -687,7 +687,7 @@ const tMain = createI18n({
     menuWindow: 'Fenster',
     menuHelp: 'Hilfe',
     menuShortcuts: 'Tastenkombinationen',
-    menuDocsHelp: 'ExampleOffice Docs-Hilfe',
+    menuDocsHelp: 'Zano Office Docs-Hilfe',
   },
   es: {
     dlgOpenDoc: 'Abrir documento',
@@ -782,7 +782,7 @@ const tMain = createI18n({
     menuWindow: 'Ventana',
     menuHelp: 'Ayuda',
     menuShortcuts: 'Atajos de teclado',
-    menuDocsHelp: 'Ayuda de ExampleOffice Docs',
+    menuDocsHelp: 'Ayuda de Zano Office Docs',
   },
   th: {
     dlgOpenDoc: 'เปิดเอกสาร',
@@ -876,7 +876,7 @@ const tMain = createI18n({
     menuWindow: 'หน้าต่าง',
     menuHelp: 'วิธีใช้',
     menuShortcuts: 'แป้นพิมพ์ลัด',
-    menuDocsHelp: 'วิธีใช้ ExampleOffice Docs',
+    menuDocsHelp: 'วิธีใช้ Zano Office Docs',
   },
   id: {
     dlgOpenDoc: 'Buka Dokumen',
@@ -970,7 +970,7 @@ const tMain = createI18n({
     menuWindow: 'Jendela',
     menuHelp: 'Bantuan',
     menuShortcuts: 'Pintasan Papan Ketik',
-    menuDocsHelp: 'Bantuan ExampleOffice Docs',
+    menuDocsHelp: 'Bantuan Zano Office Docs',
   },
   ru: {
     dlgOpenDoc: 'Открыть документ',
@@ -1065,7 +1065,7 @@ const tMain = createI18n({
     menuWindow: 'Окно',
     menuHelp: 'Справка',
     menuShortcuts: 'Сочетания клавиш',
-    menuDocsHelp: 'Справка ExampleOffice Docs',
+    menuDocsHelp: 'Справка Zano Office Docs',
   },
   ar: {
     dlgOpenDoc: 'فتح مستند',
@@ -1160,7 +1160,7 @@ const tMain = createI18n({
     menuWindow: 'نافذة',
     menuHelp: 'تعليمات',
     menuShortcuts: 'اختصارات لوحة المفاتيح',
-    menuDocsHelp: 'تعليمات ExampleOffice Docs',
+    menuDocsHelp: 'تعليمات Zano Office Docs',
   },
   pt: {
     dlgOpenDoc: 'Abrir Documento',
@@ -1255,7 +1255,7 @@ const tMain = createI18n({
     menuWindow: 'Janela',
     menuHelp: 'Ajuda',
     menuShortcuts: 'Atalhos de Teclado',
-    menuDocsHelp: 'Ajuda do ExampleOffice Docs',
+    menuDocsHelp: 'Ajuda do Zano Office Docs',
   },
   it: {
     dlgOpenDoc: 'Apri documento',
@@ -1350,7 +1350,7 @@ const tMain = createI18n({
     menuWindow: 'Finestra',
     menuHelp: 'Aiuto',
     menuShortcuts: 'Scelte rapide da tastiera',
-    menuDocsHelp: 'Guida di ExampleOffice Docs',
+    menuDocsHelp: 'Guida di Zano Office Docs',
   },
   pl: {
     dlgOpenDoc: 'Otwórz dokument',
@@ -1445,7 +1445,7 @@ const tMain = createI18n({
     menuWindow: 'Okno',
     menuHelp: 'Pomoc',
     menuShortcuts: 'Skróty klawiaturowe',
-    menuDocsHelp: 'Pomoc ExampleOffice Docs',
+    menuDocsHelp: 'Pomoc Zano Office Docs',
   },
   nl: {
     dlgOpenDoc: 'Document openen',
@@ -1540,7 +1540,7 @@ const tMain = createI18n({
     menuWindow: 'Venster',
     menuHelp: 'Help',
     menuShortcuts: 'Sneltoetsen',
-    menuDocsHelp: 'ExampleOffice Docs Help',
+    menuDocsHelp: 'Zano Office Docs Help',
   },
   ms: {
     dlgOpenDoc: 'Buka Dokumen',
@@ -1635,7 +1635,7 @@ const tMain = createI18n({
     menuWindow: 'Tetingkap',
     menuHelp: 'Bantuan',
     menuShortcuts: 'Pintasan Papan Kekunci',
-    menuDocsHelp: 'Bantuan ExampleOffice Docs',
+    menuDocsHelp: 'Bantuan Zano Office Docs',
   },
   he: {
     dlgOpenDoc: 'פתיחת מסמך',
@@ -1728,7 +1728,7 @@ const tMain = createI18n({
     menuWindow: 'חלון',
     menuHelp: 'עזרה',
     menuShortcuts: 'קיצורי מקלדת',
-    menuDocsHelp: 'עזרה של ExampleOffice Docs',
+    menuDocsHelp: 'עזרה של Zano Office Docs',
   },
   hi: {
     dlgOpenDoc: 'दस्तावेज़ खोलें',
@@ -1823,7 +1823,7 @@ const tMain = createI18n({
     menuWindow: 'विंडो',
     menuHelp: 'सहायता',
     menuShortcuts: 'कीबोर्ड शॉर्टकट',
-    menuDocsHelp: 'ExampleOffice Docs सहायता',
+    menuDocsHelp: 'Zano Office Docs सहायता',
   },
   'zh-TW': {
     dlgOpenDoc: '開啟文件',
@@ -1915,7 +1915,7 @@ const tMain = createI18n({
     menuWindow: '視窗',
     menuHelp: '說明',
     menuShortcuts: '鍵盤快速鍵',
-    menuDocsHelp: 'ExampleOffice Docs 說明',
+    menuDocsHelp: 'Zano Office Docs 說明',
   },
 })
 const tm = (key: Parameters<typeof tMain>[1], params?: Parameters<typeof tMain>[2]) =>
@@ -2000,7 +2000,7 @@ async function saveDialog(event: IpcMainInvokeEvent, options: SaveDialogOptions)
   return showSaveDialogWithMemory(dialog, dialogParent(event), options, defaultSaveDir())
 }
 
-/** default folder where new files land on their first (silent) save; shared with the other editors via shell. User-configurable (app-settings.json), falls back to <Documents>/ExampleOffice. */
+/** default folder where new files land on their first (silent) save; shared with the other editors via shell. User-configurable (app-settings.json), falls back to <Documents>/Zano Office. */
 export function defaultSaveDir(): string {
   return configuredDefaultSaveDir(app)
 }
@@ -3580,7 +3580,7 @@ interface DocsShellHooks {
   focusTab(id: string): void
   /** closes the calling tab instead of the whole shell window (Cmd+W / role:'close') */
   closeActiveTab(): void
-  /** Shell router used to open exported PDFs in a new ExampleOffice tab. */
+  /** Shell router used to open exported PDFs in a new Zano Office tab. */
   openGeneratedPath?(path: string): boolean
 }
 let shellHooks: DocsShellHooks | null = null
@@ -3936,7 +3936,7 @@ export function createDocsWindow(openPath?: string): BrowserWindow {
     height: 900,
     minWidth: 980,
     minHeight: 600,
-    title: 'ExampleOffice Docs',
+    title: 'Zano Office Docs',
     // Word-like custom title bar (document name centered, quick-access buttons)
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset' as const }
@@ -4227,11 +4227,11 @@ export function startDocsStandalone(): void {
   installContextMenu(app, () => contextMenuLabels(getUiLang()))
   // dev runs must not share the packaged app's userData (recent files, AI settings)
   // or its single-instance lock — otherwise `npm run dev` silently quits whenever
-  // the installed ExampleOffice Docs is open and forwards its argv there instead.
+  // the installed Zano Office Docs is open and forwards its argv there instead.
   // AI_OFFICE_USER_DATA: E2E/screenshot runs isolate userData (and the
   // single-instance lock) so parallel automation sessions don't evict each other
   if (process.env.AI_OFFICE_USER_DATA) app.setPath('userData', process.env.AI_OFFICE_USER_DATA)
-  else if (isDev) app.setPath('userData', join(app.getPath('appData'), 'ExampleOffice Docs Dev'))
+  else if (isDev) app.setPath('userData', join(app.getPath('appData'), 'Zano Office Docs Dev'))
 
   const hasSingleInstanceLock = app.requestSingleInstanceLock()
   if (!hasSingleInstanceLock) {

@@ -33,7 +33,7 @@ import { writePdfAtomically } from './atomic-write'
 const num = (v: number) => Math.round(v * 100) / 100
 const STATIC_FORM_FILLS_KEY = PDFName.of('GenOfficeStaticFormFills')
 /** default /T annotation author when a note is saved without one (brand string — see fork/brand.json) */
-export const DEFAULT_ANNOTATION_AUTHOR = 'ExampleOffice'
+export const DEFAULT_ANNOTATION_AUTHOR = 'Zano Office'
 
 function validStaticFormFill(value: unknown): value is StaticFormFillRecord {
   if (!value || typeof value !== 'object') return false

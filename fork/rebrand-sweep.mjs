@@ -77,10 +77,12 @@ const shellPkgChanged = shellPkg.productName !== product
 
 // "GenOffice" followed by an uppercase letter is a protected compound
 // identifier (GenOfficeStaticFormFills, GenOfficeFormField); anything else in
-// source text is user-visible branding.
+// source text is user-visible branding. Both names are also guarded on the
+// left so camelCase identifiers (openGenOffice, onbJoinGenTeam) survive —
+// product names with spaces would otherwise produce invalid syntax.
 function namePattern(name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`${escaped}(?![A-Z])`, 'g')
+  return new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Z])`, 'g')
 }
 
 const tracked = execFileSync('git', ['ls-files', 'apps/', 'packages/', 'e2e/'], {
@@ -117,7 +119,11 @@ for (const rel of tracked) {
     })
   }
   if (brand.genTeamName) {
-    text = text.replaceAll(brand.genTeamName, () => {
+    const teamPattern = new RegExp(
+      '(?<![A-Za-z0-9_$])' + brand.genTeamName + '(?![A-Za-z0-9_$])',
+      'g',
+    )
+    text = text.replace(teamPattern, () => {
       count++
       return product
     })

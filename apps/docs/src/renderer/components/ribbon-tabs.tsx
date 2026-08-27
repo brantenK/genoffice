@@ -1341,7 +1341,7 @@ export function ViewTab({
                     }}
                   >
                     {w.focused ? '✓ ' : ''}
-                    {w.title || 'ExampleOffice Docs'}
+                    {w.title || 'Zano Office Docs'}
                   </button>
                 ))}
               </div>
