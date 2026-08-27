@@ -8,7 +8,7 @@ import { displayFontFamily } from '../konva-adapter'
 import { useSystemFontFamilies } from '../system-fonts'
 import { useFontCatalog } from '../font-manager'
 import {
-  GensparkMark,
+  ZanoMark,
   IconAiAskSelection,
   IconAiBeautify,
   IconAiFactCheck,
@@ -189,7 +189,7 @@ export function RibbonHomeTab({ rb }: { rb: RibbonTabCtx }) {
           onClick={onToggleAi}
         >
           <span className="rb-big-icon">
-            <GensparkMark size={26} />
+            <ZanoMark size={26} />
           </span>
           <span>Genspark AI</span>
         </button>

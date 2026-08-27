@@ -26,23 +26,6 @@ export function gensparkAttributionHeaders(baseUrl?: string): Record<string, str
 
 export const AI_PROVIDERS: AiProviderMeta[] = [
   {
-    id: 'genspark',
-    label: 'Genspark',
-    models: [
-      'claude-opus-4-7',
-      'claude-opus-4-8',
-      'claude-sonnet-4-6',
-      'gpt-5.6',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
-      'gemini-3.1-pro-preview',
-      'gemini-3-flash-preview',
-      'gemini-3.7-flash',
-    ],
-    defaultModel: 'claude-opus-4-7',
-    keyPlaceholder: 'Not required - sign in to Genspark',
-  },
-  {
     id: 'anthropic',
     label: 'Claude',
     // current-generation ids per platform.claude.com models overview (2026-08)
@@ -191,7 +174,7 @@ export function defaultAiSettings(
       baseUrl: meta.needsBaseUrl ? '' : undefined,
     }
   }
-  return { provider: 'genspark', providers, gskToolsEnabled: true }
+  return { provider: 'anthropic', providers, gskToolsEnabled: false }
 }
 
 /** false only on an explicit opt-out; absent (pre-toggle settings files) means on */
@@ -204,16 +187,15 @@ export function cloudToolsEnabled(settings: Pick<AiSettings, 'gskToolsEnabled'>)
  * (api-key providers need a key and a model id; providers flagged
  * needsBaseUrl also need a base URL). Anything else — including unknown
  * ids from a hand-edited
- * settings file — falls back to genspark, so a half-filled setup degrades
+ * settings file — falls back to anthropic (BYOK default), so a half-filled setup degrades
  * to the signed-in default instead of silently disabling AI.
  */
 export function activeProvider(settings: AiSettings): AiProviderId {
   const provider = settings.provider
-  if (provider === 'genspark') return 'genspark'
   const meta = AI_PROVIDERS.find((m) => m.id === provider)
   const config = settings.providers?.[provider]
-  if (!meta || !config?.apiKey || !config.model) return 'genspark'
-  if (meta.needsBaseUrl && !config.baseUrl) return 'genspark'
+  if (!meta || !config?.apiKey || !config.model) return 'anthropic'
+  if (meta.needsBaseUrl && !config.baseUrl) return 'anthropic'
   return provider
 }
 

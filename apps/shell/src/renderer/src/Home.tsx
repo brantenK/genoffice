@@ -449,269 +449,31 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
 // Clicking it opens the settings modal directly (SettingsModal.tsx), which hosts
 // login/logout plus preferences (language, theme, save location, update channel).
 
-const LOGIN_POLL_MS = 2500
-/** fallback deadline when the CLI does not report expires_in (device codes live ~300s) */
-const LOGIN_MAX_WAIT_MS = 300_000
 
-function AccountEntry({
-  onStatusChange,
-}: {
-  onStatusChange?: (status: AccountStatus | null) => void
-}) {
+
+function AccountEntry() {
   const { t } = useI18n()
-  const [status, setStatus] = useState<AccountStatus | null>(null)
-
-  useEffect(() => {
-    onStatusChange?.(status)
-  }, [status, onStatusChange])
-  const [waiting, setWaiting] = useState(false)
-  // incremented on login retry, resetting the polling timer
-  const [loginNonce, setLoginNonce] = useState(0)
-  const [loginError, setLoginError] = useState<
-    'timeout' | 'launch' | 'network' | 'expired' | 'failed' | null
-  >(null)
-  // auth URL reported by the login CLI — rescue entry when the browser did not open
-  const [authUrl, setAuthUrl] = useState<string | null>(null)
-  const [urlCopied, setUrlCopied] = useState(false)
-  const loginDeadline = useRef(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [loggingOut, setLoggingOut] = useState(false)
-  // bumped on logout so an in-flight status refresh (which can still
-  // report logged-in) is discarded instead of resurrecting the UI
-  const statusSeq = useRef(0)
-
-  // query login state once on mount
-  useEffect(() => {
-    let alive = true
-    void window.aiOffice.accountStatus?.().then((s) => {
-      if (alive) setStatus(s)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  // login progress pushed from main (gsk login CLI output)
-  useEffect(() => {
-    const off = window.aiOffice.onAccountLogin?.((ev) => {
-      if (ev.phase === 'url') {
-        if (ev.url) setAuthUrl(ev.url)
-        if (ev.expiresInSec) loginDeadline.current = Date.now() + ev.expiresInSec * 1000
-      } else if (ev.phase === 'success') {
-        void window.aiOffice.accountStatus().then((s) => {
-          if (s.loggedIn) {
-            setStatus(s)
-            setWaiting(false)
-            setAuthUrl(null)
-          }
-        })
-      } else if (ev.phase === 'error') {
-        setWaiting(false)
-        setAuthUrl(null)
-        setLoginError(
-          ev.error === 'network' ? 'network' : ev.error === 'expired' ? 'expired' : 'failed',
-        )
-      }
-    })
-    return off
-  }, [])
-
-  // config-file polling stays as the fallback success path (works even if progress events are lost)
-  useEffect(() => {
-    if (!waiting) return
-    const timer = setInterval(() => {
-      void window.aiOffice.accountStatus().then((s) => {
-        if (s.loggedIn) {
-          setStatus(s)
-          setWaiting(false)
-          setAuthUrl(null)
-        } else if (Date.now() > loginDeadline.current) {
-          setWaiting(false)
-          setAuthUrl(null)
-          setLoginError('timeout')
-        }
-      })
-    }, LOGIN_POLL_MS)
-    return () => clearInterval(timer)
-  }, [waiting, loginNonce])
-
-  const loggedIn = status?.loggedIn ?? false
-  const email = status?.email ?? ''
-  const initial = email ? email[0].toUpperCase() : loggedIn ? 'G' : '?'
-  const errorText = loginError
-    ? {
-        timeout: t('loginTimeout'),
-        launch: t('loginLaunchFailed'),
-        network: t('loginNetworkError'),
-        expired: t('loginExpired'),
-        failed: t('loginFailed'),
-      }[loginError]
-    : null
-
-  const doLogout = () => {
-    setLoggingOut(true)
-    statusSeq.current++
-    void window.aiOffice.accountLogout().then(() => {
-      setLoggingOut(false)
-      setStatus({ loggedIn: false })
-    })
-  }
-
-  const startLogin = () => {
-    // clicking again while waiting = relaunch the login (main kills the stale CLI, so the new device code is the live one)
-    setLoginError(null)
-    setWaiting(true)
-    setAuthUrl(null)
-    setUrlCopied(false)
-    loginDeadline.current = Date.now() + LOGIN_MAX_WAIT_MS
-    setLoginNonce((n) => n + 1)
-    void window.aiOffice.accountLogin().then((launched) => {
-      if (!launched) {
-        setWaiting(false)
-        setLoginError('launch')
-      }
-    })
-  }
-
-  const openLoginUrl = () => void window.aiOffice.openLoginUrl?.()
-
-  const copyLoginUrl = () => {
-    if (!authUrl) return
-    void navigator.clipboard.writeText(authUrl).then(() => {
-      setUrlCopied(true)
-      window.setTimeout(() => setUrlCopied(false), 2000)
-    })
-  }
-
-  const handleClick = () => {
-    // refresh the login state / credit balance; drop the response
-    // when a logout happened while it was in flight
-    const seq = statusSeq.current
-    void window.aiOffice.accountStatus?.().then((s) => {
-      if (seq === statusSeq.current) setStatus(s)
-    })
-    setSettingsOpen(true)
-  }
 
   return (
     <div className="account-entry">
-      {settingsOpen && (
-        <SettingsModal
-          status={status}
-          loggingOut={loggingOut}
-          loginWaiting={waiting}
-          loginUrl={authUrl}
-          urlCopied={urlCopied}
-          onOpenLoginUrl={openLoginUrl}
-          onCopyLoginUrl={copyLoginUrl}
-          onClose={() => setSettingsOpen(false)}
-          onLogin={() => {
-            setSettingsOpen(false)
-            startLogin()
-          }}
-          onLogout={doLogout}
-        />
-      )}
-      {!settingsOpen && waiting && authUrl && (
-        <div className="login-hint" role="status">
-          <button className="login-hint-open" onClick={openLoginUrl}>
-            {t('loginOpenShort')}
-          </button>
-          <button
-            className={`login-hint-copy${urlCopied ? ' copied' : ''}`}
-            onClick={copyLoginUrl}
-            // static tip: screentips are suppressed from pointerdown until the pointer
-            // leaves the control, so a swapped-in "copied" tip would never show — the
-            // check-mark icon is the visible feedback
-            data-tip={t('loginCopyUrl')}
-            aria-label={urlCopied ? t('loginCopied') : t('loginCopyUrl')}
-          >
-            {urlCopied ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="m3.5 8.5 3 3 6-7"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect
-                  x="5.5"
-                  y="5.5"
-                  width="7"
-                  height="7"
-                  rx="1.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                />
-                <path
-                  d="M3.5 10.5V5a1.5 1.5 0 0 1 1.5-1.5h5.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-      )}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <button
         className="account-btn"
-        onClick={handleClick}
+        onClick={() => setSettingsOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={settingsOpen}
-        data-tip={
-          loggedIn
-            ? email || t('loggedInGenspark')
-            : waiting
-              ? t('waitingLogin')
-              : (errorText ?? t('loginGenspark'))
-        }
         aria-label={t('settings')}
+        data-tip={t('settings')}
       >
-        <span
-          className={`account-avatar${loggedIn ? ' logged-in' : ''}${waiting ? ' waiting' : ''}`}
-        >
-          {waiting ? (
-            <svg
-              className="account-spinner"
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              aria-hidden="true"
-            >
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                fill="none"
-                strokeDasharray="26"
-                strokeDashoffset="18"
-                strokeLinecap="round"
-              />
-            </svg>
-          ) : (
-            initial
-          )}
+        <span className="account-avatar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M8 4.6v3M8 10.4h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
         </span>
         <span className="account-text">
-          <span className="account-name">
-            {loggedIn
-              ? email
-                ? email.split('@')[0]
-                : t('loggedIn')
-              : waiting
-                ? t('waitingShort')
-                : t('login')}
-          </span>
-          {!loggedIn && !waiting && errorText && (
-            <span className="account-sub error">{errorText}</span>
-          )}
+          <span className="account-name">{t('settings')}</span>
         </span>
         <svg
           className="account-chevron"
@@ -746,6 +508,8 @@ const CLOUD_FILTERS = [
 
 /** module kind → file icon extension */
 const CLOUD_KIND_EXT: Record<string, string> = { docs: 'docx', sheets: 'xlsx', slides: 'pptx' }
+
+/** rows revealed per "load more" step; purely client-side over the local snapshot */
 
 /** rows revealed per "load more" step; purely client-side over the local snapshot */
 const CLOUD_REVEAL_STEP = 100
@@ -1138,19 +902,6 @@ export function Home() {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
-  // name in the greeting; omitted when logged out
-  const [accountName, setAccountName] = useState('')
-  // Genspark Projects is web-account data, so its nav entry only shows when logged in
-  const [loggedIn, setLoggedIn] = useState(false)
-  // single source of account state: AccountEntry reports every change (initial
-  // load, login, logout), keeping the greeting name and the nav entry in sync
-  const handleAccountStatus = useCallback((s: AccountStatus | null) => {
-    const on = s?.loggedIn ?? false
-    setLoggedIn(on)
-    if (!on) setCloudMode(false)
-    const name = on ? (s?.email ?? '').split('@')[0] : ''
-    setAccountName(name ? name[0].toUpperCase() + name.slice(1) : '')
-  }, [])
   const [greetAskKey] = useState(
     () => GREET_ASK_KEYS[Math.floor(Math.random() * GREET_ASK_KEYS.length)]!,
   )
@@ -1964,7 +1715,7 @@ export function Home() {
             ? 'greetAfternoon'
             : 'greetEvening'
     const cjk = lang === 'zh' || lang === 'zh-TW' || lang === 'ja'
-    const greeting = `${t(greetKey)}${accountName ? (cjk ? '，' : ', ') + accountName : ''}${cjk ? '。' : '. '}`
+    const greeting = `${t(greetKey)}${cjk ? '。' : '. '}`
     return (
       <main className="content">
         <section className="quick-start" aria-label={t('secQuickStart')}>
@@ -2135,43 +1886,7 @@ export function Home() {
             <span className="nav-label">{t('navStarred')}</span>
             <span className="nav-count">{navCounts.starred}</span>
           </button>
-          {loggedIn && (
-            <button
-              className={`nav-item${cloudMode && !selectedProjectId ? ' active' : ''}`}
-              onClick={() => {
-                setCloudMode(true)
-                setSelectedProjectId(null)
-                setSelected(new Set())
-                setRowMenu(null)
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M8 1.8l1.55 4.65L14.2 8l-4.65 1.55L8 14.2 6.45 9.55 1.8 8l4.65-1.55z"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span className="nav-label">{t('navCloud')}</span>
-              <svg
-                className="nav-external"
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7A1.5 1.5 0 0 0 12.5 12V9.5M9.5 2.5h4v4M13 3l-5.5 5.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
+
         </nav>
 
         {/* project sidebar */}
@@ -2193,7 +1908,7 @@ export function Home() {
           </>
         )}
 
-        <AccountEntry onStatusChange={handleAccountStatus} />
+        <AccountEntry />
       </aside>
 
       {selectedProjectId ? (

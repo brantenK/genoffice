@@ -73,7 +73,7 @@ import {
 import { WRAP_OPTIONS } from './ContextMenu'
 import { CropDialog, CutoutDialog } from './PictureDialogs'
 import {
-  GensparkMark,
+  ZanoMark,
   IconAlignCenter,
   IconAlignJustify,
   IconAlignLeft,
@@ -2746,7 +2746,7 @@ function RibbonInner({
                   onClick={onToggleAi}
                 >
                   <span className="rb-big-icon">
-                    <GensparkMark size={26} />
+                    <ZanoMark size={26} />
                   </span>
                   <span>Genspark AI</span>
                 </button>

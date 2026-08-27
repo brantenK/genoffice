@@ -38,7 +38,7 @@ import {
 } from './slide-qc'
 import { useI18n, t as tGlobal, aiLangDirective, type TFunc } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
-import { GensparkMark } from '../components/icons'
+import { ZanoMark } from '../components/icons'
 import sendEnterOn from '../assets/send-enter-on.png'
 import sendEnterOff from '../assets/send-enter-off.png'
 import sendStop from '../assets/send-stop.png'
@@ -1953,7 +1953,7 @@ export function AiPanel({
         aria-label={t('appAiRailExpand')}
         onClick={onExpand}
       >
-        <GensparkMark size={22} />
+        <ZanoMark size={22} />
       </button>
     )
   }
@@ -1984,7 +1984,7 @@ export function AiPanel({
       />
       <div className="ai-panel-header">
         <span className="ai-panel-title">
-          <GensparkMark size={22} />
+          <ZanoMark size={22} />
           {t('aiPanelTitle')}
         </span>
         <div className="ai-panel-header-actions">

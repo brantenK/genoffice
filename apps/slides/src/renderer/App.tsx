@@ -79,7 +79,7 @@ import { EquationDialog, HeaderFooterDialog, LinkDialog } from './components/Ins
 import { CutoutDialog } from './components/CutoutDialog'
 import type { WordArtPreset } from '@genoffice/ui'
 import type { ChartPresetDef, IconDef, SmartArtDef } from './insert-presets'
-import { GensparkMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
+import { ZanoMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
 import { ToastHost } from './components/toast'
 import { showToast } from './components/toast-bus'
 import { t, useI18n } from './i18n/locale'
@@ -3133,7 +3133,7 @@ export function App() {
                 data-tip={t('appAiRailExpand')}
                 aria-label={t('appAiRailExpand')}
               >
-                <GensparkMark size={22} />
+                <ZanoMark size={22} />
               </button>
             )}
           </div>
@@ -3471,7 +3471,7 @@ export function App() {
                               data-tip={t('aiOpenAssistant')}
                               onClick={toggleAi}
                             >
-                              <GensparkMark size={14} />
+                              <ZanoMark size={14} />
                               <span>Genspark AI</span>
                             </button>
                             {/* Same one-click presets as the Home tab; hidden instead of

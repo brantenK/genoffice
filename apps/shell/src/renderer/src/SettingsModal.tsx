@@ -180,7 +180,8 @@ function AiModelPane({ t }: { t: TFunc }) {
     apiKey: '',
     model: meta?.defaultModel ?? '',
   }
-  const isGenspark = provider === 'genspark'
+  // genspark was removed from the provider list; old settings files degrade to the BYOK note
+  const isGenspark = false
 
   const touch = () => {
     setDirty(true)
@@ -195,12 +196,7 @@ function AiModelPane({ t }: { t: TFunc }) {
     touch()
   }
   const selectProvider = (id: AiSettings['provider']) => {
-    // cloud tools cannot be off with genspark (chat runs through gsk anyway)
-    setSettings({
-      ...settings,
-      provider: id,
-      ...(id === 'genspark' ? { gskToolsEnabled: true } : {}),
-    })
+    setSettings({ ...settings, provider: id })
     touch()
   }
   const save = () => {
@@ -322,26 +318,7 @@ function AiModelPane({ t }: { t: TFunc }) {
           </div>
         </>
       )}
-      <div className="set-field">
-        <div className="set-field-text">
-          <div className="set-field-stack">
-            <div className="set-field-label">{t('setAiGskTools')}</div>
-            <div className="set-field-desc">{t('setAiGskToolsDesc')}</div>
-          </div>
-        </div>
-        {/* locked on with the genspark provider — chat runs through gsk anyway */}
-        <button
-          className="set-switch"
-          role="switch"
-          aria-checked={settings.gskToolsEnabled !== false}
-          aria-label={t('setAiGskTools')}
-          disabled={isGenspark}
-          onClick={() => {
-            setSettings({ ...settings, gskToolsEnabled: settings.gskToolsEnabled === false })
-            touch()
-          }}
-        />
-      </div>
+
       <div className="set-pane-footer">
         <AiStatusPill
           status={
@@ -421,35 +398,12 @@ function AiStatusPill({ status }: { status: AiStatus | null }) {
 }
 
 export interface SettingsModalProps {
-  status: AccountStatus | null
-  loggingOut: boolean
-  /** browser sign-in in progress (spinner shows on the account entry) */
-  loginWaiting: boolean
-  /** device auth URL while waiting — rescue actions when the browser did not auto-open */
-  loginUrl: string | null
-  urlCopied: boolean
-  onOpenLoginUrl: () => void
-  onCopyLoginUrl: () => void
   onClose: () => void
-  /** closes the modal and launches the Genspark login flow (progress shows on the account entry) */
-  onLogin: () => void
-  onLogout: () => void
 }
 
-export function SettingsModal({
-  status,
-  loggingOut,
-  loginWaiting,
-  loginUrl,
-  urlCopied,
-  onOpenLoginUrl,
-  onCopyLoginUrl,
-  onClose,
-  onLogin,
-  onLogout,
-}: SettingsModalProps) {
+export function SettingsModal({ onClose }: SettingsModalProps) {
   const { lang, setLang, t } = useI18n()
-  const [section, setSection] = useState<SectionId>('account')
+  const [section, setSection] = useState<SectionId>('aiModel')
   const [theme, setTheme] = useState<UiTheme>('system')
   const [saveDir, setSaveDir] = useState('')
   const [analyticsOn, setAnalyticsOn] = useState(true)
@@ -504,8 +458,7 @@ export function SettingsModal({
     })
   }
 
-  const loggedIn = status?.loggedIn ?? false
-  const email = status?.email ?? ''
+
 
   return (
     <div
@@ -546,48 +499,14 @@ export function SettingsModal({
             {section === 'account' && (
               <>
                 <h3 className="set-pane-title">{t('setSecAccount')}</h3>
-                <Field label={t('setEmail')} value={loggedIn ? email : t('setNotLoggedIn')} />
-                {loggedIn && (
-                  <Field
-                    label={t('credits')}
-                    value={
-                      status?.creditBalance === undefined
-                        ? '—'
-                        : Math.floor(status.creditBalance).toLocaleString('en-US')
-                    }
-                    action={
-                      <button
-                        className="set-btn"
-                        data-tip={t('creditsTip')}
-                        onClick={() => void window.aiOffice.openCreditUsage?.()}
-                      >
-                        {t('setViewUsage')}
-                      </button>
-                    }
-                  />
-                )}
-                <div className="set-pane-footer">
-                  {loggedIn ? (
-                    <button className="set-btn danger" disabled={loggingOut} onClick={onLogout}>
-                      {loggingOut ? t('loggingOut') : t('logout')}
-                    </button>
-                  ) : (
-                    <>
-                      {loginWaiting && loginUrl && (
-                        <>
-                          <button className="set-btn" onClick={onOpenLoginUrl}>
-                            {t('loginOpenManually')}
-                          </button>
-                          <button className="set-btn" onClick={onCopyLoginUrl}>
-                            {urlCopied ? t('loginCopied') : t('loginCopyUrl')}
-                          </button>
-                        </>
-                      )}
-                      <button className="set-btn primary" onClick={onLogin}>
-                        {loginWaiting ? t('waitingShort') : t('loginGenspark')}
-                      </button>
-                    </>
-                  )}
+                <Field label={t('setEmail')} value={t('setNotLoggedIn')} />
+                <div className="set-field">
+                  <div className="set-field-text">
+                    <div className="set-field-stack">
+                      <div className="set-field-label">{t('setAiByokNote')}</div>
+                      <div className="set-field-desc">{t('setAiKeyHint')}</div>
+                    </div>
+                  </div>
                 </div>
               </>
             )}
