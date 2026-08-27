@@ -82,11 +82,27 @@ Still open:
 - **Icon raster sizes**: 48/128/256/512 px slots reuse the nearest available
   Zano PNGs (16/32/64/80/1024 source sizes); regenerate exact sizes from the
   1024px source with real image tooling before release.
-- **Onboarding / star-prompt copy** still points users at upstream's GitHub
-  (names are rebranded; URLs and the "give us a star" ask are not fork-ready).
-- **Genspark sign-in UI** still rendered (gsk engine path stays default-off).
 - **README.md** is still upstream's.
-- `e2e/` visual/theme specs re-verified after the redesign.
+- **Main-process leftovers**: the gsk auth/cloud-projects machinery in
+  `packages/ai-search/src/genoffice-auth.ts`, `apps/shell/src/main/cloud-projects.ts`
+  and the star-prompt IPC handlers are unreachable dead code (renderer UI
+  removed) — deep removal is a follow-up, not worth the merge risk now.
+- 5 pre-existing Windows test failures (HEAD-identical): shell
+  `cloud-projects.test.ts` account-store binding/lifecycle — the store file
+  delete does not take effect on win32; candidate upstream Windows-CI PR.
+
+## Genspark surface removal (done)
+
+- AI provider list no longer offers Genspark; fresh settings default to
+  Claude, gsk tools off; legacy settings files degrade to Claude.
+- Settings: account pane is a BYOK note; sign-in/credits/logout UI removed;
+  gsk-tools toggle removed.
+- AI panel/ribbon monogram → Zano logo (`ZanoMark`).
+- Home: cloud-projects nav + sign-in CTA + account-name greeting removed.
+- Onboarding credits offer panel removed.
+- Star prompt removed (renderer + files + IPC query).
+- `AI_SEARCH_DISABLE_GSK` default-off flip in `packages/ai-search` still
+  governs the engine path; settings key `gskToolsEnabled` now defaults false.
 
 ## Safe-by-default packaging (verified in electron-builder.cjs)
 
