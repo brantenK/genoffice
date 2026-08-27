@@ -92,7 +92,7 @@ const tracked = execFileSync('git', ['ls-files', 'apps/', 'packages/', 'e2e/'], 
   .split('\n')
   .filter(
     (f) =>
-      (f.endsWith('.ts') || f.endsWith('.tsx')) &&
+      (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.html')) &&
       !f.includes('.test.') &&
       !f.includes('fixtures/'),
   )
