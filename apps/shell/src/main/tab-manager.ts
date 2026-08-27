@@ -51,6 +51,9 @@ interface TabRecord {
 /** must match the tab strip's rendered height (apps/shell/src/renderer/src/TabBar.tsx) */
 const TAB_STRIP_HEIGHT = 40
 const HOME_ID = 'home'
+/** user-visible tab titles — brand strings kept as constants so tests and the rebrand sweep stay in sync (see fork/brand.json) */
+export const HOME_TAB_TITLE = 'ExampleOffice'
+export const UNTITLED_DOCS_TAB_TITLE = 'ExampleOffice Docs'
 
 /**
  * Owns every open tab (Home + docs + sheets) inside the shell's single
@@ -60,7 +63,7 @@ const HOME_ID = 'home'
  */
 export class TabManager {
   private readonly tabs: TabRecord[] = [
-    { id: HOME_ID, kind: 'home', view: null, title: 'ExampleOffice' },
+    { id: HOME_ID, kind: 'home', view: null, title: HOME_TAB_TITLE },
   ]
   private activeId: string = HOME_ID
   private nextId = 1
@@ -167,7 +170,7 @@ export class TabManager {
       id,
       kind: 'docs',
       view,
-      title: openPath ? basename(openPath) : this.untitled('docs', 'ExampleOffice Docs'),
+      title: openPath ? basename(openPath) : this.untitled('docs', UNTITLED_DOCS_TAB_TITLE),
       filePath: openPath,
     })
     this.activateTab(id)

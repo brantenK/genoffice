@@ -100,7 +100,11 @@ vi.mock('../../slides/src/main/slides-main', () => ({
   slidesIsDirty: (...args: unknown[]) => slidesIsDirty(...(args as [])),
 }))
 
-import { TabManager } from '../src/main/tab-manager'
+import {
+  HOME_TAB_TITLE,
+  TabManager,
+  UNTITLED_DOCS_TAB_TITLE,
+} from '../src/main/tab-manager'
 
 const TAB_STRIP_HEIGHT = 40
 const WINDOW_WIDTH = 800
@@ -155,7 +159,7 @@ beforeEach(() => {
 describe('initial state', () => {
   it('starts with only the non-closable, active Home tab', () => {
     expect(manager.list()).toEqual([
-      { id: 'home', kind: 'home', title: 'GenOffice', closable: false, active: true },
+      { id: 'home', kind: 'home', title: HOME_TAB_TITLE, closable: false, active: true },
     ])
   })
 })
@@ -168,7 +172,7 @@ describe('opening tabs', () => {
     expect(tabs[1]).toMatchObject({
       id,
       kind: 'docs',
-      title: 'GenOffice Docs',
+      title: UNTITLED_DOCS_TAB_TITLE,
       closable: true,
       active: true,
     })
@@ -184,7 +188,7 @@ describe('opening tabs', () => {
     manager.openSlidesTab('/tmp/deck.pptx')
     manager.openPdfTab('/tmp/scan.pdf')
     expect(manager.list().map((t) => t.title)).toEqual([
-      'GenOffice',
+      HOME_TAB_TITLE,
       'report.docx',
       'budget.xlsx',
       'deck.pptx',
@@ -195,7 +199,7 @@ describe('opening tabs', () => {
   it('uses module default titles for pathless tabs', () => {
     manager.openSheetsTab()
     manager.openSlidesTab()
-    expect(manager.list().map((t) => t.title)).toEqual(['GenOffice', 'AI Sheets', 'AI Slides'])
+    expect(manager.list().map((t) => t.title)).toEqual([HOME_TAB_TITLE, 'AI Sheets', 'AI Slides'])
   })
 
   it('assigns unique, monotonic tab ids', () => {
