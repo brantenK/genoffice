@@ -17,6 +17,7 @@ export { GITHUB_REPO_URL } from './github-menu'
 export { showOpenDialogWithMemory, showSaveDialogWithMemory } from './dialog-memory'
 export {
   DEFAULT_SAVE_DIR_KEY,
+  DEFAULT_SAVE_FOLDER,
   configuredDefaultSaveDir,
   isUsableSaveDir,
   readDefaultSaveDirSetting,

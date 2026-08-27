@@ -14,6 +14,9 @@ export interface PathProvider {
 
 export const DEFAULT_SAVE_DIR_KEY = 'defaultSaveDir'
 
+/** folder name created under <Documents> when no defaultSaveDir is configured */
+export const DEFAULT_SAVE_FOLDER = 'ExampleOffice'
+
 /** the configured folder from app-settings.json, or null when unset/unreadable */
 export function readDefaultSaveDirSetting(settingsPath: string): string | null {
   try {
@@ -52,6 +55,6 @@ export function resolveDefaultSaveDir(configured: string | null, fallbackDir: st
 /** convenience for the Electron mains: settings lookup + fallback in one call */
 export function configuredDefaultSaveDir(app: PathProvider): string {
   const settingsPath = join(app.getPath('userData'), 'app-settings.json')
-  const fallback = join(app.getPath('documents'), 'ExampleOffice')
+  const fallback = join(app.getPath('documents'), DEFAULT_SAVE_FOLDER)
   return resolveDefaultSaveDir(readDefaultSaveDirSetting(settingsPath), fallback)
 }
