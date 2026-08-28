@@ -2533,6 +2533,12 @@ function createShellWindow(): void {
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // idle warm-up: once the shell (Home) has painted, pre-render a hidden docs
+  // module so the first docs tab opens near-instantly (TabManager.prewarmDocs)
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => manager.prewarmDocs(), 800)
+  })
 }
 
 // ---- routing: one dispatch function for every open path ----

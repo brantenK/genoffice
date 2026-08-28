@@ -40,6 +40,18 @@ export default defineConfig({
         ],
       }),
     ],
+    build: {
+      rollupOptions: {
+        output: {
+          // split pdf.js and pdf-lib out of the entry chunk
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (id.includes('pdfjs-dist')) return 'pdfjs'
+            if (id.includes('pdf-lib')) return 'pdf-lib'
+          },
+        },
+      },
+    },
     server: {
       port: Number(process.env.PDF_DEV_PORT) || 5176,
       strictPort: Boolean(process.env.PDF_DEV_PORT),

@@ -118,3 +118,24 @@ two rounds of fixes:
 All e2e specs exercise the real packaged-layout Electron shell (launch,
 onboarding, every editor, save/reopen round-trips), so the app is verified
 working end-to-end on Windows.
+
+
+## Snappiness pass (2026-08-28)
+
+Measured (dev build, OneDrive folder): cold start ~2-4s, docs tab open ~2s,
+sheets tab ~4s. Applied:
+
+1. **Editor pre-warm**: after Home paints, the shell pre-renders a hidden docs
+   module; the first docs tab adopts it. Measured: first docs tab 2000ms -> 60ms.
+   (tab-manager.prewarmDocs + index.ts idle hook; the active-docs IPC resolver
+   only targets real tabs, so the hidden view can never steal menu actions.)
+2. **Vendor code-splitting** (docs/slides/pdf/markdown `electron.vite.config.ts`
+   `manualChunks`): tiptap/prosemirror, konva, pdfjs-dist, pdf-lib, katex split
+   out of the entry chunks. Entry sizes: pdf 2.4->1.5MB, markdown 3.8->2.1MB,
+   slides 4.6->3.8MB, docs 5.4->4.7MB.
+3. Tooling: `fork/perf-probe.cjs` (startup + tab-open latency probe).
+
+Still open (ranked): lazy i18n per locale (sheets strings-app.ts 1.5MB,
+docs/slides strings-ribbon ~700KB each are statically parsed), warm sidecar
+across workbook opens, paint-gated window show. Re-measure on the PACKAGED
+installer before deeper work — dev runs on a OneDrive folder are pessimistic.

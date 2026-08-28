@@ -30,6 +30,18 @@ export default defineConfig({
   renderer: {
     plugins: [react()],
     resolve: { dedupe: TIPTAP_DEDUPE },
+    build: {
+      rollupOptions: {
+        output: {
+          // split the tiptap/prosemirror + katex trees out of the entry chunk
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (id.includes('@tiptap') || id.includes('prosemirror')) return 'tiptap'
+            if (id.includes('katex')) return 'katex'
+          },
+        },
+      },
+    },
     server: {
       port: Number(process.env.MARKDOWN_DEV_PORT) || 5177,
       strictPort: Boolean(process.env.MARKDOWN_DEV_PORT),

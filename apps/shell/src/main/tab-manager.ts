@@ -67,6 +67,10 @@ export class TabManager {
   ]
   private activeId: string = HOME_ID
   private nextId = 1
+  /** a hidden docs renderer warmed during idle so the first docs tab opens
+   *  without paying the module cold-start (created detached, never focused;
+   *  the active-docs IPC resolver only ever points at a real tab) */
+  private prewarmedDocsView: WebContentsView | null = null
   /** tab whose page entered HTML fullscreen (e.g. slides slideshow) — its view covers the tab strip */
   private htmlFullScreenId: string | null = null
   /** webContents ids whose view must cover the tab strip without HTML fullscreen
@@ -155,11 +159,28 @@ export class TabManager {
     this.activateTab(HOME_ID)
   }
 
+  /** Warm a hidden docs renderer during idle (called once, after the shell
+   *  window is up) so the first docs tab opens near-instantly. The view stays
+   *  detached and unfocused; only the next openDocsTab() without a path adopts
+   *  it, and a crashed/closed warm view falls back to a fresh create. */
+  prewarmDocs(): void {
+    if (this.prewarmedDocsView || this.shellWindow.isDestroyed()) return
+    const view = createDocsView()
+    this.prewarmedDocsView = view
+    view.webContents.once('destroyed', () => {
+      if (this.prewarmedDocsView === view) this.prewarmedDocsView = null
+    })
+  }
+
   openDocsTab(
     openPath?: string,
     options?: { newBlank?: boolean; aiContent?: AiDocContent },
   ): string {
-    const view = createDocsView(openPath)
+    const view =
+      openPath === undefined && this.prewarmedDocsView
+        ? this.prewarmedDocsView
+        : createDocsView(openPath)
+    this.prewarmedDocsView = null
     const id = `t${this.nextId++}`
     if (options?.newBlank) markDocsNewBlank(view.webContents.id)
     if (options?.aiContent) queueDocsAiContent(view.webContents.id, options.aiContent)
