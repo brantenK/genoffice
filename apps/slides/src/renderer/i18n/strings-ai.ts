@@ -20,7 +20,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: '版式检查已停止',
     aiQcCapped: '其余 {count} 页未检查(单次上限)',
     aiGskLoginBtn: '登录 Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: '打开 AI 助手',
     aiFactCheckBtn: 'AI 事实核查',
     aiFactCheckPrompt: '核查这份幻灯片的内容:检查数据、日期、名称和论断是否属实,指出并纠正错误',
@@ -260,7 +260,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Layout check stopped',
     aiQcCapped: '{count} more page(s) not checked (per-run cap)',
     aiGskLoginBtn: 'Sign in to Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Open AI assistant',
     aiFactCheckBtn: 'AI Fact Check',
     aiFactCheckPrompt:
@@ -507,7 +507,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'レイアウトチェックを停止しました',
     aiQcCapped: '残り {count} ページは未チェック(1回の上限)',
     aiGskLoginBtn: 'Genspark にサインイン',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI アシスタントを開く',
     aiFactCheckBtn: 'AI ファクトチェック',
     aiFactCheckPrompt:
@@ -753,7 +753,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: '레이아웃 검사를 중지했습니다',
     aiQcCapped: '나머지 {count}페이지는 검사하지 않음(회당 상한)',
     aiGskLoginBtn: 'Genspark 로그인',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI 도우미 열기',
     aiFactCheckBtn: 'AI 팩트체크',
     aiFactCheckPrompt:
@@ -1000,7 +1000,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Vérification de la mise en page arrêtée',
     aiQcCapped: '{count} page(s) restante(s) non vérifiée(s) (limite par exécution)',
     aiGskLoginBtn: 'Se connecter à Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: "Ouvrir l'assistant IA",
     aiFactCheckBtn: 'Vérification IA',
     aiFactCheckPrompt:
@@ -1250,7 +1250,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Layoutprüfung gestoppt',
     aiQcCapped: '{count} weitere Seite(n) nicht geprüft (Limit pro Lauf)',
     aiGskLoginBtn: 'Bei Genspark anmelden',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'KI-Assistenten öffnen',
     aiFactCheckBtn: 'KI-Faktencheck',
     aiFactCheckPrompt:
@@ -1499,7 +1499,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Comprobación de diseño detenida',
     aiQcCapped: '{count} página(s) más sin comprobar (límite por ejecución)',
     aiGskLoginBtn: 'Iniciar sesión en Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Abrir el asistente de IA',
     aiFactCheckBtn: 'Verificación IA',
     aiFactCheckPrompt:
@@ -1748,7 +1748,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'หยุดการตรวจสอบเลย์เอาต์แล้ว',
     aiQcCapped: 'อีก {count} หน้าไม่ได้ตรวจสอบ (ขีดจำกัดต่อครั้ง)',
     aiGskLoginBtn: 'ลงชื่อเข้าใช้ Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'เปิดผู้ช่วย AI',
     aiFactCheckBtn: 'ตรวจสอบข้อเท็จจริง AI',
     aiFactCheckPrompt:
@@ -1993,7 +1993,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Pemeriksaan tata letak dihentikan',
     aiQcCapped: '{count} halaman lagi tidak diperiksa (batas per proses)',
     aiGskLoginBtn: 'Masuk ke Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Buka asisten AI',
     aiFactCheckBtn: 'Cek Fakta AI',
     aiFactCheckPrompt:
@@ -2241,7 +2241,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Проверка макета остановлена',
     aiQcCapped: 'Ещё {count} стр. не проверено (лимит за один запуск)',
     aiGskLoginBtn: 'Войти в Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Открыть ИИ-помощника',
     aiFactCheckBtn: 'ИИ-фактчекинг',
     aiFactCheckPrompt:
@@ -2489,7 +2489,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'تم إيقاف فحص التخطيط',
     aiQcCapped: '{count} صفحة أخرى لم تُفحص (حد لكل تشغيل)',
     aiGskLoginBtn: 'تسجيل الدخول إلى Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'فتح مساعد الذكاء الاصطناعي',
     aiFactCheckBtn: 'تدقيق حقائق AI',
     aiFactCheckPrompt:
@@ -2734,7 +2734,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Verificação de layout interrompida',
     aiQcCapped: 'Mais {count} página(s) não verificada(s) (limite por execução)',
     aiGskLoginBtn: 'Entrar no Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Abrir assistente de IA',
     aiFactCheckBtn: 'Checagem IA',
     aiFactCheckPrompt:
@@ -2982,7 +2982,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Controllo del layout interrotto',
     aiQcCapped: 'Altre {count} pagina/e non controllate (limite per esecuzione)',
     aiGskLoginBtn: 'Accedi a Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: "Apri l'assistente IA",
     aiFactCheckBtn: 'Fact-check IA',
     aiFactCheckPrompt:
@@ -3230,7 +3230,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Sprawdzanie układu zatrzymane',
     aiQcCapped: 'Pozostałe {count} stron(y) nie sprawdzono (limit na uruchomienie)',
     aiGskLoginBtn: 'Zaloguj się do Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Otwórz asystenta AI',
     aiFactCheckBtn: 'Weryfikacja AI',
     aiFactCheckPrompt:
@@ -3478,7 +3478,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Lay-outcontrole gestopt',
     aiQcCapped: 'Nog {count} pagina(’s) niet gecontroleerd (limiet per run)',
     aiGskLoginBtn: 'Aanmelden bij Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI-assistent openen',
     aiFactCheckBtn: 'AI-factcheck',
     aiFactCheckPrompt:
@@ -3727,7 +3727,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'Semakan susun atur dihentikan',
     aiQcCapped: '{count} halaman lagi tidak disemak (had setiap larian)',
     aiGskLoginBtn: 'Log masuk ke Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Buka pembantu AI',
     aiFactCheckBtn: 'Semak Fakta AI',
     aiFactCheckPrompt:
@@ -3976,7 +3976,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'בדיקת הפריסה הופסקה',
     aiQcCapped: 'עוד {count} עמודים לא נבדקו (מגבלה לכל הרצה)',
     aiGskLoginBtn: 'התחבר ל-Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'פתיחת עוזר ה-AI',
     aiFactCheckBtn: 'בדיקת עובדות AI',
     aiFactCheckPrompt:
@@ -4220,7 +4220,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: 'लेआउट जाँच रोक दी गई',
     aiQcCapped: 'शेष {count} पेज नहीं जाँचे गए (प्रति रन सीमा)',
     aiGskLoginBtn: 'Genspark में साइन इन करें',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI सहायक खोलें',
     aiFactCheckBtn: 'AI तथ्य जाँच',
     aiFactCheckPrompt:
@@ -4467,7 +4467,7 @@ export const aiStrings = defineStrings({
     aiQcStopped: '版式檢查已停止',
     aiQcCapped: '其餘 {count} 頁未檢查(單次上限)',
     aiGskLoginBtn: '登入 Genspark',
-    aiPanelTitle: 'Genspark',
+    aiPanelTitle: 'Zano AI',
     aiOpenAssistant: '開啟 AI 助手',
     aiFactCheckBtn: 'AI 事實核查',
     aiFactCheckPrompt: '核查這份簡報的內容:檢查數據、日期、名稱和論斷是否屬實,指出並糾正錯誤',
