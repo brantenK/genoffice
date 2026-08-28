@@ -2363,6 +2363,10 @@ function createShellWindow(): void {
     minWidth: 980,
     minHeight: 600,
     title: 'Zano Office',
+    // unpackaged dev runs carry electron.exe's default icon; point the window
+    // at the Zano logo so the taskbar matches the packaged build (which takes
+    // the exe icon generated from build/icon.png by electron-builder)
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
     // vibrancy: editor modules punch translucent regions (e.g. the slides
     // thumbnail pane) through to the desktop
     ...(process.platform === 'darwin'
