@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { htmlLang, type Lang } from '@genoffice/i18n'
 import App from './App'
-import { LocaleProvider } from './i18n/locale'
+import { loadLocale, LocaleProvider } from './i18n/locale'
 import type { UiTheme } from '../shared/ipc'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
@@ -22,6 +22,7 @@ void (async () => {
     window.markdownApi.getLanguage().catch(() => 'zh' as const),
     window.markdownApi.getTheme().catch(() => 'system' as const),
   ])
+  await loadLocale(lang as Lang)
   document.documentElement.lang = htmlLang(lang as Lang)
   applyTheme(theme)
   window.markdownApi.onThemeChanged(applyTheme)

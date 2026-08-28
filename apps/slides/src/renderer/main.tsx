@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { htmlLang, type Lang } from '@genoffice/i18n'
 import { App } from './App'
 import { AudienceView } from './components/AudienceView'
-import { LocaleProvider, setModuleLang } from './i18n/locale'
+import { loadLocale, LocaleProvider, setModuleLang } from './i18n/locale'
 import type { UiTheme } from '../shared/ipc'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
@@ -47,6 +47,7 @@ async function bootstrap(): Promise<void> {
   } catch {
     /* dev renderer without the preload bridge */
   }
+  await loadLocale(lang)
   setModuleLang(lang)
   document.documentElement.lang = htmlLang(lang)
   // the audience show window renders slide content only — it never themes

@@ -10,7 +10,7 @@ import '@univerjs/preset-sheets-core/lib/index.css'
 
 import { App } from './App'
 import { installCanvasFontFallback, registerCellFontAliases } from './cell-font-fallback'
-import { LocaleProvider, setModuleLang } from './i18n/locale'
+import { loadLocale, LocaleProvider, setModuleLang } from './i18n/locale'
 import type { UiTheme } from '../shared/desktop-api'
 import './styles.css'
 
@@ -62,6 +62,7 @@ async function bootstrap(): Promise<void> {
   } catch {
     /* dev renderer without the preload bridge */
   }
+  await loadLocale(lang)
   setModuleLang(lang)
   document.documentElement.lang = htmlLang(lang)
   applyTheme(theme)

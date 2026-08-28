@@ -1,12 +1,49 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { createI18n, htmlLang, type Lang, type Params } from '@genoffice/i18n'
-import { strings } from './strings'
+import { format, htmlLang, platformShortcuts, type Lang, type Params } from '@genoffice/i18n'
+import type { strings } from './strings'
 
-const translate = createI18n(strings)
+type Table = typeof strings
 
-export type StringKey = keyof typeof strings.zh
+export type StringKey = keyof Table['zh']
 export type TFunc = (key: StringKey, params?: Params) => string
+
+/** per-locale string tables as separate build chunks (emitted by fork/tools/emit-locales.mjs) */
+const localeLoaders: Record<Lang, () => Promise<Record<string, string>>> = {
+  zh: () => import('./generated/zh').then((m) => m.default),
+  en: () => import('./generated/en').then((m) => m.default),
+  ja: () => import('./generated/ja').then((m) => m.default),
+  ko: () => import('./generated/ko').then((m) => m.default),
+  fr: () => import('./generated/fr').then((m) => m.default),
+  de: () => import('./generated/de').then((m) => m.default),
+  es: () => import('./generated/es').then((m) => m.default),
+  th: () => import('./generated/th').then((m) => m.default),
+  id: () => import('./generated/id').then((m) => m.default),
+  ru: () => import('./generated/ru').then((m) => m.default),
+  ar: () => import('./generated/ar').then((m) => m.default),
+  pt: () => import('./generated/pt').then((m) => m.default),
+  it: () => import('./generated/it').then((m) => m.default),
+  pl: () => import('./generated/pl').then((m) => m.default),
+  nl: () => import('./generated/nl').then((m) => m.default),
+  ms: () => import('./generated/ms').then((m) => m.default),
+  he: () => import('./generated/he').then((m) => m.default),
+  hi: () => import('./generated/hi').then((m) => m.default),
+  'zh-TW': () => import('./generated/zh-TW').then((m) => m.default),
+}
+
+const loaded: Partial<Record<Lang, Record<string, string>>> = {}
+
+/** load (once) and cache the string table for a language; await before first render */
+export async function loadLocale(lang: Lang): Promise<Record<string, string>> {
+  loaded[lang] ??= await localeLoaders[lang]()
+  return loaded[lang]!
+}
+
+function translate(lang: Lang, key: StringKey, params?: Params): string {
+  const dict = loaded[lang]
+  // keys render verbatim until the locale chunk lands (boot awaits it anyway)
+  return platformShortcuts(format(dict?.[key as string] ?? (key as string), params))
+}
 
 // mirror for non-React modules (insert-presets, konva-adapter, AI tools …);
 // set before first render and on every language switch
@@ -75,9 +112,11 @@ export function LocaleProvider({ initial, children }: { initial: Lang; children:
   useEffect(
     () =>
       window.slidesApi.onLanguageChanged((next) => {
-        setModuleLang(next)
-        document.documentElement.lang = htmlLang(next)
-        setLang(next)
+        void loadLocale(next).then(() => {
+          setModuleLang(next)
+          document.documentElement.lang = htmlLang(next)
+          setLang(next)
+        })
       }),
     [],
   )
