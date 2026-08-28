@@ -62,7 +62,7 @@ export const aiStrings = defineStrings({
     aiUnknownError: '未知错误',
     aiTimeoutError: 'AI 请求超时：网络长时间无响应，已停止。请检查网络后重试',
     aiNetworkError: '网络有问题，无法连接 AI 服务。请检查网络后重试',
-    aiCreditsExhausted: 'Genspark 积分已用完，请前往 genspark.ai/pricing 充值后重试',
+    aiCreditsExhausted: 'AI 额度已用完，请在设置中配置其他 AI 服务后重试',
     aiToolWorkbookContext: '读取工作表信息',
     aiToolReadRange: '读取范围',
     aiToolReadRangeOf: '读取范围 {range}',
@@ -165,8 +165,7 @@ export const aiStrings = defineStrings({
       'AI request timed out: no response from the network, so the run was stopped. Check your connection and try again',
     aiNetworkError:
       'Network problem: could not reach the AI service. Check your connection and try again',
-    aiCreditsExhausted:
-      'Your Genspark credits have run out. Visit genspark.ai/pricing to top up, then try again',
+    aiCreditsExhausted: 'Your AI credits have run out. Configure another AI provider in Settings, then try again',
     aiToolWorkbookContext: 'Read workbook info',
     aiToolReadRange: 'Read range',
     aiToolReadRangeOf: 'Read range {range}',
@@ -269,8 +268,7 @@ export const aiStrings = defineStrings({
       'AIリクエストがタイムアウトしました：ネットワークからの応答がないため中断しました。接続を確認して再試行してください',
     aiNetworkError:
       'ネットワークに問題があり、AI サービスに接続できません。接続を確認して再試行してください',
-    aiCreditsExhausted:
-      'Gensparkクレジットを使い切りました。genspark.ai/pricing でチャージしてから再試行してください',
+    aiCreditsExhausted: 'AIクレジットを使い切りました。設定で別のAIプロバイダーを設定して、もう一度お試しください',
     aiToolWorkbookContext: 'ブック情報を読み取り',
     aiToolReadRange: '範囲を読み取り',
     aiToolReadRangeOf: '範囲 {range} を読み取り',
@@ -372,8 +370,7 @@ export const aiStrings = defineStrings({
       'AI 요청 시간 초과: 네트워크 응답이 없어 중단되었습니다. 연결을 확인한 후 다시 시도해 주세요',
     aiNetworkError:
       '네트워크에 문제가 있어 AI 서비스에 연결할 수 없습니다. 연결을 확인한 후 다시 시도해 주세요',
-    aiCreditsExhausted:
-      'Genspark 크레딧을 모두 사용했습니다. genspark.ai/pricing에서 충전한 후 다시 시도해 주세요',
+    aiCreditsExhausted: 'AI 크레딧이 모두 소진되었습니다. 설정에서 다른 AI 제공업체를 구성한 후 다시 시도하세요',
     aiToolWorkbookContext: '통합 문서 정보 읽기',
     aiToolReadRange: '범위 읽기',
     aiToolReadRangeOf: '범위 {range} 읽기',
@@ -478,8 +475,7 @@ export const aiStrings = defineStrings({
       "Délai de la requête IA dépassé : aucune réponse du réseau, l'exécution a été interrompue. Vérifiez votre connexion et réessayez",
     aiNetworkError:
       'Problème réseau : impossible de joindre le service IA. Vérifiez votre connexion et réessayez',
-    aiCreditsExhausted:
-      'Vos crédits Genspark sont épuisés. Rechargez sur genspark.ai/pricing puis réessayez',
+    aiCreditsExhausted: 'Vos crédits IA sont épuisés. Configurez un autre fournisseur dans les paramètres puis réessayez.',
     aiToolWorkbookContext: 'Lire les informations du classeur',
     aiToolReadRange: 'Lire la plage',
     aiToolReadRangeOf: 'Lire la plage {range}',
@@ -584,8 +580,7 @@ export const aiStrings = defineStrings({
       'Zeitüberschreitung der KI-Anfrage: keine Antwort vom Netzwerk, der Vorgang wurde abgebrochen. Prüfe deine Verbindung und versuche es erneut',
     aiNetworkError:
       'Netzwerkproblem: Der KI-Dienst ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut',
-    aiCreditsExhausted:
-      'Deine Genspark-Credits sind aufgebraucht. Lade unter genspark.ai/pricing auf und versuche es erneut',
+    aiCreditsExhausted: 'Ihre KI-Guthaben sind aufgebraucht. Richten Sie in den Einstellungen einen anderen KI-Anbieter ein und versuchen Sie es erneut.',
     aiToolWorkbookContext: 'Arbeitsmappeninformationen lesen',
     aiToolReadRange: 'Bereich lesen',
     aiToolReadRangeOf: 'Bereich {range} lesen',
@@ -690,8 +685,7 @@ export const aiStrings = defineStrings({
       'La solicitud de IA agotó el tiempo de espera: no hubo respuesta de la red y se detuvo. Comprueba tu conexión e inténtalo de nuevo',
     aiNetworkError:
       'Problema de red: no se pudo conectar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo',
-    aiCreditsExhausted:
-      'Tus créditos de Genspark se han agotado. Recarga en genspark.ai/pricing e inténtalo de nuevo',
+    aiCreditsExhausted: 'Se agotaron tus créditos de IA. Configura otro proveedor de IA en Ajustes e inténtalo de nuevo.',
     aiToolWorkbookContext: 'Leer información del libro',
     aiToolReadRange: 'Leer rango',
     aiToolReadRangeOf: 'Leer rango {range}',
@@ -794,8 +788,7 @@ export const aiStrings = defineStrings({
       'คำขอ AI หมดเวลา: เครือข่ายไม่ตอบสนอง จึงหยุดการทำงาน โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
     aiNetworkError:
       'เครือข่ายมีปัญหา ไม่สามารถเชื่อมต่อบริการ AI ได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
-    aiCreditsExhausted:
-      'เครดิต Genspark ของคุณหมดแล้ว โปรดเติมเครดิตที่ genspark.ai/pricing แล้วลองใหม่',
+    aiCreditsExhausted: 'เครดิต AI หมดแล้ว กำหนดค่าผู้ให้บริการ AI อื่นในการตั้งค่าแล้วลองอีกครั้ง',
     aiToolWorkbookContext: 'อ่านข้อมูลเวิร์กบุ๊ก',
     aiToolReadRange: 'อ่านช่วง',
     aiToolReadRangeOf: 'อ่านช่วง {range}',
@@ -899,8 +892,7 @@ export const aiStrings = defineStrings({
       'Permintaan AI habis waktu: jaringan tidak merespons sehingga proses dihentikan. Periksa koneksi Anda lalu coba lagi',
     aiNetworkError:
       'Masalah jaringan: tidak dapat terhubung ke layanan AI. Periksa koneksi Anda lalu coba lagi',
-    aiCreditsExhausted:
-      'Kredit Genspark Anda telah habis. Isi ulang di genspark.ai/pricing lalu coba lagi',
+    aiCreditsExhausted: 'Kredit AI Anda habis. Konfigurasikan penyedia AI lain di Pengaturan, lalu coba lagi.',
     aiToolWorkbookContext: 'Baca info buku kerja',
     aiToolReadRange: 'Baca rentang',
     aiToolReadRangeOf: 'Baca rentang {range}',
@@ -1004,8 +996,7 @@ export const aiStrings = defineStrings({
       'Тайм-аут запроса ИИ: сеть не отвечает, выполнение остановлено. Проверьте подключение и повторите попытку',
     aiNetworkError:
       'Проблема с сетью: не удалось подключиться к сервису ИИ. Проверьте подключение и повторите попытку',
-    aiCreditsExhausted:
-      'Кредиты Genspark исчерпаны. Пополните баланс на genspark.ai/pricing и повторите попытку',
+    aiCreditsExhausted: 'Кредиты ИИ исчерпаны. Настройте другого поставщика ИИ в настройках и попробуйте снова.',
     aiToolWorkbookContext: 'Чтение сведений о книге',
     aiToolReadRange: 'Чтение диапазона',
     aiToolReadRangeOf: 'Чтение диапазона {range}',
@@ -1108,8 +1099,7 @@ export const aiStrings = defineStrings({
       'انتهت مهلة طلب الذكاء الاصطناعي: لا توجد استجابة من الشبكة وتم الإيقاف. تحقق من الاتصال وحاول مجددًا',
     aiNetworkError:
       'مشكلة في الشبكة: تعذّر الوصول إلى خدمة الذكاء الاصطناعي. تحقق من الاتصال وحاول مجددًا',
-    aiCreditsExhausted:
-      'نفدت أرصدة Genspark لديك. يرجى إعادة الشحن عبر genspark.ai/pricing ثم المحاولة مجددًا',
+    aiCreditsExhausted: 'نفدت رصيد الذكاء الاصطناعي. قم بإعداد مزود ذكاء اصطناعي آخر في الإعدادات ثم حاول مجددًا.',
     aiToolWorkbookContext: 'قراءة معلومات المصنف',
     aiToolReadRange: 'قراءة النطاق',
     aiToolReadRangeOf: 'قراءة النطاق {range}',
@@ -1213,8 +1203,7 @@ export const aiStrings = defineStrings({
       'A solicitação de IA expirou: sem resposta da rede, a execução foi interrompida. Verifique sua conexão e tente novamente',
     aiNetworkError:
       'Problema de rede: não foi possível conectar ao serviço de IA. Verifique sua conexão e tente novamente',
-    aiCreditsExhausted:
-      'Seus créditos Genspark acabaram. Recarregue em genspark.ai/pricing e tente novamente',
+    aiCreditsExhausted: 'Seus créditos de IA acabaram. Configure outro provedor de IA nas Configurações e tente novamente.',
     aiToolWorkbookContext: 'Ler informações da pasta de trabalho',
     aiToolReadRange: 'Ler intervalo',
     aiToolReadRangeOf: 'Ler intervalo {range}',
@@ -1319,8 +1308,7 @@ export const aiStrings = defineStrings({
       'Richiesta IA scaduta: nessuna risposta dalla rete, esecuzione interrotta. Controlla la connessione e riprova',
     aiNetworkError:
       'Problema di rete: impossibile raggiungere il servizio IA. Controlla la connessione e riprova',
-    aiCreditsExhausted:
-      'I tuoi crediti Genspark sono esauriti. Ricarica su genspark.ai/pricing e riprova',
+    aiCreditsExhausted: 'I tuoi crediti AI sono esauriti. Configura un altro provider AI nelle Impostazioni e riprova.',
     aiToolWorkbookContext: 'Lettura delle informazioni della cartella di lavoro',
     aiToolReadRange: "Lettura dell'intervallo",
     aiToolReadRangeOf: "Lettura dell'intervallo {range}",
@@ -1424,8 +1412,7 @@ export const aiStrings = defineStrings({
       'Przekroczono limit czasu żądania AI: brak odpowiedzi sieci, przerwano. Sprawdź połączenie i spróbuj ponownie',
     aiNetworkError:
       'Problem z siecią: nie można połączyć się z usługą AI. Sprawdź połączenie i spróbuj ponownie',
-    aiCreditsExhausted:
-      'Twoje kredyty Genspark wyczerpały się. Doładuj konto na genspark.ai/pricing i spróbuj ponownie',
+    aiCreditsExhausted: 'Twoje kredyty AI się wyczerpały. Skonfiguruj innego dostawcę AI w Ustawieniach i spróbuj ponownie.',
     aiToolWorkbookContext: 'Odczyt informacji o skoroszycie',
     aiToolReadRange: 'Odczyt zakresu',
     aiToolReadRangeOf: 'Odczyt zakresu {range}',
@@ -1530,8 +1517,7 @@ export const aiStrings = defineStrings({
       'AI-verzoek verlopen: geen reactie van het netwerk, uitvoering gestopt. Controleer je verbinding en probeer het opnieuw',
     aiNetworkError:
       'Netwerkprobleem: kan de AI-service niet bereiken. Controleer je verbinding en probeer het opnieuw',
-    aiCreditsExhausted:
-      'Je Genspark-credits zijn op. Waardeer op via genspark.ai/pricing en probeer het opnieuw',
+    aiCreditsExhausted: 'Je AI-tegoed is op. Configureer een andere AI-provider in Instellingen en probeer het opnieuw.',
     aiToolWorkbookContext: 'Werkmapgegevens lezen',
     aiToolReadRange: 'Bereik lezen',
     aiToolReadRangeOf: 'Bereik {range} lezen',
@@ -1636,8 +1622,7 @@ export const aiStrings = defineStrings({
       'Permintaan AI tamat masa: rangkaian tidak memberi respons, proses dihentikan. Semak sambungan anda dan cuba lagi',
     aiNetworkError:
       'Masalah rangkaian: tidak dapat menghubungi perkhidmatan AI. Semak sambungan anda dan cuba lagi',
-    aiCreditsExhausted:
-      'Kredit Genspark anda telah habis. Tambah nilai di genspark.ai/pricing dan cuba lagi',
+    aiCreditsExhausted: 'Kredit AI anda telah habis. Konfigurasikan pembekal AI lain dalam Tetapan, kemudian cuba lagi.',
     aiToolWorkbookContext: 'Baca maklumat buku kerja',
     aiToolReadRange: 'Baca julat',
     aiToolReadRangeOf: 'Baca julat {range}',
@@ -1737,7 +1722,7 @@ export const aiStrings = defineStrings({
     aiUnknownError: 'שגיאה לא ידועה',
     aiTimeoutError: 'תם הזמן לבקשת ה-AI: אין תגובה מהרשת וההרצה הופסקה. בדוק את החיבור ונסה שוב',
     aiNetworkError: 'בעיית רשת: לא ניתן להתחבר לשירות ה-AI. בדוק את החיבור ונסה שוב',
-    aiCreditsExhausted: 'קרדיטי Genspark שלך אזלו. טען מחדש ב-genspark.ai/pricing ונסה שוב',
+    aiCreditsExhausted: 'נגמרו קרדיטי ה-AI שלך. הגדר ספק AI אחר בהגדרות ונסה שוב',
     aiToolWorkbookContext: 'קריאת פרטי חוברת העבודה',
     aiToolReadRange: 'קריאת טווח',
     aiToolReadRangeOf: 'קריאת הטווח {range}',
@@ -1841,8 +1826,7 @@ export const aiStrings = defineStrings({
       'AI अनुरोध का समय समाप्त: नेटवर्क से कोई प्रतिक्रिया नहीं मिली, इसलिए रोक दिया गया। कनेक्शन जांचें और फिर से प्रयास करें',
     aiNetworkError:
       'नेटवर्क समस्या: AI सेवा से कनेक्ट नहीं हो सका। कनेक्शन जांचें और फिर से प्रयास करें',
-    aiCreditsExhausted:
-      'आपके Genspark क्रेडिट समाप्त हो गए हैं। genspark.ai/pricing पर रिचार्ज करें और फिर से प्रयास करें',
+    aiCreditsExhausted: 'AI क्रेडिट समाप्त हो गए हैं। सेटिंग में कोई अन्य AI प्रदाता कॉन्फ़िगर करें और फिर से प्रयास करें।',
     aiToolWorkbookContext: 'कार्यपुस्तिका की जानकारी पढ़ें',
     aiToolReadRange: 'श्रेणी पढ़ें',
     aiToolReadRangeOf: 'श्रेणी {range} पढ़ें',
@@ -1942,7 +1926,7 @@ export const aiStrings = defineStrings({
     aiUnknownError: '未知錯誤',
     aiTimeoutError: 'AI 請求逾時：網路長時間無回應，已停止。請檢查網路後重試',
     aiNetworkError: '網路有問題，無法連接 AI 服務。請檢查網路後重試',
-    aiCreditsExhausted: 'Genspark 點數已用完，請前往 genspark.ai/pricing 儲值後重試',
+    aiCreditsExhausted: 'AI 額度已用完，請在設定中設定其他 AI 服務後重試',
     aiToolWorkbookContext: '讀取工作表資訊',
     aiToolReadRange: '讀取範圍',
     aiToolReadRangeOf: '讀取範圍 {range}',

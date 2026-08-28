@@ -564,12 +564,12 @@ export function AiPanel({
         onPointerDown={startResize}
         role="separator"
         aria-orientation="vertical"
-        aria-label="Genspark"
+        aria-label="AI panel"
       />
       <header className="ai-panel-header">
         <span className="ai-panel-title">
           <ZanoMark size={22} />
-          Genspark
+          Zano AI
         </span>
         <div className="ai-panel-header-actions">
           {chat.length > 0 && (

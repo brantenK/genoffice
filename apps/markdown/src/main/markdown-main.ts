@@ -691,12 +691,12 @@ function registerMarkdownIpc(): void {
     async (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
       if (!hasGskAuth())
         return {
-          error: 'Genspark account is not logged in on this machine; ask the user to log in first',
+          error: 'No AI provider is signed in on this machine; configure one in Settings first',
         }
       if (!gskCloudToolsOn())
         return {
           error:
-            'Genspark cloud tools are turned off in Settings (AI Model); enable them to use this tool',
+            'AI tools are turned off in Settings (AI Model); enable them to use this tool',
         }
       const prompt = String(op?.prompt ?? '').trim()
       if (!prompt) return { error: 'prompt must not be empty' }
