@@ -133,20 +133,89 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       nextInvoices.unshift(targetInvoice)
     }
 
-    // Update party outstanding balance
+    // Update party outstanding balance correctly with diff
+    const prevInvoice = partial.id ? data.invoices.find((i) => i.id === partial.id) : null
+    const prevOutstanding = prevInvoice ? prevInvoice.outstandingAmount : 0
+    const balanceDiff = targetInvoice.outstandingAmount - prevOutstanding
+
     const nextParties = data.parties.map((p) => {
       if (p.id === targetInvoice.partyId) {
-        const diff = targetInvoice.outstandingAmount
-        return { ...p, outstandingBalance: p.outstandingBalance + diff }
+        return { ...p, outstandingBalance: Math.max(0, p.outstandingBalance + balanceDiff) }
       }
       return p
     })
+
+    // Auto-update double-entry accounts for new invoices
+    let nextAccounts = [...data.accounts]
+    let nextJournals = [...data.journalEntries]
+
+    if (!partial.id && targetInvoice.status !== 'Draft') {
+      if (targetInvoice.type === 'Sales') {
+        nextAccounts = nextAccounts.map((acc) => {
+          if (acc.id === 'acc-ar') return { ...acc, balance: acc.balance + targetInvoice.grandTotal }
+          if (acc.id === 'acc-vat') return { ...acc, balance: acc.balance + targetInvoice.taxTotal }
+          if (acc.id === 'acc-sales') return { ...acc, balance: acc.balance + targetInvoice.subtotal }
+          return acc
+        })
+        // Record Journal Entry
+        nextJournals.unshift({
+          id: `je-${Date.now()}`,
+          entryNumber: `JE-${new Date().getFullYear()}-${String(nextJournals.length + 1).padStart(3, '0')}`,
+          date: targetInvoice.date,
+          items: [
+            {
+              id: `je-i-1`,
+              accountId: 'acc-ar',
+              accountName: 'Accounts Receivable (Debtors)',
+              partyId: targetInvoice.partyId,
+              partyName: targetInvoice.partyName,
+              debit: targetInvoice.grandTotal,
+              credit: 0,
+              remark: `Invoice ${targetInvoice.invoiceNumber}`,
+            },
+            {
+              id: `je-i-2`,
+              accountId: 'acc-sales',
+              accountName: 'Tender & Commercial Contracting Sales',
+              debit: 0,
+              credit: targetInvoice.subtotal,
+              remark: `Sales Revenue`,
+            },
+            ...(targetInvoice.taxTotal > 0
+              ? [
+                  {
+                    id: `je-i-3`,
+                    accountId: 'acc-vat',
+                    accountName: 'SARS VAT Output Payable',
+                    debit: 0,
+                    credit: targetInvoice.taxTotal,
+                    remark: `15% VAT Output`,
+                  },
+                ]
+              : []),
+          ],
+          totalDebit: targetInvoice.grandTotal,
+          totalCredit: targetInvoice.grandTotal,
+          remarks: `System invoice posting for ${targetInvoice.invoiceNumber}`,
+          posted: true,
+        })
+      } else {
+        // Purchase Bill
+        nextAccounts = nextAccounts.map((acc) => {
+          if (acc.id === 'acc-ap') return { ...acc, balance: acc.balance + targetInvoice.grandTotal }
+          if (acc.id === 'acc-materials') return { ...acc, balance: acc.balance + targetInvoice.subtotal }
+          return acc
+        })
+      }
+    }
 
     set({
       data: {
         ...data,
         invoices: nextInvoices,
         parties: nextParties,
+        accounts: nextAccounts,
+        journalEntries: nextJournals,
       },
       activeInvoiceId: null,
     })

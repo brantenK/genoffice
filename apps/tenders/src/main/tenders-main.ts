@@ -163,26 +163,35 @@ ${requirements
   // Cross-App: Sync with CRM
   ipcMain.handle(TENDERS_CHANNELS.syncWithCrm, (_e, dealData) => {
     try {
-      const crmStorePath = join(app.getPath('userData'), 'crm', 'crm-data.json')
-      if (existsSync(crmStorePath)) {
-        const raw = readFileSync(crmStorePath, 'utf8')
-        const data = JSON.parse(raw)
-        const newDeal = {
-          id: `deal-tender-${Date.now()}`,
-          name: dealData.name || 'Tender Opportunity',
-          amount: dealData.amount || 150000,
-          stage: 'proposal',
-          probability: 60,
-          companyName: dealData.companyName || 'Procurement Buyer',
-          notes: dealData.notes || 'Imported from Zanostack Tenders',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }
-        data.deals = [newDeal, ...(data.deals || [])]
-        writeFileSync(crmStorePath, JSON.stringify(data, null, 2), 'utf8')
-        return { ok: true, dealId: newDeal.id }
+      const crmDir = join(app.getPath('userData'), 'crm')
+      if (!existsSync(crmDir)) {
+        mkdirSync(crmDir, { recursive: true })
       }
-      return { ok: true }
+      const crmDealsPath = join(crmDir, 'deals.json')
+      let deals: any[] = []
+      if (existsSync(crmDealsPath)) {
+        try {
+          const raw = readFileSync(crmDealsPath, 'utf8')
+          const parsed = JSON.parse(raw)
+          deals = Array.isArray(parsed) ? parsed : []
+        } catch {
+          deals = []
+        }
+      }
+      const newDeal = {
+        id: `deal-tender-${Date.now()}`,
+        name: dealData.name || 'Tender Opportunity',
+        amount: Number(dealData.amount) || 150000,
+        stage: 'proposal',
+        probability: 60,
+        companyName: dealData.companyName || 'Procurement Buyer',
+        notes: dealData.notes || 'Imported from Zanostack Tenders',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      deals.unshift(newDeal)
+      writeFileSync(crmDealsPath, JSON.stringify(deals, null, 2), 'utf8')
+      return { ok: true, dealId: newDeal.id }
     } catch (e: any) {
       return { ok: false, error: e?.message }
     }
