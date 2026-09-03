@@ -62,7 +62,7 @@ async function readSessionMarker(directory: string): Promise<ConversionSessionMa
 }
 
 /**
- * Removes only marked Zano Office session directories older than the TTL.
+ * Removes only marked Zanostack session directories older than the TTL.
  * Unknown files/directories under the cache root are deliberately ignored.
  */
 export async function cleanupStaleMarkdownConversions(

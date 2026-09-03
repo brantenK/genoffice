@@ -212,8 +212,8 @@ function assertModuleTreesPresent() {
 
 /** @type {import('electron-builder').Configuration} */
 const config = {
-  appId: 'com.zanooffice.app',
-  productName: 'Zano Office',
+  appId: 'com.zanostack.app',
+  productName: 'Zanostack',
   // Resolved from the installed electron package so dependency bumps can
   // never leave a stale hard-coded pin behind (packaging would silently ship
   // the old runtime).
@@ -411,8 +411,8 @@ const config = {
     // so apt sees the new packages as the same lineage. Homepage comes from
     // package.json "homepage"; the Package field is pinned in the deb block
     // below (packageName is a per-target option, rejected here by the schema).
-    maintainer: 'Zano <team@zanooffice.app>',
-    vendor: 'Zano <team@zanooffice.app>',
+    maintainer: 'Zanostack <team@zanostack.com>',
+    vendor: 'Zanostack <team@zanostack.com>',
     category: 'Office',
     // Icon SET directory, not the single 1024px png: electron-builder does
     // not resize a lone png, so deb/rpm would install only
@@ -426,7 +426,7 @@ const config = {
     // generated genoffice.desktop match the WM_CLASS Electron reports (it
     // takes that from the executable basename), so the running window links
     // back to its launcher entry.
-    executableName: 'zanooffice',
+    executableName: 'zanostack',
     // Electron takes its X11 app_id from package.json "desktopName"
     // (genoffice.desktop); syncDesktopName makes electron-builder name the
     // .desktop file and its StartupWMClass from the same value. Without it
@@ -451,7 +451,7 @@ const config = {
   // "GenOffice" and only happens to downcase it to the right value.
   deb: {
     artifactName: 'exampleoffice_${version}_${arch}.deb',
-    packageName: 'zanooffice',
+    packageName: 'zanostack',
   },
   // Same "@genoffice/shell" naming problem as deb: spell the artifact name
   // out (${arch} expands to the rpm arch string, x86_64) and pin the rpm
@@ -466,7 +466,7 @@ const config = {
   // (AppImage + deb) and the promote workflow needs no rpm alias.
   rpm: {
     artifactName: 'exampleoffice-${version}.${arch}.rpm',
-    packageName: 'zanooffice',
+    packageName: 'zanostack',
     publish: null,
   },
   nsis: {

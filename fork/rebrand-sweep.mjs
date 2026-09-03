@@ -92,9 +92,10 @@ const tracked = execFileSync('git', ['ls-files', 'apps/', 'packages/', 'e2e/'], 
   .split('\n')
   .filter(
     (f) =>
-      (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.html')) &&
+      (f.endsWith('.ts') || f.endsWith('.tsx') || f.endsWith('.html') || (f.endsWith('package.json') && f !== 'package.json')) &&
       !f.includes('.test.') &&
-      !f.includes('fixtures/'),
+      !f.includes('fixtures/') &&
+      !f.includes('package-lock.json'),
   )
 
 let touchedFiles = 0

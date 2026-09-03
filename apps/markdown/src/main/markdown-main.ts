@@ -300,7 +300,7 @@ interface RuntimePaths {
   preloadPath: string
   rendererUrl?: string
   rendererFile?: string
-  /** Shell router used to open exported PDFs in a new Zano Office tab. */
+  /** Shell router used to open exported PDFs in a new Zanostack tab. */
   openGeneratedPath?: (path: string) => boolean
 }
 

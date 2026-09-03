@@ -17,7 +17,7 @@ interface Slide {
   bodyKey?: StringKey
   /** render the body in the dimmer footnote gray (slide 3's credits disclaimer) */
   bodyDim?: boolean
-  /** community slide shows the credits offer panel with the "Join Zano Office" call-to-action */
+  /** community slide shows the credits offer panel with the "Join Zanostack" call-to-action */
   /** closing slide shows the "star us on GitHub" hint */
   showStar?: boolean
   /** closing slide explains default-on analytics and how to disable it */
@@ -119,7 +119,7 @@ export function Onboarding({ onDone }: OnboardingProps) {
   }, [])
 
   // slide changes can strip focus from the active control (leaving slide 2
-  // makes its Zano Office button inert, which blurs it) — pull focus back onto the
+  // makes its Zanostack button inert, which blurs it) — pull focus back onto the
   // card so it never drops to body
   useEffect(() => {
     const card = cardRef.current

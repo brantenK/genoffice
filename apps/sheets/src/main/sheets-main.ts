@@ -1320,7 +1320,7 @@ interface SheetsRuntimeConfig {
   rendererFile: string
   /** absolute path to the Rust xlsx-sidecar binary */
   sidecarPath?: string | undefined
-  /** Shell router used to open exported PDFs in a new Zano Office tab. */
+  /** Shell router used to open exported PDFs in a new Zanostack tab. */
   openGeneratedPath?: (path: string) => boolean
 }
 
@@ -1729,7 +1729,7 @@ export async function createSheetsWindow(
     minWidth: 1024,
     minHeight: 680,
     show: false,
-    title: 'Zano Office Sheets',
+    title: 'Zanostack Sheets',
     // Traffic lights sit inside the toolbar row.
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {

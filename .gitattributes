@@ -15,3 +15,7 @@
 *.otf binary
 *.woff binary
 *.woff2 binary
+
+# Fork and brand assets
+fork/* merge=ours
+.githooks/* merge=ours

@@ -19,7 +19,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: '第 {n} 页:已跳过自动版式检查',
     aiQcStopped: '版式检查已停止',
     aiQcCapped: '其余 {count} 页未检查(单次上限)',
-    aiGskLoginBtn: '登录 Genspark',
+    aiGskLoginBtn: '登录 Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: '打开 AI 助手',
     aiFactCheckBtn: 'AI 事实核查',
@@ -108,7 +108,7 @@ export const aiStrings = defineStrings({
     aiErrUnknown: '未知错误',
     aiErrStreamTimeout: 'AI 请求超时：网络长时间无响应，已停止。请检查网络后重试',
     aiErrNetwork: '网络有问题，无法连接 AI 服务。请检查网络后重试',
-    aiCreditsExhausted: 'Genspark 积分已用完，请前往 genspark.ai/pricing 充值后重试',
+    aiCreditsExhausted: 'AI 额度已用完，请在设置中配置其他 AI 服务后重试',
     aiErrRequestFailed: '请求发送失败: {msg}',
     aiErrGenerateFailed: '生成失败',
     aiErrRegenFailed: '重做页面失败',
@@ -259,7 +259,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Page {n}: automatic layout check skipped',
     aiQcStopped: 'Layout check stopped',
     aiQcCapped: '{count} more page(s) not checked (per-run cap)',
-    aiGskLoginBtn: 'Sign in to Genspark',
+    aiGskLoginBtn: 'Sign in to Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Open AI assistant',
     aiFactCheckBtn: 'AI Fact Check',
@@ -354,8 +354,7 @@ export const aiStrings = defineStrings({
       'AI request timed out: no response from the network, so the run was stopped. Check your connection and try again',
     aiErrNetwork:
       'Network problem: could not reach the AI service. Check your connection and try again',
-    aiCreditsExhausted:
-      'Your Genspark credits have run out. Visit genspark.ai/pricing to top up, then try again',
+    aiCreditsExhausted: 'Your AI credits have run out. Configure another AI provider in Settings, then try again',
     aiErrRequestFailed: 'Failed to send request: {msg}',
     aiErrGenerateFailed: 'Generation failed',
     aiErrRegenFailed: 'Slide redo failed',
@@ -506,7 +505,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'ページ {n}:自動レイアウトチェックをスキップ',
     aiQcStopped: 'レイアウトチェックを停止しました',
     aiQcCapped: '残り {count} ページは未チェック(1回の上限)',
-    aiGskLoginBtn: 'Genspark にサインイン',
+    aiGskLoginBtn: 'Zano にサインイン',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI アシスタントを開く',
     aiFactCheckBtn: 'AI ファクトチェック',
@@ -600,8 +599,7 @@ export const aiStrings = defineStrings({
       'AIリクエストがタイムアウトしました：ネットワークからの応答がないため中断しました。接続を確認して再試行してください',
     aiErrNetwork:
       'ネットワークに問題があり、AI サービスに接続できません。接続を確認して再試行してください',
-    aiCreditsExhausted:
-      'Gensparkクレジットを使い切りました。genspark.ai/pricing でチャージしてから再試行してください',
+    aiCreditsExhausted: 'AIクレジットを使い切りました。設定で別のAIプロバイダーを設定して、もう一度お試しください',
     aiErrRequestFailed: 'リクエストの送信に失敗しました: {msg}',
     aiErrGenerateFailed: '生成に失敗しました',
     aiErrRegenFailed: 'ページの再生成に失敗しました',
@@ -752,7 +750,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: '{n}페이지: 자동 레이아웃 검사 건너뜀',
     aiQcStopped: '레이아웃 검사를 중지했습니다',
     aiQcCapped: '나머지 {count}페이지는 검사하지 않음(회당 상한)',
-    aiGskLoginBtn: 'Genspark 로그인',
+    aiGskLoginBtn: 'Zano 로그인',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI 도우미 열기',
     aiFactCheckBtn: 'AI 팩트체크',
@@ -847,8 +845,7 @@ export const aiStrings = defineStrings({
       'AI 요청 시간 초과: 네트워크 응답이 없어 중단되었습니다. 연결을 확인한 후 다시 시도해 주세요',
     aiErrNetwork:
       '네트워크에 문제가 있어 AI 서비스에 연결할 수 없습니다. 연결을 확인한 후 다시 시도해 주세요',
-    aiCreditsExhausted:
-      'Genspark 크레딧을 모두 사용했습니다. genspark.ai/pricing에서 충전한 후 다시 시도해 주세요',
+    aiCreditsExhausted: 'AI 크레딧이 모두 소진되었습니다. 설정에서 다른 AI 제공업체를 구성한 후 다시 시도하세요',
     aiErrRequestFailed: '요청 전송 실패: {msg}',
     aiErrGenerateFailed: '생성 실패',
     aiErrRegenFailed: '페이지 다시 생성 실패',
@@ -999,7 +996,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Page {n} : vérification automatique de la mise en page ignorée',
     aiQcStopped: 'Vérification de la mise en page arrêtée',
     aiQcCapped: '{count} page(s) restante(s) non vérifiée(s) (limite par exécution)',
-    aiGskLoginBtn: 'Se connecter à Genspark',
+    aiGskLoginBtn: 'Se connecter à Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: "Ouvrir l'assistant IA",
     aiFactCheckBtn: 'Vérification IA',
@@ -1096,8 +1093,7 @@ export const aiStrings = defineStrings({
       "Délai de la requête IA dépassé : aucune réponse du réseau, l'exécution a été interrompue. Vérifiez votre connexion et réessayez",
     aiErrNetwork:
       'Problème réseau : impossible de joindre le service IA. Vérifiez votre connexion et réessayez',
-    aiCreditsExhausted:
-      'Vos crédits Genspark sont épuisés. Rechargez sur genspark.ai/pricing puis réessayez',
+    aiCreditsExhausted: 'Vos crédits IA sont épuisés. Configurez un autre fournisseur dans les paramètres puis réessayez.',
     aiErrRequestFailed: "Échec de l'envoi de la requête : {msg}",
     aiErrGenerateFailed: 'Échec de la génération',
     aiErrRegenFailed: 'Échec de la régénération de la diapositive',
@@ -1249,7 +1245,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Seite {n}: automatische Layoutprüfung übersprungen',
     aiQcStopped: 'Layoutprüfung gestoppt',
     aiQcCapped: '{count} weitere Seite(n) nicht geprüft (Limit pro Lauf)',
-    aiGskLoginBtn: 'Bei Genspark anmelden',
+    aiGskLoginBtn: 'Bei Zano anmelden',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'KI-Assistenten öffnen',
     aiFactCheckBtn: 'KI-Faktencheck',
@@ -1346,8 +1342,7 @@ export const aiStrings = defineStrings({
       'Zeitüberschreitung der KI-Anfrage: keine Antwort vom Netzwerk, der Vorgang wurde abgebrochen. Prüfe deine Verbindung und versuche es erneut',
     aiErrNetwork:
       'Netzwerkproblem: Der KI-Dienst ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut',
-    aiCreditsExhausted:
-      'Deine Genspark-Credits sind aufgebraucht. Lade unter genspark.ai/pricing auf und versuche es erneut',
+    aiCreditsExhausted: 'Ihre KI-Guthaben sind aufgebraucht. Richten Sie in den Einstellungen einen anderen KI-Anbieter ein und versuchen Sie es erneut.',
     aiErrRequestFailed: 'Senden der Anfrage fehlgeschlagen: {msg}',
     aiErrGenerateFailed: 'Generierung fehlgeschlagen',
     aiErrRegenFailed: 'Neuerstellung der Folie fehlgeschlagen',
@@ -1498,7 +1493,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Página {n}: comprobación automática de diseño omitida',
     aiQcStopped: 'Comprobación de diseño detenida',
     aiQcCapped: '{count} página(s) más sin comprobar (límite por ejecución)',
-    aiGskLoginBtn: 'Iniciar sesión en Genspark',
+    aiGskLoginBtn: 'Iniciar sesión en Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Abrir el asistente de IA',
     aiFactCheckBtn: 'Verificación IA',
@@ -1595,8 +1590,7 @@ export const aiStrings = defineStrings({
       'La solicitud de IA agotó el tiempo de espera: no hubo respuesta de la red y se detuvo. Comprueba tu conexión e inténtalo de nuevo',
     aiErrNetwork:
       'Problema de red: no se pudo conectar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo',
-    aiCreditsExhausted:
-      'Tus créditos de Genspark se han agotado. Recarga en genspark.ai/pricing e inténtalo de nuevo',
+    aiCreditsExhausted: 'Se agotaron tus créditos de IA. Configura otro proveedor de IA en Ajustes e inténtalo de nuevo.',
     aiErrRequestFailed: 'No se pudo enviar la solicitud: {msg}',
     aiErrGenerateFailed: 'Error de generación',
     aiErrRegenFailed: 'No se pudo rehacer la diapositiva',
@@ -1747,7 +1741,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'หน้า {n}: ข้ามการตรวจสอบเลย์เอาต์อัตโนมัติ',
     aiQcStopped: 'หยุดการตรวจสอบเลย์เอาต์แล้ว',
     aiQcCapped: 'อีก {count} หน้าไม่ได้ตรวจสอบ (ขีดจำกัดต่อครั้ง)',
-    aiGskLoginBtn: 'ลงชื่อเข้าใช้ Genspark',
+    aiGskLoginBtn: 'ลงชื่อเข้าใช้ Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'เปิดผู้ช่วย AI',
     aiFactCheckBtn: 'ตรวจสอบข้อเท็จจริง AI',
@@ -1840,8 +1834,7 @@ export const aiStrings = defineStrings({
       'คำขอ AI หมดเวลา: เครือข่ายไม่ตอบสนอง จึงหยุดการทำงาน โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
     aiErrNetwork:
       'เครือข่ายมีปัญหา ไม่สามารถเชื่อมต่อบริการ AI ได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
-    aiCreditsExhausted:
-      'เครดิต Genspark ของคุณหมดแล้ว โปรดเติมเครดิตที่ genspark.ai/pricing แล้วลองใหม่',
+    aiCreditsExhausted: 'เครดิต AI หมดแล้ว กำหนดค่าผู้ให้บริการ AI อื่นในการตั้งค่าแล้วลองอีกครั้ง',
     aiErrRequestFailed: 'ส่งคำขอไม่สำเร็จ: {msg}',
     aiErrGenerateFailed: 'สร้างไม่สำเร็จ',
     aiErrRegenFailed: 'ทำหน้าใหม่ไม่สำเร็จ',
@@ -1992,7 +1985,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Halaman {n}: pemeriksaan tata letak otomatis dilewati',
     aiQcStopped: 'Pemeriksaan tata letak dihentikan',
     aiQcCapped: '{count} halaman lagi tidak diperiksa (batas per proses)',
-    aiGskLoginBtn: 'Masuk ke Genspark',
+    aiGskLoginBtn: 'Masuk ke Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Buka asisten AI',
     aiFactCheckBtn: 'Cek Fakta AI',
@@ -2088,8 +2081,7 @@ export const aiStrings = defineStrings({
       'Permintaan AI habis waktu: jaringan tidak merespons sehingga proses dihentikan. Periksa koneksi Anda lalu coba lagi',
     aiErrNetwork:
       'Masalah jaringan: tidak dapat terhubung ke layanan AI. Periksa koneksi Anda lalu coba lagi',
-    aiCreditsExhausted:
-      'Kredit Genspark Anda telah habis. Isi ulang di genspark.ai/pricing lalu coba lagi',
+    aiCreditsExhausted: 'Kredit AI Anda habis. Konfigurasikan penyedia AI lain di Pengaturan, lalu coba lagi.',
     aiErrRequestFailed: 'Gagal mengirim permintaan: {msg}',
     aiErrGenerateFailed: 'Pembuatan gagal',
     aiErrRegenFailed: 'Gagal membuat ulang halaman',
@@ -2240,7 +2232,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Страница {n}: автоматическая проверка макета пропущена',
     aiQcStopped: 'Проверка макета остановлена',
     aiQcCapped: 'Ещё {count} стр. не проверено (лимит за один запуск)',
-    aiGskLoginBtn: 'Войти в Genspark',
+    aiGskLoginBtn: 'Войти в Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Открыть ИИ-помощника',
     aiFactCheckBtn: 'ИИ-фактчекинг',
@@ -2336,8 +2328,7 @@ export const aiStrings = defineStrings({
       'Тайм-аут запроса ИИ: сеть не отвечает, выполнение остановлено. Проверьте подключение и повторите попытку',
     aiErrNetwork:
       'Проблема с сетью: не удалось подключиться к сервису ИИ. Проверьте подключение и повторите попытку',
-    aiCreditsExhausted:
-      'Кредиты Genspark исчерпаны. Пополните баланс на genspark.ai/pricing и повторите попытку',
+    aiCreditsExhausted: 'Кредиты ИИ исчерпаны. Настройте другого поставщика ИИ в настройках и попробуйте снова.',
     aiErrRequestFailed: 'Не удалось отправить запрос: {msg}',
     aiErrGenerateFailed: 'Сбой генерации',
     aiErrRegenFailed: 'Не удалось переделать слайд',
@@ -2488,7 +2479,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'الصفحة {n}: تم تخطي فحص التخطيط التلقائي',
     aiQcStopped: 'تم إيقاف فحص التخطيط',
     aiQcCapped: '{count} صفحة أخرى لم تُفحص (حد لكل تشغيل)',
-    aiGskLoginBtn: 'تسجيل الدخول إلى Genspark',
+    aiGskLoginBtn: 'تسجيل الدخول إلى Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'فتح مساعد الذكاء الاصطناعي',
     aiFactCheckBtn: 'تدقيق حقائق AI',
@@ -2581,8 +2572,7 @@ export const aiStrings = defineStrings({
       'انتهت مهلة طلب الذكاء الاصطناعي: لا توجد استجابة من الشبكة وتم الإيقاف. تحقق من الاتصال وحاول مجددًا',
     aiErrNetwork:
       'مشكلة في الشبكة: تعذّر الوصول إلى خدمة الذكاء الاصطناعي. تحقق من الاتصال وحاول مجددًا',
-    aiCreditsExhausted:
-      'نفدت أرصدة Genspark لديك. يرجى إعادة الشحن عبر genspark.ai/pricing ثم المحاولة مجددًا',
+    aiCreditsExhausted: 'نفدت رصيد الذكاء الاصطناعي. قم بإعداد مزود ذكاء اصطناعي آخر في الإعدادات ثم حاول مجددًا.',
     aiErrRequestFailed: 'فشل إرسال الطلب: {msg}',
     aiErrGenerateFailed: 'فشل الإنشاء',
     aiErrRegenFailed: 'فشلت إعادة إنشاء الصفحة',
@@ -2733,7 +2723,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Página {n}: verificação automática de layout ignorada',
     aiQcStopped: 'Verificação de layout interrompida',
     aiQcCapped: 'Mais {count} página(s) não verificada(s) (limite por execução)',
-    aiGskLoginBtn: 'Entrar no Genspark',
+    aiGskLoginBtn: 'Entrar no Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Abrir assistente de IA',
     aiFactCheckBtn: 'Checagem IA',
@@ -2829,8 +2819,7 @@ export const aiStrings = defineStrings({
       'A solicitação de IA expirou: sem resposta da rede, a execução foi interrompida. Verifique sua conexão e tente novamente',
     aiErrNetwork:
       'Problema de rede: não foi possível conectar ao serviço de IA. Verifique sua conexão e tente novamente',
-    aiCreditsExhausted:
-      'Seus créditos Genspark acabaram. Recarregue em genspark.ai/pricing e tente novamente',
+    aiCreditsExhausted: 'Seus créditos de IA acabaram. Configure outro provedor de IA nas Configurações e tente novamente.',
     aiErrRequestFailed: 'Falha ao enviar a solicitação: {msg}',
     aiErrGenerateFailed: 'Falha na geração',
     aiErrRegenFailed: 'Falha ao refazer o slide',
@@ -2981,7 +2970,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Pagina {n}: controllo automatico del layout saltato',
     aiQcStopped: 'Controllo del layout interrotto',
     aiQcCapped: 'Altre {count} pagina/e non controllate (limite per esecuzione)',
-    aiGskLoginBtn: 'Accedi a Genspark',
+    aiGskLoginBtn: 'Accedi a Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: "Apri l'assistente IA",
     aiFactCheckBtn: 'Fact-check IA',
@@ -3077,8 +3066,7 @@ export const aiStrings = defineStrings({
       'Richiesta IA scaduta: nessuna risposta dalla rete, esecuzione interrotta. Controlla la connessione e riprova',
     aiErrNetwork:
       'Problema di rete: impossibile raggiungere il servizio IA. Controlla la connessione e riprova',
-    aiCreditsExhausted:
-      'I tuoi crediti Genspark sono esauriti. Ricarica su genspark.ai/pricing e riprova',
+    aiCreditsExhausted: 'I tuoi crediti AI sono esauriti. Configura un altro provider AI nelle Impostazioni e riprova.',
     aiErrRequestFailed: 'Invio della richiesta non riuscito: {msg}',
     aiErrGenerateFailed: 'Generazione non riuscita',
     aiErrRegenFailed: 'Rigenerazione della diapositiva non riuscita',
@@ -3229,7 +3217,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Strona {n}: pominięto automatyczne sprawdzanie układu',
     aiQcStopped: 'Sprawdzanie układu zatrzymane',
     aiQcCapped: 'Pozostałe {count} stron(y) nie sprawdzono (limit na uruchomienie)',
-    aiGskLoginBtn: 'Zaloguj się do Genspark',
+    aiGskLoginBtn: 'Zaloguj się do Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Otwórz asystenta AI',
     aiFactCheckBtn: 'Weryfikacja AI',
@@ -3325,8 +3313,7 @@ export const aiStrings = defineStrings({
       'Przekroczono limit czasu żądania AI: brak odpowiedzi sieci, przerwano. Sprawdź połączenie i spróbuj ponownie',
     aiErrNetwork:
       'Problem z siecią: nie można połączyć się z usługą AI. Sprawdź połączenie i spróbuj ponownie',
-    aiCreditsExhausted:
-      'Twoje kredyty Genspark wyczerpały się. Doładuj konto na genspark.ai/pricing i spróbuj ponownie',
+    aiCreditsExhausted: 'Twoje kredyty AI się wyczerpały. Skonfiguruj innego dostawcę AI w Ustawieniach i spróbuj ponownie.',
     aiErrRequestFailed: 'Wysłanie żądania nie powiodło się: {msg}',
     aiErrGenerateFailed: 'Generowanie nie powiodło się',
     aiErrRegenFailed: 'Ponowne wygenerowanie slajdu nie powiodło się',
@@ -3477,7 +3464,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Pagina {n}: automatische lay-outcontrole overgeslagen',
     aiQcStopped: 'Lay-outcontrole gestopt',
     aiQcCapped: 'Nog {count} pagina(’s) niet gecontroleerd (limiet per run)',
-    aiGskLoginBtn: 'Aanmelden bij Genspark',
+    aiGskLoginBtn: 'Aanmelden bij Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI-assistent openen',
     aiFactCheckBtn: 'AI-factcheck',
@@ -3574,8 +3561,7 @@ export const aiStrings = defineStrings({
       'AI-verzoek verlopen: geen reactie van het netwerk, uitvoering gestopt. Controleer je verbinding en probeer het opnieuw',
     aiErrNetwork:
       'Netwerkprobleem: kan de AI-service niet bereiken. Controleer je verbinding en probeer het opnieuw',
-    aiCreditsExhausted:
-      'Je Genspark-credits zijn op. Waardeer op via genspark.ai/pricing en probeer het opnieuw',
+    aiCreditsExhausted: 'Je AI-tegoed is op. Configureer een andere AI-provider in Instellingen en probeer het opnieuw.',
     aiErrRequestFailed: 'Verzenden van verzoek mislukt: {msg}',
     aiErrGenerateFailed: 'Genereren mislukt',
     aiErrRegenFailed: 'Dia opnieuw genereren mislukt',
@@ -3726,7 +3712,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'Halaman {n}: semakan susun atur automatik dilangkau',
     aiQcStopped: 'Semakan susun atur dihentikan',
     aiQcCapped: '{count} halaman lagi tidak disemak (had setiap larian)',
-    aiGskLoginBtn: 'Log masuk ke Genspark',
+    aiGskLoginBtn: 'Log masuk ke Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'Buka pembantu AI',
     aiFactCheckBtn: 'Semak Fakta AI',
@@ -3823,8 +3809,7 @@ export const aiStrings = defineStrings({
       'Permintaan AI tamat masa: rangkaian tidak memberi respons, proses dihentikan. Semak sambungan anda dan cuba lagi',
     aiErrNetwork:
       'Masalah rangkaian: tidak dapat menghubungi perkhidmatan AI. Semak sambungan anda dan cuba lagi',
-    aiCreditsExhausted:
-      'Kredit Genspark anda telah habis. Tambah nilai di genspark.ai/pricing dan cuba lagi',
+    aiCreditsExhausted: 'Kredit AI anda telah habis. Konfigurasikan pembekal AI lain dalam Tetapan, kemudian cuba lagi.',
     aiErrRequestFailed: 'Gagal menghantar permintaan: {msg}',
     aiErrGenerateFailed: 'Penjanaan gagal',
     aiErrRegenFailed: 'Gagal membuat semula slaid',
@@ -3975,7 +3960,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'עמוד {n}: בדיקת הפריסה האוטומטית דולגה',
     aiQcStopped: 'בדיקת הפריסה הופסקה',
     aiQcCapped: 'עוד {count} עמודים לא נבדקו (מגבלה לכל הרצה)',
-    aiGskLoginBtn: 'התחבר ל-Genspark',
+    aiGskLoginBtn: 'התחבר ל-Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'פתיחת עוזר ה-AI',
     aiFactCheckBtn: 'בדיקת עובדות AI',
@@ -4068,7 +4053,7 @@ export const aiStrings = defineStrings({
     aiErrStreamTimeout:
       'תם הזמן לבקשת ה-AI: אין תגובה מהרשת וההרצה הופסקה. בדוק את החיבור ונסה שוב',
     aiErrNetwork: 'בעיית רשת: לא ניתן להתחבר לשירות ה-AI. בדוק את החיבור ונסה שוב',
-    aiCreditsExhausted: 'קרדיטי Genspark שלך אזלו. טען מחדש ב-genspark.ai/pricing ונסה שוב',
+    aiCreditsExhausted: 'נגמרו קרדיטי ה-AI שלך. הגדר ספק AI אחר בהגדרות ונסה שוב',
     aiErrRequestFailed: 'שליחת הבקשה נכשלה: {msg}',
     aiErrGenerateFailed: 'היצירה נכשלה',
     aiErrRegenFailed: 'יצירת השקופית מחדש נכשלה',
@@ -4219,7 +4204,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: 'पेज {n}: स्वचालित लेआउट जाँच छोड़ दी गई',
     aiQcStopped: 'लेआउट जाँच रोक दी गई',
     aiQcCapped: 'शेष {count} पेज नहीं जाँचे गए (प्रति रन सीमा)',
-    aiGskLoginBtn: 'Genspark में साइन इन करें',
+    aiGskLoginBtn: 'Zano में साइन इन करें',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: 'AI सहायक खोलें',
     aiFactCheckBtn: 'AI तथ्य जाँच',
@@ -4314,8 +4299,7 @@ export const aiStrings = defineStrings({
       'AI अनुरोध का समय समाप्त: नेटवर्क से कोई प्रतिक्रिया नहीं मिली, इसलिए रोक दिया गया। कनेक्शन जांचें और फिर से प्रयास करें',
     aiErrNetwork:
       'नेटवर्क समस्या: AI सेवा से कनेक्ट नहीं हो सका। कनेक्शन जांचें और फिर से प्रयास करें',
-    aiCreditsExhausted:
-      'आपके Genspark क्रेडिट समाप्त हो गए हैं। genspark.ai/pricing पर रिचार्ज करें और फिर से प्रयास करें',
+    aiCreditsExhausted: 'AI क्रेडिट समाप्त हो गए हैं। सेटिंग में कोई अन्य AI प्रदाता कॉन्फ़िगर करें और फिर से प्रयास करें।',
     aiErrRequestFailed: 'अनुरोध भेजने में विफल: {msg}',
     aiErrGenerateFailed: 'जनरेशन विफल',
     aiErrRegenFailed: 'स्लाइड फिर से बनाने में विफल',
@@ -4466,7 +4450,7 @@ export const aiStrings = defineStrings({
     aiQcPageSkipped: '第 {n} 頁:已略過自動版式檢查',
     aiQcStopped: '版式檢查已停止',
     aiQcCapped: '其餘 {count} 頁未檢查(單次上限)',
-    aiGskLoginBtn: '登入 Genspark',
+    aiGskLoginBtn: '登入 Zano',
     aiPanelTitle: 'Zano AI',
     aiOpenAssistant: '開啟 AI 助手',
     aiFactCheckBtn: 'AI 事實核查',
@@ -4555,7 +4539,7 @@ export const aiStrings = defineStrings({
     aiErrUnknown: '未知錯誤',
     aiErrStreamTimeout: 'AI 請求逾時：網路長時間無回應，已停止。請檢查網路後重試',
     aiErrNetwork: '網路有問題，無法連接 AI 服務。請檢查網路後重試',
-    aiCreditsExhausted: 'Genspark 點數已用完，請前往 genspark.ai/pricing 儲值後重試',
+    aiCreditsExhausted: 'AI 額度已用完，請在設定中設定其他 AI 服務後重試',
     aiErrRequestFailed: '要求傳送失敗: {msg}',
     aiErrGenerateFailed: '產生失敗',
     aiErrRegenFailed: '重做頁面失敗',

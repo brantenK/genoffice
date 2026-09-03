@@ -193,7 +193,7 @@ import { applyUpdateChannel, initAutoUpdater } from './updater'
 import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
 
 /**
- * Zano Office unified shell: ONE Electron app, ONE BrowserWindow, hosting the
+ * Zanostack unified shell: ONE Electron app, ONE BrowserWindow, hosting the
  * docs and sheets modules as WebContentsView tabs behind a WPS-style tab
  * strip. The shell owns the lifecycle — single-instance lock, file-
  * association routing by extension, and per-active-tab menu switching.
@@ -203,16 +203,16 @@ import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
 
 // ANY unpacked run (`npm run shell`, `npm run dev`, `npx electron .`) must not
 // share the installed app's userData or single-instance lock — otherwise a dev
-// run silently quits and forwards its argv to the running installed Zano Office.
+// run silently quits and forwards its argv to the running installed Zanostack.
 // GENOFFICE_USER_DATA: test drivers point this at a scratch dir so an
 // automated instance can run alongside the dev instance (separate lock).
 if (!app.isPackaged)
   app.setPath(
     'userData',
-    process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'Zano Office Dev'),
+    process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'Zanostack Dev'),
   )
 
-// The product rename from "AI Office" to Zano Office changed the userData path; migrate old user data once
+// The product rename from "AI Office" to Zanostack changed the userData path; migrate old user data once
 if (app.isPackaged) {
   const oldDir = join(app.getPath('appData'), 'AI Office')
   const newDir = app.getPath('userData')
@@ -390,7 +390,7 @@ function initAnalytics(): void {
 }
 
 // ---- first-run onboarding ----
-// The Zano Office community page opened from the onboarding's second slide.
+// The Zanostack community page opened from the onboarding's second slide.
 // Stable short link served by the genoffice.ai site; it 302s to the tokened
 // invite link, which stays out of this repo and rotates server-side.
 const GENTEAM_URL = 'https://genoffice.ai/join'
@@ -2362,7 +2362,7 @@ function createShellWindow(): void {
     height: 900,
     minWidth: 980,
     minHeight: 600,
-    title: 'Zano Office',
+    title: 'Zanostack',
     // unpackaged dev runs carry electron.exe's default icon; point the window
     // at the Zano logo so the taskbar matches the packaged build (which takes
     // the exe icon generated from build/icon.png by electron-builder)
@@ -2538,6 +2538,18 @@ function createShellWindow(): void {
   // module so the first docs tab opens near-instantly (TabManager.prewarmDocs)
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => manager.prewarmDocs(), 800)
+    const ssPath = process.env.GENOFFICE_SCREENSHOT_PATH
+    if (ssPath) {
+      setTimeout(async () => {
+        try {
+          const img = await win.webContents.capturePage()
+          writeFileSync(ssPath, img.toPNG())
+          console.log('[screenshot] Saved to ' + ssPath)
+        } catch (e) {
+          console.error('[screenshot] Failed: ' + e)
+        }
+      }, 2500)
+    }
   })
 }
 
@@ -2827,7 +2839,7 @@ function statEntries(paths: string[]): RecentEntry[] {
 }
 
 function registerHomeIpc(): void {
-  // signed-in means Zano Office's own device-code login; the shared gsk CLI key
+  // signed-in means Zanostack's own device-code login; the shared gsk CLI key
   // is only a silent fallback, deliberately not shown here to nudge users onto our key
   ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {
     if (!loadGenofficeAuth()) return { loggedIn: false }

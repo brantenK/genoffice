@@ -1,11 +1,11 @@
 {
   "_comment": "Fork brand identity — the single edit point for rebranding. After changing values, run: node fork/rebrand-sweep.mjs. 'previousNames' lists every product name ever used by this fork or upstream; the sweep migrates all of them to productName (idempotent).",
-  "productName": "Zano Office",
-  "appId": "com.zanooffice.app",
-  "executableName": "zanooffice",
-  "packageName": "zanooffice",
-  "company": "Zano",
-  "companyEmail": "team@zanooffice.app",
-  "previousNames": ["GenOffice", "ExampleOffice"],
+  "productName": "Zanostack",
+  "appId": "com.zanostack.app",
+  "executableName": "zanostack",
+  "packageName": "zanostack",
+  "company": "Zanostack",
+  "companyEmail": "team@zanostack.com",
+  "previousNames": ["GenOffice", "ExampleOffice", "Zano Office"],
   "genTeamName": "GenTeam"
 }

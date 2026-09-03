@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-/** Pick a safe, unused PDF path inside the configured Zano Office save directory. */
+/** Pick a safe, unused PDF path inside the configured Zanostack save directory. */
 export function uniqueGeneratedPdfPath(
   dir: string,
   suggestedName: string,

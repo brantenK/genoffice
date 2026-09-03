@@ -1,0 +1,12 @@
+#!/bin/sh
+# Prevent accidental direct commits to the mirror branch 'main'
+branch="$(git symbolic-ref --short HEAD 2>/dev/null)"
+
+if [ "$branch" = "main" ]; then
+  echo ""
+  echo "🚫 COMMIT BLOCKED: You are attempting to commit directly to 'main'!"
+  echo "The 'main' branch must remain a clean, fast-forward-only mirror of upstream."
+  echo "Please switch to your product branch ('git checkout product') to make changes."
+  echo ""
+  exit 1
+fi

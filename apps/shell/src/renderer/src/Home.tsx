@@ -1842,7 +1842,7 @@ export function Home() {
         <div className="sidebar-logo">
           <div className="logo-lockup">
             <img src={zanoLogo} alt="" />
-            <span>Zano Office</span>
+            <span>Zanostack</span>
           </div>
         </div>
 
