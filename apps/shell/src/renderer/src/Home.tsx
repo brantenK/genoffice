@@ -92,6 +92,22 @@ function FileBadge({ ext, size }: { ext: string; size: number }) {
       </svg>
     )
   }
+  if (ext === 'books') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#0F766E" />
+        <path
+          d="M8 8v16a2 2 0 002 2h14M8 8a2 2 0 012-2h14v18H10a2 2 0 00-2 2"
+          stroke="#fff"
+          strokeWidth="2.2"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M12 12h8M12 16h6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    )
+  }
   const icon = FILE_ICONS[ext]
   if (icon) {
     return <img src={icon} width={size} height={size} alt="" aria-hidden="true" />
@@ -1374,6 +1390,10 @@ export function Home() {
     void window.aiOffice.newTenders()
   }
 
+  const handleNewBooks = () => {
+    void window.aiOffice.newBooks()
+  }
+
   const handleNewPdf = () => {
     void window.aiOffice.newPdf(selectedProjectId ? { projectId: selectedProjectId } : undefined)
   }
@@ -1385,6 +1405,7 @@ export function Home() {
     { ext: 'md', title: t('newMarkdown'), sub: '.md', action: handleNewMarkdown },
     { ext: 'crm', title: 'CRM', sub: 'Pipeline', action: handleNewCrm },
     { ext: 'tenders', title: 'Tenders', sub: 'Bids & RFP', action: handleNewTenders },
+    { ext: 'books', title: 'Books', sub: 'Finance & Invoicing', action: handleNewBooks },
     { ext: 'pdf', title: t('newPdf'), sub: '.pdf', action: handleNewPdf },
   ]
 

@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-page: #FBFBFB;
+    --bg-surface: #FFFFFF;
+    --border-color: #EDEDED;
+    --border-hover: #E2E2E2;
+    --text-main: #1E293B;
+    --text-muted: #7C7C7C;
+    --green-badge: #30A66D;
+    --green-bg: #F3FCF5;
+    --amber-badge: #DB7706;
+    --amber-bg: #FDFAED;
+    --red-badge: #E03636;
+    --red-bg: #FFF7F7;
+    --blue-badge: #007BE0;
+    --blue-bg: #F7FBFD;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    color: var(--text-main);
+    background-color: var(--bg-page);
+  }
+}
+
+/* Frappe Books signature custom scrollbar */
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: #E2E2E2;
+  border-radius: 4px;
+}
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: #C7C7C7;
+}

@@ -178,6 +178,7 @@ import {
 } from '../../../markdown/src/main/markdown-main'
 import { configureCrmRuntime } from '../../../crm/src/main/crm-main'
 import { configureTendersRuntime } from '../../../tenders/src/main/tenders-main'
+import { configureBooksRuntime } from '../../../books/src/main/books-main'
 import type {
   AccountLoginEvent,
   RecentEntry,
@@ -249,6 +250,9 @@ const CRM_OUT = app.isPackaged
 const TENDERS_OUT = app.isPackaged
   ? join(process.resourcesPath, 'modules', 'tenders')
   : join(APPS_ROOT, 'tenders', 'out')
+const BOOKS_OUT = app.isPackaged
+  ? join(process.resourcesPath, 'modules', 'books')
+  : join(APPS_ROOT, 'books', 'out')
 const SIDECAR_BIN = app.isPackaged
   ? join(process.resourcesPath, 'native', SIDECAR_EXE)
   : join(APPS_ROOT, 'sheets', 'native', 'xlsx-engine', 'target', 'release', SIDECAR_EXE)
@@ -300,6 +304,14 @@ configureTendersRuntime({
   rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
   openGeneratedPath: (path) => openGeneratedDocument(path),
   onOpenCrm: () => newCrmTab(),
+})
+configureBooksRuntime({
+  preloadPath: join(BOOKS_OUT, 'preload', 'index.js'),
+  rendererUrl: process.env.BOOKS_RENDERER_URL,
+  rendererFile: join(BOOKS_OUT, 'renderer', 'index.html'),
+  openGeneratedPath: (path) => openGeneratedDocument(path),
+  onOpenCrm: () => newCrmTab(),
+  onOpenTenders: () => newTendersTab(),
 })
 
 // ---- UI language ----
@@ -2929,6 +2941,15 @@ function newTendersTab(): void {
   }
 }
 
+function newBooksTab(): void {
+  try {
+    tabManager?.openBooksTab()
+    analytics.track('file_new', { kind: 'books' })
+  } catch (err) {
+    surfaceNewTabError(err)
+  }
+}
+
 /**
  * "New PDF" creates a blank single-page .pdf in the default folder up front and
  * opens it as a regular file tab — the PDF module has no in-memory blank mode
@@ -3118,6 +3139,10 @@ function registerHomeIpc(): void {
 
   ipcMain.handle(HOME_CHANNELS.newTenders, () => {
     newTendersTab()
+  })
+
+  ipcMain.handle(HOME_CHANNELS.newBooks, () => {
+    newBooksTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newPdf, (_event, opts?: { projectId?: string }) => {
@@ -3396,6 +3421,7 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
   markdown: 'md',
   crm: 'home',
   tenders: 'pdf',
+  books: 'home',
 }
 
 // tab views see neither DOM events nor a focus change when the user clicks the

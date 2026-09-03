@@ -86,6 +86,8 @@ export interface HomeApi {
   newCrm(): Promise<void>
   /** open a Tenders & Bids tab */
   newTenders(): Promise<void>
+  /** open a Zano Books accounting tab */
+  newBooks(): Promise<void>
   /** create a blank single-page PDF in the default save folder and open it */
   newPdf(opts?: { projectId?: string }): Promise<void>
   /** drop entries from the recent list (does not touch the files) */
@@ -283,6 +285,7 @@ export const HOME_CHANNELS = {
   newMarkdown: 'home:new-markdown',
   newCrm: 'home:new-crm',
   newTenders: 'home:new-tenders',
+  newBooks: 'home:new-books',
   newPdf: 'home:new-pdf',
   removeRecent: 'home:remove-recent',
   revealPath: 'home:reveal-path',

@@ -95,6 +95,9 @@ const homeApi: HomeApi = {
   async newTenders() {
     await ipcRenderer.invoke(HOME_CHANNELS.newTenders)
   },
+  async newBooks() {
+    await ipcRenderer.invoke(HOME_CHANNELS.newBooks)
+  },
   async newPdf(opts) {
     await ipcRenderer.invoke(HOME_CHANNELS.newPdf, opts)
   },
