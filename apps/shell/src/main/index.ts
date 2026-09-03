@@ -176,6 +176,7 @@ import {
   setMarkdownDocxExportedHook,
   setMarkdownFileSavedHook,
 } from '../../../markdown/src/main/markdown-main'
+import { configureCrmRuntime } from '../../../crm/src/main/crm-main'
 import type {
   AccountLoginEvent,
   RecentEntry,
@@ -241,6 +242,9 @@ const PDF_OUT = app.isPackaged
 const MARKDOWN_OUT = app.isPackaged
   ? join(process.resourcesPath, 'modules', 'markdown')
   : join(APPS_ROOT, 'markdown', 'out')
+const CRM_OUT = app.isPackaged
+  ? join(process.resourcesPath, 'modules', 'crm')
+  : join(APPS_ROOT, 'crm', 'out')
 const SIDECAR_BIN = app.isPackaged
   ? join(process.resourcesPath, 'native', SIDECAR_EXE)
   : join(APPS_ROOT, 'sheets', 'native', 'xlsx-engine', 'target', 'release', SIDECAR_EXE)
@@ -277,6 +281,12 @@ configureMarkdownRuntime({
   preloadPath: join(MARKDOWN_OUT, 'preload', 'index.js'),
   rendererUrl: process.env.MARKDOWN_RENDERER_URL,
   rendererFile: join(MARKDOWN_OUT, 'renderer', 'index.html'),
+  openGeneratedPath: (path) => openGeneratedDocument(path),
+})
+configureCrmRuntime({
+  preloadPath: join(CRM_OUT, 'preload', 'index.js'),
+  rendererUrl: process.env.CRM_RENDERER_URL,
+  rendererFile: join(CRM_OUT, 'renderer', 'index.html'),
   openGeneratedPath: (path) => openGeneratedDocument(path),
 })
 
@@ -2544,15 +2554,20 @@ function createShellWindow(): void {
     setTimeout(() => manager.prewarmDocs(), 800)
     const ssPath = process.env.GENOFFICE_SCREENSHOT_PATH
     if (ssPath) {
+      if (process.env.OPEN_CRM_ON_START) {
+        setTimeout(() => manager.openCrmTab(), 300)
+      }
       setTimeout(async () => {
         try {
-          const img = await win.webContents.capturePage()
+          const act = manager.activeTab()
+          const targetWc = act?.view && act.kind !== 'home' ? act.view.webContents : win.webContents
+          const img = await targetWc.capturePage()
           writeFileSync(ssPath, img.toPNG())
           console.log('[screenshot] Saved to ' + ssPath)
         } catch (e) {
           console.error('[screenshot] Failed: ' + e)
         }
-      }, 2500)
+      }, 3000)
     }
   })
 }
@@ -2785,6 +2800,15 @@ function newMarkdownTab(): void {
   }
 }
 
+function newCrmTab(): void {
+  try {
+    tabManager?.openCrmTab()
+    analytics.track('file_new', { kind: 'crm' })
+  } catch (err) {
+    surfaceNewTabError(err)
+  }
+}
+
 /**
  * "New PDF" creates a blank single-page .pdf in the default folder up front and
  * opens it as a regular file tab — the PDF module has no in-memory blank mode
@@ -2966,6 +2990,10 @@ function registerHomeIpc(): void {
       pendingNewFileProject.set('markdown', opts.projectId)
     }
     newMarkdownTab()
+  })
+
+  ipcMain.handle(HOME_CHANNELS.newCrm, () => {
+    newCrmTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newPdf, (_event, opts?: { projectId?: string }) => {
@@ -3242,6 +3270,7 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
   slides: 'pptx',
   pdf: 'pdf',
   markdown: 'md',
+  crm: 'home',
 }
 
 // tab views see neither DOM events nor a focus change when the user clicks the

@@ -99,6 +99,20 @@ function MarkdownIcon() {
   )
 }
 
+function CrmIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7.5" fill="#6366f1" />
+      <path
+        d="M9 22V17M16 22V10M23 22V14"
+        stroke="#fff"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 const KIND_ICON: Record<TabSummary['kind'], ReactElement> = {
   home: <HomeIcon />,
   docs: <DocIcon />,
@@ -106,6 +120,7 @@ const KIND_ICON: Record<TabSummary['kind'], ReactElement> = {
   slides: <SlideIcon />,
   pdf: <PdfIcon />,
   markdown: <MarkdownIcon />,
+  crm: <CrmIcon />,
 }
 
 export function TabBar() {

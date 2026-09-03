@@ -17,6 +17,7 @@ import {
   markdownIsDirty,
   requestMarkdownClose,
 } from '../../../markdown/src/main/markdown-main'
+import { createCrmView } from '../../../crm/src/main/crm-main'
 import {
   createPdfView,
   clearPdfDirty,
@@ -274,6 +275,27 @@ export class TabManager {
     return id
   }
 
+  openCrmTab(): string {
+    const existing = this.tabs.find((t) => t.kind === 'crm')
+    if (existing) {
+      this.activateTab(existing.id)
+      return existing.id
+    }
+    const view = createCrmView()
+    const id = `t${this.nextId++}`
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(id, view)
+    this.tabs.push({
+      id,
+      kind: 'crm',
+      view,
+      title: 'Zanostack CRM',
+    })
+    this.activateTab(id)
+    return id
+  }
+
   activateTab(id: string): void {
     const target = this.tabs.find((t) => t.id === id)
     if (!target) return
@@ -460,6 +482,11 @@ export class TabManager {
 
   findMarkdownTabByPath(path: string): string | undefined {
     return this.tabs.find((t) => t.kind === 'markdown' && t.filePath === path)?.id
+  }
+
+  activeTab(): { id: string; kind: TabKind; view?: WebContentsView } | undefined {
+    const tab = this.tabs.find((t) => t.id === this.activeId)
+    return tab ? { id: tab.id, kind: tab.kind, view: tab.view ?? undefined } : undefined
   }
 
   /** the active tab's markdown view, if the active tab is markdown (markdown menu target) */

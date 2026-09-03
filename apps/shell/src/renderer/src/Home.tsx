@@ -57,6 +57,19 @@ const FILE_ICONS: Record<string, string> = {
 const OPEN_LOCAL_EXTENSIONS = '.docx / .xlsx / .xlsm / .xls / .csv / .pptx / .pdf / .md'
 
 function FileBadge({ ext, size }: { ext: string; size: number }) {
+  if (ext === 'crm') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#6366f1" />
+        <path
+          d="M9 22V17M16 22V10M23 22V14"
+          stroke="#fff"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
   const icon = FILE_ICONS[ext]
   if (icon) {
     return <img src={icon} width={size} height={size} alt="" aria-hidden="true" />
@@ -1331,6 +1344,10 @@ export function Home() {
     )
   }
 
+  const handleNewCrm = () => {
+    void window.aiOffice.newCrm()
+  }
+
   const handleNewPdf = () => {
     void window.aiOffice.newPdf(selectedProjectId ? { projectId: selectedProjectId } : undefined)
   }
@@ -1340,6 +1357,7 @@ export function Home() {
     { ext: 'xlsx', title: t('newSheet'), sub: '.xlsx', action: handleNewSheet },
     { ext: 'pptx', title: t('newSlide'), sub: '.pptx', action: handleNewSlide },
     { ext: 'md', title: t('newMarkdown'), sub: '.md', action: handleNewMarkdown },
+    { ext: 'crm', title: 'CRM', sub: 'Pipeline', action: handleNewCrm },
     { ext: 'pdf', title: t('newPdf'), sub: '.pdf', action: handleNewPdf },
   ]
 
