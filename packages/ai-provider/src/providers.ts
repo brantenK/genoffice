@@ -24,6 +24,7 @@ export function gensparkAttributionHeaders(baseUrl?: string): Record<string, str
 }
 
 export const AI_PROVIDERS: AiProviderMeta[] = [
+  {
     id: 'anthropic',
     label: 'Claude',
     // current-generation ids per platform.claude.com models overview (2026-08)
