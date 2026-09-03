@@ -84,6 +84,8 @@ export interface HomeApi {
   newMarkdown(opts?: { projectId?: string }): Promise<void>
   /** open a CRM tab */
   newCrm(): Promise<void>
+  /** open a Tenders & Bids tab */
+  newTenders(): Promise<void>
   /** create a blank single-page PDF in the default save folder and open it */
   newPdf(opts?: { projectId?: string }): Promise<void>
   /** drop entries from the recent list (does not touch the files) */
@@ -280,6 +282,7 @@ export const HOME_CHANNELS = {
   newSlide: 'home:new-slide',
   newMarkdown: 'home:new-markdown',
   newCrm: 'home:new-crm',
+  newTenders: 'home:new-tenders',
   newPdf: 'home:new-pdf',
   removeRecent: 'home:remove-recent',
   revealPath: 'home:reveal-path',

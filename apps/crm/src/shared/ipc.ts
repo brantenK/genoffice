@@ -23,10 +23,12 @@ export const CRM_CHANNELS = {
   // Cross-App Integrations
   exportToSheets: 'crm:export-to-sheets',
   generateProposalDoc: 'crm:generate-proposal-doc',
+  openTenders: 'crm:open-tenders',
 } as const
 
 export interface CrmApi {
   getStats(): Promise<CrmStats>
+  openTenders(): Promise<boolean>
   // Deals
   listDeals(): Promise<Deal[]>
   getDeal(id: string): Promise<Deal | null>

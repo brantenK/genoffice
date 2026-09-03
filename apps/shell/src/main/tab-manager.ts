@@ -18,6 +18,7 @@ import {
   requestMarkdownClose,
 } from '../../../markdown/src/main/markdown-main'
 import { createCrmView } from '../../../crm/src/main/crm-main'
+import { createTendersView } from '../../../tenders/src/main/tenders-main'
 import {
   createPdfView,
   clearPdfDirty,
@@ -291,6 +292,27 @@ export class TabManager {
       kind: 'crm',
       view,
       title: 'Zanostack CRM',
+    })
+    this.activateTab(id)
+    return id
+  }
+
+  openTendersTab(): string {
+    const existing = this.tabs.find((t) => t.kind === 'tenders')
+    if (existing) {
+      this.activateTab(existing.id)
+      return existing.id
+    }
+    const view = createTendersView()
+    const id = `t${this.nextId++}`
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(id, view)
+    this.tabs.push({
+      id,
+      kind: 'tenders',
+      view,
+      title: 'Zanostack Tenders',
     })
     this.activateTab(id)
     return id

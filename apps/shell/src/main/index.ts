@@ -177,6 +177,7 @@ import {
   setMarkdownFileSavedHook,
 } from '../../../markdown/src/main/markdown-main'
 import { configureCrmRuntime } from '../../../crm/src/main/crm-main'
+import { configureTendersRuntime } from '../../../tenders/src/main/tenders-main'
 import type {
   AccountLoginEvent,
   RecentEntry,
@@ -245,6 +246,9 @@ const MARKDOWN_OUT = app.isPackaged
 const CRM_OUT = app.isPackaged
   ? join(process.resourcesPath, 'modules', 'crm')
   : join(APPS_ROOT, 'crm', 'out')
+const TENDERS_OUT = app.isPackaged
+  ? join(process.resourcesPath, 'modules', 'tenders')
+  : join(APPS_ROOT, 'tenders', 'out')
 const SIDECAR_BIN = app.isPackaged
   ? join(process.resourcesPath, 'native', SIDECAR_EXE)
   : join(APPS_ROOT, 'sheets', 'native', 'xlsx-engine', 'target', 'release', SIDECAR_EXE)
@@ -288,6 +292,14 @@ configureCrmRuntime({
   rendererUrl: process.env.CRM_RENDERER_URL,
   rendererFile: join(CRM_OUT, 'renderer', 'index.html'),
   openGeneratedPath: (path) => openGeneratedDocument(path),
+  onOpenTenders: () => newTendersTab(),
+})
+configureTendersRuntime({
+  preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
+  rendererUrl: process.env.TENDERS_RENDERER_URL,
+  rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
+  openGeneratedPath: (path) => openGeneratedDocument(path),
+  onOpenCrm: () => newCrmTab(),
 })
 
 // ---- UI language ----
@@ -2557,10 +2569,14 @@ function createShellWindow(): void {
       if (process.env.OPEN_CRM_ON_START) {
         setTimeout(() => manager.openCrmTab(), 300)
       }
+      if (process.env.OPEN_TENDERS_ON_START) {
+        setTimeout(() => manager.openTendersTab(), 300)
+      }
       setTimeout(async () => {
         try {
           const act = manager.activeTab()
           const targetWc = act?.view && act.kind !== 'home' ? act.view.webContents : win.webContents
+          targetWc.on('console-message', (_e, level, message) => console.log('[view-console]', level, message))
           if (process.env.CRM_CLICK_NAV) {
             await targetWc.executeJavaScript(`
               const btns = Array.from(document.querySelectorAll('.crm-segmented-btn, .crm-nav-btn'));
@@ -2575,6 +2591,86 @@ function createShellWindow(): void {
               if (btn) btn.click();
             `).catch(() => {})
             await new Promise((r) => setTimeout(r, 600))
+          }
+          if (process.env.TENDERS_DISMISS_INTRO) {
+            await targetWc.executeJavaScript(`
+              const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Skip intro'));
+              if (btn) btn.click();
+            `).catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
+          if (process.env.TENDERS_FLOW === 'demo-readiness') {
+            await targetWc.executeJavaScript(`
+              (async () => {
+                const navBtns = Array.from(document.querySelectorAll('aside nav button'));
+                const tendersNav = navBtns.find(b => b.textContent && b.textContent.includes('Tenders'));
+                if (tendersNav) tendersNav.click();
+                
+                for (let i = 0; i < 20; i++) {
+                  await new Promise(r => setTimeout(r, 200));
+                  const demoBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Load demo RFP'));
+                  if (demoBtn) {
+                    demoBtn.click();
+                    break;
+                  }
+                }
+
+                for (let i = 0; i < 30; i++) {
+                  await new Promise(r => setTimeout(r, 300));
+                  const readyBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Bid readiness'));
+                  if (readyBtn) {
+                    readyBtn.click();
+                    break;
+                  }
+                }
+              })()
+            `).catch(() => {})
+            await new Promise((r) => setTimeout(r, 2500))
+          }
+          if (process.env.TENDERS_NAV) {
+            await targetWc.executeJavaScript(`
+              const btns = Array.from(document.querySelectorAll('aside nav button'));
+              const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.TENDERS_NAV}'.toLowerCase()));
+              if (target) target.click();
+            `).catch(() => {})
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+          if (process.env.TENDERS_ACTION) {
+            const res = await targetWc.executeJavaScript(`
+              (() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const target = btns.find(b => b.textContent && b.textContent.toLowerCase().includes('${process.env.TENDERS_ACTION}'.toLowerCase()));
+                if (target) {
+                  target.click();
+                  return 'CLICKED: ' + target.textContent;
+                }
+                return 'NOT FOUND. Available buttons: ' + btns.map(b => b.textContent).join(' | ');
+              })()
+            `).catch((err) => 'ERR: ' + err)
+            console.log('[screenshot] TENDERS_ACTION:', res)
+            await new Promise((r) => setTimeout(r, 4500))
+          }
+          if (process.env.TENDERS_ACTION2) {
+            const res = await targetWc.executeJavaScript(`
+              (() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const target = btns.find(b => b.textContent && b.textContent.toLowerCase().includes('${process.env.TENDERS_ACTION2}'.toLowerCase()));
+                if (target) {
+                  target.click();
+                  return 'CLICKED 2: ' + target.textContent;
+                }
+                return 'NOT FOUND 2. Available buttons: ' + btns.map(b => b.textContent).join(' | ');
+              })()
+            `).catch((err) => 'ERR: ' + err)
+            console.log('[screenshot] TENDERS_ACTION2:', res)
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+          if (process.env.TENDERS_CLICK_SELECTOR) {
+            await targetWc.executeJavaScript(`
+              const el = document.querySelector('${process.env.TENDERS_CLICK_SELECTOR}');
+              if (el) el.click();
+            `).catch(() => {})
+            await new Promise((r) => setTimeout(r, 800))
           }
           const img = await targetWc.capturePage()
           writeFileSync(ssPath, img.toPNG())
@@ -2824,6 +2920,15 @@ function newCrmTab(): void {
   }
 }
 
+function newTendersTab(): void {
+  try {
+    tabManager?.openTendersTab()
+    analytics.track('file_new', { kind: 'tenders' })
+  } catch (err) {
+    surfaceNewTabError(err)
+  }
+}
+
 /**
  * "New PDF" creates a blank single-page .pdf in the default folder up front and
  * opens it as a regular file tab — the PDF module has no in-memory blank mode
@@ -3009,6 +3114,10 @@ function registerHomeIpc(): void {
 
   ipcMain.handle(HOME_CHANNELS.newCrm, () => {
     newCrmTab()
+  })
+
+  ipcMain.handle(HOME_CHANNELS.newTenders, () => {
+    newTendersTab()
   })
 
   ipcMain.handle(HOME_CHANNELS.newPdf, (_event, opts?: { projectId?: string }) => {
@@ -3286,6 +3395,7 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
   pdf: 'pdf',
   markdown: 'md',
   crm: 'home',
+  tenders: 'pdf',
 }
 
 // tab views see neither DOM events nor a focus change when the user clicks the

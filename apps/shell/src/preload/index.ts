@@ -92,6 +92,9 @@ const homeApi: HomeApi = {
   async newCrm() {
     await ipcRenderer.invoke(HOME_CHANNELS.newCrm)
   },
+  async newTenders() {
+    await ipcRenderer.invoke(HOME_CHANNELS.newTenders)
+  },
   async newPdf(opts) {
     await ipcRenderer.invoke(HOME_CHANNELS.newPdf, opts)
   },

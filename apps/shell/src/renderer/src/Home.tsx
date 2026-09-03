@@ -70,6 +70,28 @@ function FileBadge({ ext, size }: { ext: string; size: number }) {
       </svg>
     )
   }
+  if (ext === 'tenders') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#d97706" />
+        <path
+          d="M16 7l7 3.5v5.5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V10.5L16 7z"
+          stroke="#fff"
+          strokeWidth="2.2"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M13 16l2 2 4-4"
+          stroke="#fff"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
   const icon = FILE_ICONS[ext]
   if (icon) {
     return <img src={icon} width={size} height={size} alt="" aria-hidden="true" />
@@ -1348,6 +1370,10 @@ export function Home() {
     void window.aiOffice.newCrm()
   }
 
+  const handleNewTenders = () => {
+    void window.aiOffice.newTenders()
+  }
+
   const handleNewPdf = () => {
     void window.aiOffice.newPdf(selectedProjectId ? { projectId: selectedProjectId } : undefined)
   }
@@ -1358,6 +1384,7 @@ export function Home() {
     { ext: 'pptx', title: t('newSlide'), sub: '.pptx', action: handleNewSlide },
     { ext: 'md', title: t('newMarkdown'), sub: '.md', action: handleNewMarkdown },
     { ext: 'crm', title: 'CRM', sub: 'Pipeline', action: handleNewCrm },
+    { ext: 'tenders', title: 'Tenders', sub: 'Bids & RFP', action: handleNewTenders },
     { ext: 'pdf', title: t('newPdf'), sub: '.pdf', action: handleNewPdf },
   ]
 

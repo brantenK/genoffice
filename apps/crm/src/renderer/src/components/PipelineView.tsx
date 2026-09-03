@@ -6,6 +6,7 @@ import {
   MoreHorizontalIcon,
   EditIcon,
   TrashIcon,
+  TenderIcon,
 } from './Icons'
 
 interface PipelineViewProps {
@@ -152,6 +153,16 @@ export function PipelineView({
                           >
                             <FileTextIcon size={13} />
                             <span>Create Proposal</span>
+                          </button>
+                          <button
+                            className="crm-popover-item"
+                            onClick={() => {
+                              void window.crmApi?.openTenders()
+                              setActiveMenuDealId(null)
+                            }}
+                          >
+                            <TenderIcon size={13} />
+                            <span>View in Tenders</span>
                           </button>
                           <button
                             className="crm-popover-item"

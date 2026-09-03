@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import type { Deal, DealStage } from '../../../shared/types'
-import { BuildingIcon, FileTextIcon, EditIcon, TrashIcon } from './Icons'
+import { BuildingIcon, FileTextIcon, EditIcon, TrashIcon, TenderIcon } from './Icons'
 
 interface DealsTableViewProps {
   deals: Deal[]
@@ -156,6 +156,14 @@ export function DealsTableView({
                       >
                         <FileTextIcon size={11} />
                         <span>Proposal</span>
+                      </button>
+                      <button
+                        className="crm-pill-action-btn"
+                        title="View Compliance in Zanostack Tenders"
+                        onClick={() => void window.crmApi?.openTenders()}
+                      >
+                        <TenderIcon size={11} />
+                        <span>Tenders</span>
                       </button>
                       <button
                         className="crm-icon-action-btn"

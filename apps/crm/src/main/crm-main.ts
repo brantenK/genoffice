@@ -11,6 +11,7 @@ export interface CrmRuntimeConfig {
   rendererUrl?: string | undefined
   rendererFile: string
   openGeneratedPath?: (path: string) => boolean
+  onOpenTenders?: (tenderTitle?: string) => void
 }
 
 let runtime: CrmRuntimeConfig = {
@@ -146,6 +147,15 @@ ${deal.notes ? `> ${deal.notes}\n\n` : ''}
     } catch (e: any) {
       return { ok: false, error: e?.message || 'Failed to generate proposal' }
     }
+  })
+
+  // Cross-App: Open Tenders tab
+  ipcMain.handle(CRM_CHANNELS.openTenders, (_e, tenderTitle?: string) => {
+    if (runtime.onOpenTenders) {
+      runtime.onOpenTenders(tenderTitle)
+      return true
+    }
+    return false
   })
 }
 

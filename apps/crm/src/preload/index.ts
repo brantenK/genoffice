@@ -29,6 +29,7 @@ const crmApi: CrmApi = {
   exportToSheets: () => ipcRenderer.invoke(CRM_CHANNELS.exportToSheets),
   generateProposalDoc: (dealId: string) =>
     ipcRenderer.invoke(CRM_CHANNELS.generateProposalDoc, dealId),
+  openTenders: () => ipcRenderer.invoke(CRM_CHANNELS.openTenders),
 }
 
 contextBridge.exposeInMainWorld('crmApi', crmApi)
