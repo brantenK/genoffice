@@ -619,7 +619,7 @@ export function cssFontFamily(font: string, followAltName = true): string {
   if (f.includes('nunito')) return `${chain(font, 'Nunito Sans GO', CJK_SANS)},sans-serif`
   // Poppins is an M365 cloud font Word renders real; the bundled Latin subset
   // (fonts.css) carries its true advances (probe 2026-09-01)
-  if (f.includes('poppins')) return `${chain(font, 'GenOffice Poppins', CJK_SANS)},sans-serif`
+  if (f.includes('poppins')) return `${chain(font, 'Zanostack Poppins', CJK_SANS)},sans-serif`
   // Microsoft New Tai Lue ships with Office; its Latin is Segoe-flavored with
   // Arial-class widths (probe 2026-08-23: +0.5% vs Helvetica)
   if (f.includes('new tai lue'))
