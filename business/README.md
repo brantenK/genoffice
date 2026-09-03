@@ -2,7 +2,7 @@
 
 Welcome to the commercialization, fundraising, and sales execution documentation for **Zanostack (GenOffice)**.
 
-This directory contains the complete investor-grade business plan, pitch deck scripts, sales playbooks, and due diligence responses designed to position Zanostack for institutional investment, accelerator entry (Y Combinator, Techstars, regional innovation funds), and commercial customer acquisition.
+This directory contains the complete investor-grade business plan, pitch deck scripts, sales playbooks, investor directories, and due diligence responses designed to position Zanostack for institutional investment, accelerator entry (Y Combinator, Techstars, regional innovation funds), and commercial customer acquisition.
 
 ---
 
@@ -12,6 +12,7 @@ This directory contains the complete investor-grade business plan, pitch deck sc
 | :--- | :--- | :--- |
 | **[BUSINESS_PLAN.md](./BUSINESS_PLAN.md)** | Comprehensive 360° business plan covering market analysis, product ecosystem, revenue models, financial forecasts, and expansion roadmaps. | VCs, Angel Investors, Grant Evaluators, Founders |
 | **[INVESTOR_PITCH_DECK.md](./INVESTOR_PITCH_DECK.md)** | Slide-by-slide 12-slide pitch deck structure, visual slide directions, elevator pitch, and speaking notes. | Pitch Competitions, Investor Meetings, Demo Days |
+| **[INVESTOR_SOURCING_GUIDE.md](./INVESTOR_SOURCING_GUIDE.md)** | Exact list of accelerators, regional & global VCs, angel syndicates, grant bodies, and direct outreach templates. | Founders, Fundraising Leads |
 | **[SALES_PLAYBOOK.md](./SALES_PLAYBOOK.md)** | Actionable commercial guide covering Ideal Customer Profiles (ICPs), pricing tiers, outreach scripts, and sales closing techniques. | Sales Teams, Founders, Growth Leads |
 | **[INVESTOR_DUE_DILIGENCE_FAQ.md](./INVESTOR_DUE_DILIGENCE_FAQ.md)** | Tough technical, legal, and operational Q&A addressing licensing, proprietary moats, defense against Microsoft/Google, and unit economics. | Lead Investors, Technical Due Diligence Partners |
 
