@@ -52,11 +52,13 @@ import {
   AiCreditsError,
   AiTimeoutError,
   isAiNetworkError,
+  isAiOverloadedError,
   chatForProvider,
   defaultAiSettings,
   activeProvider,
   cloudToolsEnabled,
   resolveAiSettings,
+  maxOutputTokensOf,
   setRescueFetch,
   streamForProvider,
   type AiChatRequest,
@@ -157,6 +159,7 @@ const tMain = createI18n({
     errNotImage: '不是支持的图片类型',
     errGskNotLoggedIn: '未登录 Genspark:请点击下方「登录 Genspark」完成登录后重试',
     errNoApiKey: '未配置 {provider} 的 API Key',
+    errAiBusy: 'AI 服务当前繁忙，请稍后重试',
     errNoModel: '未配置模型名称',
     menuFile: '文件',
     menuNewDoc: '新建文档',
@@ -251,6 +254,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Not signed in to Genspark: click “Sign in to Genspark” below, sign in, then retry',
     errNoApiKey: 'No API key configured for {provider}',
+    errAiBusy: 'The AI service is busy right now — please try again in a moment',
     errNoModel: 'No model name configured',
     menuFile: 'File',
     menuNewDoc: 'New Document',
@@ -345,6 +349,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Genspark にサインインしていません。下の「Genspark にサインイン」からサインインして再試行してください',
     errNoApiKey: '{provider} の API キーが設定されていません',
+    errAiBusy: 'AI サービスが混み合っています。しばらくしてからもう一度お試しください',
     errNoModel: 'モデル名が設定されていません',
     menuFile: 'ファイル',
     menuNewDoc: '新規文書',
@@ -440,6 +445,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Genspark에 로그인되어 있지 않습니다. 아래 "Genspark 로그인"을 눌러 로그인한 뒤 다시 시도하세요',
     errNoApiKey: '{provider}의 API 키가 설정되지 않았습니다',
+    errAiBusy: 'AI 서비스가 혼잡합니다. 잠시 후 다시 시도해 주세요',
     errNoModel: '모델 이름이 설정되지 않았습니다',
     menuFile: '파일',
     menuNewDoc: '새 문서',
@@ -536,6 +542,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Non connecté à Genspark : cliquez sur « Se connecter à Genspark » ci-dessous, connectez-vous puis réessayez',
     errNoApiKey: 'Aucune clé API configurée pour {provider}',
+    errAiBusy: "Le service d'IA est actuellement surchargé — réessayez dans un instant",
     errNoModel: 'Aucun nom de modèle configuré',
     menuFile: 'Fichier',
     menuNewDoc: 'Nouveau document',
@@ -632,6 +639,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Nicht bei Genspark angemeldet: Klicken Sie unten auf „Bei Genspark anmelden“, melden Sie sich an und versuchen Sie es erneut',
     errNoApiKey: 'Kein API-Schlüssel für {provider} konfiguriert',
+    errAiBusy: 'Der KI-Dienst ist derzeit überlastet — bitte gleich erneut versuchen',
     errNoModel: 'Kein Modellname konfiguriert',
     menuFile: 'Datei',
     menuNewDoc: 'Neues Dokument',
@@ -727,6 +735,8 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'No has iniciado sesión en Genspark: pulsa «Iniciar sesión en Genspark» abajo, inicia sesión y vuelve a intentarlo',
     errNoApiKey: 'No hay clave de API configurada para {provider}',
+    errAiBusy:
+      'El servicio de IA está saturado en este momento; inténtalo de nuevo en unos instantes',
     errNoModel: 'No se ha configurado el nombre del modelo',
     menuFile: 'Archivo',
     menuNewDoc: 'Nuevo documento',
@@ -821,6 +831,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'ยังไม่ได้ลงชื่อเข้าใช้ Genspark: แตะ “ลงชื่อเข้าใช้ Genspark” ด้านล่าง แล้วลองอีกครั้ง',
     errNoApiKey: 'ยังไม่ได้ตั้งค่า API Key ของ {provider}',
+    errAiBusy: 'บริการ AI มีผู้ใช้งานจำนวนมากในขณะนี้ โปรดลองอีกครั้งในอีกสักครู่',
     errNoModel: 'ยังไม่ได้ตั้งค่าชื่อโมเดล',
     menuFile: 'ไฟล์',
     menuNewDoc: 'เอกสารใหม่',
@@ -915,6 +926,7 @@ const tMain = createI18n({
     errNotImage: 'bukan jenis gambar yang didukung',
     errGskNotLoggedIn: 'Belum masuk ke Genspark: klik “Masuk ke Genspark” di bawah, lalu coba lagi',
     errNoApiKey: 'API Key untuk {provider} belum dikonfigurasi',
+    errAiBusy: 'Layanan AI sedang sibuk — silakan coba lagi sebentar lagi',
     errNoModel: 'Nama model belum dikonfigurasi',
     menuFile: 'File',
     menuNewDoc: 'Dokumen Baru',
@@ -1010,6 +1022,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Вы не вошли в Genspark: нажмите «Войти в Genspark» ниже, войдите и повторите попытку',
     errNoApiKey: 'API-ключ для {provider} не настроен',
+    errAiBusy: 'Сервис ИИ сейчас перегружен — повторите попытку чуть позже',
     errNoModel: 'Не указано имя модели',
     menuFile: 'Файл',
     menuNewDoc: 'Создать документ',
@@ -1105,6 +1118,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'لم تسجّل الدخول إلى Genspark: انقر على «تسجيل الدخول إلى Genspark» أدناه ثم أعد المحاولة',
     errNoApiKey: 'لم يتم تكوين مفتاح API لـ {provider}',
+    errAiBusy: 'خدمة الذكاء الاصطناعي مشغولة حاليًا — يرجى المحاولة مرة أخرى بعد قليل',
     errNoModel: 'لم يتم تكوين اسم النموذج',
     menuFile: 'ملف',
     menuNewDoc: 'مستند جديد',
@@ -1200,6 +1214,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Não conectado ao Genspark: clique em “Entrar no Genspark” abaixo, entre e tente novamente',
     errNoApiKey: 'Nenhuma chave de API configurada para {provider}',
+    errAiBusy: 'O serviço de IA está sobrecarregado no momento — tente novamente em instantes',
     errNoModel: 'Nenhum nome de modelo configurado',
     menuFile: 'Arquivo',
     menuNewDoc: 'Novo Documento',
@@ -1295,6 +1310,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Accesso a Genspark non effettuato: fai clic su “Accedi a Genspark” qui sotto, accedi e riprova',
     errNoApiKey: 'Nessuna chiave API configurata per {provider}',
+    errAiBusy: 'Il servizio IA è momentaneamente sovraccarico — riprova tra poco',
     errNoModel: 'Nessun nome di modello configurato',
     menuFile: 'File',
     menuNewDoc: 'Nuovo documento',
@@ -1390,6 +1406,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Nie zalogowano do Genspark: kliknij „Zaloguj się do Genspark” poniżej, zaloguj się i spróbuj ponownie',
     errNoApiKey: 'Nie skonfigurowano klucza API dla {provider}',
+    errAiBusy: 'Usługa AI jest obecnie przeciążona — spróbuj ponownie za chwilę',
     errNoModel: 'Nie skonfigurowano nazwy modelu',
     menuFile: 'Plik',
     menuNewDoc: 'Nowy dokument',
@@ -1485,6 +1502,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Niet aangemeld bij Genspark: klik hieronder op “Aanmelden bij Genspark”, meld u aan en probeer het opnieuw',
     errNoApiKey: 'Geen API-sleutel geconfigureerd voor {provider}',
+    errAiBusy: 'De AI-service is momenteel overbelast — probeer het zo opnieuw',
     errNoModel: 'Geen modelnaam geconfigureerd',
     menuFile: 'Bestand',
     menuNewDoc: 'Nieuw document',
@@ -1580,6 +1598,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Belum log masuk ke Genspark: klik “Log masuk ke Genspark” di bawah, kemudian cuba lagi',
     errNoApiKey: 'Kunci API untuk {provider} belum dikonfigurasikan',
+    errAiBusy: 'Perkhidmatan AI sedang sibuk — sila cuba lagi sebentar lagi',
     errNoModel: 'Nama model belum dikonfigurasikan',
     menuFile: 'Fail',
     menuNewDoc: 'Dokumen Baharu',
@@ -1673,6 +1692,7 @@ const tMain = createI18n({
     errNotImage: 'סוג תמונה שאינו נתמך',
     errGskNotLoggedIn: 'לא מחובר ל-Genspark: לחץ על "התחבר ל-Genspark" למטה, התחבר ונסה שוב',
     errNoApiKey: 'לא הוגדר מפתח API עבור {provider}',
+    errAiBusy: 'שירות ה-AI עמוס כרגע — נסו שוב בעוד רגע',
     errNoModel: 'לא הוגדר שם מודל',
     menuFile: 'קובץ',
     menuNewDoc: 'מסמך חדש',
@@ -1768,6 +1788,7 @@ const tMain = createI18n({
     errGskNotLoggedIn:
       'Genspark में साइन इन नहीं है: नीचे “Genspark में साइन इन करें” पर क्लिक करें, साइन इन करें और फिर से कोशिश करें',
     errNoApiKey: '{provider} के लिए कोई API कुंजी कॉन्फ़िगर नहीं है',
+    errAiBusy: 'AI सेवा अभी व्यस्त है — कृपया थोड़ी देर बाद फिर से प्रयास करें',
     errNoModel: 'कोई मॉडल नाम कॉन्फ़िगर नहीं है',
     menuFile: 'फ़ाइल',
     menuNewDoc: 'नया दस्तावेज़',
@@ -1860,6 +1881,7 @@ const tMain = createI18n({
     errNotImage: '不是支援的圖片類型',
     errGskNotLoggedIn: '未登入 Genspark:請點擊下方「登入 Genspark」完成登入後重試',
     errNoApiKey: '未設定 {provider} 的 API Key',
+    errAiBusy: 'AI 服務目前繁忙，請稍後重試',
     errNoModel: '未設定模型名稱',
     menuFile: '檔案',
     menuNewDoc: '新增文件',
@@ -2068,9 +2090,11 @@ function pushRecent(filePath: string): void {
   buildDocsMenu() // keep File > Open Recent in sync
 }
 
-/** unified recents for the shell home screen (paths only; type = extension) */
+/** unified recents for the shell home screen (paths only; type = extension).
+ *  No existence filter: a transiently unavailable path (disconnected drive,
+ *  pending mount) must stay listed — the stat layer flags it instead (r158) */
 export function readRecentFiles(): string[] {
-  return readJson<string[]>(RECENT_PATH(), []).filter((p) => existsSync(p))
+  return readJson<string[]>(RECENT_PATH(), [])
 }
 
 export function recordRecentFile(filePath: string): void {
@@ -2127,8 +2151,11 @@ export function replaceRecentFile(oldPath: string, newPath: string): void {
 
 const STARRED_PATH = () => userDataPath('starred.json')
 
+/** No existence filter, same rationale as readRecentFiles: a transiently
+ *  unavailable starred file must keep its star and its Starred-view row —
+ *  filtering here also desynced the star state shown on recents rows (r158) */
 export function readStarredFiles(): string[] {
-  return readJson<string[]>(STARRED_PATH(), []).filter((p) => existsSync(p))
+  return readJson<string[]>(STARRED_PATH(), [])
 }
 
 export function toggleStarredFile(filePath: string): void {
@@ -2137,6 +2164,16 @@ export function toggleStarredFile(filePath: string): void {
     ? starred.filter((p) => p !== filePath)
     : [...starred, filePath]
   writeJson(STARRED_PATH(), next)
+}
+
+/** Bulk unstar (in-app delete, or removing an unavailable entry from the
+ *  recents list): the star must not outlive the row it pointed at (r158) */
+export function removeStarredFiles(filePaths: string[]): void {
+  const drop = new Set(filePaths)
+  if (drop.size === 0) return
+  const starred = readJson<string[]>(STARRED_PATH(), [])
+  const next = starred.filter((p) => !drop.has(p))
+  if (next.length !== starred.length) writeJson(STARRED_PATH(), next)
 }
 
 // ---- original archive (pass-through base: original file archived by content hash) ----
@@ -2625,7 +2662,7 @@ export function registerAiIpc(): void {
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
     const { requestId, settings, system, messages } = request
     const tools = request.tools ?? []
-    const maxTokens = request.maxTokens ?? 8192
+    const maxTokens = request.maxTokens ?? maxOutputTokensOf(settings)
     const provider = settings.provider
     let config = settings.providers?.[provider]
     // the genspark key never enters the settings file; requests take it from the gsk login state
@@ -2684,7 +2721,9 @@ export function registerAiIpc(): void {
               ? { errorCode: 'credits' as const }
               : isAiNetworkError(err)
                 ? { errorCode: 'network' as const }
-                : {}),
+                : isAiOverloadedError(err)
+                  ? { errorCode: 'overloaded' as const }
+                  : {}),
         })
       }
     } finally {
@@ -2788,9 +2827,15 @@ export function registerAiIpc(): void {
     }
     if (!config.model) return { ok: false, error: tm('errNoModel') }
     try {
-      return await chatForProvider(provider, config, system, user)
+      const result = await chatForProvider(provider, config, system, user)
+      // the one-shot path reports HTTP failures as ok:false with the raw body —
+      // replace capacity/rate-limit dumps with the localized "busy" message
+      if (!result.ok && isAiOverloadedError(result.error)) {
+        return { ok: false, error: tm('errAiBusy') }
+      }
+      return result
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: isAiOverloadedError(err) ? tm('errAiBusy') : String(err) }
     }
   })
 }
@@ -3478,7 +3523,8 @@ export function registerDocsIpc(): void {
         openGeneratedFile(filePath)
         return { ok: true, path: filePath }
       } catch (err) {
-        return { ok: false, error: String(err) }
+        // path is already authorized, so the renderer can retry chunked to the same target
+        return { ok: false, error: String(err), path: filePath }
       }
     },
   )

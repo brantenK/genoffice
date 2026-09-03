@@ -49,6 +49,14 @@ export interface AiSettings {
    * unavailable regardless.
    */
   gskToolsEnabled?: boolean
+  /**
+   * Output-token cap for ONE model turn of agent runs (default
+   * DEFAULT_MAX_OUTPUT_TOKENS). Reasoning models bill their thinking against
+   * this same budget, so a heavy edit turn can consume all of it and close with
+   * finish_reason=length and no prose at all — raising it is the user's lever
+   * (absent = the default, so pre-existing settings files keep working).
+   */
+  maxOutputTokens?: number | undefined
 }
 
 /** pre-provider settings shape (single OpenAI-compatible endpoint); migrated into "custom" */
@@ -88,8 +96,8 @@ export interface AiStreamChunk {
   /** complete parsed tool call (emitted once its arguments finish streaming) */
   toolCall?: AgentToolCall
   error?: string
-  /** machine-readable error cause ('timeout', exhausted 'credits', 'network' connectivity failure); lets the renderer localize the message */
-  errorCode?: 'timeout' | 'credits' | 'network'
+  /** machine-readable error cause ('timeout', exhausted 'credits', 'network' connectivity failure, 'overloaded' capacity/rate limit); lets the renderer localize the message */
+  errorCode?: 'timeout' | 'credits' | 'network' | 'overloaded'
   /** normalized stop reason carried on 'done' ('max_tokens' = output cut off by the token limit) */
   stopReason?: string
 }

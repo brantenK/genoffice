@@ -818,33 +818,42 @@ function CloudProjectsView() {
  * Full-window affordance while OS files hover over Home. Purely visual — the
  * actual open is owned by the preload drop bridge (installDropOpenBridge), so
  * this overlay stays pointer-events:none and never handles events itself.
- * `dragover` fires continuously while hovering and stops on leave/cancel, so
- * a short debounce is enough to show/hide without counting enter/leave pairs.
+ * Visibility tracks a dragenter/dragleave depth counter: `dragover` stops
+ * being delivered while the cursor is stationary (macOS), so a debounce would
+ * hide the overlay mid-drag. Enter fires before the matching leave when
+ * moving between elements, so the depth never dips to zero inside the window.
  */
 function DropToOpenOverlay(): ReactElement | null {
   const [visible, setVisible] = useState(false)
   useEffect(() => {
-    let hideTimer: ReturnType<typeof setTimeout> | undefined
+    let depth = 0
     const hasFiles = (ev: DragEvent): boolean => ev.dataTransfer?.types.includes('Files') ?? false
     // NB: the preload drop bridge also listens here and cancels file drags, so
     // defaultPrevented can't discriminate anything at this layer — only zones
     // that stopPropagation (none on Home) would keep us out entirely.
-    const onDragOver = (ev: DragEvent) => {
+    const onDragEnter = (ev: DragEvent) => {
       if (!hasFiles(ev)) return
-      clearTimeout(hideTimer)
+      depth += 1
       setVisible(true)
-      hideTimer = setTimeout(() => setVisible(false), 120)
     }
+    const onDragLeave = (ev: DragEvent) => {
+      if (!hasFiles(ev)) return
+      depth = Math.max(0, depth - 1)
+      if (depth === 0) setVisible(false)
+    }
+    // drop/blur reset the depth outright: leaving the window mid-drag can eat
+    // a dragleave, and a stuck overlay would be worse than a re-shown one
     const onHide = () => {
-      clearTimeout(hideTimer)
+      depth = 0
       setVisible(false)
     }
-    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onHide)
     window.addEventListener('blur', onHide)
     return () => {
-      clearTimeout(hideTimer)
-      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onHide)
       window.removeEventListener('blur', onHide)
     }
@@ -902,6 +911,21 @@ export function Home() {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
+  // unavailable recent entry (missing flag) the user clicked — offer list removal
+  const [confirmMissing, setConfirmMissing] = useState<RecentEntry | null>(null)
+  // name in the greeting; omitted when logged out
+  const [accountName, setAccountName] = useState('')
+  // Projects is web-account data, so its nav entry only shows when logged in
+  const [loggedIn, setLoggedIn] = useState(false)
+  // single source of account state: AccountEntry reports every change (initial
+  // load, login, logout), keeping the greeting name and the nav entry in sync
+  const handleAccountStatus = useCallback((s: AccountStatus | null) => {
+    const on = s?.loggedIn ?? false
+    setLoggedIn(on)
+    if (!on) setCloudMode(false)
+    const name = on ? (s?.email ?? '').split('@')[0] : ''
+    setAccountName(name ? name[0].toUpperCase() + name.slice(1) : '')
+  }, [])
   const [greetAskKey] = useState(
     () => GREET_ASK_KEYS[Math.floor(Math.random() * GREET_ASK_KEYS.length)]!,
   )
@@ -1025,16 +1049,17 @@ export function Home() {
 
   // Escape closes the row menu and the delete-confirm dialog
   useEffect(() => {
-    if (rowMenu === null && confirmDelete === null) return
+    if (rowMenu === null && confirmDelete === null && confirmMissing === null) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setRowMenu(null)
         setConfirmDelete(null)
+        setConfirmMissing(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [rowMenu, confirmDelete])
+  }, [rowMenu, confirmDelete, confirmMissing])
 
   // ── Project files state ────────────────────────────────
 
@@ -1369,15 +1394,18 @@ export function Home() {
     return (
       <li className="recent-row" key={entry.path}>
         <div
-          className="recent-item"
+          className={`recent-item${entry.missing ? ' missing' : ''}`}
           role="button"
           tabIndex={0}
           onClick={() => {
-            if (!isRenaming) void window.aiOffice.openPath(entry.path)
+            if (isRenaming) return
+            if (entry.missing) setConfirmMissing(entry)
+            else void window.aiOffice.openPath(entry.path)
           }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && event.target === event.currentTarget) {
-              void window.aiOffice.openPath(entry.path)
+              if (entry.missing) setConfirmMissing(entry)
+              else void window.aiOffice.openPath(entry.path)
             }
           }}
         >
@@ -1413,8 +1441,10 @@ export function Home() {
             <span className="recent-name">{entry.name}</span>
           )}
           <span className="recent-path">{parentDir(entry.path)}</span>
-          <span className="recent-time">{formatModified(entry.mtimeMs, i18n)}</span>
-          <span className="recent-size">{formatSize(entry.sizeBytes)}</span>
+          <span className="recent-time">
+            {entry.missing ? '—' : formatModified(entry.mtimeMs, i18n)}
+          </span>
+          <span className="recent-size">{entry.missing ? '—' : formatSize(entry.sizeBytes)}</span>
           <button
             className={`star-btn${entry.starred ? ' starred' : ''}`}
             aria-label={entry.starred ? t('unstar') : t('star')}
@@ -1954,6 +1984,40 @@ export function Home() {
               </button>
               <button className="btn btn-danger" onClick={confirmDeleteNow}>
                 {t('delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmMissing && (
+        <div className="modal-overlay" onClick={() => setConfirmMissing(null)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('missingFileTitle')}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3>{t('missingFileTitle')}</h3>
+            <p>{t('missingFileBody', { name: confirmMissing.name })}</p>
+            <div className="modal-buttons">
+              <button
+                className="btn btn-secondary"
+                autoFocus
+                onClick={() => setConfirmMissing(null)}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  // main drops the star of an unavailable entry with the row
+                  removeRecent([confirmMissing.path])
+                  setConfirmMissing(null)
+                }}
+              >
+                {t('removeFromList')}
               </button>
             </div>
           </div>

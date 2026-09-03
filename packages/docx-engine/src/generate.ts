@@ -1,4 +1,5 @@
 import type {
+  CharIndents,
   GeneratedBlock,
   ImageWrap,
   ParaFormat,
@@ -414,18 +415,23 @@ function xmlSegments(
 }
 
 /**
- * Rebuild one cell's paragraphs with new text, keeping tcPr and the first
- * paragraph's pPr / first run's rPr (so header bold, alignment, shading stay).
+ * Rebuild one cell's paragraphs, keeping tcPr. String entries keep the legacy
+ * behavior (first paragraph's pPr / first run's rPr for every paragraph); rich
+ * entries regenerate full runs against their own original paragraph's pPr, and
+ * null entries keep the original paragraph bytes untouched.
  * Returns null when the cell is too complex to patch safely (nested table).
  */
-function patchCellXml(tcXml: string, paras: string[]): string | null {
+function patchCellXml(tcXml: string, paras: readonly CellParaPatch[]): string | null {
   if (tcXml.indexOf('<w:tbl', 1) !== -1) return null
   const openTag = /^<w:tc(?: [^>]*)?>/.exec(tcXml)?.[0]
   if (!openTag) return null
   const tcPr = /<w:tcPr[\s\S]*?<\/w:tcPr>|<w:tcPr[^>]*\/>/.exec(tcXml)?.[0] ?? ''
-  const firstP = /<w:p(?: [^>]*)?>[\s\S]*?<\/w:p>/.exec(tcXml)?.[0] ?? ''
-  const pPr = /<w:pPr[\s\S]*?<\/w:pPr>|<w:pPr[^>]*\/>/.exec(firstP)?.[0] ?? ''
-  const firstRun = /<w:r(?: [^>]*)?>[\s\S]*?<\/w:r>/.exec(firstP)?.[0] ?? ''
+  const originals = xmlSegments(tcXml, 'w:p', openTag.length, tcXml.length).map((seg) =>
+    tcXml.slice(seg.start, seg.end),
+  )
+  const pPrOf = (pXml: string) => /<w:pPr[\s\S]*?<\/w:pPr>|<w:pPr[^>]*\/>/.exec(pXml)?.[0] ?? ''
+  const firstPPr = pPrOf(originals[0] ?? '')
+  const firstRun = /<w:r(?: [^>]*)?>[\s\S]*?<\/w:r>/.exec(originals[0] ?? '')?.[0] ?? ''
   const rPr = /<w:rPr[\s\S]*?<\/w:rPr>/.exec(firstRun)?.[0] ?? ''
   // picture runs are not part of the text model; carry them over verbatim so a
   // text edit in a cell with an inline image doesn't drop the image
@@ -435,20 +441,88 @@ function patchCellXml(tcXml: string, paras: string[]): string | null {
         .filter((r) => r.includes('<w:drawing'))
         .join('')
     : ''
+  // The run model re-emits every drawing it resolved media for (run.image.xml),
+  // including Word's mc:Choice drawing whose VML w:pict fallback shares the same
+  // media relationship. Only drawings the model cannot see (shapes, textboxes,
+  // charts, blind pict/object) must ride over. Carried copies keep only the
+  // drawing payload children — run-level text belongs to the rich runs, while
+  // text nested inside the drawing (textbox content) stays intact.
+  const mediaRIds = (xml: string) =>
+    [...xml.matchAll(/<(?:a:blip|v:imagedata)\b[^>]*\br:(?:embed|link|id)="([^"]+)"/g)].map(
+      (m) => m[1],
+    )
+  const DRAWING_TAGS = new Set(['mc:AlternateContent', 'w:drawing', 'w:pict', 'w:object'])
+  const carriedRunsOf = (pXml: string, emittedMedia: Set<string>) => {
+    // a payload is a twin of an emitted image when all its media is already
+    // re-emitted and it carries no textbox text of its own
+    const isTwin = (payload: string) => {
+      const ids = mediaRIds(payload)
+      return (
+        ids.length > 0 &&
+        ids.every((id) => emittedMedia.has(id)) &&
+        !/<w:txbxContent[\s>]|<v:textbox[\s>]/.test(payload)
+      )
+    }
+    return xmlSegments(pXml, 'w:r', 0, pXml.length)
+      .map((seg) => pXml.slice(seg.start, seg.end))
+      .filter((r) => /<wp:anchor[\s>]|<w:pict[\s>]|<w:object[\s>]/.test(r))
+      .map((r) => {
+        const open = /^<w:r(?:\s[^>]*)?>/.exec(r)?.[0]
+        if (!open) return ''
+        const kept = splitXmlChildren(r.slice(open.length, r.length - '</w:r>'.length)).filter(
+          (c) => DRAWING_TAGS.has(c.name) && !isTwin(c.xml),
+        )
+        return kept.length > 0 ? `<w:r>${kept.map((c) => c.xml).join('')}</w:r>` : ''
+      })
+      .join('')
+  }
+  const aligned = paras.length === originals.length
   const body = paras
-    .map((t, i) => {
-      const keep = i === 0 ? drawingRuns : ''
-      return t === ''
-        ? `<w:p>${pPr}${keep}</w:p>`
-        : `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXmlText(t)}</w:t></w:r>${keep}</w:p>`
+    .map((entry, i) => {
+      if (entry === null) return originals[i] ?? ''
+      if (typeof entry === 'string') {
+        const keep = i === 0 ? drawingRuns : ''
+        return entry === ''
+          ? `<w:p>${firstPPr}${keep}</w:p>`
+          : `<w:p>${firstPPr}<w:r>${rPr}${cellRunContentXml(entry)}</w:r>${keep}</w:p>`
+      }
+      const template = originals[Math.min(i, originals.length - 1)] ?? ''
+      const emitted = runsXml(entry.runs, null)
+      const emittedMedia = new Set(mediaRIds(emitted))
+      const keep = aligned
+        ? carriedRunsOf(template, emittedMedia)
+        : i === 0
+          ? originals.map((p) => carriedRunsOf(p, emittedMedia)).join('')
+          : ''
+      return `<w:p>${pPrOf(template)}${emitted}${keep}</w:p>`
     })
     .join('')
   return openTag + tcPr + body + '</w:tc>'
 }
 
-/** per-cell patch: plain paragraph strings, or nested-table cell texts by nested index */
+/** cell paragraph texts carry tabs/breaks as control chars (extractRuns encoding);
+ *  they must go back as real elements, not literal characters inside w:t */
+function cellRunContentXml(text: string): string {
+  const CONTROL: Record<string, string> = {
+    '\t': '<w:tab/>',
+    '\n': '<w:br/>',
+    '\f': '<w:br w:type="page"/>',
+    '\v': '<w:br w:type="column"/>',
+  }
+  return text
+    .split(/([\t\n\f\v])/)
+    .map((seg) =>
+      seg === '' ? '' : (CONTROL[seg] ?? `<w:t xml:space="preserve">${escapeXmlText(seg)}</w:t>`),
+    )
+    .join('')
+}
+
+/** one cell paragraph: control-char text (legacy first-run-rPr rebuild), rich runs, or null = keep the original paragraph bytes */
+export type CellParaPatch = string | { runs: Run[] } | null
+
+/** per-cell patch: paragraph patches, or nested-table cell texts by nested index */
 export type CellTextsPatch =
-  | readonly string[]
+  | readonly CellParaPatch[]
   | {
       /** this cell's own text (optional; rewriting the outer text of a cell containing a nested table is not supported yet) */
       paras?: readonly string[] | null
@@ -1080,7 +1154,8 @@ function formatPPrChildren(format: ParaFormat | undefined): PPrChild[] {
   // into the margin) are valid and must survive a paragraph rebuild; the
   // old > 0 guard silently dropped them, shifting rebuilt paragraphs
   // rightward on save (alpha ledger r116).
-  if (format.indentLeft) indAttrs.push(`w:left="${Math.round(format.indentLeft)}"`)
+  // explicit w:left="0" must be written back: it cancels a numbering-level indent
+  if (format.indentLeft !== undefined) indAttrs.push(`w:left="${Math.round(format.indentLeft)}"`)
   if (format.indentRight) indAttrs.push(`w:right="${Math.round(format.indentRight)}"`)
   if (format.indentFirstLine) {
     if (format.indentFirstLine > 0)
@@ -1216,14 +1291,14 @@ function rawIndUnchanged(raw: string | undefined, f: ParaFormat): boolean {
   const right = parseInt(rawAttr(raw, 'w:right') ?? rawAttr(raw, 'w:end') ?? '', 10)
   const firstLine = parseInt(rawAttr(raw, 'w:firstLine') ?? '', 10)
   const hanging = parseInt(rawAttr(raw, 'w:hanging') ?? '', 10)
-  const rawLeft = Number.isFinite(left) && left !== 0 ? left : undefined
+  // left mirrors the parse side: explicit 0 stays distinct from absent
+  const rawLeft = Number.isFinite(left) ? left : undefined
   const rawRight = Number.isFinite(right) && right !== 0 ? right : undefined
   const rawFirst = hanging > 0 ? -hanging : firstLine > 0 ? firstLine : undefined
   const norm = (v: number | undefined) => (v ? Math.round(v) : undefined)
+  const normLeft = f.indentLeft !== undefined ? Math.round(f.indentLeft) : undefined
   return (
-    rawLeft === norm(f.indentLeft) &&
-    rawRight === norm(f.indentRight) &&
-    rawFirst === norm(f.indentFirstLine)
+    rawLeft === normLeft && rawRight === norm(f.indentRight) && rawFirst === norm(f.indentFirstLine)
   )
 }
 
@@ -1303,7 +1378,47 @@ function rawFramePrUnchanged(raw: string | undefined, f: ParaFormat): boolean {
 }
 
 /** True when re-parsing the raw child yields the current model value, i.e. the group was not edited */
-function pprGroupUnchanged(tag: string, raw: string | undefined, f: ParaFormat): boolean {
+/**
+ * Same indent in two format models (twips, rounded like the emitted attributes).
+ * Used when the caller knows the paragraph's parsed format: a raw w:ind whose
+ * character-unit attributes (w:firstLineChars…) resolved to the model's twips
+ * has no twips twin to compare against, so raw-vs-model would rebuild it and
+ * lose the character unit on an unrelated format edit.
+ */
+function sameIndent(a: ParaFormat, b: ParaFormat): boolean {
+  const norm = (v: number | undefined) => (v !== undefined ? Math.round(v) : undefined)
+  const nz = (v: number | undefined) => (v ? Math.round(v) : undefined)
+  return (
+    norm(a.indentLeft) === norm(b.indentLeft) &&
+    nz(a.indentRight) === nz(b.indentRight) &&
+    nz(a.indentFirstLine) === nz(b.indentFirstLine)
+  )
+}
+
+/**
+ * Cancel attributes for the character-unit indents a paragraph was laid out
+ * with. A rebuilt w:ind carries twips only, and Word keeps preferring a
+ * `*Chars` from the style chain over a twips twin (probed) — so an indent edit
+ * on a paragraph in a CJK "first line 2 characters" style must write the
+ * explicit `w:firstLineChars="0"` Word itself writes for pt indents, or the
+ * style's character indent supersedes the edit on reload.
+ */
+function charIndentCancelAttrs(chars: CharIndents | undefined): string[] {
+  if (!chars) return []
+  const out: string[] = []
+  if (chars.left) out.push('w:leftChars="0"')
+  if (chars.right) out.push('w:rightChars="0"')
+  if (chars.hanging) out.push('w:hangingChars="0"')
+  else if (chars.firstLine) out.push('w:firstLineChars="0"')
+  return out
+}
+
+function pprGroupUnchanged(
+  tag: string,
+  raw: string | undefined,
+  f: ParaFormat,
+  original?: ParaFormat,
+): boolean {
   switch (tag) {
     case 'w:pageBreakBefore':
       return rawBool(raw) === !!f.pageBreakBefore
@@ -1320,6 +1435,12 @@ function pprGroupUnchanged(tag: string, raw: string | undefined, f: ParaFormat):
     case 'w:spacing':
       return rawSpacingUnchanged(raw, f)
     case 'w:ind':
+      if (original !== undefined) {
+        if (sameIndent(original, f)) return true
+        // laid out with character-unit indents (possibly from the style alone, with no
+        // raw w:ind at all): the edit must rebuild so the cancel attributes get written
+        if (original.charIndents) return false
+      }
       return rawIndUnchanged(raw, f)
     case 'w:pBdr':
       return rawPBdrUnchanged(raw, f)
@@ -1346,16 +1467,38 @@ function pprGroupUnchanged(tag: string, raw: string | undefined, f: ParaFormat):
  * the current model value the group was not edited and keeps its original bytes,
  * so unmodeled attributes (w:firstLineChars, w:afterLines, autospacing, border
  * colors, shading patterns…) survive. Only genuinely changed groups are rebuilt
- * from the model (at their schema position) — a rebuilt w:ind intentionally drops
- * firstLineChars/leftChars so the user's new twips indent wins over the CJK
+ * from the model (at their schema position) — a rebuilt w:ind is written in twips
+ * and, when the paragraph was laid out with character-unit indents, carries the
+ * `*Chars="0"` that cancels them, so the user's new indent wins over the CJK
  * char-unit variant Word would otherwise prefer. Everything unmanaged — keepNext,
  * paragraph-mark rPr, pPrChange revision records... — keeps its original bytes.
  * When format.tabStops is set, w:tabs is also managed (replaced or removed).
  * When format.dropCap is set, w:framePr is also managed.
+ * `original` is the paragraph's parsed format when the caller has it: an indent
+ * equal to it keeps its raw bytes even when those bytes carry no twips twin
+ * (character-unit indents resolved at parse time), and its `charIndents` say
+ * which cancel attributes an indent edit has to write.
  */
-export function mergePPrFormat(rawPPr: string, format: ParaFormat | undefined): string {
+export function mergePPrFormat(
+  rawPPr: string,
+  format: ParaFormat | undefined,
+  original?: ParaFormat,
+): string {
   const open = /^<w:pPr(?: [^>]*)?>/.exec(rawPPr)?.[0]
   const fresh = formatPPrChildren(format)
+  // an indent edit on a paragraph laid out with character-unit indents: the
+  // twips-only rebuild also cancels them (`w:firstLineChars="0"`…), or Word — and
+  // this parser — would keep resolving the character indent over the new value
+  if (original?.charIndents && !sameIndent(original, format ?? {})) {
+    const cancel = charIndentCancelAttrs(original.charIndents)
+    const at = fresh.findIndex((c) => c.name === 'w:ind')
+    const xml =
+      at === -1
+        ? `<w:ind ${cancel.join(' ')}/>`
+        : fresh[at].xml.replace(/\/>$/, ` ${cancel.join(' ')}/>`)
+    if (at === -1) fresh.push({ name: 'w:ind', xml })
+    else fresh[at] = { name: 'w:ind', xml }
+  }
   if (!open) {
     // '<w:pPr/>' or unrecognized: rebuild from the format model alone, in schema order
     // (formatPPrChildren emits by concern, and CT_PPr order is not optional)
@@ -1374,7 +1517,7 @@ export function mergePPrFormat(rawPPr: string, format: ParaFormat | undefined): 
   const rawChildren = splitXmlChildren(inner)
   const rawOf = (tag: string) => rawChildren.find((c) => c.name === tag)?.xml
   const rebuilt = new Set(
-    [...managedTags].filter((tag) => !pprGroupUnchanged(tag, rawOf(tag), format ?? {})),
+    [...managedTags].filter((tag) => !pprGroupUnchanged(tag, rawOf(tag), format ?? {}, original)),
   )
   const rank = (n: string) => PPR_CHILD_ORDER.indexOf(n)
   // the interleave below walks freshOut once with a monotonic index, so it has to arrive in
@@ -2387,11 +2530,12 @@ function mergeRFontsXml(rawXml: string, run: Run): string {
     attrs.set(slot, escapeXmlAttr(value))
     attrs.delete(theme)
   }
-  if (run.fontAscii) {
+  // slots still equal to their theme-resolved value are untouched: keep the theme attrs
+  if (run.fontAscii && run.fontAscii !== run.themeRFonts?.fontAscii) {
     set('w:ascii', 'w:asciiTheme', run.fontAscii)
     set('w:hAnsi', 'w:hAnsiTheme', run.fontAscii)
   }
-  if (run.font && (hadEastAsia || run.font !== rawPrimary)) {
+  if (run.font && run.font !== run.themeRFonts?.font && (hadEastAsia || run.font !== rawPrimary)) {
     set('w:eastAsia', 'w:eastAsiaTheme', run.font)
   }
   if (run.fontCs) set('w:cs', 'w:cstheme', run.fontCs)
@@ -2519,9 +2663,13 @@ export function mergeRPrModel(rawRPr: string, run: Run, insideLink: boolean): st
         // Runs drop unmodeled fields, and losing w:cs on an unrelated edit
         // would corrupt complex-script runs (mergeRFontsXml likewise only
         // writes w:cs when the model carries one)
+        // a model value resolved from a theme ref counts as untouched: the literal
+        // attrs can never equal it, and rebuilding would materialize the theme link
         return (
-          (rawAttr(attrs, 'w:eastAsia') ?? ascii) === run.font &&
-          ascii === run.fontAscii &&
+          ((rawAttr(attrs, 'w:eastAsia') ?? ascii) === run.font ||
+            (run.font !== undefined && run.font === run.themeRFonts?.font)) &&
+          (ascii === run.fontAscii ||
+            (run.fontAscii !== undefined && run.fontAscii === run.themeRFonts?.fontAscii)) &&
           (run.fontCs === undefined || rawAttr(attrs, 'w:cs') === run.fontCs)
         )
       }

@@ -247,9 +247,11 @@ export const strings = {
     aiWorking: '继续处理中',
     aiStopped: '已停止',
     aiNoReply: '（无回复）',
+    aiTruncatedNote: '（回复因长度限制被截断,内容可能不完整。）',
     aiTurnLimit: '已达到单次任务的步数上限，回复"继续"让我接着做。',
     aiUnknownError: '未知错误',
     aiTimeoutError: 'AI 请求超时：网络长时间无响应，已停止。请检查网络后重试',
+    aiOverloadedError: 'AI 服务当前繁忙，请稍后重试',
     aiNetworkError: '网络有问题，无法连接 AI 服务。请检查网络后重试',
     aiCreditsExhausted: 'AI 额度已用完，请在设置中配置其他 AI 服务后重试',
     aiToolReadPages: '读取第 {start}-{end} 页',
@@ -519,10 +521,12 @@ export const strings = {
     aiWorking: 'Working',
     aiStopped: 'Stopped',
     aiNoReply: '(no reply)',
+    aiTruncatedNote: '(The reply was cut off by the length limit and may be incomplete.)',
     aiTurnLimit: 'Reached the step limit for this task — say "continue" to keep going.',
     aiUnknownError: 'Unknown error',
     aiTimeoutError:
       'AI request timed out: no response from the network, so the run was stopped. Check your connection and try again',
+    aiOverloadedError: 'The AI service is busy right now — please try again in a moment',
     aiNetworkError:
       'Network problem: could not reach the AI service. Check your connection and try again',
     aiCreditsExhausted: 'Your AI credits have run out. Configure another AI provider in Settings, then try again',
@@ -794,10 +798,12 @@ export const strings = {
     aiWorking: '処理中',
     aiStopped: '停止しました',
     aiNoReply: '（応答なし）',
+    aiTruncatedNote: '（返信は長さ制限により途中で打ち切られ、不完全な可能性があります。）',
     aiTurnLimit: 'ステップ上限に達しました。「続けて」と送ると継続します。',
     aiUnknownError: '不明なエラー',
     aiTimeoutError:
       'AIリクエストがタイムアウトしました：ネットワークからの応答がないため中断しました。接続を確認して再試行してください',
+    aiOverloadedError: 'AI サービスが混み合っています。しばらくしてからもう一度お試しください',
     aiNetworkError:
       'ネットワークに問題があり、AI サービスに接続できません。接続を確認して再試行してください',
     aiCreditsExhausted: 'AIクレジットを使い切りました。設定で別のAIプロバイダーを設定して、もう一度お試しください',
@@ -1070,10 +1076,12 @@ export const strings = {
     aiWorking: '처리 중',
     aiStopped: '중지됨',
     aiNoReply: '(응답 없음)',
+    aiTruncatedNote: '(응답이 길이 제한으로 잘려 내용이 불완전할 수 있습니다.)',
     aiTurnLimit: '단계 한도에 도달했습니다. "계속"이라고 보내면 이어서 합니다.',
     aiUnknownError: '알 수 없는 오류',
     aiTimeoutError:
       'AI 요청 시간 초과: 네트워크 응답이 없어 중단되었습니다. 연결을 확인한 후 다시 시도해 주세요',
+    aiOverloadedError: 'AI 서비스가 혼잡합니다. 잠시 후 다시 시도해 주세요',
     aiNetworkError:
       '네트워크에 문제가 있어 AI 서비스에 연결할 수 없습니다. 연결을 확인한 후 다시 시도해 주세요',
     aiCreditsExhausted: 'AI 크레딧이 모두 소진되었습니다. 설정에서 다른 AI 제공업체를 구성한 후 다시 시도하세요',
@@ -1348,10 +1356,13 @@ export const strings = {
     aiWorking: 'Traitement',
     aiStopped: 'Arrêté',
     aiNoReply: '(pas de réponse)',
+    aiTruncatedNote:
+      '(La réponse a été tronquée par la limite de longueur et peut être incomplète.)',
     aiTurnLimit: 'Limite d’étapes atteinte — dites « continue » pour poursuivre.',
     aiUnknownError: 'Erreur inconnue',
     aiTimeoutError:
       "Délai de la requête IA dépassé : aucune réponse du réseau, l'exécution a été interrompue. Vérifiez votre connexion et réessayez",
+    aiOverloadedError: "Le service d'IA est actuellement surchargé — réessayez dans un instant",
     aiNetworkError:
       'Problème réseau : impossible de joindre le service IA. Vérifiez votre connexion et réessayez',
     aiCreditsExhausted: 'Vos crédits IA sont épuisés. Configurez un autre fournisseur dans les paramètres puis réessayez.',
@@ -1628,10 +1639,13 @@ export const strings = {
     aiWorking: 'Verarbeitung',
     aiStopped: 'Gestoppt',
     aiNoReply: '(keine Antwort)',
+    aiTruncatedNote:
+      '(Die Antwort wurde durch das Längenlimit abgeschnitten und ist möglicherweise unvollständig.)',
     aiTurnLimit: 'Schrittlimit erreicht — sagen Sie „weiter", um fortzufahren.',
     aiUnknownError: 'Unbekannter Fehler',
     aiTimeoutError:
       'Zeitüberschreitung der KI-Anfrage: keine Antwort vom Netzwerk, der Vorgang wurde abgebrochen. Prüfe deine Verbindung und versuche es erneut',
+    aiOverloadedError: 'Der KI-Dienst ist derzeit überlastet — bitte gleich erneut versuchen',
     aiNetworkError:
       'Netzwerkproblem: Der KI-Dienst ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut',
     aiCreditsExhausted: 'Ihre KI-Guthaben sind aufgebraucht. Richten Sie in den Einstellungen einen anderen KI-Anbieter ein und versuchen Sie es erneut.',
@@ -1906,10 +1920,14 @@ export const strings = {
     aiWorking: 'Procesando',
     aiStopped: 'Detenido',
     aiNoReply: '(sin respuesta)',
+    aiTruncatedNote:
+      '(La respuesta fue cortada por el límite de longitud y puede estar incompleta.)',
     aiTurnLimit: 'Límite de pasos alcanzado; di «continúa» para seguir.',
     aiUnknownError: 'Error desconocido',
     aiTimeoutError:
       'La solicitud de IA agotó el tiempo de espera: no hubo respuesta de la red y se detuvo. Comprueba tu conexión e inténtalo de nuevo',
+    aiOverloadedError:
+      'El servicio de IA está saturado en este momento; inténtalo de nuevo en unos instantes',
     aiNetworkError:
       'Problema de red: no se pudo conectar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo',
     aiCreditsExhausted: 'Se agotaron tus créditos de IA. Configura otro proveedor de IA en Ajustes e inténtalo de nuevo.',
@@ -2184,10 +2202,12 @@ export const strings = {
     aiWorking: 'กำลังดำเนินการ',
     aiStopped: 'หยุดแล้ว',
     aiNoReply: '(ไม่มีคำตอบ)',
+    aiTruncatedNote: '(คำตอบถูกตัดเนื่องจากถึงขีดจำกัดความยาว เนื้อหาอาจไม่สมบูรณ์)',
     aiTurnLimit: 'ถึงขีดจำกัดขั้นตอนแล้ว พิมพ์ "ทำต่อ" เพื่อดำเนินการต่อ',
     aiUnknownError: 'ข้อผิดพลาดที่ไม่รู้จัก',
     aiTimeoutError:
       'คำขอ AI หมดเวลา: เครือข่ายไม่ตอบสนอง จึงหยุดการทำงาน โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
+    aiOverloadedError: 'บริการ AI มีผู้ใช้งานจำนวนมากในขณะนี้ โปรดลองอีกครั้งในอีกสักครู่',
     aiNetworkError:
       'เครือข่ายมีปัญหา ไม่สามารถเชื่อมต่อบริการ AI ได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองใหม่',
     aiCreditsExhausted: 'เครดิต AI หมดแล้ว กำหนดค่าผู้ให้บริการ AI อื่นในการตั้งค่าแล้วลองอีกครั้ง',
@@ -2460,10 +2480,12 @@ export const strings = {
     aiWorking: 'Memproses',
     aiStopped: 'Dihentikan',
     aiNoReply: '(tidak ada balasan)',
+    aiTruncatedNote: '(Balasan terpotong karena batas panjang dan mungkin tidak lengkap.)',
     aiTurnLimit: 'Batas langkah tercapai — ketik "lanjutkan" untuk meneruskan.',
     aiUnknownError: 'Kesalahan tidak dikenal',
     aiTimeoutError:
       'Permintaan AI habis waktu: jaringan tidak merespons sehingga proses dihentikan. Periksa koneksi Anda lalu coba lagi',
+    aiOverloadedError: 'Layanan AI sedang sibuk — silakan coba lagi sebentar lagi',
     aiNetworkError:
       'Masalah jaringan: tidak dapat terhubung ke layanan AI. Periksa koneksi Anda lalu coba lagi',
     aiCreditsExhausted: 'Kredit AI Anda habis. Konfigurasikan penyedia AI lain di Pengaturan, lalu coba lagi.',
@@ -2738,10 +2760,12 @@ export const strings = {
     aiWorking: 'Обработка',
     aiStopped: 'Остановлено',
     aiNoReply: '(нет ответа)',
+    aiTruncatedNote: '(Ответ был обрезан из-за ограничения длины и может быть неполным.)',
     aiTurnLimit: 'Достигнут лимит шагов — напишите «продолжай», чтобы продолжить.',
     aiUnknownError: 'Неизвестная ошибка',
     aiTimeoutError:
       'Тайм-аут запроса ИИ: сеть не отвечает, выполнение остановлено. Проверьте подключение и повторите попытку',
+    aiOverloadedError: 'Сервис ИИ сейчас перегружен — повторите попытку чуть позже',
     aiNetworkError:
       'Проблема с сетью: не удалось подключиться к сервису ИИ. Проверьте подключение и повторите попытку',
     aiCreditsExhausted: 'Кредиты ИИ исчерпаны. Настройте другого поставщика ИИ в настройках и попробуйте снова.',
@@ -3015,10 +3039,12 @@ export const strings = {
     aiWorking: 'جارٍ المعالجة',
     aiStopped: 'تم الإيقاف',
     aiNoReply: '(لا رد)',
+    aiTruncatedNote: '(تم اقتطاع الرد بسبب حد الطول وقد يكون غير مكتمل.)',
     aiTurnLimit: 'تم بلوغ حد الخطوات — اكتب «تابع» للمواصلة.',
     aiUnknownError: 'خطأ غير معروف',
     aiTimeoutError:
       'انتهت مهلة طلب الذكاء الاصطناعي: لا توجد استجابة من الشبكة وتم الإيقاف. تحقق من الاتصال وحاول مجددًا',
+    aiOverloadedError: 'خدمة الذكاء الاصطناعي مشغولة حاليًا — يرجى المحاولة مرة أخرى بعد قليل',
     aiNetworkError:
       'مشكلة في الشبكة: تعذّر الوصول إلى خدمة الذكاء الاصطناعي. تحقق من الاتصال وحاول مجددًا',
     aiCreditsExhausted: 'نفدت رصيد الذكاء الاصطناعي. قم بإعداد مزود ذكاء اصطناعي آخر في الإعدادات ثم حاول مجددًا.',
@@ -3291,10 +3317,13 @@ export const strings = {
     aiWorking: 'Processando',
     aiStopped: 'Parado',
     aiNoReply: '(sem resposta)',
+    aiTruncatedNote: '(A resposta foi cortada pelo limite de comprimento e pode estar incompleta.)',
     aiTurnLimit: 'Limite de etapas atingido — diga "continuar" para prosseguir.',
     aiUnknownError: 'Erro desconhecido',
     aiTimeoutError:
       'A solicitação de IA expirou: sem resposta da rede, a execução foi interrompida. Verifique sua conexão e tente novamente',
+    aiOverloadedError:
+      'O serviço de IA está sobrecarregado no momento — tente novamente em instantes',
     aiNetworkError:
       'Problema de rede: não foi possível conectar ao serviço de IA. Verifique sua conexão e tente novamente',
     aiCreditsExhausted: 'Seus créditos de IA acabaram. Configure outro provedor de IA nas Configurações e tente novamente.',
@@ -3570,10 +3599,13 @@ export const strings = {
     aiWorking: 'Elaborazione',
     aiStopped: 'Interrotto',
     aiNoReply: '(nessuna risposta)',
+    aiTruncatedNote:
+      '(La risposta è stata troncata dal limite di lunghezza e potrebbe essere incompleta.)',
     aiTurnLimit: 'Limite di passaggi raggiunto — scrivi "continua" per proseguire.',
     aiUnknownError: 'Errore sconosciuto',
     aiTimeoutError:
       'Richiesta IA scaduta: nessuna risposta dalla rete, esecuzione interrotta. Controlla la connessione e riprova',
+    aiOverloadedError: 'Il servizio IA è momentaneamente sovraccarico — riprova tra poco',
     aiNetworkError:
       'Problema di rete: impossibile raggiungere il servizio IA. Controlla la connessione e riprova',
     aiCreditsExhausted: 'I tuoi crediti AI sono esauriti. Configura un altro provider AI nelle Impostazioni e riprova.',
@@ -3850,10 +3882,12 @@ export const strings = {
     aiWorking: 'Przetwarzanie',
     aiStopped: 'Zatrzymano',
     aiNoReply: '(brak odpowiedzi)',
+    aiTruncatedNote: '(Odpowiedź została ucięta przez limit długości i może być niepełna.)',
     aiTurnLimit: 'Osiągnięto limit kroków — napisz „kontynuuj", aby dokończyć.',
     aiUnknownError: 'Nieznany błąd',
     aiTimeoutError:
       'Przekroczono limit czasu żądania AI: brak odpowiedzi sieci, przerwano. Sprawdź połączenie i spróbuj ponownie',
+    aiOverloadedError: 'Usługa AI jest obecnie przeciążona — spróbuj ponownie za chwilę',
     aiNetworkError:
       'Problem z siecią: nie można połączyć się z usługą AI. Sprawdź połączenie i spróbuj ponownie',
     aiCreditsExhausted: 'Twoje kredyty AI się wyczerpały. Skonfiguruj innego dostawcę AI w Ustawieniach i spróbuj ponownie.',
@@ -4130,10 +4164,12 @@ export const strings = {
     aiWorking: 'Bezig met verwerken',
     aiStopped: 'Gestopt',
     aiNoReply: '(geen antwoord)',
+    aiTruncatedNote: '(Het antwoord is afgekapt door de lengtelimiet en is mogelijk onvolledig.)',
     aiTurnLimit: 'Stappenlimiet bereikt — zeg "ga door" om verder te gaan.',
     aiUnknownError: 'Onbekende fout',
     aiTimeoutError:
       'AI-verzoek verlopen: geen reactie van het netwerk, uitvoering gestopt. Controleer je verbinding en probeer het opnieuw',
+    aiOverloadedError: 'De AI-service is momenteel overbelast — probeer het zo opnieuw',
     aiNetworkError:
       'Netwerkprobleem: kan de AI-service niet bereiken. Controleer je verbinding en probeer het opnieuw',
     aiCreditsExhausted: 'Je AI-tegoed is op. Configureer een andere AI-provider in Instellingen en probeer het opnieuw.',
@@ -4408,10 +4444,12 @@ export const strings = {
     aiWorking: 'Sedang memproses',
     aiStopped: 'Dihentikan',
     aiNoReply: '(tiada balasan)',
+    aiTruncatedNote: '(Balasan terpotong kerana had panjang dan mungkin tidak lengkap.)',
     aiTurnLimit: 'Had langkah dicapai — taip "teruskan" untuk menyambung.',
     aiUnknownError: 'Ralat tidak diketahui',
     aiTimeoutError:
       'Permintaan AI tamat masa: rangkaian tidak memberi respons, proses dihentikan. Semak sambungan anda dan cuba lagi',
+    aiOverloadedError: 'Perkhidmatan AI sedang sibuk — sila cuba lagi sebentar lagi',
     aiNetworkError:
       'Masalah rangkaian: tidak dapat menghubungi perkhidmatan AI. Semak sambungan anda dan cuba lagi',
     aiCreditsExhausted: 'Kredit AI anda telah habis. Konfigurasikan pembekal AI lain dalam Tetapan, kemudian cuba lagi.',
@@ -4684,9 +4722,11 @@ export const strings = {
     aiWorking: 'מעבד',
     aiStopped: 'הופסק',
     aiNoReply: '(אין תשובה)',
+    aiTruncatedNote: '(התשובה נחתכה בגלל מגבלת האורך וייתכן שאינה שלמה.)',
     aiTurnLimit: 'הגעת למגבלת הצעדים של המשימה — כתבו "המשך" כדי שאמשיך.',
     aiUnknownError: 'שגיאה לא ידועה',
     aiTimeoutError: 'תם הזמן לבקשת ה-AI: אין תגובה מהרשת וההרצה הופסקה. בדוק את החיבור ונסה שוב',
+    aiOverloadedError: 'שירות ה-AI עמוס כרגע — נסו שוב בעוד רגע',
     aiNetworkError: 'בעיית רשת: לא ניתן להתחבר לשירות ה-AI. בדוק את החיבור ונסה שוב',
     aiCreditsExhausted: 'נגמרו קרדיטי ה-AI שלך. הגדר ספק AI אחר בהגדרות ונסה שוב',
     aiToolReadPages: 'קריאת עמודים {start}-{end}',
@@ -4957,10 +4997,12 @@ export const strings = {
     aiWorking: 'प्रोसेस हो रहा है',
     aiStopped: 'रोका गया',
     aiNoReply: '(कोई उत्तर नहीं)',
+    aiTruncatedNote: '(उत्तर लंबाई सीमा के कारण कट गया और अधूरा हो सकता है।)',
     aiTurnLimit: 'इस कार्य की चरण सीमा पूरी हो गई — जारी रखने के लिए "जारी रखें" लिखें।',
     aiUnknownError: 'अज्ञात त्रुटि',
     aiTimeoutError:
       'AI अनुरोध का समय समाप्त: नेटवर्क से कोई प्रतिक्रिया नहीं मिली, इसलिए रोक दिया गया। कनेक्शन जांचें और फिर से प्रयास करें',
+    aiOverloadedError: 'AI सेवा अभी व्यस्त है — कृपया थोड़ी देर बाद फिर से प्रयास करें',
     aiNetworkError:
       'नेटवर्क समस्या: AI सेवा से कनेक्ट नहीं हो सका। कनेक्शन जांचें और फिर से प्रयास करें',
     aiCreditsExhausted: 'AI क्रेडिट समाप्त हो गए हैं। सेटिंग में कोई अन्य AI प्रदाता कॉन्फ़िगर करें और फिर से प्रयास करें।',
@@ -5232,9 +5274,11 @@ export const strings = {
     aiWorking: '繼續處理中',
     aiStopped: '已停止',
     aiNoReply: '（無回覆）',
+    aiTruncatedNote: '（回覆因長度限制被截斷,內容可能不完整。）',
     aiTurnLimit: '已達到單次任務的步數上限，回覆「繼續」讓我接著做。',
     aiUnknownError: '未知錯誤',
     aiTimeoutError: 'AI 請求逾時：網路長時間無回應，已停止。請檢查網路後重試',
+    aiOverloadedError: 'AI 服務目前繁忙，請稍後重試',
     aiNetworkError: '網路有問題，無法連接 AI 服務。請檢查網路後重試',
     aiCreditsExhausted: 'AI 額度已用完，請在設定中設定其他 AI 服務後重試',
     aiToolReadPages: '讀取第 {start}-{end} 頁',

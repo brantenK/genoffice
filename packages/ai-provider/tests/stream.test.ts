@@ -550,6 +550,48 @@ describe('streamForProvider: openai-compatible', () => {
     expect(toolCalls).toEqual([{ id: 'c1', name: 'replace', input: { x: 1 } }])
   })
 
+  it('tolerates servers that resend the full tool name on every delta', async () => {
+    const body = sseStream([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"replace","arguments":"{\\"x\\":"}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"replace","arguments":"1}"}}]}}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+      'data: [DONE]',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(body)))
+    const { toolCalls, cb } = collector()
+    await streamForProvider(
+      'openai',
+      { apiKey: 'k', model: 'gpt-4.1-mini' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
+    expect(toolCalls).toEqual([{ id: 'c1', name: 'replace', input: { x: 1 } }])
+  })
+
+  it('still assembles a tool name streamed in fragments', async () => {
+    const body = sseStream([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"rep"}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"lace","arguments":"{\\"x\\":1}"}}]}}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+      'data: [DONE]',
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(body)))
+    const { toolCalls, cb } = collector()
+    await streamForProvider(
+      'openai',
+      { apiKey: 'k', model: 'gpt-4.1-mini' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
+    expect(toolCalls).toEqual([{ id: 'c1', name: 'replace', input: { x: 1 } }])
+  })
+
   it("finish_reason 'length' normalizes to max_tokens and flags the cut-off tool call", async () => {
     const body = sseStream([
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"replace","arguments":"{\\"x\\": \\"trunc"}}]}}]}',
@@ -783,25 +825,6 @@ describe('streamForProvider: genspark', () => {
     )
   })
 
-  it('routes gemini models to the Gemini proxy with header auth', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream([])))
-    vi.stubGlobal('fetch', fetchMock)
-    const { cb } = collector()
-    await streamForProvider(
-      'genspark',
-      { apiKey: 'gsk-k', model: 'gemini-3-flash-preview' },
-      'sys',
-      [],
-      [],
-      100,
-      cb,
-    ).catch(() => {})
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://www.genspark.ai/api/llm_proxy/gemini/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse',
-      expect.objectContaining({ headers: expect.objectContaining({ 'x-goog-api-key': 'gsk-k' }) }),
-    )
-  })
-
   it('routes other models to the OpenAI-compatible proxy', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
     vi.stubGlobal('fetch', fetchMock)
@@ -821,8 +844,8 @@ describe('streamForProvider: genspark', () => {
     )
   })
 
-  it('stamps X-Agent-Type on all three proxy routes for billing attribution', async () => {
-    for (const model of ['claude-opus-4-7', 'gemini-3-flash-preview', 'gpt-5.2']) {
+  it('stamps X-Agent-Type on both proxy routes for billing attribution', async () => {
+    for (const model of ['claude-opus-4-7', 'gpt-5.2']) {
       const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream([])))
       vi.stubGlobal('fetch', fetchMock)
       const { cb } = collector()
