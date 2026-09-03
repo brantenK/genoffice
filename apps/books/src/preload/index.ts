@@ -11,6 +11,12 @@ const booksApi: BooksApi = {
     ipcRenderer.invoke(BOOKS_CHANNELS.openInPdf, invoice, companyName),
   openInCrm: () => ipcRenderer.invoke(BOOKS_CHANNELS.openInCrm),
   openInTenders: () => ipcRenderer.invoke(BOOKS_CHANNELS.openInTenders),
+  importBankStatementCsv: (csvContent: string) =>
+    ipcRenderer.invoke(BOOKS_CHANNELS.importBankStatementCsv, csvContent),
+  reconcileTransaction: (transactionId: string, invoiceId: string) =>
+    ipcRenderer.invoke(BOOKS_CHANNELS.reconcileTransaction, transactionId, invoiceId),
+  getSettlementSuggestions: () =>
+    ipcRenderer.invoke(BOOKS_CHANNELS.getSettlementSuggestions),
 }
 
 if (process.contextIsolated) {

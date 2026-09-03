@@ -18,7 +18,9 @@ import {
   Monitor,
   RefreshCw,
   ShieldAlert,
-  Table
+  Table,
+  Award,
+  Zap
 } from 'lucide-react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { deadlineStatus, urgencyClasses, useNow } from '../deadline'
@@ -29,6 +31,7 @@ import { PdfViewer } from './PdfViewer'
 import { GapSummaryBar, RequirementList, ZoomControls } from './RequirementList'
 import { ReadinessDrawer } from './ReadinessDrawer'
 import { VaultDrawer } from './VaultDrawer'
+import { MilestonesDrawer } from './MilestonesDrawer'
 import { Badge, Button, Spinner } from './ui'
 
 export function Workspace() {
@@ -41,6 +44,8 @@ export function Workspace() {
   const [docError, setDocError] = useState<string | null>(null)
   const [vaultOpen, setVaultOpen] = useState(false)
   const [readinessOpen, setReadinessOpen] = useState(false)
+  const [milestonesOpen, setMilestonesOpen] = useState(false)
+  const [billingId, setBillingId] = useState<string | null>(null)
   const reattachRef = useRef<HTMLInputElement | null>(null)
   const now = useNow(60_000)
 
@@ -208,6 +213,19 @@ export function Workspace() {
           >
             <ClipboardCheck size={14} /> Bid readiness
           </Button>
+          <Button
+            size="sm"
+            variant={milestonesOpen ? 'primary' : 'default'}
+            onClick={() => setMilestonesOpen((v) => !v)}
+            title="Open contract delivery milestones & Books billing"
+          >
+            <Award size={14} /> Milestones
+            {tender.milestones && tender.milestones.some((m) => m.status === 'REACHED') && (
+              <Badge tone="indigo" className="ml-1 px-1.5 py-0 text-[10px] font-bold">
+                {tender.milestones.filter((m) => m.status === 'REACHED').length} ready
+              </Badge>
+            )}
+          </Button>
           <Button size="sm" variant="primary" onClick={() => setVaultOpen((v) => !v)}>
             <ShieldAlert size={14} /> Company vault
           </Button>
@@ -216,8 +234,91 @@ export function Workspace() {
 
       {/* split panes */}
       <div className="flex min-h-0 flex-1">
-        <aside className="w-[42%] min-w-[340px] shrink-0 border-r border-slate-200">
-          <RequirementList tender={tender} />
+        <aside className="flex w-[42%] min-w-[340px] shrink-0 flex-col border-r border-slate-200">
+          {tender.milestones && tender.milestones.length > 0 && (
+            <div className="shrink-0 border-b border-indigo-100 bg-indigo-50/40 p-2.5 px-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-indigo-900 flex items-center gap-1">
+                  <Award size={12} className="text-indigo-600" /> Contract Delivery Milestones
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMilestonesOpen(true)}
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+                >
+                  View all ({tender.milestones.length})
+                </button>
+              </div>
+              <div className="space-y-1.5">
+                {tender.milestones.map((m) => {
+                  if (m.status === 'REACHED') {
+                    return (
+                      <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-white p-2 border border-indigo-200 shadow-xs">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-slate-900 truncate">{m.name || m.title}</div>
+                          <div className="text-[10px] text-slate-500">R {Number(m.amount).toLocaleString()} · Ready to Bill</div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={billingId === m.id}
+                          onClick={async () => {
+                            setBillingId(m.id)
+                            try {
+                              const res = await window.tendersApi?.billMilestoneInBooks(tender.id, m.id)
+                              if (res && res.ok) {
+                                const nowIso = new Date().toISOString()
+                                const updated = (tender.milestones || []).map((x) =>
+                                  x.id === m.id
+                                    ? {
+                                        ...x,
+                                        status: 'BILLED' as const,
+                                        billedInvoiceId: res.invoiceId,
+                                        billedInvoiceNumber: res.invoiceNumber,
+                                        billedAt: nowIso,
+                                        billedDate: nowIso,
+                                      }
+                                    : x,
+                                )
+                                updateTender(tender.id, { milestones: updated })
+                                await window.tendersApi?.openBooks?.()
+                              }
+                            } finally {
+                              setBillingId(null)
+                            }
+                          }}
+                          className="shrink-0 inline-flex items-center gap-1 rounded bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+                        >
+                          {billingId === m.id ? <Spinner /> : <Zap size={11} className="text-amber-300" />} Bill Milestone in Zano Books
+                        </button>
+                      </div>
+                    )
+                  }
+                  if (m.status === 'BILLED') {
+                    return (
+                      <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-white/80 p-2 border border-slate-200">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium text-slate-700 truncate">{m.name || m.title}</div>
+                          <div className="text-[10px] text-slate-400">R {Number(m.amount).toLocaleString()}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => window.tendersApi?.openBooks?.()}
+                          className="shrink-0 inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100 cursor-pointer"
+                          title="Open invoice in Zano Books"
+                        >
+                          <FileText size={11} /> {m.billedInvoiceNumber || 'INV-2026'}
+                        </button>
+                      </div>
+                    )
+                  }
+                  return null
+                })}
+              </div>
+            </div>
+          )}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <RequirementList tender={tender} />
+          </div>
         </aside>
         <section className="relative min-w-0 flex-1">
           {!tender.fileUrl ? (
@@ -265,6 +366,9 @@ export function Workspace() {
 
         {/* bid-readiness drawer */}
         {readinessOpen && <ReadinessDrawer onClose={() => setReadinessOpen(false)} />}
+
+        {/* contract milestones drawer */}
+        {milestonesOpen && <MilestonesDrawer onClose={() => setMilestonesOpen(false)} />}
       </div>
     </main>
   )

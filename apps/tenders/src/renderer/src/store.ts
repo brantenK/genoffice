@@ -36,6 +36,7 @@ interface ShredProgress {
 /** Everything a company owns, under a stable explicit id. */
 export interface CompanyWorkspace {
   id: string
+  name?: string
   company: CompanyProfile
   customers: Customer[]
   vault: VaultDoc[]
@@ -135,6 +136,46 @@ interface TendersState {
   rerunGap: () => void
 }
 
+export const SEED_TENDER_WTR_04: TenderRecord = {
+  id: 'tender-wtr-04',
+  title: 'Bulk Water Metering & Valve Refurbishment',
+  referenceNumber: 'RFP-WTR-2026-04',
+  issuingBody: 'City of Ekurhuleni Water Dept',
+  closingDate: '2026-10-31',
+  submissionMethod: 'PHYSICAL',
+  submissionAddress: 'Civic Centre, Kempton Park, Ekurhuleni',
+  signatureChecks: {},
+  status: 'IN_PROGRESS',
+  createdAt: '2026-08-01T08:00:00Z',
+  fileName: 'RFP-WTR-2026-04.pdf',
+  fileUrl: '',
+  numPages: 24,
+  ocrPages: 0,
+  estimatedValue: 243000,
+  milestones: [
+    {
+      id: 'ms-01',
+      name: 'Phase 1 Reservoir Valve Refurbishment',
+      title: 'Phase 1 Reservoir Valve Refurbishment',
+      description: 'Complete overhaul of high-pressure control valves per tender specification',
+      amount: 145000,
+      status: 'REACHED',
+      dueDate: '2026-08-30',
+      completedDate: '2026-08-28',
+    },
+    {
+      id: 'ms-02',
+      name: 'Phase 2 Ultrasonic Flow Meter Installation',
+      title: 'Phase 2 Ultrasonic Flow Meter Installation',
+      description: 'Install and calibrate digital flow sensors across metering points',
+      amount: 98000,
+      status: 'PENDING',
+      dueDate: '2026-11-15',
+    },
+  ],
+  requirements: [],
+}
+
 const SEED_COMPANY_ID = 'co-thabo'
 
 function seedWorkspaces(): CompanyWorkspace[] {
@@ -144,7 +185,7 @@ function seedWorkspaces(): CompanyWorkspace[] {
       company: { ...MOCK_COMPANY },
       customers: MOCK_CUSTOMERS,
       vault: MOCK_VAULT,
-      tenders: []
+      tenders: [SEED_TENDER_WTR_04]
     }
   ]
 }
@@ -402,6 +443,14 @@ export const useTendersStore = create<TendersState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return
+        // Ensure default seed tender RFP-WTR-2026-04 exists if tender list is empty
+        for (const ws of state.workspaces) {
+          if (!ws.tenders || ws.tenders.length === 0) {
+            ws.tenders = [SEED_TENDER_WTR_04]
+          } else if (!ws.tenders.some((t) => t.id === 'tender-wtr-04' || t.referenceNumber === 'RFP-WTR-2026-04')) {
+            ws.tenders.push(SEED_TENDER_WTR_04)
+          }
+        }
         // Blob URLs from a previous session are dead — make sure they're blank.
         state.workspaces = state.workspaces.map((ws) => ({
           ...ws,
@@ -411,6 +460,10 @@ export const useTendersStore = create<TendersState>()(
             d.fileUrl?.startsWith('blob:') ? { ...d, fileUrl: null } : d
           )
         }))
+        const activeWs = state.workspaces.find((w) => w.id === state.activeCompanyId) ?? state.workspaces[0]
+        if (activeWs) {
+          state.tenders = activeWs.tenders
+        }
         // transient state must never leak in from storage
         state.shredding = null
         state.pendingFocus = null

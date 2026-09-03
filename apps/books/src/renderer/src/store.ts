@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  BankTransaction,
   BooksData,
   BooksNavigationTab,
   Invoice,
@@ -32,6 +33,8 @@ interface BooksState {
   deleteInvoice: (invoiceId: string) => Promise<void>
   addParty: (party: Omit<Party, 'id' | 'outstandingBalance'>) => Promise<void>
   addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'posted'>) => Promise<void>
+  importBankStatementCsv: (csvContent: string) => Promise<any>
+  reconcileTransaction: (transactionId: string, invoiceId: string) => Promise<any>
   persist: () => Promise<void>
 }
 
@@ -342,4 +345,202 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
     await persist()
   },
+
+  importBankStatementCsv: async (csvContent: string) => {
+    if (window.booksApi?.importBankStatementCsv) {
+      const res = await window.booksApi.importBankStatementCsv(csvContent)
+      if (res.ok) {
+        await get().loadData()
+      }
+      return res
+    }
+
+    // Local in-memory fallback
+    const { data, persist } = get()
+    const lines = csvContent.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
+    if (lines.length < 2) {
+      return { ok: false, error: 'No valid transactions found in statement CSV' }
+    }
+    const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/['"]/g, ''))
+    const dateIdx = headers.findIndex((h) => h.includes('date'))
+    const descIdx = headers.findIndex((h) => h.includes('desc') || h.includes('details') || h.includes('narrative'))
+    const refIdx = headers.findIndex((h) => h.includes('ref'))
+    const amountIdx = headers.findIndex((h) => h === 'amount' || h === 'value')
+    const debitIdx = headers.findIndex((h) => h.includes('debit'))
+    const creditIdx = headers.findIndex((h) => h.includes('credit'))
+
+    const parsed: BankTransaction[] = []
+    for (let i = 1; i < lines.length; i++) {
+      const cols: string[] = []
+      let curr = ''
+      let inQuote = false
+      for (let c = 0; c < lines[i].length; c++) {
+        const char = lines[i][c]
+        if (char === '"') inQuote = !inQuote
+        else if (char === ',' && !inQuote) { cols.push(curr.trim()); curr = '' }
+        else curr += char
+      }
+      cols.push(curr.trim())
+      if (cols.length === 0 || !cols.some((c) => c.length > 0)) continue
+
+      const date = dateIdx >= 0 && cols[dateIdx] ? cols[dateIdx] : new Date().toISOString().split('T')[0]
+      const description = descIdx >= 0 && cols[descIdx] ? cols[descIdx] : 'Bank Transaction'
+      const reference = refIdx >= 0 && cols[refIdx] ? cols[refIdx] : ''
+      let amount = 0
+      if (amountIdx >= 0 && cols[amountIdx]) {
+        let clean = cols[amountIdx].replace(/[R$\s]/g, '').replace(/,/g, '')
+        if (clean.startsWith('(') && clean.endsWith(')')) clean = '-' + clean.slice(1, -1)
+        amount = parseFloat(clean) || 0
+      } else if (debitIdx >= 0 || creditIdx >= 0) {
+        const deb = parseFloat(debitIdx >= 0 && cols[debitIdx] ? cols[debitIdx].replace(/[R$\s]/g, '').replace(/,/g, '') : '0') || 0
+        const cred = parseFloat(creditIdx >= 0 && cols[creditIdx] ? cols[creditIdx].replace(/[R$\s]/g, '').replace(/,/g, '') : '0') || 0
+        amount = cred > 0 ? cred : -deb
+      }
+      if (isNaN(amount) || amount === 0) continue
+      parsed.push({
+        id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        accountId: 'acc-bank',
+        date,
+        description,
+        reference,
+        amount: Math.round(amount * 100) / 100,
+        reconciled: false,
+      })
+    }
+
+    if (parsed.length === 0) {
+      return { ok: false, error: 'No valid transactions found in statement CSV' }
+    }
+
+    const existing = data.bankTransactions || []
+    const existingFps = new Set(existing.map((t) => `${t.date}|${t.description}|${t.amount}`))
+    const toAdd: BankTransaction[] = []
+    let netAdjustment = 0
+
+    for (const tx of parsed) {
+      const fp = `${tx.date}|${tx.description}|${tx.amount}`
+      if (!existingFps.has(fp)) {
+        toAdd.push(tx)
+        netAdjustment += tx.amount
+        existingFps.add(fp)
+      }
+    }
+
+    const nextAccounts = data.accounts.map((a) => {
+      if (a.id === 'acc-bank') {
+        return { ...a, balance: Math.round((a.balance + netAdjustment) * 100) / 100 }
+      }
+      return a
+    })
+    const bankAccount = nextAccounts.find((a) => a.id === 'acc-bank')
+
+    set({
+      data: {
+        ...data,
+        bankTransactions: [...existing, ...toAdd],
+        accounts: nextAccounts,
+      },
+    })
+    await persist()
+
+    return {
+      ok: true,
+      importedCount: toAdd.length,
+      skippedDuplicates: parsed.length - toAdd.length,
+      netAdjustment: Math.round(netAdjustment * 100) / 100,
+      newBankBalance: bankAccount ? bankAccount.balance : null,
+      transactions: toAdd,
+    }
+  },
+
+  reconcileTransaction: async (transactionId: string, invoiceId: string) => {
+    if (window.booksApi?.reconcileTransaction) {
+      const res = await window.booksApi.reconcileTransaction(transactionId, invoiceId)
+      if (res.ok) {
+        await get().loadData()
+      }
+      return res
+    }
+
+    // Local in-memory fallback
+    const { data, persist } = get()
+    const tx = (data.bankTransactions || []).find((t) => t.id === transactionId)
+    if (!tx) return { ok: false, error: `Transaction not found: ${transactionId}` }
+    if (tx.reconciled) return { ok: false, error: `Transaction already reconciled: ${transactionId}` }
+
+    const inv = (data.invoices || []).find((i) => i.id === invoiceId)
+    if (!inv) return { ok: false, error: `Invoice not found: ${invoiceId}` }
+    if (inv.status === 'Paid') return { ok: false, error: `Invoice already marked Paid: ${invoiceId}` }
+
+    const settledAmount = inv.outstandingAmount
+
+    const nextBankTransactions = (data.bankTransactions || []).map((t) =>
+      t.id === transactionId
+        ? { ...t, reconciled: true, matchedInvoiceId: inv.id, reconciledAt: new Date().toISOString() }
+        : t
+    )
+
+    const nextInvoices = data.invoices.map((i) =>
+      i.id === invoiceId
+        ? { ...i, status: 'Paid' as InvoiceStatus, outstandingAmount: 0, updatedAt: new Date().toISOString() }
+        : i
+    )
+
+    const party = data.parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
+    const nextParties = data.parties.map((p) => {
+      if (party && p.id === party.id) {
+        return { ...p, outstandingBalance: Math.max(0, Math.round((p.outstandingBalance - settledAmount) * 100) / 100) }
+      }
+      return p
+    })
+
+    const nextAccounts = data.accounts.map((acc) => {
+      if (inv.type === 'Sales' && acc.id === 'acc-ar') {
+        return { ...acc, balance: Math.max(0, Math.round((acc.balance - settledAmount) * 100) / 100) }
+      }
+      if (inv.type === 'Purchase' && acc.id === 'acc-ap') {
+        return { ...acc, balance: Math.max(0, Math.round((acc.balance - settledAmount) * 100) / 100) }
+      }
+      return acc
+    })
+
+    const jeNumber = `JE-${new Date().getFullYear()}-${String(data.journalEntries.length + 1).padStart(3, '0')}`
+    const today = new Date().toISOString().split('T')[0]
+    const journalItems =
+      inv.type === 'Sales'
+        ? [
+            { id: `jei-rec-1`, accountId: 'acc-bank', accountName: 'FNB Business Cheque Account', debit: settledAmount, credit: 0 },
+            { id: `jei-rec-2`, accountId: 'acc-ar', accountName: 'Accounts Receivable (Debtors)', debit: 0, credit: settledAmount, partyId: party?.id, partyName: party?.name },
+          ]
+        : [
+            { id: `jei-rec-1`, accountId: 'acc-ap', accountName: 'Accounts Payable (Creditors)', debit: settledAmount, credit: 0, partyId: party?.id, partyName: party?.name },
+            { id: `jei-rec-2`, accountId: 'acc-bank', accountName: 'FNB Business Cheque Account', debit: 0, credit: settledAmount },
+          ]
+
+    const newJournalEntry: JournalEntry = {
+      id: `je-${Date.now()}`,
+      entryNumber: jeNumber,
+      date: today,
+      totalDebit: settledAmount,
+      totalCredit: settledAmount,
+      remarks: `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
+      posted: true,
+      items: journalItems,
+    }
+
+    set({
+      data: {
+        ...data,
+        bankTransactions: nextBankTransactions,
+        invoices: nextInvoices,
+        parties: nextParties,
+        accounts: nextAccounts,
+        journalEntries: [newJournalEntry, ...data.journalEntries],
+      },
+    })
+
+    await persist()
+    return { ok: true }
+  },
 }))
+

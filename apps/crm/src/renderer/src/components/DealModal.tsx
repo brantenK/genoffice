@@ -8,9 +8,10 @@ interface DealModalProps {
   contacts: Contact[]
   onClose: () => void
   onSave: (deal: Partial<Deal>) => void
+  onInvoiceCreated?: (dealId: string, invoiceNumber: string) => void
 }
 
-export function DealModal({ deal, companies, contacts, onClose, onSave }: DealModalProps) {
+export function DealModal({ deal, companies, contacts, onClose, onSave, onInvoiceCreated }: DealModalProps) {
   const [name, setName] = useState(deal?.name || '')
   const [amount, setAmount] = useState(deal?.amount ? String(deal.amount) : '10000')
   const [stage, setStage] = useState<DealStage>(deal?.stage || 'lead')
@@ -18,6 +19,32 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
   const [contactId, setContactId] = useState(deal?.contactId || (contacts[0]?.id ?? ''))
   const [expectedCloseDate, setExpectedCloseDate] = useState(deal?.expectedCloseDate || '')
   const [notes, setNotes] = useState(deal?.notes || '')
+  const [localInvoiceNumber, setLocalInvoiceNumber] = useState<string | undefined>(deal?.invoiceNumber)
+  const [isInvoicing, setIsInvoicing] = useState(false)
+  const [invoiceError, setInvoiceError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLocalInvoiceNumber(deal?.invoiceNumber)
+  }, [deal?.invoiceNumber])
+
+  const handleCreateInvoice = async () => {
+    if (!deal?.id) return
+    setIsInvoicing(true)
+    setInvoiceError(null)
+    try {
+      const res = await window.crmApi?.createInvoiceInBooks(deal.id)
+      if (res?.ok && res.invoiceNumber) {
+        setLocalInvoiceNumber(res.invoiceNumber)
+        onInvoiceCreated?.(deal.id, res.invoiceNumber)
+      } else if (res?.error) {
+        setInvoiceError(res.error)
+      }
+    } catch (err: any) {
+      setInvoiceError(err?.message || 'Failed to create invoice')
+    } finally {
+      setIsInvoicing(false)
+    }
+  }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -46,6 +73,7 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
       contactName: selCont?.name || '',
       expectedCloseDate,
       notes,
+      invoiceNumber: localInvoiceNumber,
     })
   }
 
@@ -155,6 +183,78 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
                 rows={3}
               />
             </div>
+
+            {stage === 'won' && deal?.id && (
+              <div
+                className="crm-form-group"
+                style={{
+                  padding: '14px',
+                  borderRadius: '8px',
+                  backgroundColor: localInvoiceNumber
+                    ? 'rgba(5, 150, 105, 0.06)'
+                    : 'rgba(245, 158, 11, 0.08)',
+                  border: localInvoiceNumber
+                    ? '1px solid rgba(5, 150, 105, 0.25)'
+                    : '1px solid rgba(245, 158, 11, 0.3)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '6px',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      color: localInvoiceNumber ? '#059669' : '#d97706',
+                    }}
+                  >
+                    Zano Books Invoicing
+                  </span>
+                  {localInvoiceNumber ? (
+                    <button
+                      type="button"
+                      className="crm-pill-action-btn"
+                      style={{
+                        background: 'rgba(5, 150, 105, 0.12)',
+                        borderColor: '#059669',
+                        color: '#059669',
+                        fontWeight: 600,
+                        padding: '4px 10px',
+                      }}
+                      title="Open Invoice in Zano Books"
+                      onClick={() => void window.crmApi?.openBooks()}
+                    >
+                      📄 {localInvoiceNumber} (Open in Books)
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="crm-btn crm-btn-primary"
+                      style={{ fontSize: '12px', padding: '6px 14px' }}
+                      disabled={isInvoicing}
+                      onClick={() => void handleCreateInvoice()}
+                    >
+                      {isInvoicing ? 'Creating...' : '⚡ Create Invoice in Zano Books'}
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--crm-text-secondary)' }}>
+                  {localInvoiceNumber
+                    ? `Invoice ${localInvoiceNumber} has been generated and linked to this opportunity.`
+                    : 'This opportunity is closed won. Generate a Sales Invoice directly in Zano Books.'}
+                </div>
+                {invoiceError && (
+                  <div style={{ color: '#dc2626', fontSize: '12px', marginTop: '6px' }}>
+                    {invoiceError}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="crm-modal-footer">

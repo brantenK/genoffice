@@ -297,6 +297,7 @@ configureCrmRuntime({
   rendererFile: join(CRM_OUT, 'renderer', 'index.html'),
   openGeneratedPath: (path) => openGeneratedDocument(path),
   onOpenTenders: () => newTendersTab(),
+  onOpenBooks: () => newBooksTab(),
 })
 configureTendersRuntime({
   preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
@@ -304,6 +305,7 @@ configureTendersRuntime({
   rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
   openGeneratedPath: (path) => openGeneratedDocument(path),
   onOpenCrm: () => newCrmTab(),
+  onOpenBooks: () => newBooksTab(),
 })
 configureBooksRuntime({
   preloadPath: join(BOOKS_OUT, 'preload', 'index.js'),

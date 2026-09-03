@@ -24,11 +24,17 @@ export const CRM_CHANNELS = {
   exportToSheets: 'crm:export-to-sheets',
   generateProposalDoc: 'crm:generate-proposal-doc',
   openTenders: 'crm:open-tenders',
+  createInvoiceInBooks: 'crm:create-invoice-in-books',
+  openBooks: 'crm:open-books',
 } as const
 
 export interface CrmApi {
   getStats(): Promise<CrmStats>
   openTenders(): Promise<boolean>
+  openBooks(): Promise<boolean>
+  createInvoiceInBooks(
+    dealId: string,
+  ): Promise<{ ok: boolean; invoiceNumber?: string; invoiceId?: string; error?: string }>
   // Deals
   listDeals(): Promise<Deal[]>
   getDeal(id: string): Promise<Deal | null>

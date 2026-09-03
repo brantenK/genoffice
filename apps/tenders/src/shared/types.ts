@@ -168,6 +168,56 @@ export interface TenderRecord {
   requirements: RequirementRecord[]
   linkedCrmDealId?: string | null
   estimatedValue?: number | null
+  milestones?: ContractMilestone[]
+}
+
+export type MilestoneBillingStatus = 'PENDING' | 'REACHED' | 'BILLED' | 'PAID'
+export type MilestoneStatus = MilestoneBillingStatus
+
+export interface ContractMilestone {
+  id: string
+  name: string
+  title?: string
+  description?: string
+  amount: number
+  dueDate?: string
+  completedDate?: string
+  status: MilestoneBillingStatus
+  billedInvoiceId?: string
+  billedInvoiceNumber?: string
+  billedAt?: string
+  billedDate?: string
+}
+
+
+export interface CompanyWorkspace {
+  id: string
+  name?: string
+  company: CompanyProfile
+  customers: Customer[]
+  vault: VaultDoc[]
+  tenders: TenderRecord[]
+}
+
+export interface IssuerTemplate {
+  id: string
+  name: string
+  displayName: string
+  address: string | null
+  contact: string | null
+  refStyle: string | null
+  submissionMethod: SubmissionMethod | null
+  submissionAddress: string | null
+  seenCount: number
+  lastSeen: string
+}
+
+export interface TendersData {
+  version: number
+  updatedAt: string
+  activeCompanyId: string
+  workspaces: CompanyWorkspace[]
+  issuerTemplates: IssuerTemplate[]
 }
 
 export const SUBMISSION_METHOD_LABEL: Record<SubmissionMethod, string> = {

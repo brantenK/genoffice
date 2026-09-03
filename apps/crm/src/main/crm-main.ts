@@ -1,9 +1,12 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { app, ipcMain, WebContentsView } from 'electron'
 import { CRM_CHANNELS } from '../shared/ipc'
 import type { Activity, Company, Contact, Deal, DealStage } from '../shared/types'
+import { readBooksStore, writeBooksStore } from '../../../books/src/main/books-main'
+import type { Invoice, JournalEntry } from '../../../books/src/shared/types'
 import { CrmStore } from './crm-store'
 
 export interface CrmRuntimeConfig {
@@ -12,6 +15,7 @@ export interface CrmRuntimeConfig {
   rendererFile: string
   openGeneratedPath?: (path: string) => boolean
   onOpenTenders?: (tenderTitle?: string) => void
+  onOpenBooks?: () => void
 }
 
 let runtime: CrmRuntimeConfig = {
@@ -156,6 +160,172 @@ ${deal.notes ? `> ${deal.notes}\n\n` : ''}
       return true
     }
     return false
+  })
+
+  // Cross-App: Open Books tab
+  ipcMain.handle(CRM_CHANNELS.openBooks, () => {
+    if (runtime.onOpenBooks) {
+      runtime.onOpenBooks()
+      return true
+    }
+    return false
+  })
+
+  // Cross-App: Create Invoice in Zano Books
+  ipcMain.handle(CRM_CHANNELS.createInvoiceInBooks, async (_e, dealId: string) => {
+    try {
+      const deal = s.getDeals().find((d) => d.id === dealId)
+      if (!deal) {
+        return { ok: false, error: `Deal not found: ${dealId}` }
+      }
+
+      if (deal.stage !== 'won') {
+        return { ok: false, error: `Deal is not won. Current stage: ${deal.stage}` }
+      }
+
+      if (deal.invoiceNumber || deal.invoiceId) {
+        return {
+          ok: true,
+          invoiceNumber: deal.invoiceNumber,
+          invoiceId: deal.invoiceId,
+        }
+      }
+
+      const booksDir = join(app.getPath('userData'), 'books')
+      const booksPath = join(booksDir, 'books-data.json')
+      const booksData = readBooksStore(booksPath)
+
+      const partyName = deal.companyName || deal.name || 'Valued Client'
+      let party = booksData.parties.find(
+        (p) => p.name.toLowerCase() === partyName.toLowerCase(),
+      )
+
+      if (!party) {
+        party = {
+          id: `party-${randomUUID().slice(0, 8)}`,
+          name: partyName,
+          type: 'Customer',
+          email: `accounts@${partyName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com`,
+          outstandingBalance: 0,
+        }
+        booksData.parties.push(party)
+      }
+
+      const year = new Date().getFullYear()
+      const count = booksData.invoices.length
+      const invoiceNumber = `INV-${year}-${String(count + 1).padStart(3, '0')}`
+      const invoiceId = `inv-${randomUUID().slice(0, 8)}`
+
+      const grandTotal = Math.round(Number(deal.amount || 0) * 100) / 100
+      const subtotal = Math.round((grandTotal / 1.15) * 100) / 100
+      const taxTotal = Math.round((grandTotal - subtotal) * 100) / 100
+      const today = new Date().toISOString().split('T')[0]
+      const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+
+      const newInvoice: Invoice = {
+        id: invoiceId,
+        invoiceNumber,
+        type: 'Sales',
+        partyId: party.id,
+        partyName: party.name,
+        date: today,
+        dueDate,
+        items: [
+          {
+            id: `item-${randomUUID().slice(0, 8)}`,
+            itemCode: 'COMMERCIAL-DELIVERY',
+            description: `${deal.name} - Commercial Implementation & Services`,
+            accountId: 'acc-sales',
+            accountName: 'Tender & Commercial Contracting Sales',
+            qty: 1,
+            rate: subtotal,
+            taxRate: 15,
+            amount: subtotal,
+          },
+        ],
+        subtotal,
+        taxTotal,
+        grandTotal,
+        outstandingAmount: grandTotal,
+        status: 'Unpaid',
+        notes: 'Payment terms: Net 30 days upon invoice receipt.',
+        crmDealId: deal.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      booksData.invoices.unshift(newInvoice)
+      party.outstandingBalance = Math.round((party.outstandingBalance + grandTotal) * 100) / 100
+
+      // Double-entry ledger adjustment
+      for (const acc of booksData.accounts) {
+        if (acc.id === 'acc-ar') acc.balance = Math.round((acc.balance + grandTotal) * 100) / 100
+        if (acc.id === 'acc-sales') acc.balance = Math.round((acc.balance + subtotal) * 100) / 100
+        if (acc.id === 'acc-vat') acc.balance = Math.round((acc.balance + taxTotal) * 100) / 100
+      }
+
+      // Balanced Journal Entry
+      const nextJeNumber = `JE-${year}-${booksData.journalEntries.length + 1}`
+      const newJournalEntry: JournalEntry = {
+        id: `je-${randomUUID().slice(0, 8)}`,
+        entryNumber: nextJeNumber,
+        date: today,
+        totalDebit: grandTotal,
+        totalCredit: grandTotal,
+        remarks: `Sales Invoice ${invoiceNumber} for CRM Deal: ${deal.name}`,
+        posted: true,
+        items: [
+          {
+            id: `jei-${randomUUID().slice(0, 8)}`,
+            accountId: 'acc-ar',
+            accountName: 'Accounts Receivable',
+            debit: grandTotal,
+            credit: 0,
+            partyId: party.id,
+            partyName: party.name,
+          },
+          {
+            id: `jei-${randomUUID().slice(0, 8)}`,
+            accountId: 'acc-sales',
+            accountName: 'Tender & Commercial Contracting Sales',
+            debit: 0,
+            credit: subtotal,
+          },
+          {
+            id: `jei-${randomUUID().slice(0, 8)}`,
+            accountId: 'acc-vat',
+            accountName: 'SARS VAT Output Payable',
+            debit: 0,
+            credit: taxTotal,
+          },
+        ],
+      }
+      booksData.journalEntries.unshift(newJournalEntry)
+
+      writeBooksStore(booksPath, booksData)
+
+      // Update CRM deal in deals.json with back-reference
+      s.saveDeal({
+        id: deal.id,
+        invoiceId,
+        invoiceNumber,
+        invoicedAt: new Date().toISOString(),
+      })
+
+      // Trigger shell tab activation
+      runtime.onOpenBooks?.()
+
+      return {
+        ok: true,
+        invoiceNumber,
+        invoiceId,
+      }
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: err?.message || 'Failed to create invoice in Books',
+      }
+    }
   })
 }
 

@@ -279,4 +279,6 @@ export const initialBooksData: BooksData = {
       posted: true,
     },
   ],
+  bankTransactions: [],
 }
+

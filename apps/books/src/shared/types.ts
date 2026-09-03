@@ -107,16 +107,54 @@ export interface CompanySettings {
   phone: string
 }
 
+export interface BankTransaction {
+  id: string
+  accountId: string // 'acc-bank'
+  date: string // YYYY-MM-DD
+  description: string
+  reference?: string
+  amount: number // positive = deposit, negative = withdrawal
+  reconciled: boolean
+  matchedInvoiceId?: string
+  reconciledAt?: string
+}
+
+export interface SettlementSuggestion {
+  transactionId: string
+  invoiceId: string
+  invoiceNumber: string
+  partyName: string
+  invoiceType: 'Sales' | 'Purchase'
+  amount: number
+  confidence: 'HIGH' | 'MEDIUM'
+  reason: string
+}
+
 export interface BooksData {
+  version?: number
+  updatedAt?: string
   settings: CompanySettings
   accounts: Account[]
   parties: Party[]
   invoices: Invoice[]
   journalEntries: JournalEntry[]
+  bankTransactions?: BankTransaction[]
+}
+
+export interface BooksDataEnvelope {
+  version: number
+  updatedAt: string
+  settings: CompanySettings
+  accounts: Account[]
+  parties: Party[]
+  invoices: Invoice[]
+  journalEntries: JournalEntry[]
+  bankTransactions?: BankTransaction[]
 }
 
 export type BooksNavigationTab =
   | 'dashboard'
+  | 'banking'
   | 'invoices'
   | 'purchases'
   | 'parties'
@@ -126,3 +164,4 @@ export type BooksNavigationTab =
   | 'settings'
 
 export type ReportType = 'profit-loss' | 'balance-sheet' | 'general-ledger' | 'trial-balance'
+

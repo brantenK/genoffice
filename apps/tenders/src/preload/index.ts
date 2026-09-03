@@ -12,6 +12,9 @@ const tendersApi: TendersApi = {
     ipcRenderer.invoke(TENDERS_CHANNELS.syncWithCrm, dealData),
   openInCrm: (dealId?: string) =>
     ipcRenderer.invoke(TENDERS_CHANNELS.openInCrm, dealId),
+  billMilestoneInBooks: (tenderIdOrPayload, milestoneId) =>
+    ipcRenderer.invoke(TENDERS_CHANNELS.billMilestoneInBooks, tenderIdOrPayload, milestoneId),
+  openBooks: () => ipcRenderer.invoke(TENDERS_CHANNELS.openBooks),
 }
 
 contextBridge.exposeInMainWorld('tendersApi', tendersApi)

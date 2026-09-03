@@ -8,6 +8,8 @@ interface DealsTableViewProps {
   onUpdateStage: (id: string, stage: DealStage) => void
   onDeleteDeal: (id: string) => void
   onGenerateProposal: (dealId: string) => void
+  onInvoiceCreated?: (dealId: string, invoiceNumber: string) => void
+  onShowToast?: (msg: string) => void
 }
 
 const STAGES: { key: DealStage; label: string; color: string }[] = [
@@ -25,8 +27,44 @@ export function DealsTableView({
   onUpdateStage,
   onDeleteDeal,
   onGenerateProposal,
+  onInvoiceCreated,
+  onShowToast,
 }: DealsTableViewProps) {
   const [filterStage, setFilterStage] = useState<DealStage | 'all'>('all')
+  const [invoicingDealId, setInvoicingDealId] = useState<string | null>(null)
+  const [localInvoices, setLocalInvoices] = useState<Record<string, string>>({})
+  const [localToast, setLocalToast] = useState<string | null>(null)
+
+  const handleCreateInvoice = async (deal: Deal) => {
+    if (invoicingDealId) return
+    setInvoicingDealId(deal.id)
+    try {
+      const res = await window.crmApi?.createInvoiceInBooks(deal.id)
+      if (res?.ok && res.invoiceNumber) {
+        setLocalInvoices((prev) => ({ ...prev, [deal.id]: res.invoiceNumber! }))
+        const msg = `Invoice ${res.invoiceNumber} created in Zano Books`
+        if (onShowToast) {
+          onShowToast(msg)
+        } else {
+          setLocalToast(msg)
+          setTimeout(() => setLocalToast(null), 3000)
+        }
+        onInvoiceCreated?.(deal.id, res.invoiceNumber)
+      } else if (res?.error) {
+        const errMsg = res.error
+        if (onShowToast) {
+          onShowToast(errMsg)
+        } else {
+          setLocalToast(errMsg)
+          setTimeout(() => setLocalToast(null), 3000)
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to create invoice in Books:', err)
+    } finally {
+      setInvoicingDealId(null)
+    }
+  }
 
   const filtered = deals.filter((d) => (filterStage === 'all' ? true : d.stage === filterStage))
 
@@ -165,6 +203,37 @@ export function DealsTableView({
                         <TenderIcon size={11} />
                         <span>Tenders</span>
                       </button>
+                      {deal.stage === 'won' &&
+                        (deal.invoiceNumber || localInvoices[deal.id] ? (
+                          <button
+                            className="crm-pill-action-btn"
+                            style={{
+                              background: 'rgba(5, 150, 105, 0.08)',
+                              borderColor: 'rgba(5, 150, 105, 0.3)',
+                              color: '#059669',
+                              fontWeight: 600,
+                            }}
+                            title="Open Invoice in Zano Books"
+                            onClick={() => void window.crmApi?.openBooks()}
+                          >
+                            <span>📄 {deal.invoiceNumber || localInvoices[deal.id]}</span>
+                          </button>
+                        ) : (
+                          <button
+                            className="crm-pill-action-btn"
+                            style={{
+                              background: 'rgba(245, 158, 11, 0.1)',
+                              borderColor: 'rgba(245, 158, 11, 0.35)',
+                              color: '#d97706',
+                              fontWeight: 600,
+                            }}
+                            disabled={invoicingDealId === deal.id}
+                            title="Create Sales Invoice in Zano Books"
+                            onClick={() => void handleCreateInvoice(deal)}
+                          >
+                            <span>{invoicingDealId === deal.id ? '⚡ Invoicing...' : '⚡ Invoice in Books'}</span>
+                          </button>
+                        ))}
                       <button
                         className="crm-icon-action-btn"
                         title="Edit Deal"
@@ -187,6 +256,15 @@ export function DealsTableView({
           </tbody>
         </table>
       </div>
+
+      {localToast && (
+        <div
+          className="crm-toast"
+          style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000 }}
+        >
+          <span>{localToast}</span>
+        </div>
+      )}
     </div>
   )
 }

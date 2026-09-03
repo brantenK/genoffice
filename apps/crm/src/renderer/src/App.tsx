@@ -106,6 +106,16 @@ export function App() {
     showToast('Opportunity saved')
   }
 
+  const handleInvoiceCreated = async (dealId: string, invoiceNumber: string) => {
+    setDeals((prev) =>
+      prev.map((d) =>
+        d.id === dealId ? { ...d, invoiceNumber, invoicedAt: new Date().toISOString() } : d,
+      ),
+    )
+    showToast(`Invoice ${invoiceNumber} created in Zano Books`)
+    await loadData()
+  }
+
   const handleUpdateStage = async (id: string, stage: DealStage) => {
     if (window.crmApi) {
       await window.crmApi.updateDealStage(id, stage)
@@ -387,6 +397,8 @@ export function App() {
             onUpdateStage={handleUpdateStage}
             onDeleteDeal={handleDeleteDeal}
             onGenerateProposal={handleGenerateProposal}
+            onInvoiceCreated={handleInvoiceCreated}
+            onShowToast={showToast}
           />
         )}
 
@@ -423,6 +435,7 @@ export function App() {
           contacts={contacts}
           onClose={() => setDealModalOpen(false)}
           onSave={handleSaveDeal}
+          onInvoiceCreated={handleInvoiceCreated}
         />
       )}
 

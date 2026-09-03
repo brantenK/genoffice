@@ -14,9 +14,11 @@ import {
   ArrowUpRight,
   HelpCircle,
   Command,
+  Landmark,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { Dashboard } from './Dashboard'
+import { BankingView } from './BankingView'
 import { InvoiceList } from './InvoiceList'
 import { InvoiceForm } from './InvoiceForm'
 import { PartyList } from './PartyList'
@@ -44,6 +46,7 @@ export function Desk() {
 
   const navItems: { id: BooksNavigationTab; label: string; icon: React.ComponentType<{ className?: string }>; section?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'banking', label: 'Banking & Statements', icon: Landmark, section: 'Banking' },
     { id: 'invoices', label: 'Sales Invoices', icon: Receipt, section: 'Sales' },
     { id: 'parties', label: 'Customers & Parties', icon: Users, section: 'Sales' },
     { id: 'purchases', label: 'Purchase Bills', icon: ShoppingBag, section: 'Purchases' },
@@ -187,6 +190,7 @@ export function Desk() {
         ) : (
           <>
             {activeTab === 'dashboard' && <Dashboard />}
+            {activeTab === 'banking' && <BankingView />}
             {activeTab === 'invoices' && <InvoiceList type="Sales" />}
             {activeTab === 'purchases' && <InvoiceList type="Purchase" />}
             {activeTab === 'parties' && <PartyList />}

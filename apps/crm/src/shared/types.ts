@@ -18,8 +18,17 @@ export interface Deal {
   probability: number
   expectedCloseDate?: string
   notes?: string
+  invoiceId?: string
+  invoiceNumber?: string
+  invoicedAt?: string
   createdAt: string
   updatedAt: string
+}
+
+export interface DealsStoreEnvelope {
+  version: number
+  updatedAt: string
+  deals: Deal[]
 }
 
 export interface Contact {

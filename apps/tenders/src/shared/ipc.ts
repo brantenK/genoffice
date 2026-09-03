@@ -7,7 +7,30 @@ export const TENDERS_CHANNELS = {
   draftProposalDoc: 'tenders:draft-proposal-doc',
   syncWithCrm: 'tenders:sync-with-crm',
   openInCrm: 'tenders:open-in-crm',
+  billMilestoneInBooks: 'tenders:bill-milestone-in-books',
+  openBooks: 'tenders:open-books',
 } as const
+
+export interface BillMilestoneRequest {
+  tenderId: string
+  milestoneId: string
+  tenderReference?: string
+  issuingAuthority?: string
+  milestoneTitle?: string
+  amount?: number
+  notes?: string
+}
+
+export interface BillMilestoneResult {
+  ok: boolean
+  invoiceNumber?: string
+  invoiceId?: string
+  tenderReference?: string
+  grandTotal?: number
+  subtotal?: number
+  taxTotal?: number
+  error?: string
+}
 
 export interface TendersApi {
   getStoredData: () => Promise<string | null>
@@ -16,6 +39,11 @@ export interface TendersApi {
   draftProposalDoc: (tender: any) => Promise<{ ok: boolean; path?: string; error?: string }>
   syncWithCrm: (dealData: { name: string; amount: number; companyName: string; notes?: string }) => Promise<{ ok: boolean; dealId?: string; error?: string }>
   openInCrm: (dealId?: string) => Promise<{ ok: boolean }>
+  billMilestoneInBooks: (
+    tenderIdOrPayload: string | BillMilestoneRequest,
+    milestoneId?: string
+  ) => Promise<BillMilestoneResult>
+  openBooks: () => Promise<boolean>
 }
 
 declare global {

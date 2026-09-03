@@ -30,6 +30,9 @@ const crmApi: CrmApi = {
   generateProposalDoc: (dealId: string) =>
     ipcRenderer.invoke(CRM_CHANNELS.generateProposalDoc, dealId),
   openTenders: () => ipcRenderer.invoke(CRM_CHANNELS.openTenders),
+  openBooks: () => ipcRenderer.invoke(CRM_CHANNELS.openBooks),
+  createInvoiceInBooks: (dealId: string) =>
+    ipcRenderer.invoke(CRM_CHANNELS.createInvoiceInBooks, dealId),
 }
 
 contextBridge.exposeInMainWorld('crmApi', crmApi)
