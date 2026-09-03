@@ -2561,6 +2561,21 @@ function createShellWindow(): void {
         try {
           const act = manager.activeTab()
           const targetWc = act?.view && act.kind !== 'home' ? act.view.webContents : win.webContents
+          if (process.env.CRM_CLICK_NAV) {
+            await targetWc.executeJavaScript(`
+              const btns = Array.from(document.querySelectorAll('.crm-nav-btn'));
+              const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.CRM_CLICK_NAV}'.toLowerCase()));
+              if (target) target.click();
+            `).catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
+          if (process.env.CRM_CLICK_ACTION) {
+            await targetWc.executeJavaScript(`
+              const btn = document.querySelector('${process.env.CRM_CLICK_ACTION}');
+              if (btn) btn.click();
+            `).catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
           const img = await targetWc.capturePage()
           writeFileSync(ssPath, img.toPNG())
           console.log('[screenshot] Saved to ' + ssPath)
