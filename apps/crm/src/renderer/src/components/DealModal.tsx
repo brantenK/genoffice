@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type { Company, Contact, Deal, DealStage } from '../../../shared/types'
+import { XIcon } from './Icons'
 
 interface DealModalProps {
   deal?: Partial<Deal>
@@ -13,11 +14,18 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
   const [name, setName] = useState(deal?.name || '')
   const [amount, setAmount] = useState(deal?.amount ? String(deal.amount) : '10000')
   const [stage, setStage] = useState<DealStage>(deal?.stage || 'lead')
-  const [probability, setProbability] = useState(deal?.probability ? String(deal.probability) : '20')
   const [companyId, setCompanyId] = useState(deal?.companyId || (companies[0]?.id ?? ''))
   const [contactId, setContactId] = useState(deal?.contactId || (contacts[0]?.id ?? ''))
   const [expectedCloseDate, setExpectedCloseDate] = useState(deal?.expectedCloseDate || '')
   const [notes, setNotes] = useState(deal?.notes || '')
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,7 +39,7 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
       name: name.trim(),
       amount: Number(amount) || 0,
       stage,
-      probability: Number(probability) || 0,
+      probability: 50,
       companyId,
       companyName: selComp?.name || '',
       contactId,
@@ -42,29 +50,31 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
   }
 
   return (
-    <div className="crm-modal-overlay" onClick={onClose}>
+    <div className="crm-modal-backdrop" onClick={onClose}>
       <div className="crm-modal" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
           <div className="crm-modal-header">
-            <h3 className="crm-modal-title">{deal?.id ? 'Edit Deal' : 'New Opportunity'}</h3>
-            <button type="button" className="crm-modal-close" onClick={onClose}>
-              ×
+            <h3 className="crm-modal-title">{deal?.id ? 'Edit Opportunity' : 'New Opportunity'}</h3>
+            <button type="button" className="crm-modal-close-btn" onClick={onClose}>
+              <XIcon size={14} />
             </button>
           </div>
+
           <div className="crm-modal-body">
             <div className="crm-form-group">
-              <label className="crm-form-label">Deal Name</label>
+              <label className="crm-form-label">Opportunity Name</label>
               <input
                 className="crm-form-input"
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Enterprise License Expansion"
+                autoFocus
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <div className="crm-form-group" style={{ flex: 1 }}>
+            <div className="crm-form-row">
+              <div className="crm-form-group">
                 <label className="crm-form-label">Deal Amount ($)</label>
                 <input
                   type="number"
@@ -76,7 +86,7 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
                 />
               </div>
 
-              <div className="crm-form-group" style={{ flex: 1 }}>
+              <div className="crm-form-group">
                 <label className="crm-form-label">Pipeline Stage</label>
                 <select
                   className="crm-form-select"
@@ -93,15 +103,14 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <div className="crm-form-group" style={{ flex: 1 }}>
+            <div className="crm-form-row">
+              <div className="crm-form-group">
                 <label className="crm-form-label">Company Account</label>
                 <select
                   className="crm-form-select"
                   value={companyId}
                   onChange={(e) => setCompanyId(e.target.value)}
                 >
-                  <option value="">(None)</option>
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -110,17 +119,16 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
                 </select>
               </div>
 
-              <div className="crm-form-group" style={{ flex: 1 }}>
+              <div className="crm-form-group">
                 <label className="crm-form-label">Primary Contact</label>
                 <select
                   className="crm-form-select"
                   value={contactId}
                   onChange={(e) => setContactId(e.target.value)}
                 >
-                  <option value="">(None)</option>
-                  {contacts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
+                  {contacts.map((ct) => (
+                    <option key={ct.id} value={ct.id}>
+                      {ct.name}
                     </option>
                   ))}
                 </select>
@@ -138,22 +146,23 @@ export function DealModal({ deal, companies, contacts, onClose, onSave }: DealMo
             </div>
 
             <div className="crm-form-group">
-              <label className="crm-form-label">Deal Notes & Scope</label>
+              <label className="crm-form-label">Notes & Requirements</label>
               <textarea
                 className="crm-form-textarea"
-                rows={3}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Key requirements, decision criteria, or follow-up notes..."
+                placeholder="Key requirements, next steps, or customer context..."
+                rows={3}
               />
             </div>
           </div>
+
           <div className="crm-modal-footer">
             <button type="button" className="crm-btn" onClick={onClose}>
               Cancel
             </button>
             <button type="submit" className="crm-btn crm-btn-primary">
-              Save Opportunity
+              {deal?.id ? 'Save Changes' : 'Create Opportunity'}
             </button>
           </div>
         </form>

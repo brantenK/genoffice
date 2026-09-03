@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import type { Contact } from '../../../shared/types'
+import { SearchIcon, EditIcon, TrashIcon } from './Icons'
 
 interface ContactsViewProps {
   contacts: Contact[]
@@ -25,103 +26,115 @@ export function ContactsView({ contacts, onEditContact, onDeleteContact }: Conta
   return (
     <div className="crm-table-container">
       <div className="crm-table-toolbar">
-        <input
-          type="text"
-          className="crm-search-input"
-          placeholder="Search contacts by name, email, or company..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="crm-search-box" style={{ width: '280px' }}>
+          <SearchIcon size={14} />
+          <input
+            type="text"
+            className="crm-search-input-bare"
+            placeholder="Search contacts by name, email, company..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="crm-filter-pills">
           {(['all', 'active', 'lead', 'churned'] as const).map((st) => (
             <button
               key={st}
-              className={`crm-btn ${statusFilter === st ? 'crm-btn-primary' : ''}`}
-              style={{ fontSize: '12px', padding: '5px 10px', textTransform: 'capitalize' }}
+              className={`crm-filter-pill ${statusFilter === st ? 'active' : ''}`}
               onClick={() => setStatusFilter(st)}
             >
-              {st}
+              {st === 'all' ? 'All Contacts' : st.charAt(0).toUpperCase() + st.slice(1)}
             </button>
           ))}
         </div>
       </div>
 
-      <table className="crm-table">
-        <thead>
-          <tr>
-            <th>Contact</th>
-            <th>Job Title</th>
-            <th>Company</th>
-            <th>Email & Phone</th>
-            <th>Tags</th>
-            <th>Status</th>
-            <th style={{ textAlign: 'right' }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((c) => {
-            const initials = c.name
-              .split(' ')
-              .map((n: string) => n[0])
-              .join('')
-              .toUpperCase()
-              .slice(0, 2)
-
-            return (
-              <tr key={c.id}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span className="crm-avatar">{initials}</span>
-                    <strong style={{ color: 'var(--text-primary)' }}>{c.name}</strong>
-                  </div>
-                </td>
-                <td>{c.title || '—'}</td>
-                <td>{c.companyName || '—'}</td>
-                <td>
-                  <div>{c.email}</div>
-                  {c.phone && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{c.phone}</div>}
-                </td>
-                <td>
-                  {c.tags.map((t) => (
-                    <span key={t} className="crm-tag">
-                      {t}
-                    </span>
-                  ))}
-                </td>
-                <td>
-                  <span className={c.status === 'active' ? 'crm-status-active' : 'crm-status-lead'}>
-                    {c.status}
-                  </span>
-                </td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    className="crm-btn"
-                    style={{ padding: '4px 8px', fontSize: '12px', marginRight: '6px' }}
-                    onClick={() => onEditContact(c)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="crm-btn"
-                    style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--danger)' }}
-                    onClick={() => onDeleteContact(c.id)}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            )
-          })}
-          {filtered.length === 0 && (
+      <div className="crm-table-wrapper">
+        <table className="crm-table">
+          <thead>
             <tr>
-              <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
-                No contacts matching your search criteria
-              </td>
+              <th>Contact Name</th>
+              <th>Role & Title</th>
+              <th>Account</th>
+              <th>Contact Information</th>
+              <th>Tags</th>
+              <th>Status</th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map((c) => {
+              const initials = c.name
+                .split(' ')
+                .map((n: string) => n[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2)
+
+              return (
+                <tr key={c.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <span className="crm-avatar">{initials}</span>
+                      <strong
+                        style={{ color: 'var(--crm-text)', cursor: 'pointer' }}
+                        onClick={() => onEditContact(c)}
+                      >
+                        {c.name}
+                      </strong>
+                    </div>
+                  </td>
+                  <td>{c.title || '—'}</td>
+                  <td>{c.companyName || '—'}</td>
+                  <td>
+                    <div style={{ color: 'var(--crm-text)' }}>{c.email}</div>
+                    {c.phone && <div style={{ fontSize: '11px', color: 'var(--crm-text-dim)' }}>{c.phone}</div>}
+                  </td>
+                  <td>
+                    {c.tags.map((t) => (
+                      <span key={t} className="crm-tag-pill">
+                        {t}
+                      </span>
+                    ))}
+                  </td>
+                  <td>
+                    <span className={`crm-status-pill ${c.status}`}>
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          backgroundColor: c.status === 'active' ? '#059669' : c.status === 'lead' ? '#2563eb' : '#dc2626',
+                        }}
+                      />
+                      {c.status}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        className="crm-icon-action-btn"
+                        title="Edit Contact"
+                        onClick={() => onEditContact(c)}
+                      >
+                        <EditIcon size={13} />
+                      </button>
+                      <button
+                        className="crm-icon-action-btn delete"
+                        title="Delete Contact"
+                        onClick={() => onDeleteContact(c.id)}
+                      >
+                        <TrashIcon size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

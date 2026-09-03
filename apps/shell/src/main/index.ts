@@ -2563,7 +2563,7 @@ function createShellWindow(): void {
           const targetWc = act?.view && act.kind !== 'home' ? act.view.webContents : win.webContents
           if (process.env.CRM_CLICK_NAV) {
             await targetWc.executeJavaScript(`
-              const btns = Array.from(document.querySelectorAll('.crm-nav-btn'));
+              const btns = Array.from(document.querySelectorAll('.crm-segmented-btn, .crm-nav-btn'));
               const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.CRM_CLICK_NAV}'.toLowerCase()));
               if (target) target.click();
             `).catch(() => {})

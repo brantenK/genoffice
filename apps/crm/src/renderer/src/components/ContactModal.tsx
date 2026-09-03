@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type { Company, Contact } from '../../../shared/types'
+import { XIcon } from './Icons'
 
 interface ContactModalProps {
   contact?: Partial<Contact>
@@ -16,6 +17,14 @@ export function ContactModal({ contact, companies, onClose, onSave }: ContactMod
   const [companyId, setCompanyId] = useState(contact?.companyId || (companies[0]?.id ?? ''))
   const [tagsStr, setTagsStr] = useState(contact?.tags ? contact.tags.join(', ') : 'Decision Maker')
   const [status, setStatus] = useState<'lead' | 'active' | 'churned'>(contact?.status || 'active')
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,15 +50,16 @@ export function ContactModal({ contact, companies, onClose, onSave }: ContactMod
   }
 
   return (
-    <div className="crm-modal-overlay" onClick={onClose}>
+    <div className="crm-modal-backdrop" onClick={onClose}>
       <div className="crm-modal" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit}>
           <div className="crm-modal-header">
             <h3 className="crm-modal-title">{contact?.id ? 'Edit Contact' : 'New Contact'}</h3>
-            <button type="button" className="crm-modal-close" onClick={onClose}>
-              ×
+            <button type="button" className="crm-modal-close-btn" onClick={onClose}>
+              <XIcon size={14} />
             </button>
           </div>
+
           <div className="crm-modal-body">
             <div className="crm-form-group">
               <label className="crm-form-label">Full Name</label>
@@ -58,12 +68,13 @@ export function ContactModal({ contact, companies, onClose, onSave }: ContactMod
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Sarah Connor"
+                placeholder="e.g. Sarah Chen"
+                autoFocus
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <div className="crm-form-group" style={{ flex: 1 }}>
+            <div className="crm-form-row">
+              <div className="crm-form-group">
                 <label className="crm-form-label">Email Address</label>
                 <input
                   type="email"
@@ -71,40 +82,40 @@ export function ContactModal({ contact, companies, onClose, onSave }: ContactMod
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@company.com"
+                  placeholder="sarah@example.com"
                 />
               </div>
 
-              <div className="crm-form-group" style={{ flex: 1 }}>
-                <label className="crm-form-label">Phone</label>
+              <div className="crm-form-group">
+                <label className="crm-form-label">Phone Number</label>
                 <input
+                  type="tel"
                   className="crm-form-input"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 (555) 019-2834"
+                  placeholder="+1 (555) 000-0000"
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <div className="crm-form-group" style={{ flex: 1 }}>
+            <div className="crm-form-row">
+              <div className="crm-form-group">
                 <label className="crm-form-label">Job Title</label>
                 <input
                   className="crm-form-input"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. VP Operations"
+                  placeholder="e.g. VP Engineering"
                 />
               </div>
 
-              <div className="crm-form-group" style={{ flex: 1 }}>
-                <label className="crm-form-label">Company</label>
+              <div className="crm-form-group">
+                <label className="crm-form-label">Company Account</label>
                 <select
                   className="crm-form-select"
                   value={companyId}
                   onChange={(e) => setCompanyId(e.target.value)}
                 >
-                  <option value="">(None)</option>
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -114,37 +125,36 @@ export function ContactModal({ contact, companies, onClose, onSave }: ContactMod
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <div className="crm-form-group" style={{ flex: 2 }}>
-                <label className="crm-form-label">Tags (comma separated)</label>
-                <input
-                  className="crm-form-input"
-                  value={tagsStr}
-                  onChange={(e) => setTagsStr(e.target.value)}
-                  placeholder="VIP, Engineering, Enterprise"
-                />
-              </div>
+            <div className="crm-form-group">
+              <label className="crm-form-label">Tags (comma separated)</label>
+              <input
+                className="crm-form-input"
+                value={tagsStr}
+                onChange={(e) => setTagsStr(e.target.value)}
+                placeholder="VIP, Enterprise, Decision Maker"
+              />
+            </div>
 
-              <div className="crm-form-group" style={{ flex: 1 }}>
-                <label className="crm-form-label">Status</label>
-                <select
-                  className="crm-form-select"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as any)}
-                >
-                  <option value="active">Active</option>
-                  <option value="lead">Lead</option>
-                  <option value="churned">Churned</option>
-                </select>
-              </div>
+            <div className="crm-form-group">
+              <label className="crm-form-label">Relationship Status</label>
+              <select
+                className="crm-form-select"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as 'lead' | 'active' | 'churned')}
+              >
+                <option value="active">Active</option>
+                <option value="lead">Lead</option>
+                <option value="churned">Churned</option>
+              </select>
             </div>
           </div>
+
           <div className="crm-modal-footer">
             <button type="button" className="crm-btn" onClick={onClose}>
               Cancel
             </button>
             <button type="submit" className="crm-btn crm-btn-primary">
-              Save Contact
+              {contact?.id ? 'Save Changes' : 'Create Contact'}
             </button>
           </div>
         </form>

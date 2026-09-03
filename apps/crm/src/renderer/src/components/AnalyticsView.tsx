@@ -10,12 +10,12 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
   const avgDealSize = stats.totalDeals > 0 ? Math.round(stats.totalPipelineValue / stats.totalDeals) : 0
 
   const stageBreakdown = [
-    { stage: 'lead', label: 'Lead Generation', color: '#94a3b8' },
-    { stage: 'qualified', label: 'Qualification', color: '#38bdf8' },
-    { stage: 'proposal', label: 'Proposal Submitted', color: '#fbbf24' },
-    { stage: 'negotiation', label: 'Contract Review', color: '#f97316' },
-    { stage: 'won', label: 'Closed Won', color: '#22c55e' },
-    { stage: 'lost', label: 'Closed Lost', color: '#ef4444' },
+    { stage: 'lead', label: 'Lead Generation', color: '#64748b' },
+    { stage: 'qualified', label: 'Qualification', color: '#0284c7' },
+    { stage: 'proposal', label: 'Proposal Submitted', color: '#d97706' },
+    { stage: 'negotiation', label: 'Contract Review', color: '#7c3aed' },
+    { stage: 'won', label: 'Closed Won', color: '#059669' },
+    { stage: 'lost', label: 'Closed Lost', color: '#dc2626' },
   ].map((item) => {
     const list = deals.filter((d) => d.stage === item.stage)
     const val = list.reduce((sum, d) => sum + (d.amount || 0), 0)
@@ -24,82 +24,75 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Metric Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-        <div className="crm-table-container" style={{ padding: '20px' }}>
-          <div className="crm-stat-label">Total Pipeline Value</div>
-          <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '8px', color: 'var(--text-primary)' }}>
-            ${stats.totalPipelineValue.toLocaleString()}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Across {stats.totalDeals} active opportunities
-          </div>
+    <div className="crm-analytics-container">
+      {/* Metric Cards Grid */}
+      <div className="crm-stat-cards-grid">
+        <div className="crm-stat-card">
+          <div className="crm-stat-title">Total Pipeline Value</div>
+          <div className="crm-stat-number">${stats.totalPipelineValue.toLocaleString()}</div>
+          <div className="crm-stat-sub">Across {stats.totalDeals} active opportunities</div>
         </div>
 
-        <div className="crm-table-container" style={{ padding: '20px' }}>
-          <div className="crm-stat-label">Closed Won Revenue</div>
-          <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '8px', color: '#16a34a' }}>
+        <div className="crm-stat-card">
+          <div className="crm-stat-title">Closed Won Revenue</div>
+          <div className="crm-stat-number" style={{ color: '#059669' }}>
             ${stats.wonValue.toLocaleString()}
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Confirmed signed contracts
-          </div>
+          <div className="crm-stat-sub">Confirmed signed contracts</div>
         </div>
 
-        <div className="crm-table-container" style={{ padding: '20px' }}>
-          <div className="crm-stat-label">Win Rate</div>
-          <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '8px', color: '#6366f1' }}>
+        <div className="crm-stat-card">
+          <div className="crm-stat-title">Win Rate</div>
+          <div className="crm-stat-number" style={{ color: '#6366f1' }}>
             {stats.winRatePct}%
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Of closed deal outcomes
-          </div>
+          <div className="crm-stat-sub">Of closed deal outcomes</div>
         </div>
 
-        <div className="crm-table-container" style={{ padding: '20px' }}>
-          <div className="crm-stat-label">Average Opportunity Size</div>
-          <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '8px', color: 'var(--text-primary)' }}>
-            ${avgDealSize.toLocaleString()}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Per registered opportunity
-          </div>
+        <div className="crm-stat-card">
+          <div className="crm-stat-title">Average Deal Size</div>
+          <div className="crm-stat-number">${avgDealSize.toLocaleString()}</div>
+          <div className="crm-stat-sub">Per registered opportunity</div>
         </div>
       </div>
 
       {/* Stage Breakdown Progress Bars */}
-      <div className="crm-table-container" style={{ padding: '24px' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-primary)' }}>
-          Pipeline Stage Distribution
-        </h3>
+      <div className="crm-chart-card">
+        <div className="crm-chart-header">
+          <div className="crm-chart-title">Pipeline Stage Distribution</div>
+          <div style={{ fontSize: '12px', color: 'var(--crm-text-muted)' }}>
+            Total Value: ${stats.totalPipelineValue.toLocaleString()}
+          </div>
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {stageBreakdown.map((item) => (
-            <div key={item.stage}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {item.label} ({item.count} deals)
+            <div key={item.stage} className="crm-progress-row">
+              <div className="crm-progress-label-wrap">
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      backgroundColor: item.color,
+                      display: 'inline-block',
+                    }}
+                  />
+                  <span>
+                    {item.label} ({item.count} deals)
+                  </span>
                 </span>
-                <span style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
                   ${item.value.toLocaleString()} ({item.pct}%)
                 </span>
               </div>
-              <div
-                style={{
-                  height: '8px',
-                  background: 'var(--surface-subtle)',
-                  borderRadius: '4px',
-                  overflow: 'hidden',
-                }}
-              >
+              <div className="crm-progress-track">
                 <div
+                  className="crm-progress-fill"
                   style={{
-                    height: '100%',
-                    width: `${Math.max(item.pct, 2)}%`,
+                    width: `${Math.max(item.pct, item.count > 0 ? 2 : 0)}%`,
                     backgroundColor: item.color,
-                    borderRadius: '4px',
-                    transition: 'width 0.3s ease',
                   }}
                 />
               </div>

@@ -2,17 +2,31 @@ import React, { useEffect, useState } from 'react'
 import type { Company, Contact, CrmStats, Deal, DealStage } from '../../shared/types'
 import { SEED_COMPANIES, SEED_CONTACTS, SEED_DEALS } from '../../main/seed-data'
 import { PipelineView } from './components/PipelineView'
+import { DealsTableView } from './components/DealsTableView'
 import { ContactsView } from './components/ContactsView'
 import { CompaniesView } from './components/CompaniesView'
 import { AnalyticsView } from './components/AnalyticsView'
 import { DealModal } from './components/DealModal'
 import { ContactModal } from './components/ContactModal'
 import { CompanyModal } from './components/CompanyModal'
+import {
+  KanbanIcon,
+  TableIcon,
+  UsersIcon,
+  BuildingIcon,
+  ChartIcon,
+  SheetsIcon,
+  PlusIcon,
+  SearchIcon,
+  CheckIcon,
+} from './components/Icons'
+
+type NavView = 'pipeline' | 'table' | 'contacts' | 'companies' | 'analytics'
 
 export function App() {
-  const [activeNav, setActiveNav] = useState<'pipeline' | 'contacts' | 'companies' | 'analytics'>(
-    'pipeline',
-  )
+  const [activeNav, setActiveNav] = useState<NavView>('pipeline')
+  const [globalSearch, setGlobalSearch] = useState('')
+
   const [deals, setDeals] = useState<Deal[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -35,7 +49,7 @@ export function App() {
 
   const showToast = (msg: string) => {
     setToast(msg)
-    setTimeout(() => setToast(null), 3500)
+    setTimeout(() => setToast(null), 3000)
   }
 
   const loadData = async () => {
@@ -51,7 +65,6 @@ export function App() {
       setCompanies(comp)
       setStats(s)
     } else {
-      // Browser fallback for development
       setDeals(SEED_DEALS)
       setContacts(SEED_CONTACTS)
       setCompanies(SEED_COMPANIES)
@@ -90,7 +103,7 @@ export function App() {
     setDealModalOpen(false)
     setEditingDeal(undefined)
     await loadData()
-    showToast('Deal updated successfully')
+    showToast('Opportunity saved')
   }
 
   const handleUpdateStage = async (id: string, stage: DealStage) => {
@@ -120,11 +133,9 @@ export function App() {
     } else {
       setContacts((prev) => {
         if (contactData.id) {
-          return prev.map((c) =>
-            c.id === contactData.id ? ({ ...c, ...contactData } as Contact) : c,
-          )
+          return prev.map((c) => (c.id === contactData.id ? ({ ...c, ...contactData } as Contact) : c))
         }
-        return [{ ...contactData, id: `cont-${Date.now()}` } as Contact, ...prev]
+        return [{ ...contactData, id: `contact-${Date.now()}` } as Contact, ...prev]
       })
     }
     setContactModalOpen(false)
@@ -151,126 +162,141 @@ export function App() {
     } else {
       setCompanies((prev) => {
         if (companyData.id) {
-          return prev.map((c) =>
-            c.id === companyData.id ? ({ ...c, ...companyData } as Company) : c,
-          )
+          return prev.map((c) => (c.id === companyData.id ? ({ ...c, ...companyData } as Company) : c))
         }
-        return [{ ...companyData, id: `comp-${Date.now()}` } as Company, ...prev]
+        return [{ ...companyData, id: `company-${Date.now()}` } as Company, ...prev]
       })
     }
     setCompanyModalOpen(false)
     setEditingCompany(undefined)
     await loadData()
-    showToast('Company account saved')
+    showToast('Account saved')
   }
 
   const handleDeleteCompany = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this company?')) return
+    if (!confirm('Are you sure you want to delete this organization?')) return
     if (window.crmApi) {
       await window.crmApi.deleteCompany(id)
     } else {
       setCompanies((prev) => prev.filter((c) => c.id !== id))
     }
     await loadData()
-    showToast('Company removed')
+    showToast('Account removed')
   }
 
-  // Cross-App integrations
+  // Cross-App Workflows
   const handleExportToSheets = async () => {
-    if (!window.crmApi) {
-      showToast('Sheets integration ready (runs inside desktop app)')
-      return
-    }
-    const res = await window.crmApi.exportToSheets()
-    if (res.ok) {
-      showToast('📊 Pipeline opened in Zanostack Sheets!')
-    } else {
-      alert('Export failed: ' + res.error)
+    if (window.crmApi) {
+      const res = await window.crmApi.exportToSheets()
+      if (res.ok) {
+        showToast('Exporting to Zanostack Sheets...')
+      } else {
+        alert(res.error || 'Failed to export to Sheets')
+      }
     }
   }
 
   const handleGenerateProposal = async (dealId: string) => {
-    if (!window.crmApi) {
-      showToast('Proposal generator ready (runs inside desktop app)')
-      return
-    }
-    const res = await window.crmApi.generateProposalDoc(dealId)
-    if (res.ok) {
-      showToast('📄 Commercial proposal opened in Zanostack Docs!')
-    } else {
-      alert('Proposal generation failed: ' + res.error)
+    if (window.crmApi) {
+      const res = await window.crmApi.generateProposalDoc(dealId)
+      if (res.ok) {
+        showToast('Opening proposal in Zanostack Docs...')
+      } else {
+        alert(res.error || 'Failed to generate proposal')
+      }
     }
   }
 
+  // Filtered lists based on search
+  const filteredDeals = deals.filter(
+    (d) =>
+      d.name.toLowerCase().includes(globalSearch.toLowerCase()) ||
+      (d.companyName || '').toLowerCase().includes(globalSearch.toLowerCase()) ||
+      (d.contactName || '').toLowerCase().includes(globalSearch.toLowerCase()),
+  )
+
+  const filteredContacts = contacts.filter(
+    (c) =>
+      c.name.toLowerCase().includes(globalSearch.toLowerCase()) ||
+      c.email.toLowerCase().includes(globalSearch.toLowerCase()) ||
+      (c.companyName || '').toLowerCase().includes(globalSearch.toLowerCase()),
+  )
+
+  const filteredCompanies = companies.filter(
+    (comp) =>
+      comp.name.toLowerCase().includes(globalSearch.toLowerCase()) ||
+      (comp.domain || '').toLowerCase().includes(globalSearch.toLowerCase()),
+  )
+
   return (
     <div className="crm-layout">
-      {/* Toast popup */}
-      {toast && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            backgroundColor: '#1e293b',
-            color: '#f8fafc',
-            padding: '12px 20px',
-            borderRadius: '8px',
-            fontSize: '13px',
-            fontWeight: 600,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-            zIndex: 9999,
-            animation: 'modalPop 0.2s ease',
-          }}
-        >
-          {toast}
-        </div>
-      )}
-
-      {/* Header */}
+      {/* ── Top Command Bar ── */}
       <header className="crm-header">
         <div className="crm-header-left">
-          <div className="crm-brand">
-            <div className="crm-brand-badge">Z</div>
-            <span className="crm-title">Zanostack CRM</span>
-          </div>
-
-          <nav className="crm-nav">
+          {/* Segmented View Switcher */}
+          <nav className="crm-segmented-nav">
             <button
-              className={`crm-nav-btn ${activeNav === 'pipeline' ? 'active' : ''}`}
+              className={`crm-segmented-btn ${activeNav === 'pipeline' ? 'active' : ''}`}
               onClick={() => setActiveNav('pipeline')}
             >
-              📊 Pipeline
+              <KanbanIcon size={14} />
+              <span>Board</span>
             </button>
             <button
-              className={`crm-nav-btn ${activeNav === 'contacts' ? 'active' : ''}`}
+              className={`crm-segmented-btn ${activeNav === 'table' ? 'active' : ''}`}
+              onClick={() => setActiveNav('table')}
+            >
+              <TableIcon size={14} />
+              <span>Table</span>
+            </button>
+            <button
+              className={`crm-segmented-btn ${activeNav === 'contacts' ? 'active' : ''}`}
               onClick={() => setActiveNav('contacts')}
             >
-              👥 Contacts
+              <UsersIcon size={14} />
+              <span>Contacts</span>
             </button>
             <button
-              className={`crm-nav-btn ${activeNav === 'companies' ? 'active' : ''}`}
+              className={`crm-segmented-btn ${activeNav === 'companies' ? 'active' : ''}`}
               onClick={() => setActiveNav('companies')}
             >
-              🏢 Accounts
+              <BuildingIcon size={14} />
+              <span>Accounts</span>
             </button>
             <button
-              className={`crm-nav-btn ${activeNav === 'analytics' ? 'active' : ''}`}
+              className={`crm-segmented-btn ${activeNav === 'analytics' ? 'active' : ''}`}
               onClick={() => setActiveNav('analytics')}
             >
-              📈 Analytics
+              <ChartIcon size={14} />
+              <span>Analytics</span>
             </button>
           </nav>
         </div>
 
         <div className="crm-header-right">
+          {/* Global Search */}
+          <div className="crm-search-box">
+            <SearchIcon size={13} />
+            <input
+              type="text"
+              className="crm-search-input-bare"
+              placeholder="Search CRM..."
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Export to Sheets action */}
           <button
             className="crm-btn crm-btn-sheets"
             onClick={handleExportToSheets}
-            title="Export full deals pipeline into a new Zanostack Sheets tab"
+            title="Export pipeline into a new Zanostack Sheets tab"
           >
-            📊 Export to Sheets
+            <SheetsIcon size={14} />
+            <span>Export to Sheets</span>
           </button>
 
+          {/* Primary Create action */}
           {activeNav === 'contacts' ? (
             <button
               className="crm-btn crm-btn-primary"
@@ -279,7 +305,8 @@ export function App() {
                 setContactModalOpen(true)
               }}
             >
-              + New Contact
+              <PlusIcon size={14} />
+              <span>New Contact</span>
             </button>
           ) : activeNav === 'companies' ? (
             <button
@@ -289,7 +316,8 @@ export function App() {
                 setCompanyModalOpen(true)
               }}
             >
-              + New Account
+              <PlusIcon size={14} />
+              <span>New Account</span>
             </button>
           ) : (
             <button
@@ -299,47 +327,59 @@ export function App() {
                 setDealModalOpen(true)
               }}
             >
-              + New Opportunity
+              <PlusIcon size={14} />
+              <span>New Opportunity</span>
             </button>
           )}
         </div>
       </header>
 
-      {/* Quick Stats Banner */}
-      <div className="crm-stats-bar">
-        <div className="crm-stat-item">
-          <span className="crm-stat-label">Pipeline Value</span>
-          <span className="crm-stat-value">${stats.totalPipelineValue.toLocaleString()}</span>
+      {/* ── Refined Metrics Strip ── */}
+      <div className="crm-metrics-strip">
+        <div className="crm-metric-item">
+          <span className="crm-metric-label">Pipeline</span>
+          <span className="crm-metric-value">${stats.totalPipelineValue.toLocaleString()}</span>
         </div>
-        <div className="crm-stat-divider" />
-        <div className="crm-stat-item">
-          <span className="crm-stat-label">Active Opportunities</span>
-          <span className="crm-stat-value">{stats.totalDeals}</span>
+        <div className="crm-metric-divider" />
+        <div className="crm-metric-item">
+          <span className="crm-metric-label">Active Opportunities</span>
+          <span className="crm-metric-value">{stats.totalDeals}</span>
         </div>
-        <div className="crm-stat-divider" />
-        <div className="crm-stat-item">
-          <span className="crm-stat-label">Closed Won</span>
-          <span className="crm-stat-value" style={{ color: '#16a34a' }}>
-            ${stats.wonValue.toLocaleString()}
-          </span>
+        <div className="crm-metric-divider" />
+        <div className="crm-metric-item">
+          <span className="crm-metric-label">Closed Won</span>
+          <span className="crm-metric-value highlight">${stats.wonValue.toLocaleString()}</span>
         </div>
-        <div className="crm-stat-divider" />
-        <div className="crm-stat-item">
-          <span className="crm-stat-label">Win Rate</span>
-          <span className="crm-stat-value">{stats.winRatePct}%</span>
+        <div className="crm-metric-divider" />
+        <div className="crm-metric-item">
+          <span className="crm-metric-label">Win Rate</span>
+          <span className="crm-metric-value">{stats.winRatePct}%</span>
         </div>
-        <div className="crm-stat-divider" />
-        <div className="crm-stat-item">
-          <span className="crm-stat-label">Total Contacts</span>
-          <span className="crm-stat-value">{stats.totalContacts}</span>
+        <div className="crm-metric-divider" />
+        <div className="crm-metric-item">
+          <span className="crm-metric-label">Total Contacts</span>
+          <span className="crm-metric-value">{stats.totalContacts}</span>
         </div>
       </div>
 
-      {/* Main View Area */}
+      {/* ── Main View Content ── */}
       <main className="crm-content">
         {activeNav === 'pipeline' && (
           <PipelineView
-            deals={deals}
+            deals={filteredDeals}
+            onEditDeal={(deal) => {
+              setEditingDeal(deal)
+              setDealModalOpen(true)
+            }}
+            onUpdateStage={handleUpdateStage}
+            onDeleteDeal={handleDeleteDeal}
+            onGenerateProposal={handleGenerateProposal}
+          />
+        )}
+
+        {activeNav === 'table' && (
+          <DealsTableView
+            deals={filteredDeals}
             onEditDeal={(deal) => {
               setEditingDeal(deal)
               setDealModalOpen(true)
@@ -352,7 +392,7 @@ export function App() {
 
         {activeNav === 'contacts' && (
           <ContactsView
-            contacts={contacts}
+            contacts={filteredContacts}
             onEditContact={(contact) => {
               setEditingContact(contact)
               setContactModalOpen(true)
@@ -363,9 +403,9 @@ export function App() {
 
         {activeNav === 'companies' && (
           <CompaniesView
-            companies={companies}
-            onEditCompany={(comp) => {
-              setEditingCompany(comp)
+            companies={filteredCompanies}
+            onEditCompany={(company) => {
+              setEditingCompany(company)
               setCompanyModalOpen(true)
             }}
             onDeleteCompany={handleDeleteCompany}
@@ -375,16 +415,13 @@ export function App() {
         {activeNav === 'analytics' && <AnalyticsView stats={stats} deals={deals} />}
       </main>
 
-      {/* Modals */}
+      {/* ── Modals ── */}
       {dealModalOpen && (
         <DealModal
           deal={editingDeal}
           companies={companies}
           contacts={contacts}
-          onClose={() => {
-            setDealModalOpen(false)
-            setEditingDeal(undefined)
-          }}
+          onClose={() => setDealModalOpen(false)}
           onSave={handleSaveDeal}
         />
       )}
@@ -393,10 +430,7 @@ export function App() {
         <ContactModal
           contact={editingContact}
           companies={companies}
-          onClose={() => {
-            setContactModalOpen(false)
-            setEditingContact(undefined)
-          }}
+          onClose={() => setContactModalOpen(false)}
           onSave={handleSaveContact}
         />
       )}
@@ -404,12 +438,17 @@ export function App() {
       {companyModalOpen && (
         <CompanyModal
           company={editingCompany}
-          onClose={() => {
-            setCompanyModalOpen(false)
-            setEditingCompany(undefined)
-          }}
+          onClose={() => setCompanyModalOpen(false)}
           onSave={handleSaveCompany}
         />
+      )}
+
+      {/* ── Toast Feedback ── */}
+      {toast && (
+        <div className="crm-toast">
+          <CheckIcon size={14} style={{ color: '#34d399' }} />
+          <span>{toast}</span>
+        </div>
       )}
     </div>
   )

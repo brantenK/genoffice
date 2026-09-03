@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import type { Company } from '../../../shared/types'
+import { BuildingIcon, SearchIcon, EditIcon, TrashIcon } from './Icons'
 
 interface CompaniesViewProps {
   companies: Company[]
@@ -21,89 +22,98 @@ export function CompaniesView({ companies, onEditCompany, onDeleteCompany }: Com
   return (
     <div className="crm-table-container">
       <div className="crm-table-toolbar">
-        <input
-          type="text"
-          className="crm-search-input"
-          placeholder="Search accounts by company name, domain, industry..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-          {filtered.length} Organizations
+        <div className="crm-search-box" style={{ width: '280px' }}>
+          <SearchIcon size={14} />
+          <input
+            type="text"
+            className="crm-search-input-bare"
+            placeholder="Search accounts by name, domain, industry..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div style={{ fontSize: '12.5px', color: 'var(--crm-text-muted)', fontWeight: 500 }}>
+          {filtered.length} Accounts
         </div>
       </div>
 
-      <table className="crm-table">
-        <thead>
-          <tr>
-            <th>Company</th>
-            <th>Domain</th>
-            <th>Industry</th>
-            <th>Size</th>
-            <th>Location</th>
-            <th style={{ textAlign: 'right' }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((c) => {
-            const initials = c.name
-              .split(' ')
-              .map((n: string) => n[0])
-              .join('')
-              .toUpperCase()
-              .slice(0, 2)
-
-            return (
-              <tr key={c.id}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span
-                      className="crm-avatar"
-                      style={{ background: '#fef3c7', color: '#b45309' }}
-                    >
-                      {initials}
-                    </span>
-                    <strong style={{ color: 'var(--text-primary)' }}>{c.name}</strong>
-                  </div>
-                </td>
-                <td>
-                  {c.domain ? (
-                    <span style={{ color: 'var(--crm-accent)' }}>{c.domain}</span>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td>{c.industry || '—'}</td>
-                <td>{c.size || '—'}</td>
-                <td>{[c.city, c.country].filter(Boolean).join(', ') || '—'}</td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    className="crm-btn"
-                    style={{ padding: '4px 8px', fontSize: '12px', marginRight: '6px' }}
-                    onClick={() => onEditCompany(c)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="crm-btn"
-                    style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--danger)' }}
-                    onClick={() => onDeleteCompany(c.id)}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            )
-          })}
-          {filtered.length === 0 && (
+      <div className="crm-table-wrapper">
+        <table className="crm-table">
+          <thead>
             <tr>
-              <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
-                No accounts found matching your search
-              </td>
+              <th>Account Name</th>
+              <th>Domain</th>
+              <th>Industry</th>
+              <th>Employees</th>
+              <th>Headquarters</th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map((c) => {
+              const initials = c.name
+                .split(' ')
+                .map((n: string) => n[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2)
+
+              return (
+                <tr key={c.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <span className="crm-avatar" style={{ background: '#f8fafc', color: '#0284c7' }}>
+                        <BuildingIcon size={13} />
+                      </span>
+                      <strong
+                        style={{ color: 'var(--crm-text)', cursor: 'pointer' }}
+                        onClick={() => onEditCompany(c)}
+                      >
+                        {c.name}
+                      </strong>
+                    </div>
+                  </td>
+                  <td>
+                    {c.domain ? (
+                      <span style={{ color: 'var(--crm-accent)', fontFamily: 'monospace', fontSize: '12px' }}>
+                        {c.domain}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td>{c.industry || '—'}</td>
+                  <td style={{ color: 'var(--crm-text-secondary)' }}>{c.size || '—'}</td>
+                  <td>
+                    {c.city || c.country
+                      ? `${c.city ? c.city + ', ' : ''}${c.country || ''}`
+                      : '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        className="crm-icon-action-btn"
+                        title="Edit Account"
+                        onClick={() => onEditCompany(c)}
+                      >
+                        <EditIcon size={13} />
+                      </button>
+                      <button
+                        className="crm-icon-action-btn delete"
+                        title="Delete Account"
+                        onClick={() => onDeleteCompany(c.id)}
+                      >
+                        <TrashIcon size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
