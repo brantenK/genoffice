@@ -1,6 +1,6 @@
 # GenOffice
 
-**The world's first full-featured open-source AI Office suite.**
+**The world's first full-featured open-source AI Office suite — now with integrated business apps.**
 
 [![License: Apache-2.0](https://img.shields.io/github/license/genspark-ai/genoffice)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/genspark-ai/genoffice)](https://github.com/genspark-ai/genoffice/releases/latest)
@@ -12,16 +12,20 @@ GenOffice is a free, open-source alternative to Microsoft Office for macOS,
 Windows, and Linux, built around AI editing as a first-class workflow rather
 than a bolted-on chat box. It opens and saves the real Microsoft Office
 formats — Word (`.docx`), Excel (`.xlsx`), PowerPoint (`.pptx`) — and edits
-PDF and Markdown too: a word processor, spreadsheet, presentation editor,
-PDF editor, and Markdown editor as six Electron apps sharing one engine
-layer.
+PDF and Markdown too. The suite now also ships three integrated business
+applications — **Zanostack CRM**, **Zanostack Tenders**, and **Zano Books** —
+that share a cross-app workflow layer so won deals, tender milestones, and bank
+reconciliations all flow together automatically.
 
 [![Meet GenOffice — the world's first full-featured open-source AI Office (video)](https://img.youtube.com/vi/B2pLdMX95v4/maxresdefault.jpg)](https://www.youtube.com/watch?v=B2pLdMX95v4)
 
 [Watch the demo video on YouTube](https://www.youtube.com/watch?v=B2pLdMX95v4)
 
+---
+
 ## Features
 
+### Office Suite
 - **Real PDF editing** — retype text and edit images in the page itself, original fonts preserved.
 - **Local PDF → Word / PowerPoint / Excel conversion** — turn a PDF into an editable `.docx`, `.pptx`, or `.xlsx` entirely on your machine: no cloud, no upload.
 - **Scanned PDFs too** — on macOS and Windows scanned pages are read with the system OCR, so they convert to editable text.
@@ -36,6 +40,17 @@ layer.
 - **Light / dark / system themes.**
 - **macOS, Windows, Linux.**
 - **Free & open-source (Apache-2.0).**
+
+### Business Apps (Zanostack)
+- **Zanostack CRM** — sales pipeline, contacts, companies, and deal tracking with 1-click invoicing into Zano Books.
+- **Zanostack Tenders** — public and private sector RFP management, compliance matrices, company vault, and contract milestone billing into Zano Books.
+- **Zano Books** — local-first double-entry accounting: chart of accounts, sales invoices, purchase bills, bank statement CSV import, AI-assisted settlement matching, and 1-click reconciliation.
+- **CRM → Books invoicing bridge** — marking a deal won and clicking "Create Invoice in Zano Books" generates a VAT-split sales invoice, posts the double-entry journal entry, and switches you straight to Books.
+- **Tenders → Books milestone billing** — billing a reached contract milestone creates a tax invoice with the RFP reference number attached, updates the milestone status to `BILLED`, and opens Books.
+- **Bank statement reconciliation** — import any standard bank CSV, get AI-confidence settlement suggestions (HIGH confidence on invoice number, RFP reference, or party name match), and settle open invoices with one click.
+- **Resilient data sync** — atomic file writes, schema versioning with v0→v1 migration, corruption backup (`.corrupted.bak`), and safe cross-app merge without data loss.
+
+---
 
 ## Download
 
@@ -76,37 +91,57 @@ chmod +x GenOffice-<version>.AppImage
 ./GenOffice-<version>.AppImage
 ```
 
+---
+
 ## Apps
 
-| App             | Product                | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| --------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/docs`     | **GenOffice Docs**     | `.docx` word processor. Byte-preserving round trip: only dirty paragraphs are regenerated (paragraph patch), everything else in the original file is kept byte-for-byte, so opening and saving never breaks layout in Word. Paginated view whose line metrics reproduce the original document's layout, tracked changes, comments, styles, equations, ink.                                                                                                                                                                                                                                                                                                                                                                               |
-| `apps/sheets`   | **GenOffice Sheets**   | `.xlsx` spreadsheet. UI built on the open-source [Univer](https://github.com/dream-num/univer) core (Apache-2.0) with a large layer of in-house extensions; `.xlsx` import/export runs through an in-house Rust sidecar (calamine + IronCalc), charts are rendered in-house (Konva), plus pivot tables, slicers, conditional formatting, and formula tracing.                                                                                                                                                                                                                                                                                                                                                                            |
-| `apps/slides`   | **GenOffice Slides**   | `.pptx` presentations. In-house `.pptx` parse/render/edit engine with masters, charts, cropping, ink, and text shaping (HarfBuzz metrics).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+### Office Apps
+
+| App             | Product                | What it is |
+| --------------- | ---------------------- | ---------- |
+| `apps/docs`     | **GenOffice Docs**     | `.docx` word processor. Byte-preserving round trip: only dirty paragraphs are regenerated (paragraph patch), everything else in the original file is kept byte-for-byte, so opening and saving never breaks layout in Word. Paginated view whose line metrics reproduce the original document's layout, tracked changes, comments, styles, equations, ink. |
+| `apps/sheets`   | **GenOffice Sheets**   | `.xlsx` spreadsheet. UI built on the open-source [Univer](https://github.com/dream-num/univer) core (Apache-2.0) with a large layer of in-house extensions; `.xlsx` import/export runs through an in-house Rust sidecar (calamine + IronCalc), charts are rendered in-house (Konva), plus pivot tables, slicers, conditional formatting, and formula tracing. |
+| `apps/slides`   | **GenOffice Slides**   | `.pptx` presentations. In-house `.pptx` parse/render/edit engine with masters, charts, cropping, ink, and text shaping (HarfBuzz metrics). |
 | `apps/pdf`      | **GenOffice PDF**      | `.pdf` viewer/editor on [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0) + [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT): annotations, forms, outlines, stamps, signatures, page operations, and printing support. True text editing — paragraph selection with in-block reflow, alignment restoration, original-font preservation — and content-stream image insert/edit, all rewriting page content streams through [PDFium](https://pdfium.googlesource.com/pdfium/) wasm (BSD-3-Clause) with subset-embedded fonts — no cover-up annotations. Converts PDFs into editable Word, PowerPoint, and Excel files fully locally (`packages/pdf2docx`), with OCR support for scanned pages (system OCR on macOS and Windows). |
-| `apps/markdown` | **GenOffice Markdown** | `.md` / `.markdown` editor: Tiptap block editor over plain Markdown files — headings, lists, tables, images, code blocks — saved back as plain Markdown, hosted in shell tabs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `apps/shell`    | **GenOffice**          | The suite shell: home screen, tabbed hosting of the five editors, light/dark/system theme, auto-update.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `apps/markdown` | **GenOffice Markdown** | `.md` / `.markdown` editor: Tiptap block editor over plain Markdown files — headings, lists, tables, images, code blocks — saved back as plain Markdown, hosted in shell tabs. |
+| `apps/shell`    | **GenOffice**          | The suite shell: home screen, tabbed hosting of all apps, light/dark/system theme, auto-update. |
 
-Every app embeds the same AI panel: block-granular AI editing with version
-snapshots and diffs in docs, a tool-calling agent over workbook/slide/PDF
-state in the others.
+### Business Apps (Zanostack)
 
-The whole suite ships light / dark / system UI themes built on shared design
-tokens (`packages/ui`), with a CI guard that keeps chrome colors on the token
-system. Document surfaces stay light in dark mode — Word-style dark chrome
-around white paper — so files render and export identically in both themes.
+| App             | Product                  | What it is |
+| --------------- | ------------------------ | ---------- |
+| `apps/crm`      | **Zanostack CRM**        | Sales pipeline, contacts, companies, and deal management. Deals are tracked through stages (lead → qualified → proposal → negotiation → won/lost). Won deals can be invoiced directly into Zano Books with one click — the invoice is created, the double-entry ledger is updated, and the deal stores the invoice back-reference. Data stored in `userData/crm/deals.json` with schema versioning and atomic persistence. |
+| `apps/tenders`  | **Zanostack Tenders**    | Public and private sector RFP tracking and contract delivery. Manages compliance matrices, company vault returnables, AI-assisted readiness scoring, and contract milestones. Reached milestones can be billed into Zano Books with one click — a VAT tax invoice is created linked to the RFP reference number (e.g. `RFP-WTR-2026-04`), the milestone is marked `BILLED`, and Books is activated. Data stored in `userData/tenders/tenders-data.json`. |
+| `apps/books`    | **Zano Books**           | Local-first double-entry accounting. Chart of Accounts (`acc-bank`, `acc-ar`, `acc-ap`, `acc-sales`, `acc-vat`), parties, sales invoices, purchase bills, and journal entries. Banking view supports standard bank statement CSV import with deduplication, AI-confidence settlement suggestions (HIGH on invoice number / RFP reference / party name match), and 1-click reconciliation that settles open invoices and posts balanced journal entries. Data stored in `userData/books/books-data.json`. |
 
-**AI backends — Genspark sign-in or bring your own key.** By default the
-apps sign in to a Genspark account through a device-code flow — no model API
-key to enter — and model calls route through the Genspark proxy (Claude,
-GPT, and Gemini families). Or bring your own key (BYOK) in the AI settings:
-Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok,
-Mistral, and OpenRouter are built in, plus a custom provider slot for any
-OpenAI-compatible endpoint (base URL + key), local servers included. A
-Genspark account also unlocks the Genspark ("gsk") tool endpoints the agents
-build on — web and image search, image generation and editing,
-image/audio/video analysis, and audio transcription — all reachable through
-`packages/ai-search` for anyone extending the agent layer.
+### Cross-App Integration
+
+The three business apps share a live IPC integration layer:
+
+```
+CRM Deal (Won)
+    └─ crm:create-invoice-in-books ──► Books: INV-YYYY-NNN
+                                          ├─ acc-ar ↑ grandTotal
+                                          ├─ acc-sales ↑ subtotal (÷1.15)
+                                          ├─ acc-vat ↑ VAT portion
+                                          └─ Balanced journal entry posted
+
+Tenders Milestone (REACHED)
+    └─ tenders:bill-milestone-in-books ► Books: INV-YYYY-NNN (with RFP ref)
+                                          ├─ acc-ar ↑ grandTotal
+                                          └─ Milestone → BILLED
+
+Bank CSV Import
+    └─ books:import-bank-statement-csv ► bankTransactions[] + acc-bank adjusted
+
+1-Click Reconciliation
+    └─ books:reconcile-transaction ─────► Invoice → Paid, acc-ar/ap reduced,
+                                          Settlement journal entry posted (D=C)
+```
+
+All three stores use **atomic writes** (write to `.tmp`, rename), **schema versioning** with v0→v1 migration, and **corruption recovery** (`.corrupted.bak` fallback).
+
+---
 
 ## Engine packages
 
@@ -130,14 +165,17 @@ All pure TypeScript, no Electron dependency, unit-tested (except the UI kit):
   `packages/electron-utils` — shared i18n core, React UI kit, recent-files
   store, and Electron main-process helpers.
 
+---
+
 ## Development
 
 ```bash
 npm install
 npm run fixtures     # generate test .docx fixtures
 npm test             # engine + app unit tests (docs/sheets/slides need no display)
-npm run typecheck    # tsc --noEmit across every workspace
-npm run dev          # all five editors + shell against Vite dev servers
+npm run typecheck    # tsc --noEmit across every workspace (9 apps + 13 packages)
+npm run check:brand  # verify no unauthorized upstream brand occurrences
+npm run dev          # all 9 apps + shell against Vite dev servers
 npm run dev:docs     # a single app (same pattern works per workspace)
 npm run dist:mac     # package macOS dmg (regenerates third-party notices)
 npm run dist:win     # package Windows nsis installer
@@ -147,6 +185,33 @@ npm run dist:linux   # package Linux AppImage + deb + rpm
 The sheets app additionally needs a Rust toolchain for its xlsx sidecar
 (`cargo` on PATH); `npm run build -w @genoffice/sheets` compiles it
 automatically.
+
+### Running the business apps
+
+```bash
+# Run all 9 apps + shell together
+npm run dev
+
+# Run individual business apps
+npm run dev -w @genoffice/crm
+npm run dev -w @genoffice/tenders
+npm run dev -w @genoffice/books
+```
+
+### Workflow E2E verification
+
+```bash
+# 56-test E2E suite covering all 4 requirements (Tiers 1–4)
+node tools/verify-suite-workflows.mjs
+
+# Adversarial commercial lifecycle harness (Tier 5, 78 tests)
+node tools/test-challenger-1-m5-hardening.mjs
+
+# Concurrency & resilience stress tests (Tier 5, 30 tests)
+node tools/test-challenger-2-m5-resilience.mjs
+```
+
+---
 
 ## Architecture notes (docx round trip)
 
@@ -164,6 +229,13 @@ The same philosophy holds in sheets and slides: the original file is the
 source of truth, edits are applied as narrow patches, and everything the
 editor didn't touch survives the round trip untouched.
 
+The business apps follow the same principle for their JSON stores: a versioned
+envelope is written atomically, unknown extension fields are preserved across
+read-write cycles, and a `.corrupted.bak` file is written before falling back
+to safe defaults on any parse failure.
+
+---
+
 ## FAQ
 
 **Is GenOffice free?**
@@ -179,7 +251,8 @@ back byte-for-byte, so documents keep working in Microsoft Office.
 Document editing is fully local — files never leave your machine to be
 opened, edited, or saved. The AI features (agents, search, image tools) need
 a network connection, with either a Genspark sign-in or your own model API
-key (BYOK).
+key (BYOK). The three business apps (CRM, Tenders, Books) store all data
+locally and work fully offline.
 
 **Can GenOffice edit PDF files?**
 Yes — real PDF text and image editing that rewrites the page content stream
@@ -204,11 +277,48 @@ disable reporting at any time under Settings → General. Analytics never sends
 document content, file names, file paths, account identity, or email addresses.
 See [GenOffice Privacy](PRIVACY.md) for the complete event and data disclosures.
 
+**What is Zanostack CRM?**
+Zanostack CRM is the sales pipeline app bundled with GenOffice. It manages
+contacts, companies, and deals through configurable stages. Won deals can be
+invoiced into Zano Books with a single click — no copy-paste, no re-entry.
+
+**What is Zanostack Tenders?**
+Zanostack Tenders is the RFP and contract management app. It tracks public and
+private sector tender opportunities, compliance matrices, and delivery milestones.
+When a contract milestone is reached, it can be billed directly into Zano Books,
+with the RFP reference number automatically attached to the invoice.
+
+**What is Zano Books?**
+Zano Books is a local-first double-entry accounting app. It manages a chart of
+accounts, issues sales invoices and purchase bills, imports bank statement CSVs,
+and reconciles open transactions. It receives invoices from both CRM (won deals)
+and Tenders (milestone billing) automatically.
+
+**How does the cross-app invoicing work?**
+When you mark a CRM deal as won and click "Create Invoice in Zano Books", an
+`IPC` call fires from the CRM main process to the Books main process. Books
+creates a sales invoice, posts a balanced double-entry journal entry
+(DR acc-ar / CR acc-sales + acc-vat), updates the CRM deal with the invoice
+reference, and switches the shell tab to Zano Books — all without leaving the
+app. The Tenders milestone billing works the same way.
+
+**How does bank reconciliation work?**
+Import any standard bank CSV (Date, Description, Amount columns — or
+Debit/Credit) in the Banking view. Books deduplicates by fingerprint, updates
+the `acc-bank` ledger balance, and shows settlement suggestions with confidence
+scores (HIGH when the bank reference matches an invoice number, RFP reference,
+or party name). Click Reconcile to mark the invoice Paid, reduce Accounts
+Receivable, and post a balanced settlement journal entry.
+
+---
+
 ## Security
 
 See [SECURITY.md](SECURITY.md) for the process security posture (renderer
 sandboxing, IPC validation, external-link gating) and the threat models for
 AI-generated content.
+
+---
 
 ## Acknowledgements
 
@@ -235,12 +345,16 @@ GenOffice would not be possible without these open-source projects:
 - Liberation, Carlito, Caladea, and Noto CJK fonts (OFL/Apache-2.0) — bundled
   document fonts.
 
+---
+
 ## Third-party notices
 
 `npm run notices` regenerates the bundled third-party license summary
 (`tools/gen-third-party-notices.mjs`); all runtime dependencies are
 MIT/Apache-2.0/BSD-3-Clause/OFL, and the bundled fonts (Liberation, Carlito,
 Caladea, Noto CJK subsets) are OFL/Apache.
+
+---
 
 ## License
 

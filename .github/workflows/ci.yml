@@ -93,6 +93,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check brand compliance
+        run: npm run check:brand
+
       - name: Regenerate test fixtures
         run: npm run fixtures
 
@@ -111,6 +114,17 @@ jobs:
         run: |
           npm run fixtures -w @genoffice/sheets
           npm run compat -w @genoffice/sheets
+
+      # Business-app workflow E2E suite: CRM, Tenders, and Books cross-app
+      # integration (56 tests across Tiers 1–4). Requires compiled main bundles.
+      - name: Build business app main bundles
+        run: |
+          npm run build -w @genoffice/crm
+          npm run build -w @genoffice/tenders
+          npm run build -w @genoffice/books
+
+      - name: Business app workflow E2E suite
+        run: node tools/verify-suite-workflows.mjs
 
   e2e:
     # 22.04, not -latest: 24.04's AppArmor hardening blocks Electron renderer

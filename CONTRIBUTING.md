@@ -22,13 +22,19 @@ directly on this repository as usual.
 
 ## Repository layout
 
-- `apps/*` — the six Electron apps (docs, sheets, slides, pdf, markdown, shell).
+- `apps/*` — the nine Electron apps:
+  - **Office apps**: docs, sheets, slides, pdf, markdown, shell.
+  - **Business apps (Zanostack)**: crm (`Zanostack CRM`), tenders (`Zanostack Tenders`), books (`Zano Books`).
+
   Each app is an npm workspace with its own `src/main` (Electron main
-  process), `src/renderer` (React UI), and `tests/`.
+  process), `src/renderer` (React UI), and optional `tests/`.
 - `packages/*` — pure TypeScript engine and shared packages (no Electron
   dependency, unit-tested): docx/pptx engines, AI agent core, providers,
   i18n, UI kit.
 - `apps/sheets/native/xlsx-engine` — Rust xlsx engine (runs as a sidecar process) for xlsx import/export.
+- `tools/` — E2E and adversarial test harnesses (`verify-suite-workflows.mjs`,
+  `test-challenger-1-m5-hardening.mjs`, `test-challenger-2-m5-resilience.mjs`).
+- `fork/` — branding and upstream sync tooling (`check-brand.mjs`, `sync-upstream.mjs`).
 
 ## Getting started
 
@@ -38,8 +44,11 @@ needed only for the sheets xlsx sidecar).
 ```bash
 npm install
 npm run fixtures     # generate test .docx fixtures (one-time, and after docx-engine changes)
-npm run dev          # all editors + shell against Vite dev servers
-npm run dev:docs     # or run a single app
+npm run dev          # all 9 apps + shell against Vite dev servers
+npm run dev:docs     # or run a single office app
+npm run dev -w @genoffice/crm      # run the CRM app
+npm run dev -w @genoffice/tenders  # run the Tenders app
+npm run dev -w @genoffice/books    # run the Books app
 ```
 
 ## Checks every change must pass
@@ -49,9 +58,17 @@ CI runs these on every PR; please run them locally first:
 ```bash
 npm run format:check # Prettier check for uncommitted changed/new files
 npm run lint         # ESLint across the repo (0 errors required; warnings allowed)
-npm run typecheck    # tsc --noEmit across every workspace
+npm run typecheck    # tsc --noEmit across every workspace (9 apps + 13 packages)
+npm run check:brand  # verify no unauthorized upstream brand occurrences
 npm test             # engine + app unit tests (also runs the Rust sidecar tests)
 npm run licenses     # production dependency licenses within the permissive allowlist
+```
+
+For changes touching the business apps (CRM, Tenders, Books) or the cross-app
+integration layer, also run the workflow E2E suite:
+
+```bash
+node tools/verify-suite-workflows.mjs   # 56 tests, must exit 0
 ```
 
 Formatting is intentionally incremental: existing files are not reformatted
