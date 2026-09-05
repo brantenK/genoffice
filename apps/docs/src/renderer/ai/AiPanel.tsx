@@ -303,7 +303,9 @@ export function AiPanel({
   commentsAccess,
   hfAccess,
 }: AiPanelProps) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  // Panel chrome follows the UI language; message text follows its own content (dir=auto below)
+  const isRtl = lang === 'ar' || lang === 'he'
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   /** Wall-clock start of the current run, drives the elapsed badge */
@@ -986,6 +988,7 @@ export function AiPanel({
     <aside
       ref={asideRef}
       style={{ width: '100%' }}
+      dir={isRtl ? 'rtl' : undefined}
       className={`ai-panel${dragOver ? ' ai-panel-dragover' : ''}${resizing ? ' ai-panel-resizing' : ''}`}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
@@ -1045,7 +1048,11 @@ export function AiPanel({
                   <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
                 )}
                 {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
-                {entry.text && <Markdown text={entry.text} nav={docNav} />}
+                {entry.text && (
+                  <div dir="auto">
+                    <Markdown text={entry.text} nav={docNav} />
+                  </div>
+                )}
               </div>
             ))}
             <div className="ai-history-sep">{t('aiHistorySep')}</div>
@@ -1113,9 +1120,11 @@ export function AiPanel({
                   />
                 </span>
               ) : entry.role === 'assistant' ? (
-                <Markdown text={entry.text} nav={docNav} />
+                <div dir="auto">
+                  <Markdown text={entry.text} nav={docNav} />
+                </div>
               ) : (
-                entry.text
+                <span dir="auto">{entry.text}</span>
               )}
               {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
               {entry.error && (
