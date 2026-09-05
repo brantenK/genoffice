@@ -16,6 +16,7 @@ import type {
   RequirementRecord,
   SubmissionMethod,
   TenderRecord,
+  TendersData,
   VaultDoc
 } from '../shared/types'
 import { findIssuerTemplate } from './issuer'
@@ -134,6 +135,11 @@ interface TendersState {
   setSignatureCheck: (tenderId: string, ruleKey: string, checked: boolean) => void
   setShredding: (p: ShredProgress | null) => void
   rerunGap: () => void
+
+  // ── main-renderer state synchronization ────────────────────────────────────
+  loadFromMain: () => Promise<void>
+  syncFromMain: (data: TendersData) => void
+  saveToMain: () => void
 }
 
 export const SEED_TENDER_WTR_04: TenderRecord = {
@@ -211,6 +217,43 @@ function deriveViews(workspaces: CompanyWorkspace[], activeCompanyId: string) {
     vault: ws.vault,
     tenders: ws.tenders
   }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let isSyncingFromMain = false
+let lastSavedPayload: string | null = null
+
+export function cancelPendingSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+}
+
+export function scheduleSaveToMain(): void {
+  if (isSyncingFromMain) return
+  if (typeof window === 'undefined' || !window.tendersApi?.saveStoredData) return
+
+  cancelPendingSave()
+
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    if (isSyncingFromMain) return
+    const state = useTendersStore.getState()
+    const envelope: TendersData = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      activeCompanyId: state.activeCompanyId,
+      workspaces: state.workspaces,
+      issuerTemplates: state.issuerTemplates,
+    }
+    const json = JSON.stringify(envelope)
+    if (json === lastSavedPayload) return
+    lastSavedPayload = json
+    window.tendersApi?.saveStoredData(json)?.catch((err) => {
+      console.error('tenders: failed to save store to main:', err)
+    })
+  }, 300)
 }
 
 export const useTendersStore = create<TendersState>()(
@@ -412,6 +455,63 @@ export const useTendersStore = create<TendersState>()(
             const updated = applyGapToRequirements(tender.requirements, state.vault)
             get().updateTender(id, { requirements: updated })
           })
+        },
+
+        // ── main-renderer state synchronization ──────────────────────────────
+        loadFromMain: async () => {
+          if (typeof window === 'undefined' || !window.tendersApi?.getStoredData) {
+            return
+          }
+          try {
+            const rawJson = await window.tendersApi.getStoredData()
+            if (rawJson) {
+              const parsed = JSON.parse(rawJson) as TendersData
+              if (parsed && Array.isArray(parsed.workspaces) && parsed.workspaces.length > 0) {
+                get().syncFromMain(parsed)
+                return
+              }
+            }
+            // If null or empty, seed is saved to main via saveStoredData
+            const state = get()
+            const seedEnvelope: TendersData = {
+              version: 1,
+              updatedAt: new Date().toISOString(),
+              activeCompanyId: state.activeCompanyId || SEED_COMPANY_ID,
+              workspaces: state.workspaces && state.workspaces.length > 0 ? state.workspaces : seedWorkspaces(),
+              issuerTemplates: state.issuerTemplates || [],
+            }
+            const seedJson = JSON.stringify(seedEnvelope)
+            lastSavedPayload = seedJson
+            await window.tendersApi.saveStoredData(seedJson)
+          } catch (err) {
+            console.error('tenders: failed to load store from main:', err)
+          }
+        },
+
+        syncFromMain: (data: TendersData) => {
+          cancelPendingSave()
+          if (!data || !Array.isArray(data.workspaces) || data.workspaces.length === 0) return
+
+          lastSavedPayload = JSON.stringify(data)
+
+          isSyncingFromMain = true
+          try {
+            const activeCompanyId = data.activeCompanyId || data.workspaces[0].id
+            const views = deriveViews(data.workspaces, activeCompanyId)
+            set({
+              ...views,
+              issuerTemplates: data.issuerTemplates || [],
+              shredding: null,
+              pendingFocus: null,
+              tourActive: false,
+            })
+          } finally {
+            isSyncingFromMain = false
+          }
+        },
+
+        saveToMain: () => {
+          scheduleSaveToMain()
         }
       }
     },
@@ -422,11 +522,13 @@ export const useTendersStore = create<TendersState>()(
         page: s.page,
         workspaces: s.workspaces.map((ws) => ({
           ...ws,
-          // object URLs are session-lifetime — blank them so the UI can offer
-          // a "re-attach PDF" state instead of a dead fetch after reload.
-          tenders: ws.tenders.map((t) => ({ ...t, fileUrl: '' })),
+          // Only blank fileUrl if it strictly starts with 'blob:'.
+          // Stored disk paths (documents/... or vault/...) survive reloads.
+          tenders: ws.tenders.map((t) =>
+            t.fileUrl?.startsWith('blob:') ? { ...t, fileUrl: '' } : t
+          ),
           // vault docs: only blob: URLs die with the session — static /demo/*
-          // paths survive reload, so blank ONLY the blob: ones.
+          // and stored paths survive reload, so blank ONLY the blob: ones.
           vault: ws.vault.map((d) =>
             d.fileUrl?.startsWith('blob:') ? { ...d, fileUrl: null } : d
           )
@@ -451,10 +553,12 @@ export const useTendersStore = create<TendersState>()(
             ws.tenders.push(SEED_TENDER_WTR_04)
           }
         }
-        // Blob URLs from a previous session are dead — make sure they're blank.
+        // Only wipe fileUrl if it strictly starts with 'blob:'
         state.workspaces = state.workspaces.map((ws) => ({
           ...ws,
-          tenders: ws.tenders.map((t) => ({ ...t, fileUrl: '' })),
+          tenders: ws.tenders.map((t) =>
+            t.fileUrl?.startsWith('blob:') ? { ...t, fileUrl: '' } : t
+          ),
           // safety net for any blob: vault URL that slipped into storage
           vault: ws.vault.map((d) =>
             d.fileUrl?.startsWith('blob:') ? { ...d, fileUrl: null } : d
@@ -472,6 +576,17 @@ export const useTendersStore = create<TendersState>()(
     }
   )
 )
+
+useTendersStore.subscribe((state, prevState) => {
+  if (isSyncingFromMain) return
+  if (
+    state.workspaces !== prevState.workspaces ||
+    state.activeCompanyId !== prevState.activeCompanyId ||
+    state.issuerTemplates !== prevState.issuerTemplates
+  ) {
+    scheduleSaveToMain()
+  }
+})
 
 export const useTenderGuard = useTendersStore
 

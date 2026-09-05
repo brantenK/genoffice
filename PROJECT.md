@@ -1,179 +1,138 @@
-# Project: Zanostack Workflow Expansion & Hardening (CRM, Tenders, Books)
+# Project: Zanostack Tenders Overhaul and Hardening
 
 ## Architecture
-Zanostack is an Electron-based multi-application office suite managed as an npm monorepo with 22 packages (9 apps, 13 packages).
-The application shell (`apps/shell`) hosts multiple application views (`WebContentsView`) in a unified tab strip (`tabManager`).
-The core applications in this workflow hardening are:
-- **Zanostack CRM** (`apps/crm` / `@genoffice/crm`): Manages customer relationships, contacts, companies, and sales pipelines (`userData/crm/deals.json`).
-- **Zanostack Tenders** (`apps/tenders` / `@genoffice/tenders`): Manages public/private sector RFPs, compliance matrices, company vault returnables, and contract delivery milestones (`userData/tenders/tenders-data.json`).
-- **Zano Books** (`apps/books` / `@genoffice/books`): Local-first double-entry accounting software managing Chart of Accounts (`acc-bank`, `acc-ar`, `acc-ap`, `acc-sales`, `acc-vat`), parties, sales invoices, purchase bills, journal entries, and bank reconciliations (`userData/books/books-data.json`).
+Zanostack Tenders (`apps/tenders` / `@genoffice/tenders`) is a core desktop application within the GenOffice Electron multi-application monorepo. It manages public and private sector RFPs, deterministic clause extraction heuristics, compliance matrices, company vault returnables, and contract delivery milestones.
 
-### Data Flow & Cross-App Integration
-1. **CRM → Books Invoicing Bridge**:
-   When an opportunity is marked `won` in CRM, clicking "Create Invoice in Zano Books" generates a Sales Invoice in Books, sets `crmDealId`, updates Books double-entry ledger (`acc-ar`, `acc-sales`, `acc-vat`), saves `invoiceId` and `invoiceNumber` onto the CRM deal, and switches shell active tab to Zano Books.
-2. **Tenders → Books Milestone Billing Bridge**:
-   When a tender contract milestone is reached, clicking "Bill Milestone in Zano Books" generates a Tax Invoice in Books linked to `tenderReference` (e.g. `RFP-WTR-2026-04`), records the issuing authority as party, posts double-entry accounting entries, updates the milestone to `BILLED` with `billedInvoiceId`, and switches shell active tab to Zano Books.
-3. **Books Banking CSV Reconciliation**:
-   Banking view in Zano Books imports standard bank CSV files into Bank Account (`acc-bank`), adjusts the bank ledger balance, automatically computes settlement suggestions for open sales invoices (deposits) and purchase bills (withdrawals), and executes 1-click reconciliation updating invoice status, party balance, and journal entries.
-4. **Resilient Data Persistence**:
-   All 3 applications use a versioned envelope `{ version: 1, updatedAt: string, ... }` with backward-compatible migration of legacy data, field validation, atomic writes (`.tmp` + rename), and corruption backup (`.corrupted.bak`).
+The Electron shell (`apps/shell`) hosts Tenders in a `WebContentsView` tab managed by `TabManager`. The backend lifecycle and IPC endpoints are handled by `apps/tenders/src/main/tenders-main.ts`.
+
+### Unified Storage & Data Flow Architecture
+1. **Renderer-Main State Synchronization (R1)**:
+   - State of truth is stored on disk at `userData/tenders/tenders-data.json`.
+   - The React renderer Zustand store (`apps/tenders/src/renderer/src/store.ts`) rehydrates from disk via `window.tendersApi.getStoredData()` on mount.
+   - UI state changes trigger debounced saves to disk via `window.tendersApi.saveStoredData()`.
+   - Backend state modifications (e.g. milestone billing from Books or external sync) broadcast a `tenders:data-changed` push event to all active Tenders WebContents, triggering live in-memory updates without reloads.
+2. **Persistent Document & Vault Disk Storage (R2)**:
+   - Uploaded RFP PDFs and compliance vault files are saved to `userData/tenders/documents/` and `userData/tenders/vault/` via IPC.
+   - Durable relative paths (`rfps/...`, `vault/...`) are stored in `TenderRecord.fileUrl` and `VaultDoc.fileUrl`, eliminating transient browser `blob:` URLs and avoiding re-attach prompts across application restarts.
+3. **Cross-App Interoperability (R3)**:
+   - **Zano Books**: Milestone billing generates Tax Invoices and balanced double-entry journal entries. Books bank statement reconciliation back-propagates payment status (`'PAID'`) to tender milestones in `tenders-data.json`.
+   - **Zano CRM**: Tender export generates or updates CRM deals with deterministic ID (`deal-tender-${tender.id}`), mapping reference number, issuer, deadline (`expectedCloseDate`), and value, recording `linkedCrmDealId` on the tender.
+   - **Zano Docs & Sheets**: Matrix export generates clean CSV routing to Sheets; proposal draft export generates Docs-compatible documents routing directly to Zanostack Docs.
+4. **Automated Testing Suite (R4)**:
+   - Dedicated Vitest suite in `apps/tenders/tests/` testing deterministic RFP heuristics, compliance gap analysis, store serialization/migration, and IPC handlers with 100% test pass and zero TypeScript errors.
 
 ---
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| F1 | CRM deals schema versioning & migration | Versioned envelope `{ version: 1, updatedAt, deals }`, legacy array migration, field validation, atomic write, corruption backup | M1 | ORIGINAL_REQUEST §R1 |
-| F2 | Tenders data schema versioning & persistence | Versioned envelope `{ version: 1, updatedAt, activeCompanyId, workspaces, issuerTemplates }`, IPC bridge between store and `tenders-data.json`, atomic write | M1 | ORIGINAL_REQUEST §R1 |
-| F3 | Books data schema versioning & validation | Versioned envelope `{ version: 1, updatedAt, ...BooksData }`, safe migration, double-entry validation, atomic write | M1 | ORIGINAL_REQUEST §R1 |
-| F4 | Safe external sync merge logic | External cross-app writes (Tenders->CRM, CRM->Books, Tenders->Books) safely merge/update entities by ID without dropping existing records | M1 | ORIGINAL_REQUEST §R1 |
-| F5 | CRM won deals detection & invoicing eligibility | Identify won deals (`deal.stage === 'won'`), determine invoicing state (`invoiceNumber`/`invoiceId`) | M2 | ORIGINAL_REQUEST §R2 |
-| F6 | CRM to Books invoice creation handler | IPC handler `crm:create-invoice-in-books` mapping deal to Sales Invoice (counterparty, valuation, line item, payment terms, `crmDealId`, double-entry entries) | M2 | ORIGINAL_REQUEST §R2 |
-| F7 | CRM deal back-reference update | Record generated `invoiceId`, `invoiceNumber`, and `invoicedAt` onto the CRM deal in `deals.json` | M2 | ORIGINAL_REQUEST §R2 |
-| F8 | CRM UI 1-click action & tab switch | "Create Invoice in Zano Books" button and linked invoice badge in `DealsTableView` & `DealModal`; triggers `onOpenBooks` shell tab activation | M2 | ORIGINAL_REQUEST §R2 |
-| F9 | Tenders contract milestone data model | `ContractMilestone` interface on `TenderRecord` (`id`, `title`, `description`, `amount`, `status`, `dueDate`, `completedDate`, `billedInvoiceId`); seed RFP-WTR-2026-04 | M3 | ORIGINAL_REQUEST §R3 |
-| F10 | Tenders to Books milestone billing handler | IPC handler `tenders:bill-milestone-in-books` creating Tax Invoice in Books with `tenderReference`, issuing authority, milestone amount, double-entry entries | M3 | ORIGINAL_REQUEST §R3 |
-| F11 | Tenders milestone status update | Update milestone status to `BILLED`, store `billedInvoiceId`, persist to `tenders-data.json` | M3 | ORIGINAL_REQUEST §R3 |
-| F12 | Tenders UI milestone workspace & tab switch | Milestones drawer/section in `Workspace.tsx` with status badges and "Bill Milestone in Zano Books" button; triggers `onOpenBooks` shell tab activation | M3 | ORIGINAL_REQUEST §R3 |
-| F13 | Books Banking view & tab affordance | Add `'banking'` navigation tab to `Desk.tsx` and create `BankingView.tsx` displaying `acc-bank` account balance and transactions | M4 | ORIGINAL_REQUEST §R4 |
-| F14 | Bank statement CSV parser & ingestion | Parse standard bank CSVs (Date, Description, Reference, Amount/Debit/Credit), handle currency formatting, ingest into `acc-bank` | M4 | ORIGINAL_REQUEST §R4 |
-| F15 | Bank ledger balance adjustment | Update `acc-bank.balance` in Books Chart of Accounts by net transaction amount upon CSV import | M4 | ORIGINAL_REQUEST §R4 |
-| F16 | Settlement suggestion matching engine | Match unreconciled bank transactions against open invoices/bills by amount and text tokens (invoice number, tender reference, party name) with confidence scoring | M4 | ORIGINAL_REQUEST §R4 |
-| F17 | 1-click bank reconciliation action | Reconcile matched transaction, mark invoice `Paid`, adjust party balance, post balancing settlement journal entry | M4 | ORIGINAL_REQUEST §R4 |
-| F18 | Automated integration verification script | Standalone script `tools/verify-suite-workflows.mjs` verifying R1-R4 end-to-end, exiting with code 0 | M5 / Test Track | ORIGINAL_REQUEST §Verification |
-| F19 | Monorepo compliance verification | Zero unauthorized brand occurrences (`npm run check:brand`), clean typecheck across all 22 packages (`npm run typecheck`), full build (`npm run build:all`) | M5 / Test Track | ORIGINAL_REQUEST §Verification |
+| F1 | Main-to-Renderer IPC Push Notifications | Broadcast `tenders:data-changed` event to active Tenders WebContents on store updates | M1 | ORIGINAL_REQUEST §R1 |
+| F2 | Renderer Store Hydration & Debounced Save | Hydrate Zustand store via `getStoredData()` on mount and debounce save changes via `saveStoredData()` | M1 | ORIGINAL_REQUEST §R1 |
+| F3 | Data Model & Seed Harmonization | Harmonize seed company, workspace, mock vault returnables, and customers between `tenders-main.ts` and `store.ts` | M1 | ORIGINAL_REQUEST §R1 |
+| F4 | Live UI Update on External Modification | In-memory store updates on `tenders:data-changed` event without page reload, with echo-prevention guard | M1 | ORIGINAL_REQUEST §R1 |
+| F5 | Managed Disk Storage Directory Structure | Establish `userData/tenders/documents` and `userData/tenders/vault` storage directories with safe atomic file write | M2 | ORIGINAL_REQUEST §R2 |
+| F6 | Document Storage IPC Handlers | Implement `tenders:save-document`, `tenders:read-document`, `tenders:open-document`, and `tenders:delete-document` in `tenders-main.ts` | M2 | ORIGINAL_REQUEST §R2 |
+| F7 | Renderer Document & Vault Integration | Replace ephemeral `URL.createObjectURL` with `saveDocument`, storing durable relative paths | M2 | ORIGINAL_REQUEST §R2 |
+| F8 | Restart-Resilient Document Reloading | Update `store.ts` partialize/rehydrate and PDF viewer to read durable paths via `readDocument`, removing re-attach warning | M2 | ORIGINAL_REQUEST §R2 |
+| F9 | Books Reconciliation Payment Back-Propagation | Books bank reconciliation updates linked tender milestones to `'PAID'` in `tenders-data.json` and notifies Tenders | M3 | ORIGINAL_REQUEST §R3 |
+| F10 | CRM Tender Opportunity Sync Hardening | Deterministic deal ID `deal-tender-${id}`, closing date mapped to `expectedCloseDate`, back-reference `linkedCrmDealId` on tender | M3 | ORIGINAL_REQUEST §R3 |
+| F11 | Docs Proposal & Sheets Matrix Export | Clean CSV export to Sheets with escaped cells; proposal draft export opening directly into Zanostack Docs | M3 | ORIGINAL_REQUEST §R3 |
+| F12 | Vitest Setup for `apps/tenders` | Create `apps/tenders/vitest.config.ts`, add `"test": "vitest run"` script, and link to monorepo test runner | M4 | ORIGINAL_REQUEST §R4 |
+| F13 | Deterministic RFP Shredder Heuristic Tests | Automated unit tests for clause extraction, sentence joining, 35 rules scoring, and metadata extraction | M4 | ORIGINAL_REQUEST §R4 |
+| F14 | Compliance Gap Analysis Tests | Automated unit tests for document health, 90-day police stamp expiry window, keyword matching, and 0.5 auto-link threshold | M4 | ORIGINAL_REQUEST §R4 |
+| F15 | Store Migration & IPC Handler Tests | Automated tests for schema migration, atomic writes, corruption handling, and main-renderer synchronization | M4 | ORIGINAL_REQUEST §R4 |
+| F16 | Monorepo Quality & Forensic Audit | Clean `npm run typecheck` across all packages, 100% tests passing, zero brand violations, and Forensic Integrity Audit certification | M4 | ORIGINAL_REQUEST §AC |
 
 ---
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Resilient Data Sync Architecture | Schema versioning, validation, safe migration, atomic writes, and safe external sync merge across `deals.json`, `tenders-data.json`, and `books-data.json` (F1, F2, F3, F4) | none | DONE |
-| M2 | CRM to Books Invoicing Automation | CRM won opportunity detection, IPC invoice creation in Books, deal back-reference, Deals table & modal UI buttons, Books tab activation (F5, F6, F7, F8) | M1 | DONE |
-| M3 | Tenders Contract Milestone Billing | Tenders `ContractMilestone` model, RFP-WTR-2026-04 seed, IPC milestone billing in Books, milestone status update, Workspace UI actions, Books tab activation (F9, F10, F11, F12) | M1 | DONE |
-| M4 | Bank Statement Import & Reconciliation | Books `'banking'` tab & `BankingView.tsx`, CSV statement parser, `acc-bank` balance adjustment, settlement suggestion matching, 1-click reconciliation (F13, F14, F15, F16, F17) | M1 | DONE |
-| M5 | Final Milestone: Acceptance & Adversarial Hardening | Phase 1: 100% pass of `tools/verify-suite-workflows.mjs` (Tiers 1-4). Phase 2: Adversarial coverage hardening (Tier 5). Full checks: brand check, typecheck (22 packages), build:all (F18, F19) | M1, M2, M3, M4 | IN_PROGRESS |
+| M1 | Unified Main-Renderer State Synchronization | Implement IPC push channel, hydrate/save in Zustand store, harmonize seed data, and ensure real-time UI updates (F1, F2, F3, F4) | none | DONE |
+| M2 | Persistent Disk Storage for Documents & Vault | Managed disk storage in userData, IPC document handlers, durable relative paths, eliminating blob URL re-attach prompts (F5, F6, F7, F8) | M1 | DONE |
+| M3 | Cross-App Interoperability & Export Workflows | Books reconciliation payment back-propagation, CRM deal sync hardening with deterministic IDs, Docs/Sheets export workflows (F9, F10, F11) | M1 | DONE |
+| M4 | Automated Testing & Verification Suite | Vitest configuration, deterministic shredder & gap analysis test suites, store & IPC tests, typecheck clean, forensic audit (F12, F13, F14, F15, F16) | M1, M2, M3 | DONE |
 
-*Parallel Track*:
-| # | Name | Scope | Dependencies | Status |
-|---|------|-------|-------------|--------|
-| E2E | E2E Testing Track | Test infra design, test case creation (Tiers 1-4) in `tools/verify-suite-workflows.mjs`, publish `TEST_READY.md` | none (survey complete) | DONE |
+---
+
+## Code Layout
+- `apps/tenders/src/main/tenders-main.ts` — Electron main process backend, IPC registration, store persistence, document disk storage, cross-app operations.
+- `apps/tenders/src/shared/ipc.ts` — IPC channel constant definitions and typed request/response payload contracts.
+- `apps/tenders/src/shared/types.ts` — Data models for tenders, contract milestones, compliance vault documents, requirements, and stored envelopes.
+- `apps/tenders/src/preload/index.ts` — Electron preload script exposing typed `window.tendersApi` to renderer context.
+- `apps/tenders/src/renderer/src/store.ts` — Zustand renderer state store, persistence bridge, and action handlers.
+- `apps/tenders/src/renderer/src/components/` — UI views (TenderList, Workspace, DocumentsPage, MilestonesDrawer).
+- `apps/tenders/src/renderer/src/pdf/` — Deterministic PDF extraction (`extract.ts`), clause stitching (`clauses.ts`), and shredder heuristics (`shred.ts`).
+- `apps/tenders/src/renderer/src/gap.ts` — Compliance gap analysis and vault document health heuristics.
+- `apps/tenders/tests/` — Automated Vitest test suites for shredder heuristics, compliance gap, store migration, and IPC handlers.
+- `apps/books/src/main/books-main.ts` — Zano Books backend and bank statement reconciliation logic.
+- `apps/crm/src/main/crm-main.ts` — Zano CRM backend and deals persistence.
+- `apps/shell/src/main/index.ts` — Application shell and cross-app tab routing.
 
 ---
 
 ## Interface Contracts
 
-### Shared Data Store Schema Version Envelope
+### 1. Unified State Synchronization IPC Contracts
 ```typescript
-export interface DataEnvelope<T> {
-  version: number
-  updatedAt: string
-  data: T // or specific payload properties: deals, workspaces, accounts/invoices
+// IPC Channels
+TENDERS_CHANNELS.dataChanged = 'tenders:data-changed' // Main -> Renderer broadcast
+TENDERS_CHANNELS.getStoredData = 'tenders:get-stored-data' // Renderer -> Main
+TENDERS_CHANNELS.saveStoredData = 'tenders:save-stored-data' // Renderer -> Main
+
+export interface TendersApiBridge {
+  getStoredData: () => Promise<string | null>
+  saveStoredData: (json: string) => Promise<{ ok: boolean; error?: string }>
+  onDataChanged: (callback: (data: TendersData) => void) => () => void
 }
 ```
 
-### CRM ↔ Books Invoicing Contract
+### 2. Document & Vault Disk Storage IPC Contracts
 ```typescript
-// IPC Channel: 'crm:create-invoice-in-books'
-export interface CreateInvoiceFromDealRequest {
-  dealId: string
+TENDERS_CHANNELS.saveDocument = 'tenders:save-document'
+TENDERS_CHANNELS.readDocument = 'tenders:read-document'
+TENDERS_CHANNELS.openDocument = 'tenders:open-document'
+TENDERS_CHANNELS.deleteDocument = 'tenders:delete-document'
+
+export interface SaveDocumentRequest {
+  fileName: string
+  buffer: ArrayBuffer | Uint8Array
+  category: 'rfp' | 'vault'
 }
-export interface CreateInvoiceFromDealResponse {
+export interface SaveDocumentResponse {
   ok: boolean
-  invoiceId?: string
-  invoiceNumber?: string
+  storedPath: string // relative to userData/tenders, e.g. "documents/1725470000000_tender.pdf"
   error?: string
 }
 
-// Generated Invoice in Books:
-// - type: 'Sales'
-// - partyName: deal.companyName || deal.name
-// - grandTotal: deal.amount
-// - subtotal: Math.round((deal.amount / 1.15) * 100) / 100
-// - taxTotal: Math.round((deal.amount - subtotal) * 100) / 100
-// - items: [{ description: `${deal.name} - Commercial Implementation & Services`, qty: 1, rate: subtotal, amount: subtotal, taxRate: 15 }]
-// - crmDealId: deal.id
-// - status: 'Unpaid'
-// - notes: 'Payment terms: Net 30 days upon invoice receipt.'
-```
-
-### Tenders ↔ Books Milestone Billing Contract
-```typescript
-// IPC Channel: 'tenders:bill-milestone-in-books'
-export interface BillMilestoneRequest {
-  tenderId: string
-  milestoneId: string
-  tenderReference: string // e.g. 'RFP-WTR-2026-04'
-  issuingAuthority: string // e.g. 'City of Ekurhuleni Water Dept'
-  milestoneTitle: string // e.g. 'Phase 1 Reservoir Valve Refurbishment'
-  amount: number // e.g. 145000
-  notes?: string
+export interface ReadDocumentRequest {
+  storedPath: string
 }
-export interface BillMilestoneResponse {
+export interface ReadDocumentResponse {
   ok: boolean
-  invoiceId?: string
-  invoiceNumber?: string
+  buffer?: ArrayBuffer
   error?: string
 }
-
-// Generated Tax Invoice in Books:
-// - type: 'Sales'
-// - partyName: issuingAuthority
-// - tenderReference: tenderReference
-// - grandTotal: amount
-// - subtotal: Math.round((amount / 1.15) * 100) / 100
-// - taxTotal: Math.round((amount - subtotal) * 100) / 100
-// - items: [{ description: `${milestoneTitle} per ${tenderReference}`, qty: 1, rate: subtotal, amount: subtotal, taxRate: 15 }]
-// - status: 'Unpaid'
 ```
 
-### Books Banking CSV Import & Reconciliation Contract
+### 3. Cross-App Contracts
 ```typescript
-export interface BankTransaction {
-  id: string
-  accountId: string // 'acc-bank'
-  date: string // YYYY-MM-DD
-  description: string
-  reference?: string
-  amount: number // positive = deposit, negative = withdrawal
-  reconciled: boolean
-  matchedInvoiceId?: string
-  reconciledAt?: string
-}
+// Books Reconciliation -> Tenders Milestone Back-Propagation
+// When an invoice with tenderReference is reconciled and marked 'Paid':
+// 1. Load userData/tenders/tenders-data.json
+// 2. Locate matching milestone by billedInvoiceId or tenderReference
+// 3. Update milestone: status = 'PAID', paidAt = new Date().toISOString()
+// 4. Save tenders-data.json atomically and broadcast tenders:data-changed
 
-export interface SettlementSuggestion {
-  transactionId: string
-  invoiceId: string
-  invoiceNumber: string
-  partyName: string
-  invoiceType: 'Sales' | 'Purchase'
+// CRM Opportunity Sync Contract
+export interface SyncWithCrmPayload {
+  dealId: string // deterministic: `deal-tender-${tender.id}`
+  title: string
+  companyName: string
+  referenceNumber: string
   amount: number
-  confidence: 'HIGH' | 'MEDIUM'
-  reason: string
+  expectedCloseDate: string // tender.closingDate
+  stage: 'proposal'
+  tenderId: string
 }
 ```
-
----
-
-## Code Layout
-- `packages/project-store/` or shared schema modules: Resilient data schema migration and storage helpers.
-- `apps/crm/src/`:
-  - `shared/types.ts`: `Deal` interface with invoice fields, `DealsStoreEnvelope`.
-  - `main/crm-store.ts`: Schema migration, validation, atomic writing.
-  - `main/crm-main.ts`: IPC handlers for Books invoice creation and opening Books tab.
-  - `renderer/src/components/DealsTableView.tsx`, `DealModal.tsx`: Invoicing UI affordances.
-- `apps/tenders/src/`:
-  - `shared/types.ts`: `ContractMilestone`, `TendersData` envelope.
-  - `main/tenders-main.ts`: Milestone billing IPC handler, safe external sync with CRM deals.
-  - `renderer/src/components/Workspace.tsx`: Milestones drawer and "Bill Milestone in Zano Books" action.
-  - `renderer/src/store.ts`: Seed tender `RFP-WTR-2026-04` with reached milestone, IPC sync.
-- `apps/books/src/`:
-  - `shared/types.ts`: `BankTransaction`, `BooksData` versioned envelope.
-  - `main/books-main.ts`: Schema versioning, atomic writing, data loading/saving.
-  - `renderer/src/components/Desk.tsx`: `'banking'` tab navigation.
-  - `renderer/src/components/BankingView.tsx`: Bank statement CSV import and 1-click reconciliation UI.
-  - `renderer/src/store.ts`: Bank transaction state, CSV import action, suggestion matching, reconcile action.
-- `apps/shell/src/main/`:
-  - `index.ts`: Wire `onOpenBooks` into `configureCrmRuntime` and `configureTendersRuntime`.
-- `tools/`:
-  - `verify-suite-workflows.mjs`: Automated end-to-end integration test runner.

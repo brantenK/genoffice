@@ -89,7 +89,24 @@ export function DocumentsPage() {
     setSelected(null)
   }
 
-  const handleSubmit = (data: VaultFormData) => {
+  const handleSubmit = async (data: VaultFormData) => {
+    let savedPath: string | null = null
+    if (data.file && typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
+      try {
+        const buffer = await data.file.arrayBuffer()
+        const saveRes = await window.tendersApi.saveDocument({
+          fileName: data.file.name,
+          buffer,
+          category: 'vault'
+        })
+        if (saveRes?.ok && saveRes.storedPath) {
+          savedPath = saveRes.storedPath
+        }
+      } catch (err) {
+        console.warn('tenders: failed to persist vault document via IPC', err)
+      }
+    }
+
     if (editDoc) {
       // ── edit / re-attach an existing document ───────────────────────────
       const metadata: Record<string, string> = { ...editDoc.metadata }
@@ -97,6 +114,9 @@ export function DocumentsPage() {
       else delete metadata['Note']
       if (data.file) metadata['File name'] = data.file.name
       if (editDoc.fileUrl?.startsWith('blob:')) URL.revokeObjectURL(editDoc.fileUrl)
+      const fileUrl = data.file
+        ? (savedPath || URL.createObjectURL(data.file))
+        : editDoc.fileUrl
       const updated: VaultDoc = {
         ...editDoc,
         title: data.title,
@@ -105,7 +125,7 @@ export function DocumentsPage() {
         expiryDate: data.expiryDate,
         isCertified: data.isCertified,
         certifiedDate: data.certifiedDate,
-        fileUrl: data.file ? URL.createObjectURL(data.file) : editDoc.fileUrl,
+        fileUrl,
         metadata
       }
       updateVaultDoc(editDoc.id, updated)
@@ -115,11 +135,14 @@ export function DocumentsPage() {
       const metadata: Record<string, string> = {}
       if (data.file) metadata['File name'] = data.file.name
       if (data.note) metadata['Note'] = data.note
+      const fileUrl = data.file
+        ? (savedPath || URL.createObjectURL(data.file))
+        : null
       addVaultDoc({
         id: newVaultDocId(),
         title: data.title,
         category: data.category,
-        fileUrl: data.file ? URL.createObjectURL(data.file) : null,
+        fileUrl,
         issueDate: data.issueDate,
         expiryDate: data.expiryDate,
         isCertified: data.isCertified,
@@ -384,14 +407,30 @@ function DocDetailPanel({
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
         {doc.fileUrl ? (
-          <a
-            href={doc.fileUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+          <button
+            type="button"
+            onClick={async () => {
+              const url = doc.fileUrl
+              if (!url) return
+              if (
+                typeof window !== 'undefined' &&
+                window.tendersApi?.openDocument &&
+                !url.startsWith('blob:') &&
+                !url.startsWith('http') &&
+                !url.startsWith('/demo')
+              ) {
+                const res = await window.tendersApi.openDocument({ storedPath: url })
+                if (!res?.ok) {
+                  console.warn('tenders: failed to open document via shell', res?.error)
+                }
+              } else {
+                window.open(url, '_blank')
+              }
+            }}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
           >
             <ExternalLink size={14} /> Open PDF
-          </a>
+          </button>
         ) : (
           <button
             type="button"

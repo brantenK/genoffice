@@ -1,39 +1,37 @@
-## 2026-09-03T19:07:01Z
-You are Reviewer 2 for Milestone 4 (reviewer_2_m4).
-Your working directory is:
+## 2026-09-05T01:00:00Z
+You are reviewer_2_m4, an independent code reviewer.
+Your assigned working directory is:
 c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\reviewer_2_m4
 
-You MUST read the original user request at:
+You MUST read ORIGINAL_REQUEST.md before starting work:
 c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\ORIGINAL_REQUEST.md
+Specifically inspect the latest request dated 2026-09-04T18:31:53Z.
 
-You MUST read the project blueprint at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\PROJECT.md
+Also read PROJECT.md and worker_m4_tests handoff:
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\PROJECT.md
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\worker_m4_tests\handoff.md
 
-Read TEST_READY.md at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\TEST_READY.md
+Scope of Review: Milestone 4 — Test Coverage & Robustness (R4)
+Examine:
+- apps/tenders/vitest.config.ts
+- apps/tenders/package.json
+- apps/tenders/tests/shredder-heuristics.test.ts
+- apps/tenders/tests/compliance-gap.test.ts
+- apps/tenders/tests/store-migrations.test.ts
+- apps/tenders/tests/ipc-handlers.test.ts
 
-Read Worker 4's handoff report at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\worker_m4\handoff.md
-
-Your mission:
-Adversarially challenge and review Milestone 4:
-1. Examine potential failure modes:
-   - Does `parseBankStatementCsv` handle tricky inputs (empty lines, trailing commas, spaces, currency symbols like R and $, negative values in parentheses like `(25000)`) without crashing?
-   - Does `importBankStatement` correctly deduplicate by fingerprint (`date|description|amount`) so re-importing the same statement doesn't double-adjust `acc-bank` balance?
-   - Does `computeSettlementSuggestions` accurately match deposits with Sales invoices and withdrawals with Purchase bills, scoring confidence properly?
-   - Does `executeReconciliation` enforce idempotency (rejecting already reconciled transactions or already paid invoices)?
-   - Does `executeReconciliation` maintain exact double-entry balance in posted `JournalEntry` (`totalDebit === totalCredit === settledAmount`)?
-2. Run verification commands:
+Review with special focus on:
+1. Deterministic RFP shredder edge cases (noisy text, clause boundary detection, 35 rules coverage, metadata extraction).
+2. Compliance gap edge cases (health transitions, 90-day police stamp cutoff, auto-link 0.5 threshold).
+3. Store migrations and persistence (MOCK_VAULT and MOCK_COMPANY preservation, corruption recovery, durable paths).
+4. Run verification commands:
+   - `npm test -w @genoffice/tenders`
    - `npm run check:brand`
    - `npm run typecheck`
-   - `node tools/verify-suite-workflows.mjs --feature r4`
-   - `node tools/test-adversarial-m4-empirical.mjs`
-3. Deliver your structured review verdict: APPROVE or REQUEST_CHANGES.
+   - `npx tsx tools/verify-tenders-sync.ts`
+   - `npx tsx tools/verify-tenders-storage.ts`
+   - `npx tsx tools/verify-tenders-interop.ts`
+5. Document all findings and provide an explicit binary gate verdict: APPROVE or REQUEST_CHANGES.
 Write your handoff report to:
 c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\reviewer_2_m4\handoff.md
-Maintain progress in your progress.md. When done, notify me via send_message with your verdict.
-
-## 2026-09-03T19:46:17Z
-**Context**: Milestone 4 Adversarial Review
-**Content**: Background build task has completed (full build:all succeeded with code 0). All 14 of your adversarial tests passed. Please finalize your handoff.md and send your review verdict to the orchestrator.
-**Action**: Write handoff.md and send your verdict.
+Send a completion message to parent when done.

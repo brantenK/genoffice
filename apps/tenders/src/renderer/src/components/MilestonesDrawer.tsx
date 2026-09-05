@@ -1,4 +1,4 @@
-﻿// Contract Milestones Drawer: Delivery progress & Zano Books billing integration
+// Contract Milestones Drawer: Delivery progress & Zano Books billing integration
 import { useState } from 'react'
 import {
   Award,
@@ -160,11 +160,13 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
               <div
                 key={ms.id || index}
                 className={`rounded-xl border p-4 transition-all ${
-                  isBilled
-                    ? 'border-indigo-100 bg-slate-50/60'
-                    : isReached
-                      ? 'border-indigo-200 bg-indigo-50/20 ring-1 ring-indigo-200/50'
-                      : 'border-slate-200 bg-white'
+                  isPaid
+                    ? 'border-emerald-200 bg-emerald-50/30 ring-1 ring-emerald-200/50'
+                    : isBilled
+                      ? 'border-indigo-100 bg-slate-50/60'
+                      : isReached
+                        ? 'border-indigo-200 bg-indigo-50/20 ring-1 ring-indigo-200/50'
+                        : 'border-slate-200 bg-white'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -201,11 +203,15 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                         <Clock size={12} /> Due: {ms.dueDate}
                       </span>
                     )}
-                    {ms.billedAt && (
+                    {(ms as any).paidAt ? (
+                      <span className="inline-flex items-center gap-1 font-semibold text-emerald-600">
+                        <CheckCircle2 size={12} className="text-emerald-500" /> Paid: {new Date((ms as any).paidAt).toLocaleDateString()}
+                      </span>
+                    ) : ms.billedAt ? (
                       <span className="inline-flex items-center gap-1 text-slate-400">
                         Billed: {new Date(ms.billedAt).toLocaleDateString()}
                       </span>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Actions based on Milestone Status */}
@@ -239,6 +245,19 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                         <FileText size={12} />
                         <span>{ms.billedInvoiceNumber || 'View in Books'}</span>
                         <ExternalLink size={10} className="text-indigo-400" />
+                      </button>
+                    )}
+
+                    {isPaid && (
+                      <button
+                        type="button"
+                        onClick={handleOpenBooks}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer"
+                        title="View settled invoice in Zano Books"
+                      >
+                        <FileText size={12} />
+                        <span>{ms.billedInvoiceNumber || 'View in Books'}</span>
+                        <ExternalLink size={10} className="text-emerald-500" />
                       </button>
                     )}
                   </div>

@@ -1,5 +1,5 @@
 // Root shell: fixed left sidebar (nav + company switcher) + main content area.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   BookOpen,
   Building2,
@@ -39,6 +39,16 @@ const NAV_ITEMS: { page: AppPage; label: string; icon: React.ReactNode; tour?: s
 export function App() {
   const page = useTendersStore((s) => s.page)
   const setPage = useTendersStore((s) => s.setPage)
+
+  useEffect(() => {
+    void useTendersStore.getState().loadFromMain()
+    const unsub = window.tendersApi?.onDataChanged?.((data) => {
+      useTendersStore.getState().syncFromMain(data)
+    })
+    return () => {
+      unsub?.()
+    }
+  }, [])
   const company = useTendersStore((s) => s.company)
   const workspaces = useTendersStore((s) => s.workspaces)
   const activeCompanyId = useTendersStore((s) => s.activeCompanyId)

@@ -1,93 +1,243 @@
-# Handoff Report: Challenger 2 (Milestone 4 — Accounting Side-Effects & 1-Click Reconciliation)
+# Milestone 4 Handoff Report — Empirical Verification & End-to-End Regression Challenge (R4)
+
+**Agent**: challenger_2_m4  
+**Working Directory**: `c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_2_m4`  
+**Date**: 2026-09-05T01:10:00Z  
+**Verdict**: **APPROVE**
+
+---
 
 ## 1. Observation
-- **Test Harness Authored**: `tools/test-challenger-2-m4-accounting.mjs` (29 empirical adversarial tests across 6 suites).
-- **Commands Executed and Results**:
-  1. `node tools/test-challenger-2-m4-accounting.mjs`:
-     - **Result**: `29 passed, 0 failed out of 29 tests` (exit code 0).
-     - **Suite 1 (Sales Invoices)**: Verified 8 tests: transaction marked reconciled with `matchedInvoiceId` and ISO `reconciledAt`; invoice status marked `Paid`, `outstandingAmount` set to 0; customer `outstandingBalance` decremented; `acc-ar` offset by settled amount; balanced `JournalEntry` posted (`debit acc-bank`, `credit acc-ar`); fractional cent precision; party matching fallback by name; graceful handling when party is missing.
-     - **Suite 2 (Purchase Bills)**: Verified 8 tests: transaction marked reconciled; bill status marked `Paid`, `outstandingAmount` set to 0; supplier `outstandingBalance` decremented; `acc-ap` offset by settled amount; balanced `JournalEntry` posted (`debit acc-ap`, `credit acc-bank`); fractional cent precision; clamping at 0 when party or account balance is smaller than bill amount (`Math.max(0, ...)`).
-     - **Suite 3 (Error Guards)**: Verified 7 tests: non-existent transaction rejected (`Transaction not found`), non-existent invoice rejected (`Invoice not found`), re-reconciling already reconciled transaction rejected (`already reconciled`), re-reconciling already Paid invoice rejected (`already marked Paid`), missing `bankTransactions` array, missing `invoices` array, and zero-amount invoice reconciliation without runtime failure.
-     - **Suite 4 (Double-Entry Invariant)**: Verified 2 tests: multi-transaction interleaved reconciliation (4 transactions, deposits + withdrawals, 100% balanced journal entries, cumulative bank balance verified) and a 50-cycle randomized fuzzer with arbitrary floats verifying 100% `totalDebit === totalCredit` and `sum(items.debit) === totalDebit` / `sum(items.credit) === totalCredit`.
-     - **Suite 5 (Statement Re-import Integrity)**: Verified 1 test: re-importing identical statement CSV skips duplicate transactions, produces `netAdjustment = 0`, preserves existing reconciled transaction links, and prevents duplicate balance increment.
-     - **Suite 6 (IPC Handlers)**: Verified 3 tests: `books:reconcile-transaction` IPC channel end-to-end execution, structured error propagation, and `books:get-settlement-suggestions` exclusion of reconciled transactions / paid invoices.
-  2. `node tools/test-adversarial-m4-empirical.mjs`:
-     - **Result**: `8 passed, 0 failed out of 8 tests` (exit code 0).
-  3. `node tools/verify-suite-workflows.mjs --feature r4`:
-     - **Result**: `12 passed, 0 failed out of 12 tests` (exit code 0).
-  4. `node tools/verify-suite-workflows.mjs`:
-     - **Result**: `56 passed, 0 failed out of 56 tests` across Tiers 1-4 (exit code 0).
-  5. `npm run check:brand`:
-     - **Result**: `Zero unauthorized upstream brand occurrences found` (exit code 0).
-  6. `npm run typecheck`:
-     - **Result**: Clean typecheck across all 22 monorepo packages (exit code 0).
-  7. `npm run build:all`:
-     - **Result**: Clean build across all 9 applications (`@genoffice/docs`, `@genoffice/sheets`, `@genoffice/slides`, `@genoffice/pdf`, `@genoffice/markdown`, `@genoffice/crm`, `@genoffice/tenders`, `@genoffice/books`, `@genoffice/shell`) (exit code 0).
 
-- **Implementation Inspected in `apps/books/src/main/books-main.ts`**:
-  - `executeReconciliation` (lines 564–656):
-    - Reconciles transaction: `tx.reconciled = true; tx.matchedInvoiceId = inv.id; tx.reconciledAt = new Date().toISOString()`.
-    - Updates invoice: `inv.status = 'Paid'; inv.outstandingAmount = 0; inv.updatedAt = new Date().toISOString()`.
-    - Updates party: `party.outstandingBalance = Math.max(0, Math.round((party.outstandingBalance - settledAmount) * 100) / 100)`.
-    - Offsets ledger: `acc-ar` offset for Sales, `acc-ap` offset for Purchase with `Math.max(0, ...)`.
-    - Posts balanced `JournalEntry`:
-      - Sales: Debit `acc-bank` (settledAmount), Credit `acc-ar` (settledAmount).
-      - Purchase: Debit `acc-ap` (settledAmount), Credit `acc-bank` (settledAmount).
-      - `totalDebit === settledAmount`, `totalCredit === settledAmount`.
-    - Guards: validates transaction existence & unreconciled state, invoice existence & unpaid status.
+All test suites and verification scripts were directly executed using the environment's terminal runner. Direct commands, execution parameters, and verbatim terminal outputs are documented below.
+
+### 1.1 Tenders Vitest Test Suite (`npm test -w @genoffice/tenders`)
+- **Command**: `npm test -w @genoffice/tenders`
+- **Working Directory**: `c:\Users\brant\OneDrive\Documents\GenOffice\genoffice`
+- **Exit Code**: `0`
+- **Output**:
+  ```text
+  > @genoffice/tenders@0.1.0 test
+  > vitest run
+
+   RUN  v4.1.10 C:/Users/brant/OneDrive/Documents/GenOffice/genoffice/apps/tenders
+
+   ✓ tests/shredder-heuristics.test.ts (26 tests) 38ms
+   ✓ tests/compliance-gap.test.ts (21 tests) 42ms
+  stderr | tests/store-migrations.test.ts > Tenders Store Migrations & Atomic Persistence > 3. Corrupted JSON Recovery and .corrupted.bak > creates .corrupted.bak and returns safe fallback envelope on invalid JSON
+  tenders-main: Corrupted tenders file detected. Backed up to C:\Users\brant\AppData\Local\Temp\tenders-migration-test-7b8a476b\tenders-data.json.corrupted.bak
+
+   ✓ tests/store-migrations.test.ts (10 tests) 72ms
+   ✓ tests/ipc-handlers.test.ts (15 tests) 280ms
+
+   Test Files  4 passed (4)
+        Tests  72 passed (72)
+     Start at  03:00:22
+     Duration  2.36s (transform 1.05s, setup 0ms, import 1.55s, tests 432ms, environment 5.43s)
+  ```
+- **Confirmation**: Exactly 72 of 72 unit tests passed across 4 test suites with zero failures.
+
+---
+
+### 1.2 Repository Verification Scripts
+
+#### 1. `npx tsx tools/verify-tenders-sync.ts` (State Synchronization)
+- **Exit Code**: `0`
+- **Output Summary**:
+  ```text
+  --- TEST 1: Harmonized Seed Data Integrity --- (13 checks passed)
+  --- TEST 2: Legacy / Empty File Migration --- (4 checks passed)
+  --- TEST 3: Active WebContents Tracking & Broadcast --- (5 checks passed)
+  --- TEST 4: Renderer Persistence & Restart Integrity (Req 6.a) --- (8 checks passed)
+  --- TEST 5: External Modification Broadcast & Live Sync (Req 6.b) --- (2 checks passed)
+  --- TEST 6: Echo Loop Prevention Guard --- (1 check passed)
+  --- TEST 7: billMilestoneInBooks Persistence & Broadcast --- (7 checks passed)
+  ----------------------------------------------------------------------
+  Results: 40 passed, 0 failed
+  🎉 ALL STATE SYNCHRONIZATION VERIFICATIONS PASSED!
+  ```
+
+#### 2. `npx tsx tools/verify-tenders-storage.ts` (Persistent Disk Storage)
+- **Exit Code**: `0`
+- **Output Summary**:
+  ```text
+  --- TEST 1: Managed Directory Structure under userData/tenders --- (6 checks passed)
+  --- TEST 2: Persistent Save & Atomic Writes (RFP & Vault) --- (12 checks passed)
+  --- TEST 3: Filename Sanitization & Collision Resistance --- (6 checks passed)
+  --- TEST 4: Document Retrieval (readDocument) via IPC --- (6 checks passed)
+  --- TEST 5: Shell Open Document (openDocument) via IPC --- (3 checks passed)
+  --- TEST 6: Document Deletion (deleteDocument) via IPC --- (4 checks passed)
+  --- TEST 7: Path Traversal Prevention (Req c) --- (24 checks passed)
+  --- TEST 8: Store Rehydration & Elimination of Re-attach Prompt (Req b) --- (11 checks passed)
+  ----------------------------------------------------------------------
+  Results: 72 passed, 0 failed
+  🎉 ALL MILESTONE 2 PERSISTENT DISK STORAGE VERIFICATIONS PASSED!
+  ```
+
+#### 3. `npx tsx tools/verify-tenders-interop.ts` (Interoperability & Cross-App Workflows)
+- **Exit Code**: `0`
+- **Output Summary**:
+  ```text
+  --- SECTION 1: Books Milestone Billing & Double-Entry Ledger Integrity (Req a) --- (27 checks passed)
+  --- SECTION 2: Bank Reconciliation Payment Back-Propagation to Tenders (Req b) --- (18 checks passed)
+  --- SECTION 3: CRM Tender Opportunity Sync Hardening (Req c) --- (23 checks passed)
+  --- SECTION 4: Docs & Sheets Export Workflows (Req d) --- (48 checks passed)
+  ----------------------------------------------------------------------
+  Results: 116 passed, 0 failed
+  🎉 ALL MILESTONE 3 INTEROPERABILITY VERIFICATIONS PASSED!
+  ```
+
+#### 4. `npx tsx tools/test-challenger-m3-interop-stress.ts` (Interop Stress Testing)
+- **Exit Code**: `0`
+- **Output Summary**:
+  ```text
+  --- SUITE 1: Books Reconciliation Payment Back-Propagation Stress Test ---
+  --- SUITE 2: CRM Sync Deduplication Stress Test ---
+  --- SUITE 3: Sheets CSV Export Robustness Stress Test ---
+  --- SUITE 3.6: Empirical Parseability with Zano Sheets Native Importer ---
+  --- SUITE 3.7: Root-Cause Verification Benchmark (RFC 4180 Unspaced) ---
+  --- SUITE 3.8: Exhaustive 8,000-Cell Round-Trip Fidelity Oracle ---
+  --- SUITE 3.9: Extreme Adversarial Matrix Robustness ---
+  --- SUITE 3.10: Monotonic Export Timestamps & Anti-Collision Verification ---
+  ======================================================================
+  RESULTS: 117 passed, 0 failed
+  FINDINGS: 0 detected
+  ======================================================================
+  VERDICT: APPROVE — All stress tests passed cleanly.
+  ```
+
+#### 5. `npx tsx tools/test-challenger-m3-workflows.ts` (Commercial Workflows & Accounting)
+- **Exit Code**: `0`
+- **Output Summary**:
+  ```text
+  ================================================================================
+     CHALLENGER 2 VERIFICATION SUMMARY & METRICS
+  ================================================================================
+  Total Assertions Evaluated : 132
+  Passed Assertions           : 132
+  Failed Assertions           : 0
+
+  Breakdown by Category:
+  - Contract Lifecycle & Accounting Checks : 52
+  - CRM Opportunity Sync & Navigation      : 17
+  - Sheets & Docs Export Workflows          : 22
+  - Adversarial Stress & Edge Case Checks  : 41
+  ================================================================================
+  🎉 VERDICT: APPROVE — All Milestone 3 Cross-App Workflows empirically verified!
+  ```
+
+#### 6. `node tools/verify-suite-workflows.mjs` (Monorepo E2E Workflows Track)
+- **Exit Code**: `0`
+- **Output Summary**:
+  ```text
+  ======================================================================
+     ZANOSTACK SUITE WORKFLOW VERIFICATION (E2E TRACK)
+  ======================================================================
+  Plan: 56 tests selected (Filter: Tier=all, Milestone=all, Feature=all)
+  Results: 56 passed, 0 failed out of 56 tests (1223ms)
+  🎉 ALL SUITE WORKFLOW VERIFICATIONS PASSED SUCCESSFULLY!
+  ```
+
+---
+
+### 1.3 Extended Regression Suites Verification
+To ensure zero regressions across earlier milestone implementations (M1, M2), the following deep stress harnesses were also executed:
+1. `npx tsx tools/test-challenger-m1-data-integrity.ts`: 175 passed, 0 failed.
+2. `npx tsx tools/test-challenger-m1-sync.ts`: 61 passed, 0 failed.
+3. `npx tsx tools/test-challenger-m2-restart-rehydration.ts`: 266 passed, 0 failed.
+4. `npx tsx tools/test-challenger-m2-storage-security.ts`: 483 passed, 0 failed.
+
+**Total extended regression assertions**: 985 passed, 0 failed.
+
+---
+
+### 1.4 Monorepo Health & Quality Checks
+1. **TypeScript Typecheck (`npm run typecheck`)**:
+   - Command: `npm run typecheck` (runs `tsc --noEmit` across all 22 packages)
+   - Exit Code: `0`
+   - Diagnostic errors: `0`
+2. **Brand Compliance (`npm run check:brand`)**:
+   - Command: `npm run check:brand`
+   - Exit Code: `0`
+   - Output: `✅ Brand check passed: Zero unauthorized upstream brand occurrences found.`
+
+---
 
 ## 2. Logic Chain
-1. **Sales 1-Click Reconciliation Side-Effects**:
-   - In `tools/test-challenger-2-m4-accounting.mjs` Tests 1.1–1.6, executing reconciliation on an open Sales invoice (`INV-2026-041`) against a bank deposit (`tx-dep-1`, R 145,000.00) directly updated `tx.reconciled` to `true`, set `tx.matchedInvoiceId` to `inv-sales-tender`, updated the invoice status to `'Paid'`, set `outstandingAmount` to 0, decremented the customer's outstanding balance from 145,000 to 0, decremented `acc-ar` balance from 350,000 to 205,000, and posted a Journal Entry where `totalDebit === 145000`, `totalCredit === 145000`, item 1 debits `acc-bank`, and item 2 credits `acc-ar`.
-2. **Purchase 1-Click Reconciliation Side-Effects**:
-   - In Tests 2.1–2.6, executing reconciliation on an open Purchase bill (`BILL-2026-018`) against a bank withdrawal (`tx-with-1`, -R 42,000.00) updated `tx.reconciled` to `true`, set `tx.matchedInvoiceId` to `bill-purch-steel`, updated the bill status to `'Paid'`, cleared outstanding to 0, decremented the supplier's outstanding balance from 42,000 to 0, decremented `acc-ap` balance from 120,000 to 78,000, and posted a Journal Entry where `totalDebit === 42000`, `totalCredit === 42000`, item 1 debits `acc-ap`, and item 2 credits `acc-bank`.
-3. **Double-Entry Invariant Rigor**:
-   - In Tests 1.5, 2.5, 4.1, and 4.2 (50 randomized fuzzing iterations), every single generated journal entry strictly satisfied `totalDebit === totalCredit`. Furthermore, item-level sums `sum(debit)` and `sum(credit)` matched `totalDebit` and `totalCredit` with 0 floating point drift across standard integers, fractional cents, and large values.
-4. **Boundary & Guard Resilience**:
-   - Tests 3.1–3.4 verified that non-existent IDs and re-reconciling already reconciled transactions or already Paid invoices return structured `{ ok: false, error: ... }` responses. Tests 1.7, 2.7, and 2.8 verified that `Math.max(0, ...)` prevents underflow into negative party or account balances.
-5. **Monorepo Coherence**:
-   - All 9 applications in the monorepo compile cleanly via `npm run build:all`. All 22 packages pass `npm run typecheck`. Brand check passes with 0 violations.
+
+1. **Premise 1 (R4 Mandate)**:
+   Milestone 4 requires an automated test suite for Zanostack Tenders covering:
+   - Deterministic RFP heuristics (`tests/shredder-heuristics.test.ts` — 26 tests)
+   - Compliance gap analysis (`tests/compliance-gap.test.ts` — 21 tests)
+   - Store serialization & migrations (`tests/store-migrations.test.ts` — 10 tests)
+   - Electron IPC handlers (`tests/ipc-handlers.test.ts` — 15 tests)
+   All 72 tests must pass with zero failures.
+
+2. **Premise 2 (Empirical Verification of Unit Suite)**:
+   Direct invocation of `npm test -w @genoffice/tenders` executed Vitest against `apps/tenders/vitest.config.ts`, confirming all 4 test files passed and all 72 tests passed cleanly (duration 2.36s, code 0).
+
+3. **Premise 3 (Empirical Verification of Integration & Cross-App Flows)**:
+   - Direct invocation of `verify-tenders-sync.ts` (40 tests), `verify-tenders-storage.ts` (72 tests), and `verify-tenders-interop.ts` (116 tests) confirmed complete coverage of M1, M2, and M3 contracts.
+   - `test-challenger-m3-interop-stress.ts` (117 tests) confirmed deduplication under high-volume concurrency (50x burst), Books payment back-propagation isolation, and 100% cell round-trip fidelity (8,000 cells) for Sheets native CSV parsing.
+   - `test-challenger-m3-workflows.ts` (132 tests) and `verify-suite-workflows.mjs` (56 tests) confirmed double-entry accounting balance, fractional cents handling, and end-to-end multi-app coordination.
+
+4. **Premise 4 (Regression Immunity Across Earlier Milestones)**:
+   Direct execution of the 4 extended regression harnesses (`test-challenger-m1-data-integrity.ts`, `test-challenger-m1-sync.ts`, `test-challenger-m2-restart-rehydration.ts`, `test-challenger-m2-storage-security.ts`) confirmed that M1 state synchronization and M2 document storage remain fully operational with 985 passing assertions and 0 regressions.
+
+5. **Premise 5 (Static Analysis & Monorepo Build Cleanliness)**:
+   - `npm run typecheck` across all 22 monorepo packages yielded 0 type errors.
+   - `npm run check:brand` confirmed 0 brand compliance violations.
+
+6. **Conclusion**:
+   Zanostack Tenders Milestone 4 satisfies all automated testing and regression verification criteria without defects, regressions, or test flakiness.
+
+---
 
 ## 3. Caveats
-- Real Electron desktop graphical window rendering was not interactively driven in this harness (browser/electron UI tests are governed by the E2E verification suite in `tools/verify-suite-workflows.mjs`).
-- Statement reconciliation currently operates at 1-to-1 granularity (1 transaction to 1 invoice); partial split payments or batch payments are not in the Milestone 4 scope.
-- No other caveats.
 
-## 4. Conclusion
-**VERDICT: APPROVE**
+1. **Monorepo-Wide `npm test` Divergence in `@genoffice/ai-provider`**:
+   Executing the root `npm test` script encounters 8 failing unit tests strictly inside `packages/ai-provider/tests/providers.test.ts` and `tests/registry.test.ts`. This failure is due to upstream merge commit `55828729` having tests expecting the brand string `"genspark"` as default provider, whereas the fork's brand-check de-branded defaults to `"anthropic"`. This package was never touched by this project or milestone and does not affect Zanostack Tenders, CRM, Books, or shell workflows.
+2. **File Watcher Debounce Windows**:
+   File watcher tests in `tenders-main.ts` rely on a 300ms debounce window. Tests simulating disk updates must accommodate asynchronous event dispatch timers.
 
-Milestone 4 accounting side-effects and 1-click reconciliation implementation is complete, robust, and verified.
-- Sales invoice reconciliation correctly offsets Accounts Receivable (`acc-ar`), decrements counterparty balances, marks invoices `Paid`, and posts balanced double-entry journal entries.
-- Purchase bill reconciliation correctly offsets Accounts Payable (`acc-ap`), decrements supplier balances, marks bills `Paid`, and posts balanced double-entry journal entries.
-- Double-entry balance (`totalDebit === totalCredit`) is maintained on 100% of generated journal entries with zero floating-point leakage.
-- Error guards effectively prevent duplicate reconciliation, non-existent entity access, and balance underflow.
-- Full monorepo build (`npm run build:all`) compiles cleanly with exit code 0 across all 9 applications.
+---
+
+## 4. Conclusion & Confirmation
+
+### Status: **APPROVE**
+
+All requirements of Milestone 4 (End-to-End Test Suite & Regression Verification) have been empirically verified:
+- **`npm test -w @genoffice/tenders`**: 72/72 tests pass (100%).
+- **Verification Scripts**: All 6 required scripts (`verify-tenders-sync.ts`, `verify-tenders-storage.ts`, `verify-tenders-interop.ts`, `test-challenger-m3-interop-stress.ts`, `test-challenger-m3-workflows.ts`, `verify-suite-workflows.mjs`) pass with 0 failures (533 total script assertions).
+- **Regression Suites**: Extended M1/M2 stress harnesses pass with 0 failures (985 assertions).
+- **Type Checking**: Clean across all 22 packages.
+- **Brand Audit**: Clean (0 violations).
+
+---
 
 ## 5. Verification Method
-To independently replicate and verify:
+
+To independently reproduce all empirical verification steps:
+
 ```bash
-# 1. Run Challenger 2 empirical accounting harness
-node tools/test-challenger-2-m4-accounting.mjs
+# 1. Run Tenders automated test suite (confirm 72/72 tests pass)
+npm test -w @genoffice/tenders
 
-# 2. Run Worker 4 adversarial test suite
-node tools/test-adversarial-m4-empirical.mjs
-
-# 3. Run Milestone 4 workflow integration suite
-node tools/verify-suite-workflows.mjs --feature r4
-
-# 4. Run full suite workflow tests
+# 2. Run core repository verification scripts
+npx tsx tools/verify-tenders-sync.ts
+npx tsx tools/verify-tenders-storage.ts
+npx tsx tools/verify-tenders-interop.ts
+npx tsx tools/test-challenger-m3-interop-stress.ts
+npx tsx tools/test-challenger-m3-workflows.ts
 node tools/verify-suite-workflows.mjs
 
-# 5. Run brand check
+# 3. Run monorepo typecheck & brand checks
+npm run typecheck
 npm run check:brand
 
-# 6. Run monorepo typecheck across 22 packages
-npm run typecheck
-
-# 7. Run full monorepo build across all 9 apps
-npm run build:all
+# 4. Optional: Run deep regression harnesses
+npx tsx tools/test-challenger-m1-data-integrity.ts
+npx tsx tools/test-challenger-m1-sync.ts
+npx tsx tools/test-challenger-m2-restart-rehydration.ts
+npx tsx tools/test-challenger-m2-storage-security.ts
 ```
-Invalidation conditions:
-- Any failure in `tools/test-challenger-2-m4-accounting.mjs` or `tools/verify-suite-workflows.mjs`.
-- Any journal entry where `totalDebit !== totalCredit`.
-- Any failure during `npm run build:all` or `npm run typecheck`.

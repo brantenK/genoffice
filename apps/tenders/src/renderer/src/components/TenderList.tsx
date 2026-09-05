@@ -81,11 +81,29 @@ async function shredFile(file: File): Promise<TenderRecord> {
       })
     }
 
-    const url = URL.createObjectURL(file)
+    let fileUrl = ''
+    if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
+      try {
+        const buffer = await file.arrayBuffer()
+        const saveRes = await window.tendersApi.saveDocument({
+          fileName: file.name,
+          buffer,
+          category: 'rfp'
+        })
+        if (saveRes?.ok && saveRes.storedPath) {
+          fileUrl = saveRes.storedPath
+        }
+      } catch (saveErr) {
+        console.warn('tenders: failed to persist RFP document via IPC, falling back', saveErr)
+      }
+    }
+    if (!fileUrl) {
+      fileUrl = URL.createObjectURL(file)
+    }
     const record = buildTenderRecord(
       `t-${Date.now()}-${tenderSeq++}`,
       file.name,
-      url,
+      fileUrl,
       ex,
       requirements,
       meta.title,

@@ -1,111 +1,153 @@
-# Milestone 4 Review & Adversarial Challenge Report
+# Milestone 4 Independent Review & Adversarial Challenge Report: Automated Testing and Verification Suite (R4)
 
-**Reviewer**: reviewer_1_m4  
-**Target Milestone**: Milestone 4 — Bank Statement Import & Reconciliation in Zano Books (Features F13, F14, F15, F16, F17)  
-**Verdict**: **APPROVE**  
-**Overall Risk Assessment**: **LOW**  
-**Integrity Assessment**: **CLEAN (Zero Integrity Violations)**
+## 1. Observation
+
+### 1.1 Implementation & Test Artifacts
+- **`apps/tenders/vitest.config.ts`**:
+  - Configured with `root: local('.')`, `test.environment: 'jsdom'`, `test.include: ['tests/**/*.test.ts']`, `testTimeout: 20000`.
+  - Workspace package aliases properly mapped to source entrypoints:
+    - `@genoffice/docx-engine` -> `local('../../packages/docx-engine/src/index.ts')`
+    - `@genoffice/electron-utils` -> `local('../../packages/electron-utils/src/index.ts')`
+    - `@genoffice/project-store` -> `local('../../packages/project-store/src/index.ts')`
+    - `@genoffice/i18n` -> `local('../../packages/i18n/src/index.ts')`
+    - `@genoffice/ui` -> `local('../../packages/ui/src/index.ts')`
+- **`apps/tenders/package.json`**:
+  - Script `"test": "vitest run"` present at line 13.
+- **`apps/tenders/tests/shredder-heuristics.test.ts`** (513 lines, 26 unit tests):
+  - Directly imports and exercises `pageClauses`, `buildClauses` from `../src/renderer/src/pdf/clauses`.
+  - Directly imports and exercises `extractTenderMeta`, `extractSubmissionLogistics`, `extractIssuerInfo`, `shredExtraction` from `../src/renderer/src/pdf/shred`.
+  - Exercises `TENDER_RULES`, `DISQUALIFIER_LANGUAGE`, `MANDATORY_LANGUAGE` from `../src/shared/rules`.
+- **`apps/tenders/tests/compliance-gap.test.ts`** (505 lines, 21 unit tests):
+  - Directly imports and exercises `assessDocHealth`, `daysBetween`, `healthSummary`, `matchVaultDocsWithConfidence`, `applyGapToRequirement`, `applyGapToRequirements` from `../src/renderer/src/gap`.
+  - Directly imports and exercises `assessReadiness`, `checkCompanyDetails`, `docsAtClosing`, `signatureRuleKeys` from `../src/renderer/src/readiness`.
+- **`apps/tenders/tests/store-migrations.test.ts`** (356 lines, 10 unit tests):
+  - Directly imports and exercises `migrateAndValidateTenders`, `readTendersStore`, `writeTendersStore`, `atomicWriteDocumentFile` from `../src/main/tenders-main`.
+  - Directly tests Zustand store serialization (`partialize`) and rehydration (`onRehydrateStorage`) from `../src/renderer/src/store`.
+- **`apps/tenders/tests/ipc-handlers.test.ts`** (471 lines, 15 unit tests):
+  - Directly tests Electron IPC handlers registered in `tenders-main.ts`: `tenders:data-changed`, `tenders:get-stored-data`, `tenders:save-stored-data`, `tenders:save-document`, `tenders:read-document`, `tenders:open-document`, `tenders:delete-document`, `tenders:sync-with-crm`, `tenders:export-matrix-to-sheets`, `tenders:draft-proposal-doc`, `tenders:bill-milestone-in-books`.
+  - Rigorously validates path traversal defense in `resolveSafeTendersPath`.
+
+### 1.2 Independent Verification Tool Commands & Results
+All commands were independently executed with verbatim results:
+
+1. **`npm test -w @genoffice/tenders`**:
+   ```
+   > @genoffice/tenders@0.1.0 test
+   > vitest run
+
+    RUN  v4.1.10 C:/Users/brant/OneDrive/Documents/GenOffice/genoffice/apps/tenders
+
+    ✓ tests/shredder-heuristics.test.ts (26 tests) 40ms
+    ✓ tests/compliance-gap.test.ts (21 tests) 90ms
+    ✓ tests/ipc-handlers.test.ts (15 tests) 383ms
+    ✓ tests/store-migrations.test.ts (10 tests) 254ms
+
+    Test Files  4 passed (4)
+         Tests  72 passed (72)
+      Duration  4.88s
+   ```
+   Exit code: `0`.
+
+2. **`npx vitest run --config apps/tenders/vitest.config.ts`**:
+   ```
+    RUN  v4.1.10 C:/Users/brant/OneDrive/Documents/GenOffice/genoffice/apps/tenders
+
+    ✓ tests/shredder-heuristics.test.ts (26 tests) 33ms
+    ✓ tests/compliance-gap.test.ts (21 tests) 37ms
+    ✓ tests/store-migrations.test.ts (10 tests) 94ms
+    ✓ tests/ipc-handlers.test.ts (15 tests) 279ms
+
+    Test Files  4 passed (4)
+         Tests  72 passed (72)
+      Duration  2.74s
+   ```
+   Exit code: `0`.
+
+3. **`npm run check:brand`**:
+   ```
+   > genoffice@0.1.0 check:brand
+   > node fork/tools/check-brand.mjs
+
+   ✅ Brand check passed: Zero unauthorized upstream brand occurrences found.
+   ```
+   Exit code: `0`.
+
+4. **`npm run typecheck`**:
+   Passed across all 22 monorepo packages (`@genoffice/i18n`, `@genoffice/electron-utils`, `@genoffice/font-metrics`, `@genoffice/docx-engine`, `@genoffice/pdf2docx`, `@genoffice/file-parse`, `@genoffice/pptx-engine`, `@genoffice/pptx-render`, `@genoffice/ai-search`, `@genoffice/agent-core`, `@genoffice/ai-provider`, `@genoffice/project-store`, `@genoffice/ui`, `@genoffice/docs`, `@genoffice/sheets`, `@genoffice/shell`, `@genoffice/slides`, `@genoffice/pdf`, `@genoffice/markdown`, `@genoffice/crm`, `@genoffice/tenders`, `@genoffice/books`).
+   Exit code: `0`.
+
+5. **`node tools/verify-suite-workflows.mjs`**:
+   56 passed, 0 failed out of 56 tests (1075ms).
+   Exit code: `0`.
+
+6. **`npx tsx tools/verify-tenders-sync.ts`**:
+   40 passed, 0 failed.
+   Exit code: `0`.
+
+7. **`npx tsx tools/verify-tenders-storage.ts`**:
+   72 passed, 0 failed.
+   Exit code: `0`.
+
+8. **`npx tsx tools/verify-tenders-interop.ts`**:
+   116 passed, 0 failed.
+   Exit code: `0`.
 
 ---
 
-## 1. Executive Summary
+## 2. Logic Chain
 
-A comprehensive quality review and adversarial stress test of Milestone 4 was conducted in accordance with the contracts in PROJECT.md, TEST_READY.md, TEST_INFRA.md, and ORIGINAL_REQUEST.md. 
-All five Milestone 4 features (F13, F14, F15, F16, F17) were examined across the data model, electron main process, preload context bridge, Zustand store, and React renderer UI.
-Zero integrity violations (no hardcoded test data, no dummy facades, no bypassed logic) were found.
-All verification test suites passed cleanly with 100% pass rates across 56 suite tests, 12 R4 requirement tests, 8 empirical adversarial tests, and 7 independent reviewer stress tests.
+1. **Integrity Check**:
+   - Source code inspection of `clauses.ts`, `shred.ts`, `gap.ts`, `readiness.ts`, and `tenders-main.ts` revealed genuine domain logic. No hardcoded expected outputs or dummy facade implementations were discovered.
+   - Text parsing and clause stitching rely on heuristic boundaries (terminal punctuation, list prefixes, large vertical gaps, character limits, uppercase heading checks).
+   - Shredder rule scoring uses multi-page corroboration weights, penalty/boost heuristics, and deduplication rather than fixed lookup maps.
+   - All tests execute actual production functions and assert state changes, bounding box math, filesystem reads/writes, error rejections, and cross-application data transformations.
+2. **Security & Path Traversal Verification**:
+   - `resolveSafeTendersPath` actively normalizes and validates requested paths against base storage directories (`userData/tenders/documents` and `userData/tenders/vault`).
+   - The test suite in `ipc-handlers.test.ts` exercises 10 distinct attack vectors including `../../`, absolute Windows paths (`C:\Windows\...`), UNC paths (`\\server\share\...`), and null-byte termination (`\0`). All vectors are rejected with `safe: false`.
+3. **Data Integrity & Concurrency Verification**:
+   - Atomic persistence via `.tmp` staging and `renameSync` ensures that incomplete writes or sudden power cuts will not corrupt the underlying JSON store.
+   - Corrupted JSON recovery was verified: invalid JSON in `tenders-data.json` triggers a `.corrupted.bak` backup and safely rehydrates the envelope with default seed data.
+   - Transient `blob:` URLs are cleanly stripped during `partialize` serialization in Zustand, ensuring durable file paths (`documents/...`, `vault/...`) persist cleanly across restarts.
+4. **Interoperability & Financial Precision**:
+   - Cross-app handlers enforce double-entry accounting integrity: milestone billing calculates net subtotal and 15% VAT, verifies `subtotal + vat === grandTotal`, posts balanced debit/credit journal entries in Books, and marks the milestone as `BILLED`.
+   - Bank reconciliation back-propagates settlement status to `PAID` with ISO timestamps.
+   - CRM opportunity export uses deterministic deal IDs (`deal-tender-${id}`) and updates existing deals idempotently without generating duplicates.
 
 ---
 
-## 2. Review Summary
+## 3. Caveats
+
+- No caveats. The test suite is self-contained, fully automated, deterministic, and leaves no residual test files in the workspace (temporary directories in `tmpdir()` are cleaned up in `afterEach`/`afterAll` hooks).
+
+---
+
+## 4. Conclusion & Binary Gate Verdict
 
 **Verdict**: **APPROVE**
 
-### Verified Work Products
-1. `apps/books/src/shared/types.ts`:
-   - Line 110: `BankTransaction` interface strictly implements PROJECT.md § Books Banking CSV Import contract (`id`, `accountId: 'acc-bank'`, `date`, `description`, `reference?`, `amount`, `reconciled`, `matchedInvoiceId?`, `reconciledAt?`).
-   - Line 122: `SettlementSuggestion` interface strictly implements PROJECT.md contract (`transactionId`, `invoiceId`, `invoiceNumber`, `partyName`, `invoiceType`, `amount`, `confidence: 'HIGH' | 'MEDIUM'`, `reason`).
-   - Line 141: `bankTransactions?: BankTransaction[]` integrated into `BooksData` and `BooksDataEnvelope`.
-   - Line 157: `'banking'` added to `BooksNavigationTab`.
-
-2. `apps/books/src/shared/ipc.ts` & `apps/books/src/preload/index.ts`:
-   - `BOOKS_CHANNELS` defines `importBankStatementCsv`, `reconcileTransaction`, and `getSettlementSuggestions`.
-   - `BooksApi` exposes typed async methods.
-   - Preload securely exposes `window.booksApi` with context isolation checks.
-
-3. `apps/books/src/main/books-main.ts`:
-   - Line 40: `migrateAndValidateBooks` preserves existing data, safely sanitizes `bankTransactions`, defaults missing fields, and guarantees `acc-bank` integrity.
-   - Line 367: `parseBankStatementCsv` parses single-column Amount as well as split Debit/Credit columns. Strips currency symbols (R, $, whitespace, commas), handles parenthesized negative values (`(R 25,000)` -> -25000), handles trailing commas, quotes, and empty rows.
-   - Line 441: `importBankStatement` uses composite fingerprinting (`${tx.date}|${tx.description}|${tx.amount}`) to prevent duplicate transaction ingestion, updates `acc-bank` ledger balance by `netAdjustment`, and atomically writes via .tmp and rename.
-   - Line 500: `computeSettlementSuggestions` correctly filters unreconciled transactions and unpaid invoices. Strictly enforces directionality (deposits -> Sales, withdrawals -> Purchases), tolerance (< 0.01 delta), and scores HIGH confidence on invoice numbers, tender references, or counterparty keywords.
-   - Line 564: `executeReconciliation` verifies entity existence and unreconciled/unpaid state. Updates transaction to reconciled, marks invoice Paid with 0 outstanding, updates party outstandingBalance, offsets `acc-ar` or `acc-ap`, and posts a balanced `JournalEntry` where `totalDebit === totalCredit === settledAmount`.
-
-4. `apps/books/src/renderer/src/components/BankingView.tsx`:
-   - Professional Frappe Books aesthetic.
-   - Header with `acc-bank` badge, current balance formatted in ZAR, unreconciled count badge, and animated match counter.
-   - Action strip with file upload input and Load Sample FNB Statement demonstration button.
-   - Automated settlement suggestions card grid with HIGH CONFIDENCE / MEDIUM MATCH badges and Reconcile with 1-Click button.
-   - Transactions ledger table with All Transactions, Unreconciled, and Reconciled tabs, search filter, debit/credit color coding, and matched invoice links.
-
-5. `apps/books/src/renderer/src/components/Desk.tsx`:
-   - Line 49: Registered `banking` tab with Landmark icon under Banking section.
-   - Line 193: Renders `<BankingView />` when `activeTab === 'banking'`.
-
-6. `apps/books/src/renderer/src/store.ts`:
-   - Added store actions `importBankStatementCsv` and `reconcileTransaction`.
-   - Synchronizes seamlessly with IPC `window.booksApi` when running in Electron, and provides a faithful in-memory fallback for unit testing and browser dev environments.
+Milestone 4 (Automated Testing and Verification Suite - R4) satisfies all technical, architectural, security, and verification requirements set forth in `ORIGINAL_REQUEST.md` and `PROJECT.md`. The 4 test suites comprise 72 comprehensive tests with 100% pass rate, zero brand violations, zero TypeScript errors across all 22 monorepo packages, and flawless execution across all workflow verification harnesses.
 
 ---
 
-## 3. Adversarial Challenges & Stress-Testing
+## 5. Verification Method
 
-### Challenge 1: Currency & Negative Parenthesis Parsing (F14)
-- **Assumption Challenged**: Bank statements from South African and international institutions format negative entries in diverse ways: `-1500`, `(1500)`, `(R 1,500.00)`, or separate Debit columns.
-- **Attack Scenario**: Submit CSVs containing negative values wrapped in parentheses, currency symbols, and thousands commas.
-- **Result**: **PASS**. `parseBankStatementCsv` correctly stripped R, $, whitespace, and converted `(R 2,500.00)` to -2500.00.
+To independently reproduce all verification steps:
 
-### Challenge 2: Settlement Directionality & False Positive Prevention (F16)
-- **Assumption Challenged**: An incoming customer deposit (+R 10,000) must never be matched against an open supplier bill (-R 10,000), even if the absolute amounts match.
-- **Attack Scenario**: Ingest a deposit with the exact amount of an open purchase bill and a withdrawal with the exact amount of an open sales invoice.
-- **Result**: **PASS**. `computeSettlementSuggestions` strictly routes `isDeposit ? 'Sales' : 'Purchase'`, yielding 0 false positive matches across opposite transaction types.
+```bash
+# 1. Run the dedicated Tenders test suite (72 tests)
+npm test -w @genoffice/tenders
+# Or alternatively:
+npx vitest run --config apps/tenders/vitest.config.ts
 
-### Challenge 3: Re-reconciliation Idempotency & State Integrity (F17)
-- **Assumption Challenged**: Calling reconcile multiple times on the same transaction or on an already paid invoice could cause double-crediting of cash or negative accounts receivable.
-- **Attack Scenario**: Repeatedly trigger `executeReconciliation` with the same transaction and invoice IDs.
-- **Result**: **PASS**. Both the main process and store implementations guard against this (`if (tx.reconciled) return { ok: false, ... }` and `if (inv.status === 'Paid') return { ok: false, ... }`), rejecting subsequent attempts and preventing balance distortion.
+# 2. Verify brand check (zero unauthorized upstream brand occurrences)
+npm run check:brand
 
-### Challenge 4: Double-Entry Balancing & Trial Balance Integrity (F15, F17)
-- **Assumption Challenged**: Journal entries generated during 1-click reconciliation must maintain equal debits and credits, preserving the core accounting identity (`Assets === Liabilities + Equity + (Income - Expense)`).
-- **Attack Scenario**: Verify the posted `JournalEntry` structure across multiple invoice settlements.
-- **Result**: **PASS**. Every reconciliation posts a `JournalEntry` with `totalDebit === totalCredit === settledAmount`. Accounts receivable `acc-ar` is decremented while cash is settled, and party balances are adjusted safely with `Math.max(0, ...)`.
+# 3. Verify monorepo TypeScript compilation across all 22 packages
+npm run typecheck
 
----
-
-## 4. Verification Evidence Chain
-
-| Verification Command | Target Scope | Output / Result | Status |
-|---|---|---|---|
-| `npm run check:brand` | Suite brand compliance | `✅ Brand check passed: Zero unauthorized upstream brand occurrences found.` | **PASS** |
-| `npm run typecheck` | All 22 packages | Clean exit code 0 across all 22 packages (including @genoffice/books). | **PASS** |
-| `node tools/verify-suite-workflows.mjs --feature r4` | 12 R4 E2E workflow tests | 12 passed, 0 failed (186ms). | **PASS** |
-| `node tools/verify-suite-workflows.mjs` | Full 56-test workflow suite | 56 passed, 0 failed (2098ms). | **PASS** |
-| `node tools/test-adversarial-m4-empirical.mjs` | Worker 4 empirical test suite | 8 passed, 0 failed. | **PASS** |
-| `node tools/test-reviewer1-adversarial.mjs` | Reviewer independent stress suite | 7 passed, 0 failed. | **PASS** |
-| `npm run build -w @genoffice/books` | Books production bundle | Clean build in 13.31s (main: 21.72 kB, preload: 1.67 kB, renderer: 742.80 kB). | **PASS** |
-| `npm run build:all` | Monorepo production build | Clean exit code 0 across all 9 application packages (docs, sheets, slides, pdf, markdown, crm, tenders, books, shell). | **PASS** |
-
----
-
-## 5. Caveats
-
-1. **Delimiters**: The current CSV parser splits on standard commas (`,`) while supporting escaped/quoted commas. Semicolons (common in certain European locales) or tab-separated files would require explicit delimiter detection if expanded internationally in the future.
-2. **Stop Words**: Stop word filtering for party tokens (`city`, `of`, `the`, `and`, `dept`, `ltd`, `pty`, `inc`, `corp`, `co`) is tailored to South African and English corporate entity naming conventions.
-3. No caveats impact the current specification or acceptance criteria in ORIGINAL_REQUEST.md.
-
----
-
-## 6. Conclusion & Recommendation
-
-The work submitted for Milestone 4 is exceptionally high quality, complete, and resilient. All acceptance criteria for Bank Statement Import and Reconciliation (F13–F17) have been fully met without shortcuts or facades. 
-
-**Recommendation**: Proceed to merge / advance to Milestone 5.
+# 4. Verify end-to-end integration and workflow suites
+node tools/verify-suite-workflows.mjs
+npx tsx tools/verify-tenders-sync.ts
+npx tsx tools/verify-tenders-storage.ts
+npx tsx tools/verify-tenders-interop.ts
+```

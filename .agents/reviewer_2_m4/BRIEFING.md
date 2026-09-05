@@ -1,61 +1,75 @@
-# BRIEFING — 2026-09-03T19:47:00Z
+# BRIEFING — 2026-09-05T01:05:00Z
 
 ## Mission
-Adversarially challenge and review Milestone 4 (Banking & Reconciliation) implementation, verifying robustness, idempotency, double-entry invariance, and integrity.
+Review Milestone 4 — Test Coverage & Robustness (R4) for Zanostack Tenders (`apps/tenders`), auditing shredder heuristics, compliance gap analysis, store serialization/migrations, and IPC handlers, running all verification gates, and delivering independent verification & adversarial review.
 
 ## 🔒 My Identity
-- Archetype: reviewer-critic
+- Archetype: reviewer_critic
 - Roles: reviewer, critic
 - Working directory: c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\reviewer_2_m4
-- Original parent: d94f5282-fbc7-4b07-8909-cf2550459903
-- Milestone: Milestone 4
+- Original parent: fbcabbf4-6f44-4812-94fe-47a67abd75f4
+- Milestone: Milestone 4 (R4)
 - Instance: 2 of 2
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
-- Actively check for integrity violations: hardcoded test results, facade implementations, shortcuts, fabricated verification outputs
-- Evidence-based adversarial challenge and quality review
+- Write only to my directory: .agents/reviewer_2_m4/
+- Binary gate verdict: APPROVE or REQUEST_CHANGES
+- Actively check for integrity violations
 
 ## Current Parent
-- Conversation ID: d94f5282-fbc7-4b07-8909-cf2550459903
-- Updated: 2026-09-03T19:46:17Z
+- Conversation ID: fbcabbf4-6f44-4812-94fe-47a67abd75f4
+- Updated: 2026-09-05T01:00:00Z
 
 ## Review Scope
-- **Files to review**: `apps/books/src/main/books-main.ts`, `apps/books/src/shared/types.ts`, `apps/books/src/shared/ipc.ts`, `apps/books/src/preload/index.ts`, `apps/books/src/renderer/src/store.ts`, `apps/books/src/renderer/src/components/BankingView.tsx`, `apps/books/src/renderer/src/components/Desk.tsx`
-- **Interface contracts**: `PROJECT.md`, `TEST_READY.md`, `ORIGINAL_REQUEST.md`, `worker_m4/handoff.md`
-- **Review criteria**: Correctness, completeness, quality, adversarial robustness, integrity, double-entry invariance, idempotency, CSV edge cases
-
-## Key Decisions Made
-- Executed all requested suite verification commands (`check:brand`, `typecheck`, `verify-suite-workflows --feature r4`, `test-adversarial-m4-empirical.mjs`, full `verify-suite-workflows.mjs`).
-- Executed empirical adversarial suites: `test-challenger-1-m4-empirical.mjs`, `test-challenger-2-m4-accounting.mjs`, and author-designed `test-reviewer-2-m4-adversarial.mjs`.
-- Verified build:all compiles all packages with code 0.
-- Confirmed zero integrity violations (no hardcoded test mocks, facades, or bypassing shortcuts).
-- Formulated verdict: APPROVE.
+- **Files to review**:
+  - `apps/tenders/vitest.config.ts`
+  - `apps/tenders/package.json`
+  - `apps/tenders/tests/shredder-heuristics.test.ts`
+  - `apps/tenders/tests/compliance-gap.test.ts`
+  - `apps/tenders/tests/store-migrations.test.ts`
+  - `apps/tenders/tests/ipc-handlers.test.ts`
+  - `apps/tenders/src/renderer/src/pdf/clauses.ts`
+  - `apps/tenders/src/renderer/src/pdf/shred.ts`
+  - `apps/tenders/src/renderer/src/gap.ts`
+  - `apps/tenders/src/renderer/src/readiness.ts`
+  - `apps/tenders/src/main/tenders-main.ts`
+- **Interface contracts**: PROJECT.md, ORIGINAL_REQUEST.md
+- **Review criteria**: correctness, robustness, edge cases, integrity, layout & brand compliance
 
 ## Review Checklist
 - **Items reviewed**:
-  - `parseBankStatementCsv`: Handles currency symbols (`R`, `$`), parentheses negatives `(25000)`, trailing commas, spaces, empty rows, separate Debit/Credit columns.
-  - `importBankStatement`: Fingerprint deduplication (`date|description|amount`) guarantees 0 duplicate imports and exact mathematical balance equality for `acc-bank`.
-  - `computeSettlementSuggestions`: Correctly partitions deposits to Sales invoices and withdrawals to Purchase bills; scores HIGH for invoice number, tender reference, or counterparty keywords; scores MEDIUM for exact amount.
-  - `executeReconciliation`: Fully idempotent (rejects already reconciled transactions and paid invoices); clears outstanding amount; decrements party balance.
-  - `JournalEntry` double-entry balance: Strict identity `totalDebit === totalCredit === settledAmount` preserved across all reconciliations; debit/credit account mappings correct.
-  - UI Affordance: Banking tab in `Desk.tsx` and full-featured `BankingView.tsx` with ledger table, 1-click reconcile, CSV upload, and demo statement loader.
+  - `apps/tenders/vitest.config.ts` (root config, package aliases, jsdom environment)
+  - `apps/tenders/package.json` (test script: `"vitest run"`)
+  - `apps/tenders/tests/shredder-heuristics.test.ts` (26 tests)
+  - `apps/tenders/tests/compliance-gap.test.ts` (21 tests)
+  - `apps/tenders/tests/store-migrations.test.ts` (10 tests)
+  - `apps/tenders/tests/ipc-handlers.test.ts` (15 tests)
+  - Core implementation logic: `clauses.ts`, `shred.ts`, `gap.ts`, `readiness.ts`, `tenders-main.ts`
 - **Verdict**: APPROVE
-- **Unverified claims**: None remaining.
+- **Unverified claims**: none; all 6 verification commands independently executed and confirmed.
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - Tricky CSV rows (empty, spaces, commas, quotes, currencies, negative parentheses) -> Handled cleanly.
-  - Re-importing identical statement -> Zero balance drift, exact deduplication.
-  - Cross-type matching attack (deposit matching purchase bill or withdrawal matching sales invoice) -> Successfully blocked.
-  - Double-reconciliation attack -> Rejected with structured error.
-  - Double-entry imbalance attack -> Verified 100% debit-credit parity.
-- **Vulnerabilities found**: Unquoted thousands-separator commas in standard CSV will naturally split fields; standard RFC 4180 quotation must be used. Within-batch identical transactions with same date, description, and amount are deduplicated (noted as design consideration).
-- **Untested angles**: Non-comma delimiters (e.g. semicolon-separated European CSVs) — handled as noted caveat.
+  - Noisy text line extraction and boundary detection (passed)
+  - 90-day police stamp cutoff and health transitions (passed)
+  - Auto-link 0.5 threshold behavior and category agreement boosts/penalties (passed)
+  - Path traversal injection tokens (../../, Windows absolute paths, UNC, null bytes) (passed)
+  - Invalid JSON store corruption recovery and .corrupted.bak backup (passed)
+  - Unparseable date strings and date arithmetic failure modes (analyzed)
+  - Uncertified documents with non-null certifiedDate (analyzed)
+- **Vulnerabilities found**:
+  - Minor edge case in `assessDocHealth`: unparseable date strings producing `NaN` fall through to `VALID`
+  - Minor edge case in `assessDocHealth`: uncertified docs with non-null `certifiedDate` evaluate to `VALID` instead of `NO_EXPIRY_INFO`
+  - Documentation count mismatch: PROJECT.md references "35 rules" while rule catalogue contains 25 rules
+- **Untested angles**:
+  - Windows file locking race conditions under high concurrent atomic renames
+
+## Key Decisions Made
+- Binary gate verdict: APPROVE — all acceptance criteria met, 0 regressions, clean brand check, clean typecheck across all 22 packages, genuine implementations with zero integrity violations.
 
 ## Artifact Index
-- `.agents/reviewer_2_m4/BRIEFING.md` — Persistent memory
-- `.agents/reviewer_2_m4/progress.md` — Liveness & progress tracking
-- `.agents/reviewer_2_m4/DISPATCH.md` — Dispatch log
-- `.agents/reviewer_2_m4/handoff.md` — Final review and challenge report
-- `tools/test-reviewer-2-m4-adversarial.mjs` — Independent reviewer 2 stress harness
+- DISPATCH.md — record of initial dispatch message
+- BRIEFING.md — persistent working memory and review state
+- progress.md — liveness heartbeat and completed steps
+- handoff.md — comprehensive 5-component review and adversarial report

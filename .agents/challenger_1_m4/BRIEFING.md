@@ -1,52 +1,58 @@
-# BRIEFING — 2026-09-03T21:46:00+02:00
+# BRIEFING — 2026-09-05T01:07:45Z
 
 ## Mission
-Adversarially and empirically stress-test and verify Milestone 4 CSV parsing, deduplication, bank ledger balance adjustments, and settlement matching.
+Adversarial empirical stress-testing against Milestone 4 test suites and heuristics (shredder heuristics, compliance gap auto-linking at boundary, store migration & atomic write concurrency).
 
 ## 🔒 My Identity
-- Archetype: EMPIRICAL CHALLENGER
+- Archetype: empirical challenger
 - Roles: critic, specialist
 - Working directory: c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_1_m4
-- Original parent: d94f5282-fbc7-4b07-8909-cf2550459903
-- Milestone: Milestone 4
+- Original parent: fbcabbf4-6f44-4812-94fe-47a67abd75f4
+- Milestone: Milestone 4 — Empirical Test Suite & Heuristics Verification (R4)
 - Instance: 1 of 1
 
 ## 🔒 Key Constraints
-- Review-only — do NOT modify implementation code
-- Run verification code yourself. Do NOT trust worker claims or logs.
-- Write tests outside .agents/ (e.g. tools/ or tests/)
-- .agents/ holds only agent metadata.
+- Review-only — do NOT modify implementation code unless adding verification tests in designated test directories
+- Empirical verification challenger: all claims must be empirically verified by running code/tests
+- If a bug cannot be reproduced empirically, it does not count
+- .agents/ holds only metadata (plans, progress, handoffs) — never source code, tests, or data files
 
 ## Current Parent
-- Conversation ID: d94f5282-fbc7-4b07-8909-cf2550459903
-- Updated: 2026-09-03T21:46:00+02:00
+- Conversation ID: fbcabbf4-6f44-4812-94fe-47a67abd75f4
+- Updated: 2026-09-05T01:07:45Z
 
 ## Review Scope
-- **Files to review**: Milestone 4 implementations (`apps/books/src/main/books-main.ts`, `apps/books/src/shared/types.ts`, `apps/books/src/shared/ipc.ts`, `apps/books/src/renderer/src/components/BankingView.tsx`, `apps/books/src/renderer/src/components/Desk.tsx`)
-- **Interface contracts**: `c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\PROJECT.md`
-- **Review criteria**: Correctness, edge cases, deduplication idempotency, mathematical ledger balance integrity, token matching accuracy, zero false positives for unmatched amounts.
+- **Files to review**: apps/tenders/tests/*.test.ts, packages/tender-core heuristics and stores
+- **Interface contracts**: PROJECT.md, ORIGINAL_REQUEST.md
+- **Review criteria**: Vitest test suite execution, shredder heuristics resilience, compliance gap boundary logic, atomic store migration & concurrency
+
+## Key Decisions Made
+- Created and executed `apps/tenders/tests/adversarial-stress.test.ts` with 18 high-stress adversarial test cases across all 4 required dimensions.
+- Executed 5 consecutive Vitest stress runs with zero test flakiness (90/90 tests passing in all 5 runs).
+- Verified `npm run typecheck -w @genoffice/tenders` (code 0) and `npm run check:brand` (0 unauthorized occurrences).
+- Identified heuristic edge-case subtlety in `extractSubmissionLogistics` (consecutive unpunctuated contact/submission lines) and `CLOSING_RE` trailing period retention.
+- Confirmed mathematical precision of `AUTO_LINK_THRESHOLD` (0.49 vs 0.50 vs 0.51).
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - CSV parser handles 4-column standard, separate Debit/Credit, currency symbols (R, $), whitespace padding, parenthesized negative values, empty/whitespace lines, and filters invalid amounts (NaN, 0, strings).
-  - Deduplication prevents re-importing identical transactions 2x and 3x, yielding 0 imported transactions and zero extra balance adjustments.
-  - Bank ledger balance strictly satisfies `acc-bank = prev + net` across zero, positive, and overdraft initial balances with floating-point precision.
-  - Settlement suggestions strictly distinguish deposits (Sales) vs withdrawals (Purchases), accurately disambiguate competing candidates via tokens (invoice number, tender reference, party keywords), and produce 0 false positives for unmatched amounts.
-  - Double-entry reconciliation accurately offsets `acc-ar` / `acc-ap`, zeroes invoice balance, posts balanced journal entries, and rejects duplicate reconciliation.
-- **Vulnerabilities found**: None. All 33 empirical tests passed cleanly without failure.
-- **Untested angles**: Non-comma delimiters (e.g. semicolon or tab) which are out of scope for standard CSV requirements.
+  - Clause reconstruction under extreme punctuation, Unicode characters, and >600 char sentence limits: PASSED.
+  - Compliance gap auto-link threshold at 0.49 (rejected), 0.50 (linked), 0.51 (linked): PASSED.
+  - Health rank preference over confidence score among linkable documents: PASSED.
+  - High-concurrency atomic writes (50 writes) and concurrent document saves (50 saves): PASSED with 0 collisions.
+  - Interleaved concurrent store reads and writes (40 writes, 40 reads): PASSED with 0 torn reads.
+  - Directory traversal neutralization via `basename` and `resolveSafeTendersPath`: PASSED.
+- **Vulnerabilities found**:
+  - Low/Medium heuristic nuance: Unpunctuated contact email line directly adjacent to physical submission address line without period can be stitched into one clause, prioritizing EMAIL over PHYSICAL.
+  - Low cosmetic nuance: `CLOSING_RE` preserves trailing period if present on closing date line.
+- **Untested angles**:
+  - Multi-gigabyte PDF processing under Node memory limits (covered by pdfjs-dist limits).
 
 ## Loaded Skills
-None.
-
-## Key Decisions Made
-- Created and executed standalone adversarial empirical test suite `tools/test-challenger-1-m4-empirical.mjs` with 33 test cases.
-- Executed `npm run check:brand`, `tools/verify-suite-workflows.mjs --feature r4`, `tools/verify-suite-workflows.mjs`, `npm run typecheck`, and `npm run build:all`.
-- Verdict: APPROVE.
+- None specified for domain
 
 ## Artifact Index
-- DISPATCH.md — Dispatch prompt from orchestrator
-- BRIEFING.md — Working memory
-- progress.md — Liveness heartbeat and progress tracking
-- handoff.md — Final handoff report with verdict
-- `tools/test-challenger-1-m4-empirical.mjs` — Standalone adversarial test suite
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_1_m4\DISPATCH.md — Initial dispatch
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_1_m4\BRIEFING.md — Situational awareness
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_1_m4\progress.md — Progress heartbeat
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_1_m4\handoff.md — Final handoff report
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\apps\tenders\tests\adversarial-stress.test.ts — Adversarial stress test suite

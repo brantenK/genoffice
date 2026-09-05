@@ -34,6 +34,41 @@ export function DealsTableView({
   const [invoicingDealId, setInvoicingDealId] = useState<string | null>(null)
   const [localInvoices, setLocalInvoices] = useState<Record<string, string>>({})
   const [localToast, setLocalToast] = useState<string | null>(null)
+  const [currentDeals, setCurrentDeals] = useState<Deal[]>(deals)
+
+  React.useEffect(() => {
+    setCurrentDeals(deals)
+  }, [deals])
+
+  React.useEffect(() => {
+    let mounted = true
+    const refresh = async () => {
+      try {
+        if (window.crmApi?.listDeals) {
+          const fresh = await window.crmApi.listDeals()
+          if (mounted && Array.isArray(fresh)) {
+            setCurrentDeals(fresh)
+          }
+        }
+      } catch {}
+    }
+
+    const onFocus = () => void refresh()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    const timer = setInterval(refresh, 2500)
+
+    return () => {
+      mounted = false
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      clearInterval(timer)
+    }
+  }, [])
 
   const handleCreateInvoice = async (deal: Deal) => {
     if (invoicingDealId) return
@@ -42,6 +77,9 @@ export function DealsTableView({
       const res = await window.crmApi?.createInvoiceInBooks(deal.id)
       if (res?.ok && res.invoiceNumber) {
         setLocalInvoices((prev) => ({ ...prev, [deal.id]: res.invoiceNumber! }))
+        setCurrentDeals((prev) =>
+          prev.map((d) => (d.id === deal.id ? { ...d, invoiceNumber: res.invoiceNumber } : d)),
+        )
         const msg = `Invoice ${res.invoiceNumber} created in Zano Books`
         if (onShowToast) {
           onShowToast(msg)
@@ -66,7 +104,7 @@ export function DealsTableView({
     }
   }
 
-  const filtered = deals.filter((d) => (filterStage === 'all' ? true : d.stage === filterStage))
+  const filtered = currentDeals.filter((d) => (filterStage === 'all' ? true : d.stage === filterStage))
 
   return (
     <div className="crm-table-container">
@@ -76,7 +114,7 @@ export function DealsTableView({
             className={`crm-filter-pill ${filterStage === 'all' ? 'active' : ''}`}
             onClick={() => setFilterStage('all')}
           >
-            All Deals ({deals.length})
+            All Deals ({currentDeals.length})
           </button>
           {STAGES.map((st) => (
             <button
@@ -129,6 +167,23 @@ export function DealsTableView({
                     >
                       {deal.name}
                     </strong>
+                    {Boolean((deal as any).tenderReference || (deal as any).tenderId) && (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: '10px',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                          color: '#4f46e5',
+                          fontWeight: 600,
+                          display: 'inline-block',
+                        }}
+                        title={`Tender Reference: ${(deal as any).tenderReference || (deal as any).tenderId}`}
+                      >
+                        {(deal as any).tenderReference || 'Tender'}
+                      </span>
+                    )}
                     {deal.notes && (
                       <div
                         style={{

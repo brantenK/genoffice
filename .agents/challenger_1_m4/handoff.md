@@ -1,157 +1,129 @@
-# Handoff Report: Challenger 1 (Milestone 4 — Bank Statement Import & Reconciliation)
-
-**Agent**: `challenger_1_m4`  
-**Verdict**: **APPROVE**  
-**Working Directory**: `c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\challenger_1_m4`  
-
----
+# Milestone 4 Handoff Report — Empirical Verification & Adversarial Stress Testing
 
 ## 1. Observation
 
-### Implementation & Verification Scope
-Milestone 4 implementation files evaluated:
-- `apps/books/src/main/books-main.ts` (lines 367–439: `parseBankStatementCsv`, lines 441–498: `importBankStatement`, lines 500–562: `computeSettlementSuggestions`, lines 564–656: `executeReconciliation`, lines 336–365: IPC handlers)
-- `apps/books/src/shared/types.ts` (`BankTransaction`, `SettlementSuggestion`, `BooksDataEnvelope`)
-- `apps/books/src/shared/ipc.ts` (`BOOKS_CHANNELS.importBankStatementCsv`, `BOOKS_CHANNELS.reconcileTransaction`, `BOOKS_CHANNELS.getSettlementSuggestions`)
-- `apps/books/src/renderer/src/components/BankingView.tsx` (FNB business account header, CSV upload, sample FNB statement load, suggestion cards, transactions ledger)
-- `apps/books/src/renderer/src/components/Desk.tsx` (Banking nav item with Landmark icon)
+### 1.1 Test Suite & Verification Commands
+1. **Full Vitest Suite Execution (`npm test -w @genoffice/tenders`)**:
+   - Files tested:
+     - `apps/tenders/tests/shredder-heuristics.test.ts` (26 tests)
+     - `apps/tenders/tests/compliance-gap.test.ts` (21 tests)
+     - `apps/tenders/tests/store-migrations.test.ts` (10 tests)
+     - `apps/tenders/tests/ipc-handlers.test.ts` (15 tests)
+     - `apps/tenders/tests/adversarial-stress.test.ts` (18 tests)
+   - Total: 90 tests across 5 test suites.
+   - Result: 90 passed, 0 failed.
+   - Initial run command output:
+     ```text
+     Test Files  5 passed (5)
+          Tests  90 passed (90)
+       Duration  4.83s
+     ```
 
-### Empirical Test Harness
-Created standalone test harness: `tools/test-challenger-1-m4-empirical.mjs`.  
-Executed test command:
-```bash
-node tools/test-challenger-1-m4-empirical.mjs
-```
-Verbatim test output:
-```
-======================================================================
-  CHALLENGER 1 (Milestone 4): EMPIRICAL ADVERSARIAL VERIFICATION
-======================================================================
+2. **Concurrency & Repeatability Stress Run (5 consecutive runs)**:
+   - Command executed:
+     ```powershell
+     1..5 | ForEach-Object { Write-Host "=== RUN $_ ==="; npm test -w @genoffice/tenders; if ($LASTEXITCODE -ne 0) { throw "Failed on run $_" } }
+     ```
+   - Results:
+     - Run 1: 5 passed (5), 90 passed (90) — duration 9.50s
+     - Run 2: 5 passed (5), 90 passed (90) — duration 5.19s
+     - Run 3: 5 passed (5), 90 passed (90) — duration 3.48s
+     - Run 4: 5 passed (5), 90 passed (90) — duration 2.98s
+     - Run 5: 5 passed (5), 90 passed (90) — duration 3.36s
+   - Flakiness: 0% failure rate over 450 total test executions.
 
---- Category 1: CSV Parser Edge Cases ---
-  ✅ [PASS] 1.1 Standard 4-column CSV (Date, Description, Reference, Amount)
-  ✅ [PASS] 1.2 CSV header variations (uppercase, alternative names: Narrative, Value)
-  ✅ [PASS] 1.3 Separate Debit and Credit columns: Debit-only row -> negative amount
-  ✅ [PASS] 1.4 Separate Debit and Credit columns: Credit-only row -> positive amount
-  ✅ [PASS] 1.5 Separate Debit and Credit columns: Empty/zero debit and credit row is safely skipped
-  ✅ [PASS] 1.6 South African Rand currency symbol (R), spaces, and thousand-separators
-  ✅ [PASS] 1.7 US Dollar currency symbol ($), spaces, and comma separators
-  ✅ [PASS] 1.8 Parenthesized negatives: plain, formatted with Rand R, and formatted with Dollar $
-  ✅ [PASS] 1.9 Trailing empty rows, blank lines, and trailing commas
-  ✅ [PASS] 1.10 Whitespace padding around headers and data columns
-  ✅ [PASS] 1.11 Invalid amounts (0, 0.00, R 0.00, NaN, text words) are safely ignored
-  ✅ [PASS] 1.12 Empty string or headers-only CSV returns empty array cleanly
+3. **TypeScript Typecheck (`npm run typecheck -w @genoffice/tenders`)**:
+   - Command: `tsc --noEmit`
+   - Exit code: 0, zero diagnostic errors.
 
---- Category 2: Bank Statement Import Deduplication & Ledger Balance Adjustment ---
-  ✅ [PASS] 2.1 Initial statement import (1x): imports transactions and adjusts bank ledger balance
-  ✅ [PASS] 2.2 Re-importing the same statement (2x): 0 duplicates imported, zero balance change
-  ✅ [PASS] 2.3 Re-importing the same statement a third time (3x): 0 duplicates, zero balance change
-  ✅ [PASS] 2.4 Partial overlap import: imports only new rows and adjusts balance strictly by new rows
-  ✅ [PASS] 2.5 Zero-sum statement import: imports transactions with netAdjustment = 0
-  ✅ [PASS] 2.6 Bank ledger balance adjustment strict mathematical equality: acc-bank = prev + net
-  ✅ [PASS] 2.7 Ingestion of empty or invalid CSV returns error and preserves database unaltered
+4. **Monorepo Brand Verification (`npm run check:brand`)**:
+   - Command: `node fork/tools/check-brand.mjs`
+   - Result: `✅ Brand check passed: Zero unauthorized upstream brand occurrences found.`
 
---- Category 3: Settlement Suggestion Matching Engine ---
-  ✅ [PASS] 3.1 Deposit matching: matches open Sales invoice, strictly ignores Purchase bill of same amount
-  ✅ [PASS] 3.2 Withdrawal matching: matches open Purchase bill, strictly ignores Sales invoice of same amount
-  ✅ [PASS] 3.3 Text token disambiguation: Invoice Number token gives HIGH confidence
-  ✅ [PASS] 3.4 Text token disambiguation: Tender Reference token gives HIGH confidence
-  ✅ [PASS] 3.5 Text token disambiguation: Counterparty keyword token gives HIGH confidence
-  ✅ [PASS] 3.6 Competing candidates disambiguation: Same amount, different tokens
-  ✅ [PASS] 3.7 Zero false positives for unmatched amounts: Delta >= 0.01 produces 0 suggestions
-  ✅ [PASS] 3.8 Exclude reconciled transactions: Reconciled transactions generate 0 suggestions
-  ✅ [PASS] 3.9 Exclude paid invoices: Paid or 0-outstanding invoices generate 0 suggestions
+### 1.2 Adversarial Heuristic & Boundary Observations
+1. **Extreme Punctuation and Unicode (`apps/tenders/src/renderer/src/pdf/clauses.ts`, `shred.ts`)**:
+   - Ellipses (`...`), double/triple exclamations (`?!`), smart quotes (`“ ”`), parentheses `(...)`, non-breaking spaces (`\u00A0`), em-dashes (`—`), and symbols/emoji (`⚠️`, `📋`) were parsed without throwing exceptions.
+   - Sentences exceeding `MAX_CLAUSE_CHARS = 600` (tested with a 784-char sentence across lines) were split into bounded clauses without data loss or buffer overrun (`clauses.length >= 2`).
+   - Short noise lines (< 8 characters: empty, spaces, single letters, bullet digits) were cleanly filtered out (`clauses.every(c => c.text.length >= 8)`).
 
---- Category 4: End-to-End Reconciliation & Double-Entry Integrity ---
-  ✅ [PASS] 4.1 Full reconciliation cycle: Updates transaction, invoice, party, and balances
-  ✅ [PASS] 4.2 Supplier Bill reconciliation: Offsets Accounts Payable (acc-ap) and party balance
-  ✅ [PASS] 4.3 Post-reconciliation suggestion clearance: Settled items generate 0 suggestions
-  ✅ [PASS] 4.4 Idempotency / Double-reconciliation rejection: Re-reconciling returns an error
-  ✅ [PASS] 4.5 IPC Round-Trip: Ingestion -> Suggestion -> Reconciliation via ipcMain channels
+2. **Compliance Gap Auto-Linking Boundary (`apps/tenders/src/renderer/src/gap.ts:79`)**:
+   - `AUTO_LINK_THRESHOLD = 0.50`:
+     - Confidence = 0.490 / 0.499: `linkable` is empty (`length === 0`), `linkedVaultDocId` remains `null`, `status` is `'OUTSTANDING'`, reason includes `low confidence (49%/50%), confirm manually.`
+     - Confidence = 0.500: `linkable` contains candidate (`length === 1`), `linkedVaultDocId` is set to document ID, `status` is `'FULFILLED'`.
+     - Confidence = 0.501 / 0.510: `linkedVaultDocId` is assigned, `status` is `'FULFILLED'`.
+   - Health preference override: When competing linkable candidates exist (e.g. Doc A with confidence 0.90 but `EXPIRED` vs Doc B with confidence 0.55 and `VALID`), `applyGapToRequirement` sorts by `HEALTH_RANK`, selecting Doc B (`VALID`) over Doc A (`EXPIRED`), preventing false compliance fulfillment with stale returnables.
+   - Police certification window: A document with confidence >= 0.50 but certified >90 days prior to tender closing is assigned `status = 'ACTION_REQUIRED'` and flagged with `exceeds 90-day window`.
 
-======================================================================
-TOTAL TESTS: 33 | PASSED: 33 | FAILED: 0
-======================================================================
-```
-
-### Full Monorepo Verifications
-- `npm run check:brand`: Passed (0 unauthorized upstream brand occurrences).
-- `node tools/verify-suite-workflows.mjs --feature r4`: 12 passed, 0 failed.
-- `node tools/verify-suite-workflows.mjs`: 56 passed, 0 failed.
-- `npm run typecheck`: Exit code 0 across all 22 monorepo packages.
-- `npm run build:all`: Exit code 0 across all applications and shared packages.
+3. **Store Migration & Concurrency Stress (`apps/tenders/src/main/tenders-main.ts`)**:
+   - 50 rapid sequential/concurrent atomic writes (`writeTendersStore`) wrote valid JSON with zero torn files.
+   - 50 concurrent `saveDocumentFile` operations via `Promise.all` completed with zero timestamp collisions (`uniquePaths.size === 50`) due to monotonic micro-offset incrementing in `getUniqueTimestamp()`.
+   - Interleaved reader-writer harness (40 concurrent writes and 40 concurrent reads running in parallel) achieved 100% successful reads with 0 parse errors.
+   - Directory traversal attacks (`../../../../etc/shadow`, `..\..\`, and null-byte injection `\0`) were neutralized: `basename` eliminated traversal directories during save, and `resolveSafeTendersPath` rejected path traversal outside `documents/` or `vault/`.
 
 ---
 
 ## 2. Logic Chain
 
-1. **CSV Parsing Resilience**:
-   - `parseBankStatementCsv` in `apps/books/src/main/books-main.ts:367` splits input lines, strips surrounding quotes, detects headers dynamically (supporting standard `Date, Description, Reference, Amount` as well as separate `Debit` and `Credit` columns).
-   - South African `R` and US `$` currency symbols, thousand separators (commas and spaces), and whitespace padding are systematically cleaned (`cols[amountIdx].replace(/[R$\s]/g, '').replace(/,/g, '')`).
-   - Parenthesized accounting negatives (e.g. `(25000)`, `(R 14,500.50)`, `($ 3,200.00)`) are accurately translated to negative floats (`clean.startsWith('(') && clean.endsWith(')') -> '-' + clean.slice(1, -1)`).
-   - Zero, zero-equivalent (`R 0.00`), and non-numeric entries (`NaN`, `PENDING`, `N/A`) are cleanly discarded without producing corrupted entries.
-
-2. **Deduplication & Ledger Balance Math**:
-   - In `importBankStatement` (line 441), incoming transactions are fingerprinted via `${tx.date}|${tx.description}|${tx.amount}` against existing transactions.
-   - On initial import (1x), valid transactions are ingested, and `acc-bank` balance is updated strictly by `netAdjustment`.
-   - On repeat imports (2x and 3x), 100% of rows match existing fingerprints; `importedCount` is 0, `skippedDuplicates` equals total parsed rows, `netAdjustment` is 0, and the `acc-bank` balance remains exactly identical with zero drift.
-   - For partial overlaps, only the novel transactions are ingested, and the balance adjustment is mathematically exact (`balance = Math.round((bankAccount.balance + netAdjustment) * 100) / 100`).
-
-3. **Settlement Suggestion Matching Engine**:
-   - In `computeSettlementSuggestions` (line 500), transactions with `reconciled === false` are filtered. Inflows (`amount > 0`) exclusively query open `Sales` invoices; outflows (`amount < 0`) exclusively query open `Purchase` bills.
-   - Delta check `Math.abs(inv.outstandingAmount - targetAmount) < 0.01` guarantees zero false positives for unmatched amounts (even amounts off by 1 cent or 1 Rand produce 0 suggestions).
-   - Text token disambiguation prioritizes exact invoice number matches (`invNoMatch`), tender reference matches (`tenderMatch`), and counterparty name/keyword matches (`partyMatch`, filtering standard legal stop words like `city`, `dept`, `ltd`, `pty`), elevating them to `HIGH` confidence.
-   - Invoices with matching amounts but different tokens cleanly receive `MEDIUM` confidence, allowing users to disambiguate identical amounts.
-   - Reconciled transactions and paid invoices are excluded from subsequent suggestion evaluations.
-
-4. **Double-Entry Reconciliation Invariants**:
-   - `executeReconciliation` marks the transaction `reconciled: true` with `matchedInvoiceId` and `reconciledAt` timestamp.
-   - The invoice is marked `Paid` with `outstandingAmount: 0`.
-   - The counterparty's `outstandingBalance` is reduced by the settled amount.
-   - Accounts Receivable (`acc-ar`) or Accounts Payable (`acc-ap`) is decreased by the settled amount.
-   - A balanced `JournalEntry` is posted where `totalDebit === totalCredit === settledAmount`.
-   - Re-reconciling returns `{ ok: false, error: '...' }`, preventing double-settlement.
+1. **Premise 1 (R4 Contract Requirement)**: Milestone 4 requires deterministic RFP shredder heuristics, compliance gap analysis, store serialization/migrations, and Electron IPC handlers to pass under automated testing and stress.
+2. **Premise 2 (Empirical Proof via Dedicated Test Suite)**: The existing 72 unit tests across `shredder-heuristics.test.ts`, `compliance-gap.test.ts`, `store-migrations.test.ts`, and `ipc-handlers.test.ts` plus the 18 new adversarial tests in `adversarial-stress.test.ts` (90 tests total) execute deterministically and pass 100% across 5 consecutive stress iterations.
+3. **Premise 3 (Boundary Robustness)**:
+   - In `gap.ts`, auto-linking requires `confidence >= AUTO_LINK_THRESHOLD (0.5)`. Empirical testing confirms that scores strictly below 0.50 leave requirements unlinked with a warning to confirm manually, while scores >= 0.50 auto-link and update status.
+   - `HEALTH_RANK` strictly takes precedence over lexical match score among linkable documents, guaranteeing that expired documents cannot displace valid returnables.
+4. **Premise 4 (Atomic Concurrency Integrity)**:
+   - `writeTendersStore` uses `writeFileSync` to a unique temp file (`${filePath}.${Date.now()}.${randomUUID()}.tmp`) followed by atomic rename (`renameSync`), eliminating file corruption or torn reads during concurrent read/write access.
+   - `saveDocumentFile` uses `getUniqueTimestamp()` ensuring that even when 50 files are saved within the same millisecond, every file receives a strictly unique filename and is persisted atomically.
+5. **Conclusion**: The Milestone 4 automated testing, heuristic shredding, compliance gap auto-linking, and persistence layer satisfy all requirements with high stability and integrity.
 
 ---
 
 ## 3. Caveats
 
-- Delimiters: The parser assumes standard comma delimiters (`CSV`). TSV (tabs) or semicolon-delimited files are not auto-detected, but comma-delimited is the universal standard for South African bank exports (FNB, Standard Bank, Nedbank, Absa).
-- Duplicate identical transactions on the same day: If a business legitimately has two identical transactions on the same date with identical descriptions and identical amounts, the fingerprint `${date}|${description}|${amount}` will treat the second one in the same batch as a duplicate. This is standard behavior for bank imports without unique bank transaction IDs.
-- No other caveats.
+1. **Submission Logistics Stitching Sensitivity**:
+   - In `clauses.ts`, consecutive visual row lines without terminal sentence punctuation (`.`, `!`, `?`) or large vertical gaps are stitched into single sentence-level clauses.
+   - If an RFP cover page has an unpunctuated contact line with an email (`thabo@dws.gov.za`) immediately preceding a physical tender box line without terminal periods, the two lines are joined into one clause. In `shred.ts`, `methodOfLine` tests `EMAIL_RE` before `BID_BOX_RE`, which can classify the submission method as `EMAIL`.
+   - In well-formed RFPs, distinct sections are separated by paragraph gaps or terminal punctuation, preventing this.
+2. **Closing Date Trailing Punctuation**:
+   - `CLOSING_RE` (`closing\s*date\s*[:\-]?\s*(.+)`) captures the remainder of the line, including trailing periods if present (unlike `REF_RE` which explicitly strips `replace(/[.,;]$/, '')`). This is a benign cosmetic distinction.
 
 ---
 
-## 4. Conclusion
+## 4. Conclusion & Confirmation
 
-**Verdict**: **APPROVE**  
-Milestone 4 (Bank Statement Import & Reconciliation in Zano Books) is thoroughly and robustly implemented. The code demonstrates complete adherence to interface contracts, resilience to adversarial edge cases, strict mathematical ledger balance integrity, accurate token disambiguation, and idempotency.
+### Assessment: **APPROVE**
+
+The Zanostack Tenders Milestone 4 implementation is verified and approved.
+- All 90 unit and adversarial stress tests pass cleanly across 5 consecutive runs with zero flakiness.
+- Shredder heuristics remain robust under extreme punctuation, Unicode characters, and sentence length boundaries.
+- Compliance gap analysis strictly obeys the 0.50 threshold and enforces health priority.
+- Store migrations and atomic document persistence withstand concurrent operations and traversal attacks.
+- TypeScript typecheck and monorepo brand checks pass with zero errors.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify all findings:
-```bash
-# 1. Run Challenger 1's empirical adversarial test harness
-node tools/test-challenger-1-m4-empirical.mjs
+To independently reproduce and verify these findings:
 
-# 2. Run Worker 4's adversarial verification suite
-node tools/test-adversarial-m4-empirical.mjs
+1. **Run full Vitest test suite**:
+   ```bash
+   npm test -w @genoffice/tenders
+   ```
+   *Expected result*: 5 test files passed, 90 tests passed, 0 failures.
 
-# 3. Run E2E R4 suite workflow tests
-node tools/verify-suite-workflows.mjs --feature r4
+2. **Run 5-iteration stress test**:
+   ```powershell
+   1..5 | ForEach-Object { npm test -w @genoffice/tenders; if ($LASTEXITCODE -ne 0) { throw "Flakiness detected" } }
+   ```
+   *Expected result*: 5 runs complete with code 0.
 
-# 4. Run full E2E workflow verification (all 56 tests)
-node tools/verify-suite-workflows.mjs
+3. **Run TypeScript typecheck**:
+   ```bash
+   npm run typecheck -w @genoffice/tenders
+   ```
+   *Expected result*: Exits with code 0 and 0 errors.
 
-# 5. Run branding compliance check
-npm run check:brand
-
-# 6. Run monorepo typecheck across all 22 packages
-npm run typecheck
-
-# 7. Run full monorepo build
-npm run build:all
-```
-All commands must exit with code 0.
+4. **Run Brand Check**:
+   ```bash
+   npm run check:brand
+   ```
+   *Expected result*: Zero unauthorized upstream brand occurrences.

@@ -1,14 +1,30 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { app, ipcMain, WebContentsView } from 'electron'
-import { TENDERS_CHANNELS, type BillMilestoneRequest, type BillMilestoneResult } from '../shared/ipc'
-import type { ContractMilestone, TenderRecord, TendersData } from '../shared/types'
+import { app, ipcMain, shell, WebContentsView, type WebContents } from 'electron'
+import {
+  TENDERS_CHANNELS,
+  type BillMilestoneRequest,
+  type BillMilestoneResult,
+  type DeleteDocumentRequest,
+  type DeleteDocumentResponse,
+  type OpenDocumentRequest,
+  type OpenDocumentResponse,
+  type ReadDocumentRequest,
+  type ReadDocumentResponse,
+  type SaveDocumentRequest,
+  type SaveDocumentResponse,
+} from '../shared/ipc'
+import type { CompanyWorkspace, ContractMilestone, TenderRecord, TendersData } from '../shared/types'
 import { readBooksStore, writeBooksStore } from '../../../books/src/main/books-main'
 import type { Invoice, JournalEntry, Party } from '../../../books/src/shared/types'
+import { MOCK_COMPANY } from '../renderer/src/mock/company'
+import { MOCK_CUSTOMERS } from '../renderer/src/mock/customers'
+import { MOCK_VAULT } from '../renderer/src/mock/vault'
 
 export const CURRENT_TENDERS_SCHEMA_VERSION = 1
+export const SEED_COMPANY_ID = 'co-thabo'
 
 export const SEED_TENDER_WTR_04: TenderRecord = {
   id: 'tender-wtr-04',
@@ -50,42 +66,27 @@ export const SEED_TENDER_WTR_04: TenderRecord = {
   requirements: [],
 }
 
+export function createDefaultSeedWorkspaces(): CompanyWorkspace[] {
+  return [
+    {
+      id: SEED_COMPANY_ID,
+      name: 'Thabo Engineering (Pty) Ltd',
+      company: { ...MOCK_COMPANY },
+      customers: [...MOCK_CUSTOMERS],
+      vault: [...MOCK_VAULT],
+      tenders: [SEED_TENDER_WTR_04],
+    },
+  ]
+}
+
 export function migrateAndValidateTenders(raw: unknown): TendersData {
   const now = new Date().toISOString()
   if (!raw || typeof raw !== 'object') {
     return {
       version: CURRENT_TENDERS_SCHEMA_VERSION,
       updatedAt: now,
-      activeCompanyId: 'comp-zano-01',
-      workspaces: [
-        {
-          id: 'ws-ekurhuleni-01',
-          name: 'Ekurhuleni Water Infrastructure',
-          company: {
-            name: 'Zano Consulting (Pty) Ltd',
-            tradingName: 'Zano Consulting',
-            registrationNumber: '2018/123456/07',
-            vatNumber: '4920284719',
-            taxPin: '9876543210',
-            bbbeeLevel: 'Level 1',
-            bbbeeBlackOwnership: '100%',
-            csdSupplierNumber: 'MAAA0012345',
-            founded: '2018',
-            employees: '45',
-            industry: 'Engineering & Construction',
-            description: 'Civil and mechanical engineering contracting services',
-            address: '24 Sovereign Square, Sandton, 2196',
-            phone: '+27 11 982 4000',
-            email: 'info@zanostack.dev',
-            website: 'https://zanostack.dev',
-            directors: [],
-            projects: [],
-          },
-          customers: [],
-          vault: [],
-          tenders: [SEED_TENDER_WTR_04],
-        },
-      ],
+      activeCompanyId: SEED_COMPANY_ID,
+      workspaces: createDefaultSeedWorkspaces(),
       issuerTemplates: [],
     }
   }
@@ -93,10 +94,36 @@ export function migrateAndValidateTenders(raw: unknown): TendersData {
   const r = raw as Record<string, unknown>
   const version = typeof r.version === 'number' && r.version >= 1 ? r.version : CURRENT_TENDERS_SCHEMA_VERSION
   const updatedAt = typeof r.updatedAt === 'string' && r.updatedAt.trim() ? r.updatedAt : now
-  const workspaces = Array.isArray(r.workspaces) ? (r.workspaces as any[]) : []
-  const activeCompanyId = typeof r.activeCompanyId === 'string' && r.activeCompanyId.trim()
-    ? r.activeCompanyId
-    : (workspaces[0]?.id || '')
+  let workspaces = Array.isArray(r.workspaces) ? (r.workspaces as any[]) : []
+  if (workspaces.length === 0) {
+    workspaces = createDefaultSeedWorkspaces()
+  } else {
+    workspaces = workspaces.map((ws) => {
+      const isSeedCompany = ws.id === SEED_COMPANY_ID || ws.id === 'ws-ekurhuleni-01'
+      const company = ws.company && ws.company.name ? ws.company : { ...MOCK_COMPANY }
+      const customers = Array.isArray(ws.customers) && ws.customers.length > 0
+        ? ws.customers
+        : (isSeedCompany ? [...MOCK_CUSTOMERS] : (Array.isArray(ws.customers) ? ws.customers : []))
+      const vault = Array.isArray(ws.vault) && ws.vault.length > 0
+        ? ws.vault
+        : (isSeedCompany ? [...MOCK_VAULT] : (Array.isArray(ws.vault) ? ws.vault : []))
+      const tenders = Array.isArray(ws.tenders) && ws.tenders.length > 0
+        ? ws.tenders
+        : (isSeedCompany ? [SEED_TENDER_WTR_04] : (Array.isArray(ws.tenders) ? ws.tenders : []))
+      return {
+        ...ws,
+        id: ws.id === 'ws-ekurhuleni-01' ? SEED_COMPANY_ID : ws.id,
+        name: ws.name || company.tradingName || company.name,
+        company,
+        customers,
+        vault,
+        tenders,
+      }
+    })
+  }
+  const activeCompanyId = typeof r.activeCompanyId === 'string' && r.activeCompanyId.trim() && r.activeCompanyId !== 'comp-zano-01'
+    ? (r.activeCompanyId === 'ws-ekurhuleni-01' ? SEED_COMPANY_ID : r.activeCompanyId)
+    : (workspaces[0]?.id || SEED_COMPANY_ID)
   const issuerTemplates = Array.isArray(r.issuerTemplates) ? (r.issuerTemplates as any[]) : []
 
   return {
@@ -149,6 +176,101 @@ export function readTendersStore(baseDirOrPath: string): TendersData {
   }
 }
 
+const activeTendersWebContents = new Set<WebContents>()
+let fileWatcher: FSWatcher | null = null
+let lastBroadcastJson = ''
+let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+export function registerTendersWebContents(wc: WebContents): void {
+  if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) return
+  activeTendersWebContents.add(wc)
+  if (typeof wc.once === 'function') {
+    wc.once('destroyed', () => {
+      activeTendersWebContents.delete(wc)
+    })
+  }
+}
+
+export function unregisterTendersWebContents(wc: WebContents): void {
+  activeTendersWebContents.delete(wc)
+}
+
+export function getActiveTendersWebContents(): WebContents[] {
+  return Array.from(activeTendersWebContents).filter(
+    (wc) => typeof wc.isDestroyed !== 'function' || !wc.isDestroyed()
+  )
+}
+
+export function broadcastTendersData(data: TendersData): void {
+  const json = JSON.stringify(data)
+  lastBroadcastJson = json
+  for (const wc of activeTendersWebContents) {
+    if (typeof wc.isDestroyed !== 'function' || !wc.isDestroyed()) {
+      try {
+        wc.send(TENDERS_CHANNELS.dataChanged, data)
+      } catch (err) {
+        console.warn('tenders-main: failed to broadcast dataChanged to WebContents:', err)
+      }
+    }
+  }
+}
+
+let watchedFilePath = ''
+
+export function startTendersStoreWatcher(targetPath?: string): void {
+  const filePath = targetPath || getStoragePath()
+  const dir = filePath.replace(/[/\\][^/\\]+$/, '')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+
+  if (fileWatcher) {
+    if (watchedFilePath === filePath) {
+      return
+    }
+    stopTendersStoreWatcher()
+  }
+
+  watchedFilePath = filePath
+  try {
+    fileWatcher = watch(dir, (_eventType, filename) => {
+      if (filename && filename.includes('tenders-data.json') && !filename.endsWith('.tmp')) {
+        if (watchDebounceTimer) clearTimeout(watchDebounceTimer)
+        watchDebounceTimer = setTimeout(() => {
+          try {
+            if (existsSync(filePath)) {
+              const currentData = readTendersStore(filePath)
+              const currentJson = JSON.stringify(currentData)
+              if (currentJson !== lastBroadcastJson) {
+                lastBroadcastJson = currentJson
+                broadcastTendersData(currentData)
+              }
+            }
+          } catch (err) {
+            console.warn('tenders-main: error in file watcher handler:', err)
+          }
+        }, 100)
+      }
+    })
+  } catch (err) {
+    console.warn('tenders-main: could not start tenders-data.json watcher:', err)
+  }
+}
+
+export function stopTendersStoreWatcher(): void {
+  watchedFilePath = ''
+  if (watchDebounceTimer) {
+    clearTimeout(watchDebounceTimer)
+    watchDebounceTimer = null
+  }
+  if (fileWatcher) {
+    try {
+      fileWatcher.close()
+    } catch {}
+    fileWatcher = null
+  }
+}
+
 export function writeTendersStore(baseDirOrPath: string, data: unknown): void {
   const filePath = baseDirOrPath.endsWith('tenders-data.json') ? baseDirOrPath : join(baseDirOrPath, 'tenders-data.json')
   const dir = filePath.replace(/[/\\][^/\\]+$/, '')
@@ -161,6 +283,7 @@ export function writeTendersStore(baseDirOrPath: string, data: unknown): void {
   try {
     writeFileSync(tmp, JSON.stringify(validated, null, 2), 'utf8')
     renameSync(tmp, filePath)
+    broadcastTendersData(validated)
   } catch (e) {
     try {
       if (existsSync(tmp)) unlinkSync(tmp)
@@ -186,12 +309,219 @@ let runtime: TendersRuntimeConfig = {
 
 let ipcRegistered = false
 
-function getStoragePath(): string {
-  const dir = join(app.getPath('userData'), 'tenders')
+export function getTendersBaseDir(overrideUserData?: string): string {
+  const dir = join(overrideUserData || app.getPath('userData'), 'tenders')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  return join(dir, 'tenders-data.json')
+  return dir
+}
+
+export function getTendersDocumentsDir(overrideUserData?: string): string {
+  const dir = join(getTendersBaseDir(overrideUserData), 'documents')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  return dir
+}
+
+export function getTendersVaultDir(overrideUserData?: string): string {
+  const dir = join(getTendersBaseDir(overrideUserData), 'vault')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  return dir
+}
+
+export function resolveSafeTendersPath(
+  storedPath: string,
+  overrideUserData?: string
+): { safe: boolean; fullPath: string; error?: string } {
+  if (!storedPath || typeof storedPath !== 'string') {
+    return { safe: false, fullPath: '', error: 'Stored path is required' }
+  }
+  if (storedPath.includes('\0')) {
+    return { safe: false, fullPath: '', error: 'Null byte detected in path' }
+  }
+  const root = resolve(getTendersBaseDir(overrideUserData))
+  const resolved = resolve(root, storedPath)
+  const docsDir = resolve(getTendersDocumentsDir(overrideUserData))
+  const docsDirWithSep = docsDir.endsWith(sep) ? docsDir : docsDir + sep
+  const vaultDir = resolve(getTendersVaultDir(overrideUserData))
+  const vaultDirWithSep = vaultDir.endsWith(sep) ? vaultDir : vaultDir + sep
+
+  // Must strictly be inside either documents/ or vault/ subdirectories
+  const isInsideDocs = resolved.startsWith(docsDirWithSep) && resolved !== docsDir
+  const isInsideVault = resolved.startsWith(vaultDirWithSep) && resolved !== vaultDir
+
+  if (!isInsideDocs && !isInsideVault) {
+    return { safe: false, fullPath: '', error: 'Directory traversal detected' }
+  }
+  return { safe: true, fullPath: resolved }
+}
+
+export function atomicWriteDocumentFile(targetPath: string, buffer: Buffer): void {
+  const dir = targetPath.replace(/[/\\][^/\\]+$/, '')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  const tmp = `${targetPath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
+  try {
+    writeFileSync(tmp, buffer)
+    let renamed = false
+    let lastErr: any = null
+    for (let i = 0; i < 3; i++) {
+      try {
+        renameSync(tmp, targetPath)
+        renamed = true
+        break
+      } catch (err: any) {
+        lastErr = err
+        if (err?.code === 'EBUSY' || err?.code === 'EPERM') {
+          const start = Date.now()
+          while (Date.now() - start < 15) {}
+        } else {
+          throw err
+        }
+      }
+    }
+    if (!renamed && lastErr) {
+      throw lastErr
+    }
+  } catch (err) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp)
+    } catch {}
+    throw err
+  }
+}
+
+let lastSaveTimestamp = 0
+export function getUniqueTimestamp(): number {
+  const now = Date.now()
+  lastSaveTimestamp = now > lastSaveTimestamp ? now : lastSaveTimestamp + 1
+  return lastSaveTimestamp
+}
+
+export async function saveDocumentFile(
+  req: SaveDocumentRequest,
+  overrideUserData?: string
+): Promise<SaveDocumentResponse> {
+  try {
+    if (!req || typeof req !== 'object') {
+      return { ok: false, error: 'Invalid request payload' }
+    }
+    const { fileName, buffer, category } = req
+    if (!fileName || typeof fileName !== 'string') {
+      return { ok: false, error: 'File name is required' }
+    }
+    if (!buffer) {
+      return { ok: false, error: 'File buffer is required' }
+    }
+    if (category !== 'rfp' && category !== 'vault') {
+      return { ok: false, error: 'Category must be either "rfp" or "vault"' }
+    }
+
+    // Sanitize fileName to prevent directory traversal and remove problematic characters
+    const rawBase = basename(fileName)
+    let cleanName = rawBase.replace(/[^a-zA-Z0-9._-]/g, '_')
+    if (!cleanName || cleanName.replace(/[._-]/g, '').length === 0) {
+      cleanName = category === 'rfp' ? 'tender.pdf' : 'document.pdf'
+    }
+
+    const timestamp = getUniqueTimestamp()
+    const storedFileName = `${timestamp}_${cleanName}`
+    const subFolder = category === 'rfp' ? 'documents' : 'vault'
+    const targetDir = category === 'rfp'
+      ? getTendersDocumentsDir(overrideUserData)
+      : getTendersVaultDir(overrideUserData)
+    const targetPath = join(targetDir, storedFileName)
+
+    const fileBuf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as any)
+    atomicWriteDocumentFile(targetPath, fileBuf)
+
+    const storedPath = `${subFolder}/${storedFileName}`
+    return { ok: true, storedPath }
+  } catch (err: any) {
+    console.error('tenders-main: failed to save document file', err)
+    return { ok: false, error: err?.message || 'Failed to save document' }
+  }
+}
+
+export async function readDocumentFile(
+  req: ReadDocumentRequest,
+  overrideUserData?: string
+): Promise<ReadDocumentResponse> {
+  try {
+    if (!req || typeof req !== 'object' || !req.storedPath) {
+      return { ok: false, error: 'Stored path is required' }
+    }
+    const check = resolveSafeTendersPath(req.storedPath, overrideUserData)
+    if (!check.safe) {
+      return { ok: false, error: check.error || 'Invalid or unsafe path' }
+    }
+    if (!existsSync(check.fullPath)) {
+      return { ok: false, error: 'File not found on disk' }
+    }
+    const buf = readFileSync(check.fullPath)
+    const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+    return { ok: true, buffer: arrayBuffer }
+  } catch (err: any) {
+    console.error('tenders-main: failed to read document file', err)
+    return { ok: false, error: err?.message || 'Failed to read document' }
+  }
+}
+
+export async function openDocumentFile(
+  req: OpenDocumentRequest,
+  overrideUserData?: string
+): Promise<OpenDocumentResponse> {
+  try {
+    if (!req || typeof req !== 'object' || !req.storedPath) {
+      return { ok: false, error: 'Stored path is required' }
+    }
+    const check = resolveSafeTendersPath(req.storedPath, overrideUserData)
+    if (!check.safe) {
+      return { ok: false, error: check.error || 'Invalid or unsafe path' }
+    }
+    if (!existsSync(check.fullPath)) {
+      return { ok: false, error: 'File not found on disk' }
+    }
+    const openErr = await shell.openPath(check.fullPath)
+    if (openErr) {
+      return { ok: false, error: openErr }
+    }
+    return { ok: true }
+  } catch (err: any) {
+    console.error('tenders-main: failed to open document file', err)
+    return { ok: false, error: err?.message || 'Failed to open document' }
+  }
+}
+
+export async function deleteDocumentFile(
+  req: DeleteDocumentRequest,
+  overrideUserData?: string
+): Promise<DeleteDocumentResponse> {
+  try {
+    if (!req || typeof req !== 'object' || !req.storedPath) {
+      return { ok: false, error: 'Stored path is required' }
+    }
+    const check = resolveSafeTendersPath(req.storedPath, overrideUserData)
+    if (!check.safe) {
+      return { ok: false, error: check.error || 'Invalid or unsafe path' }
+    }
+    if (existsSync(check.fullPath)) {
+      unlinkSync(check.fullPath)
+    }
+    return { ok: true }
+  } catch (err: any) {
+    console.error('tenders-main: failed to delete document file', err)
+    return { ok: false, error: err?.message || 'Failed to delete document' }
+  }
+}
+
+function getStoragePath(): string {
+  return join(getTendersBaseDir(), 'tenders-data.json')
 }
 
 export function configureTendersRuntime(config: TendersRuntimeConfig): void {
@@ -202,9 +532,14 @@ export function registerTendersIpc(): void {
   if (ipcRegistered) return
   ipcRegistered = true
 
+  startTendersStoreWatcher()
+
   // Persistence in userData/tenders/
-  ipcMain.handle(TENDERS_CHANNELS.getStoredData, () => {
+  ipcMain.handle(TENDERS_CHANNELS.getStoredData, (_e) => {
     try {
+      if (_e?.sender) {
+        registerTendersWebContents(_e.sender)
+      }
       const p = getStoragePath()
       if (existsSync(p)) {
         const validated = readTendersStore(p)
@@ -218,13 +553,33 @@ export function registerTendersIpc(): void {
 
   ipcMain.handle(TENDERS_CHANNELS.saveStoredData, (_e, json: string) => {
     try {
+      if (_e?.sender) {
+        registerTendersWebContents(_e.sender)
+      }
       const p = getStoragePath()
       const parsed = typeof json === 'string' ? JSON.parse(json) : json
       writeTendersStore(p, parsed)
-      return true
-    } catch {
-      return false
+      return { ok: true }
+    } catch (err: any) {
+      return { ok: false, error: err?.message || 'Failed to save stored data' }
     }
+  })
+
+  // Persistent Document & Vault Disk Storage (R2)
+  ipcMain.handle(TENDERS_CHANNELS.saveDocument, async (_e, req: SaveDocumentRequest) => {
+    return saveDocumentFile(req)
+  })
+
+  ipcMain.handle(TENDERS_CHANNELS.readDocument, async (_e, req: ReadDocumentRequest) => {
+    return readDocumentFile(req)
+  })
+
+  ipcMain.handle(TENDERS_CHANNELS.openDocument, async (_e, req: OpenDocumentRequest) => {
+    return openDocumentFile(req)
+  })
+
+  ipcMain.handle(TENDERS_CHANNELS.deleteDocument, async (_e, req: DeleteDocumentRequest) => {
+    return deleteDocumentFile(req)
   })
 
   // Cross-App: Export Compliance Matrix to Sheets
@@ -232,24 +587,34 @@ export function registerTendersIpc(): void {
     TENDERS_CHANNELS.exportMatrixToSheets,
     (_e, _tenderId: string, tenderTitle: string, matrixRows: any[]) => {
       try {
-        const header = 'Item,Category,Requirement / Clause,Risk Level,Status,Linked Vault Document,Compliance Reason\n'
+        const BOM = '\uFEFF'
+        const header = 'Requirement ID,Category,Requirement Text,Mandatory / Disqualifier,Fulfillment Status,Linked Document,Health Status,Notes\n'
+        const escapeCsv = (str: unknown): string => {
+          if (str === null || str === undefined) return '""'
+          const s = String(str).replace(/"/g, '""')
+          return `"${s}"`
+        }
+
         const rows = (matrixRows || [])
           .map((r, idx) => {
-            const item = idx + 1
-            const cat = `"${(r.category || '').replace(/"/g, '""')}"`
-            const title = `"${(r.title || r.verbatimClause || '').replace(/"/g, '""')}"`
-            const risk = `"${(r.riskLevel || '').replace(/"/g, '""')}"`
-            const status = `"${(r.status || '').replace(/"/g, '""')}"`
-            const doc = `"${(r.linkedVaultDocId || 'None').replace(/"/g, '""')}"`
-            const reason = `"${(r.reason || '').replace(/"/g, '""')}"`
-            return `${item},${cat},${title},${risk},${status},${doc},${reason}`
+            const reqId = escapeCsv(r.id || `REQ-${idx + 1}`)
+            const cat = escapeCsv((r.category || 'GENERAL').replace(/_/g, ' '))
+            const reqText = escapeCsv(r.title || r.verbatimClause || r.requirementText || '')
+            const isMand = r.isMandatory !== undefined ? Boolean(r.isMandatory) : (r.mandatory !== undefined ? Boolean(r.mandatory) : (r.riskLevel === 'HIGH' || r.riskLevel === 'CRITICAL'))
+            const mandText = escapeCsv(isMand ? 'Mandatory / Disqualifier' : 'Standard Returnable')
+            const status = escapeCsv(r.status || 'UNDER_REVIEW')
+            const linkedDoc = escapeCsv(r.linkedVaultDocId || r.linkedDocument || 'None')
+            const health = escapeCsv(r.healthStatus || (r.linkedVaultDocId ? 'VALID' : 'NO_ATTACHMENT'))
+            const notes = escapeCsv(r.notes || r.reason || '')
+            return [reqId, cat, reqText, mandText, status, linkedDoc, health, notes].join(',')
           })
           .join('\n')
 
-        const csvContent = header + rows
+        const csvContent = BOM + header + rows
+        const sanitizedTitle = (tenderTitle || 'Tender').replace(/[^a-zA-Z0-9_-]/g, '_')
         const targetPath = join(
           tmpdir(),
-          `Tender_Matrix_${(tenderTitle || 'Export').replace(/[^a-zA-Z0-9_-]/g, '_')}.csv`,
+          `${sanitizedTitle}_Compliance_Matrix_${getUniqueTimestamp()}.csv`,
         )
         writeFileSync(targetPath, csvContent, 'utf8')
 
@@ -266,58 +631,106 @@ export function registerTendersIpc(): void {
   // Cross-App: Draft Proposal in Docs
   ipcMain.handle(TENDERS_CHANNELS.draftProposalDoc, (_e, tender: any) => {
     try {
-      const title = tender?.title || 'Tender Response'
+      const title = tender?.title || 'Tender Proposal'
       const ref = tender?.referenceNumber || 'RFP-BID-2026'
       const issuer = tender?.issuingBody || 'Procurement Authority'
       const closing = tender?.closingDate || 'TBD'
+      const estValue = tender?.estimatedValue ? Number(tender.estimatedValue) : 0
       const requirements = (tender?.requirements || []) as any[]
+      const milestones = (tender?.milestones || []) as any[]
 
       const fulfilled = requirements.filter((r) => r.status === 'FULFILLED')
       const actionReq = requirements.filter((r) => r.status === 'ACTION_REQUIRED')
+      const underReview = requirements.filter((r) => r.status === 'UNDER_REVIEW')
 
-      const content = `# Bid & Tender Submission: ${title}
+      const dateStr = new Date().toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' })
 
+      const content = `# Commercial & Technical Tender Proposal
+
+**Project Title:** ${title}  
 **Tender Reference:** ${ref}  
 **Issuing Authority:** ${issuer}  
-**Submission Deadline:** ${closing}  
-**Date Generated:** ${new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}  
+**Closing Date:** ${closing}  
+**Submission Date:** ${dateStr}  
+**Total Bid Valuation:** R ${estValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (incl. 15% VAT)
 
 ---
 
-## 1. Compliance Statement & Executive Transmittal
-We hereby formally submit our comprehensive proposal and compliance pack in response to **${title}** (${ref}). Our organization confirms that all mandatory criteria, technical functional prerequisites, and returnables specified by **${issuer}** have been verified.
+## 1. Executive Summary
 
-## 2. Compliance Returnables Verification Summary
+This tender proposal is formally submitted by our organization in response to **${title}** (${ref}) issued by **${issuer}**. Having rigorously examined the scope of work, technical specifications, and general conditions of contract, we hereby commit to execute and complete all specified deliverables with uncompromising fidelity, technical precision, and full compliance with South African regulatory standards.
+
+Our engineering and contracting division possesses the requisite operational capability, accredited technical personnel, robust supply chain partnerships, and sound financial liquidity to fulfill all terms specified in the contract documents. All preliminary returnables, mandatory disqualification criteria, and compliance documentation have been verified and assembled in our attached compliance pack.
+
+---
+
+## 2. Delivery Methodology & Implementation Plan
+
+Our operational deployment follows a structured, milestone-driven project delivery lifecycle engineered to eliminate delivery risks and ensure seamless stakeholder communication:
+
+1. **Phase 1: Project Mobilization & Technical Baseline Survey**
+   - Immediate deployment of lead project managers and safety officers.
+   - Comprehensive site inspection, verification of existing infrastructure parameters, and finalization of detailed execution drawings.
+   - Procurement lock-in with certified primary suppliers and submission of Occupational Health & Safety (OHS) baseline files.
+
+2. **Phase 2: Core Engineering, Overhaul & Procurement Execution**
+   - Execution of primary civil, mechanical, and instrumentation works strictly conforming to SABS and ISO 9001 standards.
+   - Rigorous staged quality control inspections with structured sign-off hold-points for client consulting engineers.
+   - Continuous environmental and safety compliance monitoring with zero-harm safety enforcement.
+
+3. **Phase 3: Integration, Commissioning, Calibration & Handover**
+   - Systematic testing, flow calibration, pressure testing, and multi-point telemetry verification.
+   - Comprehensive operator training, handover of operations manuals, and issuance of certificates of compliance (CoC).
+   - Structured defect liability period monitoring and post-commissioning technical support.
+
+---
+
+## 3. Pricing Schedule & Contract Milestones
+
+The proposed commercial structure is organized into progressive delivery milestones payable upon formal engineering certification and tax invoicing through Zano Books:
+
+| Phase | Milestone Description | Target Due Date | Valuation (excl. VAT) | VAT (15%) | Total Progress Amount (ZAR) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+${milestones.length > 0
+  ? milestones.map((m, idx) => {
+      const gross = Number(m.amount || 0)
+      const net = Math.round((gross / 1.15) * 100) / 100
+      const vat = Math.round((gross - net) * 100) / 100
+      return `| Phase ${idx + 1} | ${m.name || m.title || 'Contract Milestone'} | ${m.dueDate || 'TBD'} | R ${net.toLocaleString(undefined, { minimumFractionDigits: 2 })} | R ${vat.toLocaleString(undefined, { minimumFractionDigits: 2 })} | R ${gross.toLocaleString(undefined, { minimumFractionDigits: 2 })} |`
+    }).join('\n')
+  : `| 01 | Phase 1 Initial Mobilization & Procurement | ${closing} | R ${Math.round((estValue * 0.4 / 1.15) * 100) / 100} | R ${Math.round((estValue * 0.4 - estValue * 0.4 / 1.15) * 100) / 100} | R ${(estValue * 0.4).toLocaleString()} |\n| 02 | Phase 2 Site Execution & Core Overhaul | TBD | R ${Math.round((estValue * 0.4 / 1.15) * 100) / 100} | R ${Math.round((estValue * 0.4 - estValue * 0.4 / 1.15) * 100) / 100} | R ${(estValue * 0.4).toLocaleString()} |\n| 03 | Phase 3 Commissioning & Final Handover | TBD | R ${Math.round((estValue * 0.2 / 1.15) * 100) / 100} | R ${Math.round((estValue * 0.2 - estValue * 0.2 / 1.15) * 100) / 100} | R ${(estValue * 0.2).toLocaleString()} |`
+}
+| **TOTAL** | **Comprehensive Turnkey Contract Sum** | | **R ${Math.round((estValue / 1.15) * 100) / 100}** | **R ${Math.round((estValue - Math.round((estValue / 1.15) * 100) / 100) * 100) / 100}** | **R ${estValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}** |
+
+*Payment Terms: 30 days from invoice certification. Double-entry ledger settlement via Zano Books.*
+
+---
+
+## 4. Compliance Checklist & Returnables Matrix
+
+The pre-submission compliance audit confirms the readiness of all mandatory criteria, legal standing certificates, and technical prerequisites:
 
 - **Total Evaluated Criteria:** ${requirements.length}
 - **Fully Fulfilled Returnables:** ${fulfilled.length}
-- **Pending Action Items:** ${actionReq.length}
-- **Readiness Gate Status:** ${actionReq.length === 0 ? 'READY FOR FINAL SUBMISSION' : 'PRE-FLIGHT CHECKS IN PROGRESS'}
+- **Under Review / Action Required:** ${actionReq.length + underReview.length}
+- **Audit Gate Status:** ${actionReq.length === 0 ? 'CLEARED FOR SUBMISSION' : 'CONDITIONAL PRE-FLIGHT'}
 
-### Evaluated Matrix
-| # | Requirement | Stage | Status | Verification Detail |
-| :--- | :--- | :--- | :--- | :--- |
-${requirements
-  .slice(0, 15)
-  .map(
-    (r, i) =>
-      `| ${i + 1} | ${r.title || 'Requirement'} | ${r.category?.replace(/_/g, ' ') || 'General'} | **${r.status}** | ${r.reason || 'Verified against vault'} |`,
-  )
-  .join('\n')}
+| Item | Requirement / Returnable | Mandatory / Disqualifier | Fulfillment Status | Linked Returnable | Health Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+${requirements.map((r, i) => {
+  const mand = r.isMandatory !== false ? 'Mandatory' : 'Optional'
+  const link = r.linkedVaultDocId ? `\`${r.linkedVaultDocId}\`` : 'Direct Attachment'
+  const health = r.healthStatus || (r.linkedVaultDocId ? 'VALID' : 'NO_DOC')
+  return `| ${i + 1} | ${r.title || r.verbatimClause || 'Requirement'} | ${mand} | **${r.status || 'UNDER_REVIEW'}** | ${link} | ${health} |`
+}).join('\n')}
 
 ---
 
-## 3. Commercial & Technical Offer
-- **Proposed Engagement Scope:** Complete delivery per RFP specifications.
-- **Validity Period:** 90 calendar days from closing date.
-- **Accompanying Attachments:** Company Document Pack, Tax Compliance Status PIN, BBBEE Affidavit, Certified Director IDs.
-
----
-
-*Compiled via Zanostack Tenders & Bids Hub*
+*Compiled and verified via Zanostack Tenders & Bids Hub · Zano Enterprise Office Suite*
 `
 
-      const targetPath = join(tmpdir(), `Bid_Response_${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.md`)
+      const sanitizedTitle = (title || 'Tender').replace(/[^a-zA-Z0-9_-]/g, '_')
+      const targetPath = join(tmpdir(), `${sanitizedTitle}_Draft_Proposal_${getUniqueTimestamp()}.md`)
       writeFileSync(targetPath, content, 'utf8')
 
       if (runtime.openGeneratedPath) {
@@ -332,11 +745,12 @@ ${requirements
   // Cross-App: Sync with CRM
   ipcMain.handle(TENDERS_CHANNELS.syncWithCrm, (_e, dealData) => {
     try {
-      const crmDir = join(app.getPath('userData'), 'crm')
+      const userDataDir = (app?.getPath ? app.getPath('userData') : '') || dealData?.userDataDir || ''
+      const crmDir = dealData?.crmDealsPath ? dirname(dealData.crmDealsPath) : join(userDataDir, 'crm')
       if (!existsSync(crmDir)) {
         mkdirSync(crmDir, { recursive: true })
       }
-      const crmDealsPath = join(crmDir, 'deals.json')
+      const crmDealsPath = dealData?.crmDealsPath || join(crmDir, 'deals.json')
       let envelope: { version: number; updatedAt: string; deals: any[] } = {
         version: 1,
         updatedAt: new Date().toISOString(),
@@ -365,38 +779,76 @@ ${requirements
         }
       }
 
-      const targetId = dealData?.id || dealData?.dealId || dealData?.crmDealId || `deal-tender-${Date.now()}`
-      const existingIdx = envelope.deals.findIndex((d: any) => d && d.id === targetId)
+      // Resolve Tender from disk if needed
+      const tendersPath = dealData?.tendersPath || getStoragePath()
+      let tenderFromStore: TenderRecord | undefined
+      let tendersDataEnvelope: TendersData | undefined
+      if (existsSync(tendersPath)) {
+        try {
+          tendersDataEnvelope = readTendersStore(tendersPath)
+          for (const ws of tendersDataEnvelope.workspaces || []) {
+            for (const t of ws.tenders || []) {
+              if (
+                (dealData?.tenderId && t.id === dealData.tenderId) ||
+                (dealData?.id && (t.id === dealData.id || `deal-tender-${t.id}` === dealData.id)) ||
+                (dealData?.tenderReference && t.referenceNumber === dealData.tenderReference)
+              ) {
+                tenderFromStore = t
+                break
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const tender = dealData?.tender || tenderFromStore
+      const tenderId = dealData?.tenderId || tender?.id || (dealData?.id?.startsWith('deal-tender-') ? dealData.id.replace('deal-tender-', '') : dealData?.id)
+      const deterministicDealId = dealData?.dealId || (dealData?.id && dealData.id !== tenderId ? dealData.id : (tenderId ? `deal-tender-${tenderId}` : `deal-tender-${Date.now()}`))
+      const targetId = deterministicDealId
+
+      const refNum = tender?.referenceNumber || dealData?.tenderReference || dealData?.referenceNumber || ''
+      const rawTitle = tender?.title || dealData?.title || dealData?.name || 'Tender Opportunity'
+      const title = refNum && rawTitle.startsWith(`${refNum} - `) ? rawTitle.replace(`${refNum} - `, '') : rawTitle
+      const dealName = refNum ? `${refNum} - ${title}` : title
+      const companyName = tender?.issuingBody || dealData?.companyName || 'Government / Enterprise Buyer'
+      const rawAmount = typeof tender?.estimatedValue === 'number'
+        ? tender.estimatedValue
+        : (typeof dealData?.amount === 'number' && Number.isFinite(dealData.amount) ? dealData.amount : 0)
+      const amount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0
+      const stage = dealData?.stage || 'proposal'
+      const expectedCloseDate = tender?.closingDate || dealData?.expectedCloseDate || dealData?.closingDate || undefined
+      const notes = dealData?.notes || (refNum ? `Tender Ref: ${refNum}\nIssuing Authority: ${companyName}` : `Issuing Authority: ${companyName}`)
+
       const now = new Date().toISOString()
+      const existingIdx = envelope.deals.findIndex((d: any) => d && (d.id === targetId || (tenderId && d.tenderId === tenderId)))
       let resultDealId = targetId
+
+      const dealFields = {
+        id: targetId,
+        name: dealName,
+        companyName,
+        amount,
+        stage,
+        expectedCloseDate,
+        notes,
+        tenderReference: refNum || undefined,
+        tenderId: tenderId || undefined,
+        probability: typeof dealData?.probability === 'number' ? dealData.probability : (stage === 'won' ? 100 : 60),
+        updatedAt: now,
+      }
 
       if (existingIdx >= 0) {
         const existing = envelope.deals[existingIdx]
-        const updated = {
+        envelope.deals[existingIdx] = {
           ...existing,
-          name: dealData?.name || existing.name || 'Tender Opportunity',
-          amount: typeof dealData?.amount === 'number' && Number.isFinite(dealData.amount)
-            ? dealData.amount
-            : (Number(dealData?.amount) >= 0 ? Number(dealData.amount) : (existing.amount ?? 150000)),
-          stage: dealData?.stage || existing.stage || 'proposal',
-          probability: typeof dealData?.probability === 'number' ? dealData.probability : (existing.probability ?? 60),
-          companyName: dealData?.companyName || existing.companyName || 'Procurement Buyer',
-          notes: dealData?.notes !== undefined ? dealData.notes : existing.notes,
-          updatedAt: now,
+          ...dealFields,
+          createdAt: existing.createdAt || now,
         }
-        envelope.deals[existingIdx] = updated
         resultDealId = existing.id
       } else {
         const newDeal = {
-          id: targetId,
-          name: dealData?.name || 'Tender Opportunity',
-          amount: Number(dealData?.amount) >= 0 ? Number(dealData.amount) : 150000,
-          stage: dealData?.stage || 'proposal',
-          probability: typeof dealData?.probability === 'number' ? dealData.probability : 60,
-          companyName: dealData?.companyName || 'Procurement Buyer',
-          notes: dealData?.notes || 'Imported from Zanostack Tenders',
+          ...dealFields,
           createdAt: now,
-          updatedAt: now,
         }
         envelope.deals.unshift(newDeal)
         resultDealId = newDeal.id
@@ -406,6 +858,28 @@ ${requirements
       const tmp = `${crmDealsPath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
       writeFileSync(tmp, JSON.stringify(envelope, null, 2), 'utf8')
       renameSync(tmp, crmDealsPath)
+
+      // Record tender.linkedCrmDealId = deal.id back onto TenderRecord in tenders-data.json and persist
+      if (tendersPath && existsSync(tendersPath)) {
+        try {
+          const tendersData = tendersDataEnvelope || readTendersStore(tendersPath)
+          let tenderUpdated = false
+          for (const ws of tendersData.workspaces || []) {
+            for (const t of ws.tenders || []) {
+              if (t.id === tenderId || (refNum && t.referenceNumber === refNum)) {
+                t.linkedCrmDealId = resultDealId
+                tenderUpdated = true
+              }
+            }
+          }
+          if (tenderUpdated) {
+            tendersData.updatedAt = now
+            writeTendersStore(tendersPath, tendersData) // automatically broadcasts tenders:data-changed!
+          }
+        } catch (tenderErr) {
+          console.warn('tenders-main: failed to back-link CRM deal on tender:', tenderErr)
+        }
+      }
 
       return { ok: true, dealId: resultDealId }
     } catch (e: any) {
@@ -439,6 +913,9 @@ ${requirements
       milestoneIdArg?: string,
     ): Promise<BillMilestoneResult> => {
       try {
+        if (_e?.sender) {
+          registerTendersWebContents(_e.sender)
+        }
         let tenderId: string
         let milestoneId: string
         let tenderReference: string | undefined
@@ -663,6 +1140,8 @@ export function createTendersView(): WebContentsView {
       sandbox: true,
     },
   })
+
+  registerTendersWebContents(view.webContents)
 
   if (runtime.rendererUrl) {
     void view.webContents.loadURL(runtime.rendererUrl)

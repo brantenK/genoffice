@@ -122,14 +122,30 @@ function VaultDocCard({
           </Badge>
         )}
         {doc.fileUrl ? (
-          <a
-            href={doc.fileUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700"
+          <button
+            type="button"
+            onClick={async () => {
+              const url = doc.fileUrl
+              if (!url) return
+              if (
+                typeof window !== 'undefined' &&
+                window.tendersApi?.openDocument &&
+                !url.startsWith('blob:') &&
+                !url.startsWith('http') &&
+                !url.startsWith('/demo')
+              ) {
+                const res = await window.tendersApi.openDocument({ storedPath: url })
+                if (!res?.ok) {
+                  console.warn('tenders: failed to open vault document via shell', res?.error)
+                }
+              } else {
+                window.open(url, '_blank')
+              }
+            }}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700"
           >
             <FileText size={11} /> View PDF
-          </a>
+          </button>
         ) : (
           <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[11px] text-slate-400">
             No file on record

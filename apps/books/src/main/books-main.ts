@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { app, ipcMain, WebContentsView } from 'electron'
@@ -569,10 +569,12 @@ export function executeReconciliation({
   booksDataPath,
   transactionId,
   invoiceId,
+  tendersDataPath,
 }: {
   booksDataPath: string
   transactionId: string
   invoiceId: string
+  tendersDataPath?: string
 }): {
   ok: boolean
   error?: string
@@ -581,6 +583,9 @@ export function executeReconciliation({
   invoiceNumber?: string
   settledAmount?: number
   invoiceStatus?: string
+  tenderMilestonePaid?: boolean
+  matchedMilestoneId?: string
+  matchedTenderId?: string
 } {
   const booksData = readBooksStore(booksDataPath)
 
@@ -649,6 +654,86 @@ export function executeReconciliation({
   booksData.updatedAt = new Date().toISOString()
   writeBooksStore(booksDataPath, booksData)
 
+  // 6. Propagate payment state back to Zano Tenders milestone
+  let tenderMilestonePaid = false
+  let matchedMilestoneId: string | undefined
+  let matchedTenderId: string | undefined
+
+  try {
+    let candidatePath = tendersDataPath
+    if (!candidatePath && booksDataPath) {
+      const fromBooks = resolve(booksDataPath, '..', '..', 'tenders', 'tenders-data.json')
+      if (existsSync(fromBooks)) candidatePath = fromBooks
+    }
+    if (!candidatePath && app?.getPath) {
+      try {
+        const fromApp = join(app.getPath('userData'), 'tenders', 'tenders-data.json')
+        if (existsSync(fromApp)) candidatePath = fromApp
+      } catch {}
+    }
+    if (!candidatePath) {
+      if (booksDataPath) {
+        candidatePath = resolve(booksDataPath, '..', '..', 'tenders', 'tenders-data.json')
+      } else if (app?.getPath) {
+        try {
+          candidatePath = join(app.getPath('userData'), 'tenders', 'tenders-data.json')
+        } catch {}
+      }
+    }
+
+    if (candidatePath && existsSync(candidatePath)) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const tendersModule = require('../../../tenders/src/main/tenders-main')
+      const readFn = tendersModule.readTendersStore
+      const writeFn = tendersModule.writeTendersStore
+
+      if (typeof readFn === 'function' && typeof writeFn === 'function') {
+        const tendersData = readFn(candidatePath)
+        let modified = false
+        const nowIso = new Date().toISOString()
+
+        for (const ws of tendersData.workspaces || []) {
+          for (const t of ws.tenders || []) {
+            for (const m of t.milestones || []) {
+              const matchByInvoiceId = Boolean(m.billedInvoiceId && m.billedInvoiceId === inv.id)
+              const matchByInvoiceNum = Boolean(
+                m.billedInvoiceNumber && inv.invoiceNumber && m.billedInvoiceNumber === inv.invoiceNumber
+              )
+              const matchByRefAndAmount = Boolean(
+                (inv.tenderReference || (inv as any).tenderRef) &&
+                t.referenceNumber === (inv.tenderReference || (inv as any).tenderRef) &&
+                (m.status === 'BILLED' || m.status === 'REACHED') &&
+                Math.round(m.amount * 100) === Math.round(settledAmount * 100)
+              )
+
+              if (matchByInvoiceId || matchByInvoiceNum || matchByRefAndAmount) {
+                m.status = 'PAID'
+                m.paidAt = nowIso
+                m.paidDate = nowIso
+                if (!m.billedInvoiceId) m.billedInvoiceId = inv.id
+                if (!m.billedInvoiceNumber && inv.invoiceNumber) m.billedInvoiceNumber = inv.invoiceNumber
+                modified = true
+                tenderMilestonePaid = true
+                matchedMilestoneId = m.id
+                matchedTenderId = t.id
+                break
+              }
+            }
+            if (tenderMilestonePaid) break
+          }
+          if (tenderMilestonePaid) break
+        }
+
+        if (modified) {
+          tendersData.updatedAt = nowIso
+          writeFn(candidatePath, tendersData)
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[books-main] Failed to propagate payment to tenders:', err)
+  }
+
   return {
     ok: true,
     transactionId,
@@ -656,6 +741,9 @@ export function executeReconciliation({
     invoiceNumber: inv.invoiceNumber,
     settledAmount,
     invoiceStatus: inv.status,
+    tenderMilestonePaid,
+    matchedMilestoneId,
+    matchedTenderId,
   }
 }
 

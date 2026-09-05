@@ -38,3 +38,44 @@ Add a bank statement import workflow in Zano Books that accepts standard bank tr
 ## Follow-up — 2026-09-03T17:23:26Z
 
 The server restarted and quota has reset. Please resume monitoring and orchestrating the Zanostack workflow implementation. Check the state of .agents and continue from where work left off.
+
+## 2026-09-04T18:31:53Z
+
+Overhaul and harden Zanostack Tenders (`apps/tenders`) and its Electron backend (`tenders-main.ts`), establishing unified persistence between the renderer store and Electron main process, persistent vault/PDF disk storage, robust cross-app workflows with Books, CRM, Docs, and Sheets, and an automated test suite.
+
+Working directory: c:/Users/brant/OneDrive/Documents/GenOffice/genoffice
+Integrity mode: development
+
+## Requirements
+
+### R1. Unified Main-Renderer State Synchronization
+Synchronize application state between the React renderer store (Zustand) and the Electron main process storage (`userData/tenders/tenders-data.json`). Data persisted via IPC or modified by cross-app operations (such as milestone billing from Books) must be immediately reflected in the user interface, eliminating stale state and desynchronization between disk and renderer memory.
+
+### R2. Persistent Disk Storage for RFP Documents & Vault Returnables
+Provide persistent file storage for uploaded tender PDFs and compliance vault documents within the application data directory. Stored documents must remain accessible across application restarts, replacing transient session-only blob URLs with durable local file paths or managed IPC retrieval.
+
+### R3. Cross-App Interoperability & Export Workflows
+Harden and elevate cross-app workflows with other GenOffice desktop applications:
+- **Zano Books:** Milestone billing must create valid double-entry ledger entries and tax invoices, update tender milestones to billed, and propagate payment state updates back to tender milestones.
+- **Zano CRM:** Tender opportunities must seamlessly sync into CRM deals with accurate stage, issuer, submission deadline, and estimated value.
+- **Docs & Sheets:** Exporting compliance matrices and proposal drafts must generate cleanly formatted documents ready for viewing and editing in Zano Docs and Sheets.
+
+### R4. Automated Testing and Verification Suite
+Add automated unit and integration tests covering the deterministic RFP shredder heuristics, compliance gap analysis, store serialization/migrations, and Electron IPC handlers. The entire test suite and TypeScript typechecking must pass cleanly with zero regressions.
+
+## Acceptance Criteria
+
+### Persistence & Data Integrity
+- [ ] Tenders data saved in renderer is persisted to `tenders-data.json` and loads identically on app restart.
+- [ ] Milestone billing executed in the backend updates both the on-disk store and the active renderer store without requiring a reload.
+- [ ] Uploaded tender PDFs and vault files are stored on disk in the user data directory and re-open successfully after restarting the app.
+
+### Cross-App Functionality
+- [ ] Billed milestones produce balanced journal entries, accounts receivable adjustments, and linked tax invoices in Zano Books.
+- [ ] Tenders exported to CRM appear with expected metadata (reference, issuer, value, closing date) in CRM deals.
+- [ ] Export matrix to Sheets and Draft proposal in Docs generate valid files without error and trigger corresponding shell tab navigation.
+
+### Code Quality & Testing
+- [ ] `npm run typecheck` passes with zero TypeScript errors across `apps/tenders` and dependent apps.
+- [ ] A dedicated test suite for `apps/tenders` runs via automated test command (e.g. `npm test` / Vitest) and passes 100% of tests.
+- [ ] No regression in existing tab navigation or shell startup behavior.

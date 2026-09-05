@@ -1,46 +1,33 @@
-﻿## 2026-09-03T19:07:01Z
-
-You are Reviewer 1 for Milestone 4 (reviewer_1_m4).
-Your working directory is:
+## 2026-09-05T01:00:00Z
+You are reviewer_1_m4, an independent code reviewer.
+Your assigned working directory is:
 c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\reviewer_1_m4
 
-You MUST read the original user request at:
+You MUST read ORIGINAL_REQUEST.md before starting work:
 c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\ORIGINAL_REQUEST.md
+Specifically inspect the latest request dated 2026-09-04T18:31:53Z.
 
-You MUST read the project blueprint at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\PROJECT.md
+Also read PROJECT.md and worker_m4_tests handoff:
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\PROJECT.md
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\worker_m4_tests\handoff.md
 
-Read TEST_READY.md at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\TEST_READY.md
+Scope of Review: Milestone 4 — Automated Testing and Verification Suite (R4)
+Examine the created and modified files:
+- apps/tenders/vitest.config.ts
+- apps/tenders/package.json
+- apps/tenders/tests/shredder-heuristics.test.ts
+- apps/tenders/tests/compliance-gap.test.ts
+- apps/tenders/tests/store-migrations.test.ts
+- apps/tenders/tests/ipc-handlers.test.ts
 
-Read TEST_INFRA.md at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\TEST_INFRA.md
-
-Read Worker 4's handoff report at:
-c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\worker_m4\handoff.md
-
-Your mission:
-Objectively and independently review Milestone 4 (Bank Statement Import & Reconciliation in Zano Books — Features F13, F14, F15, F16, F17):
-1. Examine code changes in:
-   - pps/books/src/shared/types.ts
-   - pps/books/src/shared/ipc.ts & pps/books/src/preload/index.ts
-   - pps/books/src/main/books-main.ts
-   - pps/books/src/renderer/src/components/BankingView.tsx
-   - pps/books/src/renderer/src/components/Desk.tsx
-   - pps/books/src/renderer/src/store.ts
-2. Verify correctness, completeness, robustness, and adherence to PROJECT.md interface contracts.
-3. Run verification commands:
-   - 
-pm run check:brand
-   - 
-pm run typecheck
-   - 
-ode tools/verify-suite-workflows.mjs --feature r4
-   - 
-ode tools/verify-suite-workflows.mjs
-   - 
-ode tools/test-adversarial-m4-empirical.mjs
-4. Deliver your structured review verdict: APPROVE or REQUEST_CHANGES.
+Verify:
+1. Verify that all 4 test suites adhere to high-quality testing standards, testing genuine logic without shortcuts or facades.
+2. Verify test execution across commands:
+   - `npm test -w @genoffice/tenders` (or `npx vitest run --config apps/tenders/vitest.config.ts`)
+   - `npm run check:brand`
+   - `npm run typecheck`
+   - `node tools/verify-suite-workflows.mjs`
+3. Document all findings and provide an explicit binary gate verdict: APPROVE or REQUEST_CHANGES.
 Write your handoff report to:
 c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\reviewer_1_m4\handoff.md
-Maintain progress in your progress.md. When done, notify me via send_message with your verdict.
+Send a completion message to parent when done.

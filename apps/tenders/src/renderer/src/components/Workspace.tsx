@@ -49,9 +49,9 @@ export function Workspace() {
   const reattachRef = useRef<HTMLInputElement | null>(null)
   const now = useNow(60_000)
 
-  // Load the tender's PDF (object URL) into pdfjs for the viewer. Object URLs
-  // die on page reload (persisted state blanks fileUrl), so a blank fileUrl is
-  // the re-attach state — nothing to fetch until the user re-picks the PDF.
+  // Load the tender's PDF into pdfjs for the viewer.
+  // If tender.fileUrl is a stored path on disk, read via IPC readDocument.
+  // If tender.fileUrl is an ephemeral blob or web url, fetch it directly.
   useEffect(() => {
     if (!tender) return
     if (!tender.fileUrl) {
@@ -64,8 +64,27 @@ export function Workspace() {
     setDoc(null)
     setDocError(null)
     ;(async () => {
-      const res = await fetch(tender.fileUrl)
-      const buf = await res.arrayBuffer()
+      let buf: ArrayBuffer | null = null
+      if (
+        typeof window !== 'undefined' &&
+        window.tendersApi?.readDocument &&
+        !tender.fileUrl.startsWith('blob:') &&
+        !tender.fileUrl.startsWith('http') &&
+        !tender.fileUrl.startsWith('/')
+      ) {
+        try {
+          const res = await window.tendersApi.readDocument({ storedPath: tender.fileUrl })
+          if (res?.ok && res.buffer) {
+            buf = res.buffer
+          }
+        } catch (readErr) {
+          console.warn('tenders: failed to read document from disk via IPC', readErr)
+        }
+      }
+      if (!buf) {
+        const res = await fetch(tender.fileUrl)
+        buf = await res.arrayBuffer()
+      }
       loaded = await loadPdfDocument(buf)
       if (!cancelled) setDoc(loaded)
     })().catch(() => {
@@ -94,8 +113,26 @@ export function Workspace() {
         ? MapPin
         : Monitor
 
-  const handleReattach = (file: File) => {
-    const url = URL.createObjectURL(file)
+  const handleReattach = async (file: File) => {
+    let url = ''
+    if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
+      try {
+        const buffer = await file.arrayBuffer()
+        const saveRes = await window.tendersApi.saveDocument({
+          fileName: file.name,
+          buffer,
+          category: 'rfp'
+        })
+        if (saveRes?.ok && saveRes.storedPath) {
+          url = saveRes.storedPath
+        }
+      } catch (err) {
+        console.warn('tenders: failed to persist reattached RFP document via IPC', err)
+      }
+    }
+    if (!url) {
+      url = URL.createObjectURL(file)
+    }
     updateTender(tender.id, { fileUrl: url, fileName: file.name })
   }
 
@@ -189,22 +226,48 @@ export function Workspace() {
           >
             <FileText size={13} /> Draft Docs
           </Button>
-          <Button
-            size="sm"
-            variant="default"
-            onClick={async () => {
-              await window.tendersApi?.syncWithCrm({
-                name: `Tender: ${tender.title}`,
-                amount: tender.estimatedValue || 250000,
-                companyName: tender.issuingBody || 'Government / Enterprise Buyer',
-                notes: `Closing: ${tender.closingDate || 'TBD'}. Verified returnables: ${tender.requirements.filter((r) => r.status === 'FULFILLED').length}/${tender.requirements.length}.`,
-              })
-              await window.tendersApi?.openInCrm()
-            }}
-            title="Sync this tender opportunity with Zanostack CRM"
-          >
-            <Building2 size={13} /> CRM
-          </Button>
+          {tender.linkedCrmDealId ? (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={async () => {
+                await window.tendersApi?.openInCrm(tender.linkedCrmDealId || `deal-tender-${tender.id}`)
+              }}
+              title="Open linked deal in Zanostack CRM"
+              className="border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium"
+            >
+              <Building2 size={13} className="text-purple-600" />
+              <span>CRM Deal</span>
+              <Badge tone="violet" className="ml-1 text-[10px] px-1 py-0 font-semibold">Linked</Badge>
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={async () => {
+                const deterministicDealId = `deal-tender-${tender.id}`
+                const res = await (window.tendersApi?.syncWithCrm as any)?.({
+                  id: deterministicDealId,
+                  tenderId: tender.id,
+                  name: `${tender.referenceNumber ? `${tender.referenceNumber} - ` : ''}${tender.title}`,
+                  companyName: tender.issuingBody || 'Government / Enterprise Buyer',
+                  amount: tender.estimatedValue || 0,
+                  stage: 'proposal',
+                  expectedCloseDate: tender.closingDate || undefined,
+                  notes: `Tender Ref: ${tender.referenceNumber || 'N/A'}\nIssuing Authority: ${tender.issuingBody || 'N/A'}`,
+                  tenderReference: tender.referenceNumber || undefined,
+                  tender,
+                })
+                if (res && res.ok && res.dealId) {
+                  updateTender(tender.id, { linkedCrmDealId: res.dealId })
+                }
+                await window.tendersApi?.openInCrm(res?.dealId || deterministicDealId)
+              }}
+              title="Sync this tender opportunity with Zanostack CRM"
+            >
+              <Building2 size={13} /> CRM
+            </Button>
+          )}
           <Button
             size="sm"
             variant={readinessOpen ? 'primary' : 'default'}
@@ -307,6 +370,32 @@ export function Workspace() {
                           title="Open invoice in Zano Books"
                         >
                           <FileText size={11} /> {m.billedInvoiceNumber || 'INV-2026'}
+                        </button>
+                      </div>
+                    )
+                  }
+                  if (m.status === 'PAID') {
+                    const paidDateStr = (m as any).paidAt ? new Date((m as any).paidAt).toLocaleDateString() : 'Settled'
+                    return (
+                      <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-emerald-50/70 p-2 border border-emerald-200 shadow-xs">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-emerald-950 truncate flex items-center gap-1.5">
+                            <span>{m.name || m.title}</span>
+                            <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.2 text-[10px] font-bold text-emerald-800">
+                              PAID
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-emerald-700 font-medium">
+                            R {Number(m.amount).toLocaleString()} · Paid {paidDateStr}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => window.tendersApi?.openBooks?.()}
+                          className="shrink-0 inline-flex items-center gap-1 rounded border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer transition-colors"
+                          title="Open settled invoice in Zano Books"
+                        >
+                          <FileText size={11} /> {m.billedInvoiceNumber || 'View Invoice'}
                         </button>
                       </div>
                     )
