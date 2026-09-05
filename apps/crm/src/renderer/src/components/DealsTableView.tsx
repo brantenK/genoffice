@@ -24,7 +24,7 @@ const STAGES: { key: DealStage; label: string; color: string }[] = [
 export function DealsTableView({
   deals,
   onEditDeal,
-  onUpdateStage,
+  onUpdateStage: _onUpdateStage,
   onDeleteDeal,
   onGenerateProposal,
   onInvoiceCreated,
@@ -104,7 +104,9 @@ export function DealsTableView({
     }
   }
 
-  const filtered = currentDeals.filter((d) => (filterStage === 'all' ? true : d.stage === filterStage))
+  const filtered = currentDeals.filter((d) =>
+    filterStage === 'all' ? true : d.stage === filterStage,
+  )
 
   return (
     <div className="crm-table-container">
@@ -286,7 +288,11 @@ export function DealsTableView({
                             title="Create Sales Invoice in Zano Books"
                             onClick={() => void handleCreateInvoice(deal)}
                           >
-                            <span>{invoicingDealId === deal.id ? '⚡ Invoicing...' : '⚡ Invoice in Books'}</span>
+                            <span>
+                              {invoicingDealId === deal.id
+                                ? '⚡ Invoicing...'
+                                : '⚡ Invoice in Books'}
+                            </span>
                           </button>
                         ))}
                       <button

@@ -3,13 +3,12 @@
 import {
   AlertTriangle,
   BookOpen,
-  CheckCircle2,
   Clock,
   CalendarClock,
   CalendarDays,
   FileText,
   TrendingUp,
-  Users
+  Users,
 } from 'lucide-react'
 import { useMemo } from 'react'
 import type { DocHealth } from '../../../shared/types'
@@ -23,14 +22,14 @@ const HEALTH_TONE: Record<DocHealth, 'green' | 'amber' | 'red' | 'slate'> = {
   VALID: 'green',
   EXPIRED: 'red',
   STALE_CERTIFICATION: 'amber',
-  NO_EXPIRY_INFO: 'slate'
+  NO_EXPIRY_INFO: 'slate',
 }
 
 const HEALTH_LABEL: Record<DocHealth, string> = {
   VALID: 'Valid',
   EXPIRED: 'Expired',
   STALE_CERTIFICATION: 'Stale stamp',
-  NO_EXPIRY_INFO: 'No expiry'
+  NO_EXPIRY_INFO: 'No expiry',
 }
 
 const SECTOR_COLORS: Record<string, string> = {
@@ -40,11 +39,14 @@ const SECTOR_COLORS: Record<string, string> = {
   Bidding: 'bg-amber-400',
 }
 
-const RUNWAY_TONE: Record<RunwayItem['kind'], { dot: string; badge: 'red' | 'amber' | 'sky' | 'violet' }> = {
-  VAULT_EXPIRY:    { dot: 'bg-red-500',    badge: 'red' },
-  STALE_STAMP:     { dot: 'bg-amber-500',  badge: 'amber' },
-  TENDER_CLOSING:  { dot: 'bg-sky-500',    badge: 'sky' },
-  TENDER_SUBMIT_BY:{ dot: 'bg-violet-500', badge: 'violet' }
+const RUNWAY_TONE: Record<
+  RunwayItem['kind'],
+  { dot: string; badge: 'red' | 'amber' | 'sky' | 'violet' }
+> = {
+  VAULT_EXPIRY: { dot: 'bg-red-500', badge: 'red' },
+  STALE_STAMP: { dot: 'bg-amber-500', badge: 'amber' },
+  TENDER_CLOSING: { dot: 'bg-sky-500', badge: 'sky' },
+  TENDER_SUBMIT_BY: { dot: 'bg-violet-500', badge: 'violet' },
 }
 
 export function OverviewPage() {
@@ -55,23 +57,17 @@ export function OverviewPage() {
   const setPage = useTendersStore((s) => s.setPage)
   const now = useNow(60_000)
 
-  const docReports = useMemo(
-    () => vault.map((d) => ({ doc: d, rep: assessDocHealth(d) })),
-    [vault]
-  )
-  const runway = useMemo(
-    () => buildRunway(vault, tenders, now),
-    [vault, tenders, now]
-  )
+  const docReports = useMemo(() => vault.map((d) => ({ doc: d, rep: assessDocHealth(d) })), [vault])
+  const runway = useMemo(() => buildRunway(vault, tenders, now), [vault, tenders, now])
   const upcomingRunway = runway.filter((i) => i.daysAway >= 0)
   const expired = docReports.filter((r) => r.rep.health === 'EXPIRED')
-  const stale   = docReports.filter((r) => r.rep.health === 'STALE_CERTIFICATION')
-  const valid   = docReports.filter((r) => r.rep.health === 'VALID')
+  const stale = docReports.filter((r) => r.rep.health === 'STALE_CERTIFICATION')
+  const valid = docReports.filter((r) => r.rep.health === 'VALID')
   const expiringWithin60 = docReports.filter(
-    (r) => r.rep.health === 'VALID' && r.rep.daysUntilExpiry !== null && r.rep.daysUntilExpiry < 60
+    (r) => r.rep.health === 'VALID' && r.rep.daysUntilExpiry !== null && r.rep.daysUntilExpiry < 60,
   )
   const activeCustomers = customers.filter((c) => c.status === 'ACTIVE').length
-  const activeTenders   = tenders.length
+  const activeTenders = tenders.length
   const completedProjects = company.projects.filter((p) => p.status === 'COMPLETED').length
 
   return (
@@ -85,7 +81,6 @@ export function OverviewPage() {
       </div>
 
       <div className="mx-auto w-full max-w-6xl space-y-8 px-8 py-8">
-
         {/* KPI strip */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" data-tour="tour-kpi">
           <KpiCard
@@ -193,10 +188,14 @@ export function OverviewPage() {
                   className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2 hover:bg-slate-50"
                   onClick={() => setPage('profile')}
                 >
-                  <span className={`mt-1.5 size-2 shrink-0 rounded-full ${SECTOR_COLORS[p.sector] ?? 'bg-slate-400'}`} />
+                  <span
+                    className={`mt-1.5 size-2 shrink-0 rounded-full ${SECTOR_COLORS[p.sector] ?? 'bg-slate-400'}`}
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium text-slate-800">{p.title}</p>
-                    <p className="text-[11px] text-slate-500">{p.client} · {p.value}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {p.client} · {p.value}
+                    </p>
                   </div>
                   <StatusPill status={p.status} />
                 </div>
@@ -206,7 +205,10 @@ export function OverviewPage() {
         </div>
 
         {/* expiry runway timeline */}
-        <section className="rounded-xl border border-slate-200 bg-white p-5" data-tour="tour-runway">
+        <section
+          className="rounded-xl border border-slate-200 bg-white p-5"
+          data-tour="tour-runway"
+        >
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-slate-800">Renewal runway</h2>
             <Button
@@ -238,10 +240,26 @@ export function OverviewPage() {
         <section>
           <h2 className="mb-3 text-sm font-semibold text-slate-700">Quick actions</h2>
           <div className="flex flex-wrap gap-3">
-            <QuickAction label="Add a customer" icon={<Users size={15} />} onClick={() => setPage('customers')} />
-            <QuickAction label="Upload a document" icon={<FileText size={15} />} onClick={() => setPage('documents')} />
-            <QuickAction label="Shred a tender RFP" icon={<BookOpen size={15} />} onClick={() => setPage('tenders')} />
-            <QuickAction label="Edit company profile" icon={<TrendingUp size={15} />} onClick={() => setPage('profile')} />
+            <QuickAction
+              label="Add a customer"
+              icon={<Users size={15} />}
+              onClick={() => setPage('customers')}
+            />
+            <QuickAction
+              label="Upload a document"
+              icon={<FileText size={15} />}
+              onClick={() => setPage('documents')}
+            />
+            <QuickAction
+              label="Shred a tender RFP"
+              icon={<BookOpen size={15} />}
+              onClick={() => setPage('tenders')}
+            />
+            <QuickAction
+              label="Edit company profile"
+              icon={<TrendingUp size={15} />}
+              onClick={() => setPage('profile')}
+            />
           </div>
         </section>
       </div>
@@ -250,7 +268,12 @@ export function OverviewPage() {
 }
 
 function KpiCard({
-  icon, label, value, sub, accent, onClick
+  icon,
+  label,
+  value,
+  sub,
+  accent,
+  onClick,
 }: {
   icon: React.ReactNode
   label: string
@@ -278,7 +301,12 @@ function KpiCard({
 }
 
 function AttentionRow({
-  icon, title, detail, tone, badge, onClick
+  icon,
+  title,
+  detail,
+  tone,
+  badge,
+  onClick,
 }: {
   icon: React.ReactNode
   title: string
@@ -320,7 +348,11 @@ function RunwayRow({ item }: { item: RunwayItem }) {
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
             <span className="inline-flex items-center gap-1">
               <CalendarClock size={11} />
-              {date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {date.toLocaleDateString('en-ZA', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
             </span>
             <span>{item.note}</span>
           </p>
@@ -335,22 +367,35 @@ function RunwayRow({ item }: { item: RunwayItem }) {
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
-    COMPLETED:   'bg-emerald-100 text-emerald-700',
+    COMPLETED: 'bg-emerald-100 text-emerald-700',
     IN_PROGRESS: 'bg-sky-100 text-sky-700',
-    BIDDING:     'bg-amber-100 text-amber-700',
-    ON_HOLD:     'bg-slate-100 text-slate-600',
+    BIDDING: 'bg-amber-100 text-amber-700',
+    ON_HOLD: 'bg-slate-100 text-slate-600',
   }
   const label: Record<string, string> = {
-    COMPLETED: 'Done', IN_PROGRESS: 'Active', BIDDING: 'Bidding', ON_HOLD: 'On hold'
+    COMPLETED: 'Done',
+    IN_PROGRESS: 'Active',
+    BIDDING: 'Bidding',
+    ON_HOLD: 'On hold',
   }
   return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${map[status] ?? 'bg-slate-100 text-slate-600'}`}>
+    <span
+      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${map[status] ?? 'bg-slate-100 text-slate-600'}`}
+    >
       {label[status] ?? status}
     </span>
   )
 }
 
-function QuickAction({ label, icon, onClick }: { label: string; icon: React.ReactNode; onClick: () => void }) {
+function QuickAction({
+  label,
+  icon,
+  onClick,
+}: {
+  label: string
+  icon: React.ReactNode
+  onClick: () => void
+}) {
   return (
     <button
       type="button"

@@ -1,11 +1,10 @@
 import React from 'react'
 import { FileSpreadsheet, TrendingUp, Scale, BookOpen, CheckSquare } from 'lucide-react'
 import { useBooksStore } from '../store'
-import type { ReportType } from '../../../shared/types'
 
 export function ReportsView() {
   const { data, activeReport, setActiveReport } = useBooksStore()
-  const { accounts, settings, journalEntries, invoices } = data
+  const { accounts, settings, journalEntries } = data
 
   const formatMoney = (val: number) => {
     return `${settings.currencySymbol} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -31,7 +30,7 @@ export function ReportsView() {
 
   // --- EXPORT TO SHEETS ---
   const handleExportToSheets = () => {
-    let reportTitle = 'Financial_Report'
+    let reportTitle: string
     let csv = ''
 
     if (activeReport === 'profit-loss') {
@@ -72,14 +71,16 @@ export function ReportsView() {
       csv = `Account Name,Root Type,Debit (${settings.currency}),Credit (${settings.currency})\n`
       let totalDr = 0
       let totalCr = 0
-      accounts.filter((a) => !a.isGroup).forEach((a) => {
-        const isDebit = a.rootType === 'Asset' || a.rootType === 'Expense'
-        const dr = isDebit ? a.balance : 0
-        const cr = !isDebit ? a.balance : 0
-        totalDr += dr
-        totalCr += cr
-        csv += `"${a.name}","${a.rootType}",${dr.toFixed(2)},${cr.toFixed(2)}\n`
-      })
+      accounts
+        .filter((a) => !a.isGroup)
+        .forEach((a) => {
+          const isDebit = a.rootType === 'Asset' || a.rootType === 'Expense'
+          const dr = isDebit ? a.balance : 0
+          const cr = !isDebit ? a.balance : 0
+          totalDr += dr
+          totalCr += cr
+          csv += `"${a.name}","${a.rootType}",${dr.toFixed(2)},${cr.toFixed(2)}\n`
+        })
       csv += `TOTAL,,${totalDr.toFixed(2)},${totalCr.toFixed(2)}\n`
     } else {
       reportTitle = 'General_Ledger'
@@ -180,7 +181,9 @@ export function ReportsView() {
 
           {/* Income Section */}
           <div className="mb-6">
-            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">Income</div>
+            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">
+              Income
+            </div>
             <div className="divide-y divide-[#EDEDED] border-t border-[#EDEDED]">
               {incomeAccounts.map((acc) => (
                 <div key={acc.id} className="py-2.5 flex justify-between text-xs">
@@ -197,7 +200,9 @@ export function ReportsView() {
 
           {/* Expense Section */}
           <div className="mb-8">
-            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">Expenses</div>
+            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">
+              Expenses
+            </div>
             <div className="divide-y divide-[#EDEDED] border-t border-[#EDEDED]">
               {expenseAccounts.map((acc) => (
                 <div key={acc.id} className="py-2.5 flex justify-between text-xs">
@@ -233,7 +238,9 @@ export function ReportsView() {
 
           {/* Assets */}
           <div className="mb-6">
-            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">Assets</div>
+            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">
+              Assets
+            </div>
             <div className="divide-y divide-[#EDEDED] border-t border-[#EDEDED]">
               {assetAccounts.map((acc) => (
                 <div key={acc.id} className="py-2 flex justify-between text-xs">
@@ -250,7 +257,9 @@ export function ReportsView() {
 
           {/* Liabilities */}
           <div className="mb-6">
-            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">Liabilities</div>
+            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">
+              Liabilities
+            </div>
             <div className="divide-y divide-[#EDEDED] border-t border-[#EDEDED]">
               {liabilityAccounts.map((acc) => (
                 <div key={acc.id} className="py-2 flex justify-between text-xs">
@@ -267,7 +276,9 @@ export function ReportsView() {
 
           {/* Equity */}
           <div className="mb-8">
-            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">Equity</div>
+            <div className="text-xs font-bold text-[#1E293B] uppercase tracking-wider mb-2">
+              Equity
+            </div>
             <div className="divide-y divide-[#EDEDED] border-t border-[#EDEDED]">
               {equityAccounts.map((acc) => (
                 <div key={acc.id} className="py-2 flex justify-between text-xs">
@@ -290,7 +301,8 @@ export function ReportsView() {
           <div className="p-4 rounded-xl bg-[#F8F8F8] border border-[#EDEDED] flex justify-between items-center text-xs font-bold text-[#1E293B]">
             <span>Total Liabilities & Equity Equation Check:</span>
             <span className="font-mono text-sm text-[#10B981]">
-              Assets ({formatMoney(totalAssets)}) = Liab + Eq ({formatMoney(totalLiabilities + totalEquity)}) ✓
+              Assets ({formatMoney(totalAssets)}) = Liab + Eq (
+              {formatMoney(totalLiabilities + totalEquity)}) ✓
             </span>
           </div>
         </div>

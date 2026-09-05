@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Plus, BookOpen, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useBooksStore } from '../store'
 import type { JournalEntryItem } from '../../../shared/types'
 
@@ -124,9 +124,13 @@ export function JournalEntryList() {
           <tbody className="divide-y divide-[#EDEDED]">
             {journalEntries.map((je) => (
               <tr key={je.id} className="hover:bg-[#FBFBFB]">
-                <td className="px-6 py-3.5 font-mono text-xs font-semibold text-[#1E293B]">{je.entryNumber}</td>
+                <td className="px-6 py-3.5 font-mono text-xs font-semibold text-[#1E293B]">
+                  {je.entryNumber}
+                </td>
                 <td className="px-6 py-3.5 text-xs text-[#7C7C7C]">{je.date}</td>
-                <td className="px-6 py-3.5 text-xs text-[#525252]">{je.remarks || 'Standard posting'}</td>
+                <td className="px-6 py-3.5 text-xs text-[#525252]">
+                  {je.remarks || 'Standard posting'}
+                </td>
                 <td className="px-6 py-3.5 text-right font-mono text-xs font-bold text-[#1E293B]">
                   {formatMoney(je.totalDebit)}
                 </td>
@@ -148,7 +152,9 @@ export function JournalEntryList() {
       {showModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-[#EDEDED]">
-            <h2 className="text-lg font-bold text-[#1E293B] mb-4">Record Double-Entry Journal Voucher</h2>
+            <h2 className="text-lg font-bold text-[#1E293B] mb-4">
+              Record Double-Entry Journal Voucher
+            </h2>
             <form onSubmit={handleSubmit} className="space-y-4 text-xs">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -161,7 +167,9 @@ export function JournalEntryList() {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-[#525252] mb-1">Remarks / Reference</label>
+                  <label className="block font-semibold text-[#525252] mb-1">
+                    Remarks / Reference
+                  </label>
                   <input
                     type="text"
                     placeholder="e.g. Bank charges or depreciation"
@@ -192,11 +200,13 @@ export function JournalEntryList() {
                             onChange={(e) => updateItem(it.id, 'accountId', e.target.value)}
                             className="w-full px-2 py-1.5 bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none"
                           >
-                            {accounts.filter((a) => !a.isGroup).map((a) => (
-                              <option key={a.id} value={a.id}>
-                                {a.name} ({a.rootType})
-                              </option>
-                            ))}
+                            {accounts
+                              .filter((a) => !a.isGroup)
+                              .map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} ({a.rootType})
+                                </option>
+                              ))}
                           </select>
                         </td>
                         <td className="p-2">
@@ -204,7 +214,9 @@ export function JournalEntryList() {
                             type="number"
                             step="0.01"
                             value={it.debit || ''}
-                            onChange={(e) => updateItem(it.id, 'debit', parseFloat(e.target.value) || 0)}
+                            onChange={(e) =>
+                              updateItem(it.id, 'debit', parseFloat(e.target.value) || 0)
+                            }
                             className="w-full px-2 py-1.5 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none"
                           />
                         </td>
@@ -213,7 +225,9 @@ export function JournalEntryList() {
                             type="number"
                             step="0.01"
                             value={it.credit || ''}
-                            onChange={(e) => updateItem(it.id, 'credit', parseFloat(e.target.value) || 0)}
+                            onChange={(e) =>
+                              updateItem(it.id, 'credit', parseFloat(e.target.value) || 0)
+                            }
                             className="w-full px-2 py-1.5 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none"
                           />
                         </td>
@@ -249,7 +263,9 @@ export function JournalEntryList() {
               {!isBalanced && totalDebit > 0 && (
                 <div className="flex items-center gap-2 p-2.5 bg-[#FFF7F7] text-[#E03636] rounded-lg text-xs">
                   <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <span>Journal entry is out of balance. Total Debits must equal Total Credits.</span>
+                  <span>
+                    Journal entry is out of balance. Total Debits must equal Total Credits.
+                  </span>
                 </div>
               )}
 
@@ -265,7 +281,9 @@ export function JournalEntryList() {
                   type="submit"
                   disabled={!isBalanced}
                   className={`px-4 py-2 rounded-lg font-semibold text-white ${
-                    isBalanced ? 'bg-[#1E293B] hover:bg-[#0F172A]' : 'bg-[#C7C7C7] cursor-not-allowed'
+                    isBalanced
+                      ? 'bg-[#1E293B] hover:bg-[#0F172A]'
+                      : 'bg-[#C7C7C7] cursor-not-allowed'
                   }`}
                 >
                   Post Voucher

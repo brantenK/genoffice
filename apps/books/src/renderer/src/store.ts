@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type {
-  BankTransaction,
   BooksData,
   BooksNavigationTab,
   Invoice,
@@ -128,8 +127,12 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const parties = Array.isArray(incomingData.parties)
       ? recomputePartyBalances(invoices, incomingData.parties)
       : []
-    const journalEntries = Array.isArray(incomingData.journalEntries) ? incomingData.journalEntries : []
-    const bankTransactions = Array.isArray(incomingData.bankTransactions) ? incomingData.bankTransactions : []
+    const journalEntries = Array.isArray(incomingData.journalEntries)
+      ? incomingData.journalEntries
+      : []
+    const bankTransactions = Array.isArray(incomingData.bankTransactions)
+      ? incomingData.bankTransactions
+      : []
     const settings = incomingData.settings || get().data.settings
 
     const nextData: BooksData = {
@@ -219,7 +222,8 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         })(),
       type,
       partyId: partial.partyId || oldInvoice?.partyId || '',
-      partyName: partial.partyName || oldInvoice?.partyName || (type === 'Sales' ? 'Customer' : 'Supplier'),
+      partyName:
+        partial.partyName || oldInvoice?.partyName || (type === 'Sales' ? 'Customer' : 'Supplier'),
       date: partial.date || oldInvoice?.date || now.split('T')[0],
       dueDate:
         partial.dueDate ||
@@ -231,8 +235,14 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       grandTotal: totals.grandTotal,
       outstandingAmount,
       status,
-      notes: partial.notes !== undefined ? partial.notes : (oldInvoice?.notes || 'Payment due within 30 days.'),
-      tenderReference: partial.tenderReference !== undefined ? partial.tenderReference : oldInvoice?.tenderReference,
+      notes:
+        partial.notes !== undefined
+          ? partial.notes
+          : oldInvoice?.notes || 'Payment due within 30 days.',
+      tenderReference:
+        partial.tenderReference !== undefined
+          ? partial.tenderReference
+          : oldInvoice?.tenderReference,
       crmDealId: partial.crmDealId !== undefined ? partial.crmDealId : oldInvoice?.crmDealId,
       createdAt: oldInvoice ? oldInvoice.createdAt : now,
       updatedAt: now,
@@ -243,11 +253,11 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       (!oldInvoice && targetInvoice.status !== 'Draft') ||
       (oldInvoice && oldInvoice.status === 'Draft' && targetInvoice.status !== 'Draft')
 
-    let nextAccounts = data.accounts.map((a) => ({ ...a }))
-    let nextJournals = [...data.journalEntries]
+    const nextAccounts = data.accounts.map((a) => ({ ...a }))
+    const nextJournals = [...data.journalEntries]
 
     // Resolve or auto-create party
-    let partiesPool = [...data.parties]
+    const partiesPool = [...data.parties]
     let resolvedParty =
       partiesPool.find((p) => p.id === targetInvoice.partyId) ||
       partiesPool.find((p) => p.name.toLowerCase() === targetInvoice.partyName.toLowerCase())
@@ -291,7 +301,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
           const diff = round2(targetInvoice.subtotal - sumAmt)
           if (diff !== 0 && entries.length > 0) {
-            incomeGroups.set(entries[entries.length - 1][0], round2(incomeGroups.get(entries[entries.length - 1][0])! + diff))
+            incomeGroups.set(
+              entries[entries.length - 1][0],
+              round2(incomeGroups.get(entries[entries.length - 1][0])! + diff),
+            )
           }
         }
         for (const [accId, amt] of incomeGroups.entries()) {
@@ -332,7 +345,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
           const diff = round2(targetInvoice.subtotal - sumAmt)
           if (diff !== 0 && entries.length > 0) {
-            expenseGroups.set(entries[entries.length - 1][0], round2(expenseGroups.get(entries[entries.length - 1][0])! + diff))
+            expenseGroups.set(
+              entries[entries.length - 1][0],
+              round2(expenseGroups.get(entries[entries.length - 1][0])! + diff),
+            )
           }
         }
         for (const [accId, amt] of expenseGroups.entries()) {
@@ -344,7 +360,9 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
         // Increment VAT Input
         if (targetInvoice.taxTotal > 0) {
-          const vatInAcc = nextAccounts.find((a) => a.id === 'acc-vat-in') || nextAccounts.find((a) => a.id === 'acc-vat')
+          const vatInAcc =
+            nextAccounts.find((a) => a.id === 'acc-vat-in') ||
+            nextAccounts.find((a) => a.id === 'acc-vat')
           if (vatInAcc) {
             vatInAcc.balance = round2(vatInAcc.balance + targetInvoice.taxTotal)
           }
@@ -357,7 +375,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           targetInvoice,
           nextAccounts,
           targetInvoice.grandTotal,
-          resolvedParty
+          resolvedParty,
         )
         nextJournals.unshift(settlementJournal)
 
@@ -402,13 +420,15 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     if (!inv) return
     if (inv.status === 'Paid') return
 
-    const settlementAmount = round2(inv.outstandingAmount > 0 ? inv.outstandingAmount : inv.grandTotal)
+    const settlementAmount = round2(
+      inv.outstandingAmount > 0 ? inv.outstandingAmount : inv.grandTotal,
+    )
     const party =
       data.parties.find((p) => p.id === inv.partyId) ||
       data.parties.find((p) => p.name.toLowerCase() === inv.partyName.toLowerCase())
 
-    let nextAccounts = data.accounts.map((a) => ({ ...a }))
-    let nextJournals = [...data.journalEntries]
+    const nextAccounts = data.accounts.map((a) => ({ ...a }))
+    const nextJournals = [...data.journalEntries]
 
     if (settlementAmount > 0) {
       // Generate settlement journal (F8)
@@ -437,7 +457,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
             outstandingAmount: 0,
             updatedAt: new Date().toISOString(),
           }
-        : i
+        : i,
     )
 
     // Recompute party balances (F9)
@@ -461,7 +481,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const target = data.invoices.find((i) => i.id === invoiceId)
     if (!target) return
 
-    let nextAccounts = data.accounts.map((a) => ({ ...a }))
+    const nextAccounts = data.accounts.map((a) => ({ ...a }))
     let nextJournals = [...data.journalEntries]
 
     if (target.status !== 'Draft') {
@@ -469,7 +489,9 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         const arReduction =
           target.status === 'Paid'
             ? 0
-            : (target.outstandingAmount > 0 ? target.outstandingAmount : target.grandTotal)
+            : target.outstandingAmount > 0
+              ? target.outstandingAmount
+              : target.grandTotal
         const bankReduction = round2(target.grandTotal - arReduction)
 
         if (arReduction > 0) {
@@ -493,7 +515,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
           const diff = round2(target.subtotal - sumAmt)
           if (diff !== 0 && entries.length > 0) {
-            incomeGroups.set(entries[entries.length - 1][0], round2(incomeGroups.get(entries[entries.length - 1][0])! + diff))
+            incomeGroups.set(
+              entries[entries.length - 1][0],
+              round2(incomeGroups.get(entries[entries.length - 1][0])! + diff),
+            )
           }
         }
         for (const [accId, amt] of incomeGroups.entries()) {
@@ -509,7 +534,9 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         const apReduction =
           target.status === 'Paid'
             ? 0
-            : (target.outstandingAmount > 0 ? target.outstandingAmount : target.grandTotal)
+            : target.outstandingAmount > 0
+              ? target.outstandingAmount
+              : target.grandTotal
         const bankAddition = round2(target.grandTotal - apReduction)
 
         if (apReduction > 0) {
@@ -533,7 +560,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
           const diff = round2(target.subtotal - sumAmt)
           if (diff !== 0 && entries.length > 0) {
-            expenseGroups.set(entries[entries.length - 1][0], round2(expenseGroups.get(entries[entries.length - 1][0])! + diff))
+            expenseGroups.set(
+              entries[entries.length - 1][0],
+              round2(expenseGroups.get(entries[entries.length - 1][0])! + diff),
+            )
           }
         }
         for (const [accId, amt] of expenseGroups.entries()) {
@@ -542,14 +572,18 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         }
 
         if (target.taxTotal !== 0) {
-          const vatInAcc = nextAccounts.find((a) => a.id === 'acc-vat-in') || nextAccounts.find((a) => a.id === 'acc-vat')
+          const vatInAcc =
+            nextAccounts.find((a) => a.id === 'acc-vat-in') ||
+            nextAccounts.find((a) => a.id === 'acc-vat')
           if (vatInAcc) vatInAcc.balance = Math.max(0, round2(vatInAcc.balance - target.taxTotal))
         }
       }
 
       nextJournals = nextJournals.filter((je) => {
         const matchesRemarks = je.remarks && je.remarks.includes(target.invoiceNumber)
-        const matchesItem = je.items.some((it) => it.remark && it.remark.includes(target.invoiceNumber))
+        const matchesItem = je.items.some(
+          (it) => it.remark && it.remark.includes(target.invoiceNumber),
+        )
         return !matchesRemarks && !matchesItem
       })
     }
@@ -639,7 +673,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     }
 
     const existing = data.bankTransactions || []
-    const { toAdd, skippedDuplicates, netAdjustment } = deduplicateBankTransactions(parsed, existing)
+    const { toAdd, skippedDuplicates, netAdjustment } = deduplicateBankTransactions(
+      parsed,
+      existing,
+    )
 
     const nextAccounts = data.accounts.map((a) => {
       if (a.id === 'acc-bank') {
@@ -682,11 +719,15 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const { data, persist } = get()
     const tx = (data.bankTransactions || []).find((t) => t.id === transactionId)
     if (!tx) return { ok: false, error: `Transaction not found: ${transactionId}` }
-    if (tx.reconciled) return { ok: false, error: `Transaction already reconciled: ${transactionId}` }
+    if (tx.reconciled)
+      return { ok: false, error: `Transaction already reconciled: ${transactionId}` }
 
     const inv = (data.invoices || []).find((i) => i.id === invoiceId)
     if (!inv) return { ok: false, error: `Invoice not found: ${invoiceId}` }
-    if (inv.status === 'Paid' || (inv.outstandingAmount !== undefined && inv.outstandingAmount <= 0)) {
+    if (
+      inv.status === 'Paid' ||
+      (inv.outstandingAmount !== undefined && inv.outstandingAmount <= 0)
+    ) {
       return { ok: false, error: `Invoice already marked Paid: ${invoiceId}` }
     }
     if (inv.status === 'Draft') {
@@ -698,10 +739,16 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
     // Direction validation
     if (inv.type === 'Sales' && tx.amount <= 0) {
-      return { ok: false, error: 'Cannot reconcile a debit/withdrawal transaction against a Sales invoice' }
+      return {
+        ok: false,
+        error: 'Cannot reconcile a debit/withdrawal transaction against a Sales invoice',
+      }
     }
     if (inv.type === 'Purchase' && tx.amount >= 0) {
-      return { ok: false, error: 'Cannot reconcile a credit/deposit transaction against a Purchase bill' }
+      return {
+        ok: false,
+        error: 'Cannot reconcile a credit/deposit transaction against a Purchase bill',
+      }
     }
 
     // Settlement math
@@ -709,7 +756,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const currentOutstanding = round2(
       inv.outstandingAmount !== undefined && inv.outstandingAmount > 0
         ? inv.outstandingAmount
-        : inv.grandTotal
+        : inv.grandTotal,
     )
     const settledAmount = round2(Math.min(txAmt, currentOutstanding))
     const remainingOutstanding = round2(currentOutstanding - settledAmount)
@@ -717,8 +764,13 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
     const nextBankTransactions = (data.bankTransactions || []).map((t) =>
       t.id === transactionId
-        ? { ...t, reconciled: true, matchedInvoiceId: inv.id, reconciledAt: new Date().toISOString() }
-        : t
+        ? {
+            ...t,
+            reconciled: true,
+            matchedInvoiceId: inv.id,
+            reconciledAt: new Date().toISOString(),
+          }
+        : t,
     )
 
     const nextInvoices = data.invoices.map((i) =>
@@ -729,7 +781,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
             outstandingAmount: remainingOutstanding,
             updatedAt: new Date().toISOString(),
           }
-        : i
+        : i,
     )
 
     const party = data.parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
@@ -754,7 +806,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       updatedParty || party,
       jeNumber,
       'acc-bank',
-      `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`
+      `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
     )
 
     set({
@@ -781,4 +833,3 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     }
   },
 }))
-

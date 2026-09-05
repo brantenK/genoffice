@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CRM_CHANNELS, type CrmApi } from '../shared/ipc'
-import type { Activity, Company, Contact, Deal, DealStage } from '../shared/types'
+import type { Company, Contact, Deal, DealStage } from '../shared/types'
 
 const crmApi: CrmApi = {
   getStats: () => ipcRenderer.invoke(CRM_CHANNELS.getStats),
@@ -13,13 +13,11 @@ const crmApi: CrmApi = {
   deleteDeal: (id: string) => ipcRenderer.invoke(CRM_CHANNELS.deleteDeal, id),
 
   listContacts: () => ipcRenderer.invoke(CRM_CHANNELS.listContacts),
-  saveContact: (contact: Partial<Contact>) =>
-    ipcRenderer.invoke(CRM_CHANNELS.saveContact, contact),
+  saveContact: (contact: Partial<Contact>) => ipcRenderer.invoke(CRM_CHANNELS.saveContact, contact),
   deleteContact: (id: string) => ipcRenderer.invoke(CRM_CHANNELS.deleteContact, id),
 
   listCompanies: () => ipcRenderer.invoke(CRM_CHANNELS.listCompanies),
-  saveCompany: (company: Partial<Company>) =>
-    ipcRenderer.invoke(CRM_CHANNELS.saveCompany, company),
+  saveCompany: (company: Partial<Company>) => ipcRenderer.invoke(CRM_CHANNELS.saveCompany, company),
   deleteCompany: (id: string) => ipcRenderer.invoke(CRM_CHANNELS.deleteCompany, id),
 
   listActivities: (filter) => ipcRenderer.invoke(CRM_CHANNELS.listActivities, filter),

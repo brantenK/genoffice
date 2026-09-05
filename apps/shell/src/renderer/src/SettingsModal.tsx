@@ -10,7 +10,7 @@ import {
 import type { AiSettings } from '@genoffice/ai-provider'
 import { useI18n } from './locale'
 import type { StringKey, TFunc } from './locale'
-import type { AccountStatus, AiCatalogEntry, UiTheme } from '../../shared/home-api'
+import type { AiCatalogEntry, UiTheme } from '../../shared/home-api'
 import { ProviderLogo } from './provider-logos'
 import './settings.css'
 
@@ -514,8 +514,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       if (dir) setSaveDir(dir)
     })
   }
-
-
 
   return (
     <div

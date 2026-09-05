@@ -1,16 +1,8 @@
 // Deterministic heuristic "tender shredder": scans extracted lines against the
 // shared rule catalogue and produces the compliance matrix requirements with
 // exact source clauses + bounding boxes. Also lifts tender metadata from page 1.
-import {
-  DISQUALIFIER_LANGUAGE,
-  MANDATORY_LANGUAGE,
-  TENDER_RULES
-} from '../../shared/rules'
-import type {
-  ExtractedRequirement,
-  PageExtraction,
-  SubmissionMethod
-} from '../../shared/types'
+import { DISQUALIFIER_LANGUAGE, MANDATORY_LANGUAGE, TENDER_RULES } from '../../shared/rules'
+import type { ExtractedRequirement, PageExtraction, SubmissionMethod } from '../../shared/types'
 import { buildClauses, type Clause } from './clauses'
 
 export interface TenderMeta {
@@ -55,7 +47,12 @@ function clauseScore(text: string): number {
 
 /** near-duplicate clauses (same rule restated on cover + body) are merged */
 function similarText(a: string, b: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
   const wa = norm(a).split(' ')
   const wb = norm(b).split(' ')
   if (wa.length === 0 || wb.length === 0) return false
@@ -113,14 +110,13 @@ export function shredExtraction(ex: PageExtraction): ExtractedRequirement[] {
     for (const h of list) for (const p of h.pages) allPages.add(p)
     const corroboration = Math.min((list.length - 1) * 0.1, 0.2)
     const confidence = Math.min(
-      0.55 +
-        Math.min(best.score / 6, 0.25) +
-        corroboration +
-        (allPages.size > 1 ? 0.1 : 0),
-      1
+      0.55 + Math.min(best.score / 6, 0.25) + corroboration + (allPages.size > 1 ? 0.1 : 0),
+      1,
     )
 
-    const extraPages = [...allPages].filter((p) => p !== best.clause.pageNumber).sort((a, b) => a - b)
+    const extraPages = [...allPages]
+      .filter((p) => p !== best.clause.pageNumber)
+      .sort((a, b) => a - b)
     const notes: string[] = []
     if (rule.notes) notes.push(rule.notes)
     if (extraPages.length > 0) notes.push(`Also referenced on p. ${extraPages.join(', p. ')}`)
@@ -141,7 +137,7 @@ export function shredExtraction(ex: PageExtraction): ExtractedRequirement[] {
       order: rule.order,
       additionalClauses: additional.length > 0 ? additional : undefined,
       confidence: Math.round(confidence * 100) / 100,
-      notes: notes.length > 0 ? notes.join(' · ') : undefined
+      notes: notes.length > 0 ? notes.join(' · ') : undefined,
     })
   }
 
@@ -151,12 +147,14 @@ export function shredExtraction(ex: PageExtraction): ExtractedRequirement[] {
 const TITLE_HEADING =
   /(request for (proposals?|tender|quotation)s?|invitation to (bid|tender)|tender document|\brfp\b|reit)/i
 const REF_RE =
-  /(?:reference\s*(?:number|no\.?)?|ref(?:erence)?\s*(?:no\.?|number)?|tender\s*no\.?|bid\s*number)\s*[:\-]\s*([A-Za-z0-9][\w/.-]{2,})/i
-const CLOSING_RE = /closing\s*date\s*[:\-]?\s*(.+)/i
-const ISSUING_HINT = /(department|ministry|municipal|authority|agency|council|commission|university|eskom|transnet)/i
+  /(?:reference\s*(?:number|no\.?)?|ref(?:erence)?\s*(?:no\.?|number)?|tender\s*no\.?|bid\s*number)\s*[:-]\s*([A-Za-z0-9][\w/.-]{2,})/i
+const CLOSING_RE = /closing\s*date\s*[:-]?\s*(.+)/i
+const ISSUING_HINT =
+  /(department|ministry|municipal|authority|agency|council|commission|university|eskom|transnet)/i
 
 // ── submission logistics heuristics ─────────────────────────────────────────
-const SUBMIT_HINT = /(deposit\w*|deliver\w*|submit\w*|hand\w*\s*in|lodg\w*|sent|transmitt\w*|upload\w*)/i
+const SUBMIT_HINT =
+  /(deposit\w*|deliver\w*|submit\w*|hand\w*\s*in|lodg\w*|sent|transmitt\w*|upload\w*)/i
 const BID_BOX_RE = /bid\s*box|tender\s*box|bid\s*receptacle|foyer|reception|registry|counter/i
 const PORTAL_RE = /portal|e-?tender\w*|online|electronically|website|e-submission|system/i
 const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/
@@ -164,8 +162,8 @@ const ADDRESS_TAIL_RE =
   /(?:bid\s*box|foyer|building|street|road|avenue|boulevard|drive|office|pretoria|johannesburg|cape town|durban|polokwane|bloemfontein|nelspruit|kimberley|mafikeng|rustenburg|pietermaritzburg)/i
 
 // ── letterhead / issuer heuristics ───────────────────────────────────────────
-const CONTACT_PERSON_RE = /contact\s*person\s*[:\-]?\s*(.+)/i
-const PHONE_RE = /(?:tel(?:ephone)?|phone)\s*[:\-]?\s*(\(?\d[\d ()-]{5,}\d)/i
+const CONTACT_PERSON_RE = /contact\s*person\s*[:-]?\s*(.+)/i
+const PHONE_RE = /(?:tel(?:ephone)?|phone)\s*[:-]?\s*(\(?\d[\d ()-]{5,}\d)/i
 const ADDRESS_HINT_RE =
   /(?:\b\d{1,4}\s+(?:[A-Z][a-z]+\s)+(?:street|road|avenue|boulevard|drive)\b|building|private bag\s*\w*|p\.?o\.?\s*box)/i
 
@@ -224,10 +222,13 @@ function methodOfLine(text: string): SubmissionMethod {
 }
 
 /** Analyze the cover letterhead: who is the issuer, where, how to reach them. */
-export function extractIssuerInfo(ex: PageExtraction, meta: {
-  referenceNumber: string | null
-  issuingBody: string | null
-}): IssuerInfo | null {
+export function extractIssuerInfo(
+  ex: PageExtraction,
+  meta: {
+    referenceNumber: string | null
+    issuingBody: string | null
+  },
+): IssuerInfo | null {
   const first = ex.pages[0]
   if (!first) return null
   const lines = first.lines.map((l) => l.text)
@@ -270,7 +271,7 @@ export function extractIssuerInfo(ex: PageExtraction, meta: {
     displayName,
     address,
     contact,
-    refStyle
+    refStyle,
   }
 }
 
@@ -304,7 +305,8 @@ export function extractTenderMeta(ex: PageExtraction, fallbackTitle: string): Te
     for (let i = 0; i < headingIdx; i++) {
       if (isMostlyUpper(lines[i])) upperLines.push(lines[i])
     }
-    issuingBody = upperLines.find((l) => ISSUING_HINT.test(l)) ?? upperLines[upperLines.length - 1] ?? null
+    issuingBody =
+      upperLines.find((l) => ISSUING_HINT.test(l)) ?? upperLines[upperLines.length - 1] ?? null
   }
 
   for (const l of lines) {
@@ -326,6 +328,6 @@ export function extractTenderMeta(ex: PageExtraction, fallbackTitle: string): Te
     issuingBody,
     closingDate,
     submissionMethod: logistics.submissionMethod,
-    submissionAddress: logistics.submissionAddress
+    submissionAddress: logistics.submissionAddress,
   }
 }

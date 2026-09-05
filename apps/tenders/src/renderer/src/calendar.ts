@@ -25,14 +25,14 @@ export const RUNWAY_KIND_LABEL: Record<RunwayKind, string> = {
   VAULT_EXPIRY: 'Document expires',
   STALE_STAMP: 'Police stamp window ends',
   TENDER_CLOSING: 'Tender closes',
-  TENDER_SUBMIT_BY: 'Submit tender by'
+  TENDER_SUBMIT_BY: 'Submit tender by',
 }
 
 /** Build the chronological renewal timeline (earliest first). */
 export function buildRunway(
   vault: VaultDoc[],
   tenders: TenderRecord[],
-  now: Date = new Date()
+  now: Date = new Date(),
 ): RunwayItem[] {
   const items: RunwayItem[] = []
 
@@ -50,7 +50,7 @@ export function buildRunway(
         note:
           days < 0
             ? `Expired ${Math.abs(days)} day(s) ago — renew immediately`
-            : `Expires in ${days} day(s)`
+            : `Expires in ${days} day(s)`,
       })
     }
 
@@ -67,7 +67,7 @@ export function buildRunway(
         note:
           days < 0
             ? `Stamp ${Math.abs(days)} day(s) past the 90-day window — re-certify`
-            : `Re-certify within ${days} day(s)`
+            : `Re-certify within ${days} day(s)`,
       })
     }
   }
@@ -83,7 +83,7 @@ export function buildRunway(
         date: closing.toISOString(),
         daysAway: days,
         kind: 'TENDER_CLOSING',
-        note: t.referenceNumber ? `Ref ${t.referenceNumber}` : 'Closing date'
+        note: t.referenceNumber ? `Ref ${t.referenceNumber}` : 'Closing date',
       })
       const submitBy = new Date(closing.getTime() - 24 * 3_600_000)
       items.push({
@@ -92,7 +92,7 @@ export function buildRunway(
         date: submitBy.toISOString(),
         daysAway: daysBetween(submitBy, now),
         kind: 'TENDER_SUBMIT_BY',
-        note: 'Target: submit 24h before closing'
+        note: 'Target: submit 24h before closing',
       })
     }
   }
@@ -103,11 +103,7 @@ export function buildRunway(
 // ── .ics generation ──────────────────────────────────────────────────────────
 
 function icsEscape(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n')
+  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n')
 }
 
 function icsStamp(d: Date): string {
@@ -146,15 +142,17 @@ function vevent(uid: string, start: Date, title: string, description: string): s
     'ACTION:DISPLAY',
     fold(`DESCRIPTION:${icsEscape(title)}`),
     'END:VALARM',
-    'END:VEVENT'
+    'END:VEVENT',
   ]
 }
 
 /** Render a full iCalendar file body for the given runway items. */
-export function buildIcs(items: RunwayItem[], onlyUpcoming = true, now: Date = new Date()): string {
-  const selected = onlyUpcoming
-    ? items.filter((i) => i.daysAway >= -1)
-    : items
+export function buildIcs(
+  items: RunwayItem[],
+  onlyUpcoming = true,
+  _now: Date = new Date(),
+): string {
+  const selected = onlyUpcoming ? items.filter((i) => i.daysAway >= -1) : items
 
   const lines: string[] = [
     'BEGIN:VCALENDAR',
@@ -162,7 +160,7 @@ export function buildIcs(items: RunwayItem[], onlyUpcoming = true, now: Date = n
     'PRODID:-//Zanostack Tenders//Expiry Runway//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    `X-WR-CALNAME:${icsEscape('Zanostack Tenders — renewal runway')}`
+    `X-WR-CALNAME:${icsEscape('Zanostack Tenders — renewal runway')}`,
   ]
 
   for (const item of selected) {
@@ -172,8 +170,8 @@ export function buildIcs(items: RunwayItem[], onlyUpcoming = true, now: Date = n
         item.id,
         start,
         `${RUNWAY_KIND_LABEL[item.kind]} — ${item.title}`,
-        `${item.note}. Added by Zanostack Tenders.`
-      )
+        `${item.note}. Added by Zanostack Tenders.`,
+      ),
     )
   }
 

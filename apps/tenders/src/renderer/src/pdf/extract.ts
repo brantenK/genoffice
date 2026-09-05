@@ -6,12 +6,12 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import type { BoundingBox, ExtractedPage, PageExtraction, PageLine } from '../../shared/types'
 
-let workerConfigured = false
+let _workerConfigured = false
 
 /** Must be called once from the browser entry with the bundled worker URL. */
 export function configurePdfWorker(src: string): void {
   pdfjs.GlobalWorkerOptions.workerSrc = src
-  workerConfigured = true
+  _workerConfigured = true
 }
 
 export async function loadPdfDocument(data: ArrayBuffer): Promise<PDFDocumentProxy> {
@@ -45,7 +45,7 @@ export async function extractSinglePage(page: PDFPageProxy): Promise<ExtractedPa
   for (const raw of content.items) {
     const it = raw as { str?: string; transform?: number[]; width?: number; height?: number }
     if (!it.str || !it.str.trim() || !it.transform) continue
-    const [/*a*/, /*b*/, /*c*/, /*d*/, e, f] = it.transform
+    const [, , , , /*a*/ /*b*/ /*c*/ /*d*/ e, f] = it.transform
     const w = it.width ?? 0
     const h = it.height ?? 0
     if (w <= 0 || h <= 0) continue
@@ -68,11 +68,11 @@ export async function extractSinglePage(page: PDFPageProxy): Promise<ExtractedPa
         top: top / viewport.height,
         left: left / viewport.width,
         width: (right - left) / viewport.width,
-        height: (bottom - top) / viewport.height
+        height: (bottom - top) / viewport.height,
       },
       top,
       left,
-      height: bottom - top
+      height: bottom - top,
     })
   }
 
@@ -120,14 +120,14 @@ export async function extractSinglePage(page: PDFPageProxy): Promise<ExtractedPa
     height: viewport.height,
     text,
     lines,
-    needsOcr: text.replace(/\s+/g, '').length < 20
+    needsOcr: text.replace(/\s+/g, '').length < 20,
   }
 }
 
 /** Extract all pages, reporting progress (1-based page number). */
 export async function extractAllPages(
   doc: PDFDocumentProxy,
-  onProgress?: (page: number, total: number) => void
+  onProgress?: (page: number, total: number) => void,
 ): Promise<PageExtraction> {
   const pages: ExtractedPage[] = []
   let textPages = 0

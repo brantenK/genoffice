@@ -1,14 +1,6 @@
 // Customers: table of clients + per-customer doc requirements panel.
 import { useState } from 'react'
-import {
-  ArrowLeft,
-  Building2,
-  CheckCircle2,
-  Mail,
-  Phone,
-  User,
-  XCircle
-} from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Mail, Phone, User, XCircle } from 'lucide-react'
 import type { Customer, CustomerStatus, DocCategory } from '../../../shared/types'
 import { useTendersStore } from '../../store'
 import { Badge } from '../ui'
@@ -16,7 +8,7 @@ import { Badge } from '../ui'
 const STATUS_TONE: Record<CustomerStatus, 'green' | 'sky' | 'slate'> = {
   ACTIVE: 'green',
   PROSPECT: 'sky',
-  INACTIVE: 'slate'
+  INACTIVE: 'slate',
 }
 
 const DOC_CAT_COLOR: Record<DocCategory, string> = {
@@ -24,7 +16,7 @@ const DOC_CAT_COLOR: Record<DocCategory, string> = {
   FINANCIAL: 'text-emerald-600',
   TECHNICAL: 'text-sky-600',
   GOVERNANCE: 'text-violet-600',
-  CV: 'text-amber-600'
+  CV: 'text-amber-600',
 }
 
 export function CustomersPage() {
@@ -63,8 +55,8 @@ export function CustomersPage() {
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >
-              {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
-              {' '}({s === 'ALL' ? customers.length : customers.filter((c) => c.status === s).length})
+              {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()} (
+              {s === 'ALL' ? customers.length : customers.filter((c) => c.status === s).length})
             </button>
           ))}
         </div>
@@ -98,7 +90,9 @@ export function CustomersPage() {
                 {/* progress bar */}
                 <div className="mt-4">
                   <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>{fulfilled}/{total} docs ready</span>
+                    <span>
+                      {fulfilled}/{total} docs ready
+                    </span>
                     <span>{pct}%</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
@@ -153,7 +147,9 @@ function CustomerDetail({ customer, onBack }: { customer: Customer; onBack: () =
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-900">{customer.name}</h1>
-            <p className="mt-0.5 text-sm text-slate-500">{customer.industry} · Client since {customer.since}</p>
+            <p className="mt-0.5 text-sm text-slate-500">
+              {customer.industry} · Client since {customer.since}
+            </p>
           </div>
           <Badge tone={STATUS_TONE[customer.status]}>
             {customer.status.charAt(0) + customer.status.slice(1).toLowerCase()}
@@ -173,7 +169,10 @@ function CustomerDetail({ customer, onBack }: { customer: Customer; onBack: () =
               </div>
               <div className="flex items-center gap-2">
                 <Mail size={14} className="shrink-0 text-slate-400" />
-                <a href={`mailto:${customer.contactEmail}`} className="text-indigo-600 hover:underline">
+                <a
+                  href={`mailto:${customer.contactEmail}`}
+                  className="text-indigo-600 hover:underline"
+                >
                   {customer.contactEmail}
                 </a>
               </div>
@@ -197,7 +196,8 @@ function CustomerDetail({ customer, onBack }: { customer: Customer; onBack: () =
           <h2 className="mb-4 text-sm font-semibold text-slate-800">
             Required documents
             <span className="ml-2 text-[11px] font-normal text-slate-400">
-              {customer.requiredDocs.filter((d) => d.fulfilled).length}/{customer.requiredDocs.length} ready
+              {customer.requiredDocs.filter((d) => d.fulfilled).length}/
+              {customer.requiredDocs.length} ready
             </span>
           </h2>
           <ul className="divide-y divide-slate-100">
@@ -224,7 +224,9 @@ function CustomerDetail({ customer, onBack }: { customer: Customer; onBack: () =
                       <p className="mt-0.5 text-[11px] text-slate-400">No vault document linked</p>
                     )}
                   </div>
-                  <span className={`shrink-0 text-[11px] font-medium ${DOC_CAT_COLOR[req.docCategory]}`}>
+                  <span
+                    className={`shrink-0 text-[11px] font-medium ${DOC_CAT_COLOR[req.docCategory]}`}
+                  >
                     {req.docCategory.charAt(0) + req.docCategory.slice(1).toLowerCase()}
                   </span>
                 </li>

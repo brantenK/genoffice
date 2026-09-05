@@ -3,7 +3,6 @@ import type {
   BankTransaction,
   Invoice,
   InvoiceItem,
-  InvoiceType,
   JournalEntry,
   JournalEntryItem,
   Party,
@@ -35,12 +34,7 @@ export function calculateInvoiceTotals(items: InvoiceItem[]): {
 
   for (const it of items) {
     let lineAmt = 0
-    if (
-      it.qty != null &&
-      it.rate != null &&
-      !isNaN(Number(it.qty)) &&
-      !isNaN(Number(it.rate))
-    ) {
+    if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
       lineAmt = round2(Number(it.qty) * Number(it.rate))
     } else if (it.amount != null && !isNaN(Number(it.amount))) {
       lineAmt = round2(Number(it.amount))
@@ -68,24 +62,21 @@ export function createSalesInvoiceJournal(
   invoice: Invoice,
   accounts: Account[],
   party?: Party,
-  jeNumber?: string
+  jeNumber?: string,
 ): JournalEntry {
-  const grandTotal = round2(invoice.grandTotal || (invoice.subtotal + invoice.taxTotal))
+  const grandTotal = round2(invoice.grandTotal || invoice.subtotal + invoice.taxTotal)
   const taxTotal = round2(invoice.taxTotal)
   const subtotal = round2(grandTotal - taxTotal)
 
   const dateStr = invoice.date || new Date().toISOString().split('T')[0]
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const randomSuffix = Math.random().toString(36).slice(2, 7)
-  const entryNum =
-    jeNumber ||
-    `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
+  const entryNum = jeNumber || `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
 
-  const arAcc =
-    accounts.find((a) => a.id === 'acc-ar' || a.accountType === 'Receivable') || {
-      id: 'acc-ar',
-      name: 'Accounts Receivable (Debtors)',
-    }
+  const arAcc = accounts.find((a) => a.id === 'acc-ar' || a.accountType === 'Receivable') || {
+    id: 'acc-ar',
+    name: 'Accounts Receivable (Debtors)',
+  }
 
   const isArCredit = grandTotal < 0
   const absGrandTotal = round2(Math.abs(grandTotal))
@@ -109,12 +100,7 @@ export function createSalesInvoiceJournal(
   if (Array.isArray(invoice.items) && invoice.items.length > 0) {
     for (const it of invoice.items) {
       let lineAmt = 0
-      if (
-        it.qty != null &&
-        it.rate != null &&
-        !isNaN(Number(it.qty)) &&
-        !isNaN(Number(it.rate))
-      ) {
+      if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
         lineAmt = round2(Number(it.qty) * Number(it.rate))
       } else if (it.amount != null && !isNaN(Number(it.amount))) {
         lineAmt = round2(Number(it.amount))
@@ -123,18 +109,23 @@ export function createSalesInvoiceJournal(
       const matched = accounts.find((a) => a.id === accId)
       const accName = it.accountName || matched?.name || 'Tender & Commercial Contracting Sales'
 
-      const existing = incomeGroups.get(accId) || { accountId: accId, accountName: accName, amount: 0 }
+      const existing = incomeGroups.get(accId) || {
+        accountId: accId,
+        accountName: accName,
+        amount: 0,
+      }
       existing.amount = round2(existing.amount + lineAmt)
       incomeGroups.set(accId, existing)
     }
   }
 
   if (incomeGroups.size === 0) {
-    const salesAcc =
-      accounts.find((a) => a.id === 'acc-sales' || a.accountType === 'Direct Income') || {
-        id: 'acc-sales',
-        name: 'Tender & Commercial Contracting Sales',
-      }
+    const salesAcc = accounts.find(
+      (a) => a.id === 'acc-sales' || a.accountType === 'Direct Income',
+    ) || {
+      id: 'acc-sales',
+      name: 'Tender & Commercial Contracting Sales',
+    }
     incomeGroups.set(salesAcc.id, {
       accountId: salesAcc.id,
       accountName: salesAcc.name,
@@ -169,11 +160,10 @@ export function createSalesInvoiceJournal(
   }
 
   if (taxTotal !== 0) {
-    const vatAcc =
-      accounts.find((a) => a.id === 'acc-vat' || a.id === 'acc-vat-out') || {
-        id: 'acc-vat',
-        name: 'SARS VAT Output Payable',
-      }
+    const vatAcc = accounts.find((a) => a.id === 'acc-vat' || a.id === 'acc-vat-out') || {
+      id: 'acc-vat',
+      name: 'SARS VAT Output Payable',
+    }
 
     const isNegativeVat = taxTotal < 0
     const absTax = round2(Math.abs(taxTotal))
@@ -213,41 +203,36 @@ export function createPurchaseBillJournal(
   bill: Invoice,
   accounts: Account[],
   party?: Party,
-  jeNumber?: string
+  jeNumber?: string,
 ): JournalEntry {
-  const grandTotal = round2(bill.grandTotal || (bill.subtotal + bill.taxTotal))
+  const grandTotal = round2(bill.grandTotal || bill.subtotal + bill.taxTotal)
   const taxTotal = round2(bill.taxTotal)
   const subtotal = round2(grandTotal - taxTotal)
 
   const dateStr = bill.date || new Date().toISOString().split('T')[0]
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const randomSuffix = Math.random().toString(36).slice(2, 7)
-  const entryNum =
-    jeNumber ||
-    `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
+  const entryNum = jeNumber || `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
 
   const items: JournalEntryItem[] = []
 
   // Group line items by expense account if available
-  const expenseGroups = new Map<string, { accountId: string; accountName: string; amount: number }>()
+  const expenseGroups = new Map<
+    string,
+    { accountId: string; accountName: string; amount: number }
+  >()
 
   if (Array.isArray(bill.items) && bill.items.length > 0) {
     for (const it of bill.items) {
       let lineAmt = 0
-      if (
-        it.qty != null &&
-        it.rate != null &&
-        !isNaN(Number(it.qty)) &&
-        !isNaN(Number(it.rate))
-      ) {
+      if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
         lineAmt = round2(Number(it.qty) * Number(it.rate))
       } else if (it.amount != null && !isNaN(Number(it.amount))) {
         lineAmt = round2(Number(it.amount))
       }
       const accId = it.accountId || 'acc-materials'
       const matched = accounts.find((a) => a.id === accId)
-      const accName =
-        it.accountName || matched?.name || 'Direct Project Materials & Subcontractors'
+      const accName = it.accountName || matched?.name || 'Direct Project Materials & Subcontractors'
 
       const existing = expenseGroups.get(accId) || {
         accountId: accId,
@@ -260,11 +245,12 @@ export function createPurchaseBillJournal(
   }
 
   if (expenseGroups.size === 0) {
-    const matAcc =
-      accounts.find((a) => a.id === 'acc-materials' || a.accountType === 'Direct Expense') || {
-        id: 'acc-materials',
-        name: 'Direct Project Materials & Subcontractors',
-      }
+    const matAcc = accounts.find(
+      (a) => a.id === 'acc-materials' || a.accountType === 'Direct Expense',
+    ) || {
+      id: 'acc-materials',
+      name: 'Direct Project Materials & Subcontractors',
+    }
     expenseGroups.set(matAcc.id, {
       accountId: matAcc.id,
       accountName: matAcc.name,
@@ -299,8 +285,7 @@ export function createPurchaseBillJournal(
   }
 
   if (taxTotal !== 0) {
-    const vatInAcc =
-      accounts.find((a) => a.id === 'acc-vat-in') ||
+    const vatInAcc = accounts.find((a) => a.id === 'acc-vat-in') ||
       accounts.find((a) => a.id === 'acc-vat') || {
         id: 'acc-vat-in',
         name: 'SARS VAT Input Recoverable',
@@ -314,17 +299,14 @@ export function createPurchaseBillJournal(
       accountName: vatInAcc.name,
       debit: isNegativeTax ? 0 : absTax,
       credit: isNegativeTax ? absTax : 0,
-      remark: isNegativeTax
-        ? '15% VAT Input Adjustment'
-        : '15% VAT Input Recoverable',
+      remark: isNegativeTax ? '15% VAT Input Adjustment' : '15% VAT Input Recoverable',
     })
   }
 
-  const apAcc =
-    accounts.find((a) => a.id === 'acc-ap' || a.accountType === 'Payable') || {
-      id: 'acc-ap',
-      name: 'Accounts Payable (Creditors)',
-    }
+  const apAcc = accounts.find((a) => a.id === 'acc-ap' || a.accountType === 'Payable') || {
+    id: 'acc-ap',
+    name: 'Accounts Payable (Creditors)',
+  }
 
   const isApDebit = grandTotal < 0
   const absGrandTotal = round2(Math.abs(grandTotal))
@@ -355,7 +337,10 @@ export function createPurchaseBillJournal(
 }
 
 export interface SettlementJournalOptions {
-  invoice: Pick<Invoice, 'id' | 'invoiceNumber' | 'type' | 'partyId' | 'partyName' | 'grandTotal' | 'outstandingAmount'>
+  invoice: Pick<
+    Invoice,
+    'id' | 'invoiceNumber' | 'type' | 'partyId' | 'partyName' | 'grandTotal' | 'outstandingAmount'
+  >
   accounts: Account[]
   amount?: number
   party?: Party
@@ -378,9 +363,12 @@ export function createSettlementJournal(
   partyParam?: Party,
   jeNumberParam?: string,
   bankAccountIdParam?: string,
-  remarksParam?: string
+  remarksParam?: string,
 ): JournalEntry {
-  let invoice: Pick<Invoice, 'id' | 'invoiceNumber' | 'type' | 'partyId' | 'partyName' | 'grandTotal' | 'outstandingAmount'>
+  let invoice: Pick<
+    Invoice,
+    'id' | 'invoiceNumber' | 'type' | 'partyId' | 'partyName' | 'grandTotal' | 'outstandingAmount'
+  >
   let accounts: Account[]
   let amount: number | undefined
   let party: Party | undefined
@@ -420,30 +408,26 @@ export function createSettlementJournal(
       ? amount
       : invoice.outstandingAmount !== undefined
         ? invoice.outstandingAmount
-        : invoice.grandTotal
+        : invoice.grandTotal,
   )
 
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const randomSuffix = Math.random().toString(36).slice(2, 7)
-  const entryNum =
-    jeNumber ||
-    `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
+  const entryNum = jeNumber || `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
 
-  const bankAcc =
-    accounts.find((a) => a.id === bankAccountId || a.accountType === 'Bank') || {
-      id: bankAccountId,
-      name: 'FNB Business Cheque Account',
-    }
+  const bankAcc = accounts.find((a) => a.id === bankAccountId || a.accountType === 'Bank') || {
+    id: bankAccountId,
+    name: 'FNB Business Cheque Account',
+  }
 
   const isSales = invoice.type === 'Sales'
 
   let items: JournalEntryItem[]
   if (isSales) {
-    const arAcc =
-      accounts.find((a) => a.id === 'acc-ar' || a.accountType === 'Receivable') || {
-        id: 'acc-ar',
-        name: 'Accounts Receivable (Debtors)',
-      }
+    const arAcc = accounts.find((a) => a.id === 'acc-ar' || a.accountType === 'Receivable') || {
+      id: 'acc-ar',
+      name: 'Accounts Receivable (Debtors)',
+    }
 
     items = [
       {
@@ -466,11 +450,10 @@ export function createSettlementJournal(
       },
     ]
   } else {
-    const apAcc =
-      accounts.find((a) => a.id === 'acc-ap' || a.accountType === 'Payable') || {
-        id: 'acc-ap',
-        name: 'Accounts Payable (Creditors)',
-      }
+    const apAcc = accounts.find((a) => a.id === 'acc-ap' || a.accountType === 'Payable') || {
+      id: 'acc-ap',
+      name: 'Accounts Payable (Creditors)',
+    }
 
     items = [
       {
@@ -524,8 +507,7 @@ export function recomputePartyBalances(invoices: Invoice[], parties: Party[]): P
     })
 
     const openTotal = partyInvoices.reduce((sum, inv) => {
-      const amt =
-        inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal
+      const amt = inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal
       return round2(sum + (Number(amt) || 0))
     }, 0)
 
@@ -598,7 +580,10 @@ export function parseBankAmount(raw: string | number | null | undefined): number
   }
 
   // Strip currency tokens and symbols: ZAR, R, $, €, £, and whitespace
-  s = s.replace(/ZAR/gi, '').replace(/[R$\u00A0\s€£]/gi, '').trim()
+  s = s
+    .replace(/ZAR/gi, '')
+    .replace(/[R$\u00A0\s€£]/gi, '')
+    .trim()
   if (!s) return 0
 
   if (s.startsWith('-')) {
@@ -701,34 +686,44 @@ export function parseBankStatementCsv(csvText: string): BankTransaction[] {
 
   for (let i = 0; i < maxScan; i++) {
     const rawLine = lines[i]
-    const cols = splitCsvRow(rawLine).map((c) =>
-      c.toLowerCase().replace(/['"]/g, '').trim()
-    )
+    const cols = splitCsvRow(rawLine).map((c) => c.toLowerCase().replace(/['"]/g, '').trim())
     if (cols.length < 2) continue
 
     const hasDate = cols.some(
       (c) =>
         /(^date$|transaction\s*date|trans\s*date|posting\s*date|value\s*date)/i.test(c) ||
-        (c.includes('date') && !c.includes('statement') && !c.includes('account') && !c.includes('print'))
+        (c.includes('date') &&
+          !c.includes('statement') &&
+          !c.includes('account') &&
+          !c.includes('print')),
     )
     const hasAmount = cols.some(
       (c) =>
         !c.includes('balance') &&
         !c.includes('debit') &&
         !c.includes('credit') &&
-        /(^amount$|transaction\s*amount|trans\s*amount|net\s*amount|total\s*amount|value|^amt$)/i.test(c)
+        /(^amount$|transaction\s*amount|trans\s*amount|net\s*amount|total\s*amount|value|^amt$)/i.test(
+          c,
+        ),
     )
     const hasDebit = cols.some((c) =>
-      /(^debit$|debit\s*amount|paid\s*out|money\s*out|withdrawal|withdrawals|payments?)/i.test(c)
+      /(^debit$|debit\s*amount|paid\s*out|money\s*out|withdrawal|withdrawals|payments?)/i.test(c),
     )
     const hasCredit = cols.some((c) =>
-      /(^credit$|credit\s*amount|paid\s*in|money\s*in|deposits?|receipts?)/i.test(c)
+      /(^credit$|credit\s*amount|paid\s*in|money\s*in|deposits?|receipts?)/i.test(c),
     )
     const hasDesc = cols.some((c) =>
-      /(desc|detail|narrative|particular|remark|memo|payee)/i.test(c)
+      /(desc|detail|narrative|particular|remark|memo|payee)/i.test(c),
     )
 
-    if (hasDate && (hasAmount || (hasDebit && hasCredit) || hasDebit || hasCredit || (hasDesc && cols.length >= 3))) {
+    if (
+      hasDate &&
+      (hasAmount ||
+        (hasDebit && hasCredit) ||
+        hasDebit ||
+        hasCredit ||
+        (hasDesc && cols.length >= 3))
+    ) {
       headerRowIndex = i
       foundHeader = true
       break
@@ -740,34 +735,36 @@ export function parseBankStatementCsv(csvText: string): BankTransaction[] {
   }
 
   const headers = splitCsvRow(lines[headerRowIndex]).map((h) =>
-    h.toLowerCase().replace(/['"]/g, '').trim()
+    h.toLowerCase().replace(/['"]/g, '').trim(),
   )
 
   const dateIdx = headers.findIndex(
     (h) =>
       /(^date$|transaction\s*date|trans\s*date|posting\s*date|value\s*date)/i.test(h) ||
-      (h.includes('date') && !h.includes('statement') && !h.includes('account'))
+      (h.includes('date') && !h.includes('statement') && !h.includes('account')),
   )
   const descIdx = headers.findIndex((h) =>
-    /(desc|detail|narrative|particular|remark|memo|payee)/i.test(h)
+    /(desc|detail|narrative|particular|remark|memo|payee)/i.test(h),
   )
   const refIdx = headers.findIndex(
     (h) =>
       /^(ref|reference|ref\s*no|reference\s*number)$/i.test(h) ||
-      (!h.includes('desc') && !h.includes('detail') && /ref/i.test(h))
+      (!h.includes('desc') && !h.includes('detail') && /ref/i.test(h)),
   )
   const amountIdx = headers.findIndex(
     (h) =>
       !h.includes('balance') &&
       !h.includes('debit') &&
       !h.includes('credit') &&
-      /(^amount$|transaction\s*amount|trans\s*amount|net\s*amount|total\s*amount|value|^amt$)/i.test(h)
+      /(^amount$|transaction\s*amount|trans\s*amount|net\s*amount|total\s*amount|value|^amt$)/i.test(
+        h,
+      ),
   )
   const debitIdx = headers.findIndex((h) =>
-    /(^debit$|debit\s*amount|paid\s*out|money\s*out|withdrawal|withdrawals|payments?)/i.test(h)
+    /(^debit$|debit\s*amount|paid\s*out|money\s*out|withdrawal|withdrawals|payments?)/i.test(h),
   )
   const creditIdx = headers.findIndex((h) =>
-    /(^credit$|credit\s*amount|paid\s*in|money\s*in|deposits?|receipts?)/i.test(h)
+    /(^credit$|credit\s*amount|paid\s*in|money\s*in|deposits?|receipts?)/i.test(h),
   )
 
   const transactions: BankTransaction[] = []
@@ -838,7 +835,7 @@ export function parseBankStatementCsv(csvText: string): BankTransaction[] {
  */
 export function deduplicateBankTransactions(
   parsed: BankTransaction[],
-  existing: BankTransaction[]
+  existing: BankTransaction[],
 ): {
   toAdd: BankTransaction[]
   skippedDuplicates: number
@@ -876,4 +873,3 @@ export function deduplicateBankTransactions(
     netAdjustment: round2(netAdjustment),
   }
 }
-

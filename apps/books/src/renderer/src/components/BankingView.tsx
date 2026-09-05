@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import {
   Landmark,
   Upload,
@@ -10,17 +10,14 @@ import {
   ArrowUpRight,
   Sparkles,
   FileSpreadsheet,
-  AlertCircle,
-  Tag,
-  Check,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
-import type { BankTransaction, SettlementSuggestion } from '../../../shared/types'
+import type { SettlementSuggestion } from '../../../shared/types'
 
 export function BankingView() {
   const { data, importBankStatementCsv, reconcileTransaction } = useBooksStore()
   const { accounts, settings, invoices } = data
-  const bankTransactions = data.bankTransactions || []
+  const bankTransactions = useMemo(() => data.bankTransactions || [], [data.bankTransactions])
 
   const [activeFilter, setActiveFilter] = useState<'all' | 'unreconciled' | 'reconciled'>('all')
   const [searchTerm, setSearchTerm] = useState('')
@@ -50,10 +47,25 @@ export function BankingView() {
         if (!amountMatches) continue
 
         const textToSearch = `${tx.description} ${tx.reference || ''}`.toLowerCase()
-        const invNoMatch = Boolean(inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase()))
-        const tenderMatch = Boolean(inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase()))
+        const invNoMatch = Boolean(
+          inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase()),
+        )
+        const tenderMatch = Boolean(
+          inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase()),
+        )
 
-        const stopWords = new Set(['city', 'of', 'the', 'and', 'dept', 'ltd', 'pty', 'inc', 'corp', 'co'])
+        const stopWords = new Set([
+          'city',
+          'of',
+          'the',
+          'and',
+          'dept',
+          'ltd',
+          'pty',
+          'inc',
+          'corp',
+          'co',
+        ])
         const partyTokens = (inv.partyName || '')
           .toLowerCase()
           .split(/[^a-z0-9]+/)
@@ -141,7 +153,9 @@ export function BankingView() {
         try {
           const res = await importBankStatementCsv(content)
           if (res.ok) {
-            showToast(`Successfully imported ${res.importedCount || 0} statement transactions (${res.skippedDuplicates || 0} duplicates skipped).`)
+            showToast(
+              `Successfully imported ${res.importedCount || 0} statement transactions (${res.skippedDuplicates || 0} duplicates skipped).`,
+            )
           } else {
             showToast(`Import failed: ${res.error || 'Unknown error'}`)
           }
@@ -159,13 +173,19 @@ export function BankingView() {
   const handleLoadSampleStatement = async () => {
     setIsImporting(true)
     // Find open invoices to craft matched realistic transactions
-    const wonDealInv = invoices.find((i) => i.crmDealId || i.partyName.toLowerCase().includes('helios'))
-    const tenderInv = invoices.find((i) => i.tenderReference || i.partyName.toLowerCase().includes('ekurhuleni'))
+    const wonDealInv = invoices.find(
+      (i) => i.crmDealId || i.partyName.toLowerCase().includes('helios'),
+    )
+    const tenderInv = invoices.find(
+      (i) => i.tenderReference || i.partyName.toLowerCase().includes('ekurhuleni'),
+    )
 
     const wonAmount = wonDealInv ? wonDealInv.outstandingAmount : 115000
     const wonRef = wonDealInv ? wonDealInv.invoiceNumber : 'INV-2026-001'
     const tenderAmount = tenderInv ? tenderInv.outstandingAmount : 145000
-    const tenderRef = tenderInv ? (tenderInv.tenderReference || tenderInv.invoiceNumber) : 'RFP-WTR-2026-04'
+    const tenderRef = tenderInv
+      ? tenderInv.tenderReference || tenderInv.invoiceNumber
+      : 'RFP-WTR-2026-04'
 
     const sampleCsv = `Date,Description,Reference,Amount
 2026-09-02,EFT Deposit Helios Clean Energy Corporate Rollout,${wonRef},${wonAmount.toFixed(2)}
@@ -176,7 +196,9 @@ export function BankingView() {
     try {
       const res = await importBankStatementCsv(sampleCsv)
       if (res.ok) {
-        showToast(`Loaded sample FNB statement: ${res.importedCount} transactions imported (${res.skippedDuplicates} duplicates skipped).`)
+        showToast(
+          `Loaded sample FNB statement: ${res.importedCount} transactions imported (${res.skippedDuplicates} duplicates skipped).`,
+        )
       } else {
         showToast(`Sample load failed: ${res.error}`)
       }
@@ -191,7 +213,9 @@ export function BankingView() {
     try {
       const res = await reconcileTransaction(txId, invId)
       if (res.ok) {
-        showToast(`Reconciled transaction with Invoice ${invNum}. Invoice marked Paid and Journal Entry posted.`)
+        showToast(
+          `Reconciled transaction with Invoice ${invNum}. Invoice marked Paid and Journal Entry posted.`,
+        )
       } else {
         showToast(`Reconciliation failed: ${res.error || 'Unknown error'}`)
       }
@@ -299,7 +323,10 @@ export function BankingView() {
         </div>
 
         <div className="text-xs text-[#7C7C7C]">
-          Supports CSV headers: <code className="font-mono bg-[#EDEDED] px-1 py-0.5 rounded text-[11px]">Date, Description, Reference, Amount</code>
+          Supports CSV headers:{' '}
+          <code className="font-mono bg-[#EDEDED] px-1 py-0.5 rounded text-[11px]">
+            Date, Description, Reference, Amount
+          </code>
         </div>
       </div>
 
@@ -330,9 +357,7 @@ export function BankingView() {
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-[#1E293B]">
-                            {sug.partyName}
-                          </span>
+                          <span className="font-bold text-sm text-[#1E293B]">{sug.partyName}</span>
                           <span
                             className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
                               sug.invoiceType === 'Sales'
@@ -371,7 +396,9 @@ export function BankingView() {
                   </div>
 
                   <button
-                    onClick={() => handleReconcile(sug.transactionId, sug.invoiceId, sug.invoiceNumber)}
+                    onClick={() =>
+                      handleReconcile(sug.transactionId, sug.invoiceId, sug.invoiceNumber)
+                    }
                     className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#0D655E] transition-colors shadow-xs"
                   >
                     <Zap className="w-3.5 h-3.5 text-amber-300" />
@@ -458,7 +485,8 @@ export function BankingView() {
                         No bank transactions found
                       </div>
                       <p className="text-xs text-[#94A3B8] max-w-sm">
-                        Import a bank statement CSV or click "Load Sample FNB Statement" to see transactions and automated settlement suggestions.
+                        Import a bank statement CSV or click "Load Sample FNB Statement" to see
+                        transactions and automated settlement suggestions.
                       </p>
                     </div>
                   </td>
@@ -490,13 +518,7 @@ export function BankingView() {
                         {tx.reference || '—'}
                       </td>
                       <td className="py-3 px-4 text-right font-semibold whitespace-nowrap">
-                        <span
-                          className={
-                            isDeposit
-                              ? 'text-[#059669] font-bold'
-                              : 'text-[#1E293B]'
-                          }
-                        >
+                        <span className={isDeposit ? 'text-[#059669] font-bold' : 'text-[#1E293B]'}>
                           {isDeposit ? `+${formatMoney(tx.amount)}` : formatMoney(tx.amount)}
                         </span>
                       </td>

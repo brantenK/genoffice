@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
-import { ChevronRight, ChevronDown, Folder, FileText, Plus } from 'lucide-react'
+import { ChevronRight, ChevronDown, Folder, FileText } from 'lucide-react'
 import { useBooksStore } from '../store'
-import type { Account, AccountRoot } from '../../../shared/types'
 
 export function ChartOfAccounts() {
   const { data } = useBooksStore()
@@ -53,13 +52,19 @@ export function ChartOfAccounts() {
                 onClick={() => hasChildren && toggle(acc.id)}
                 style={{ paddingLeft: `${depth * 20 + 12}px` }}
                 className={`flex items-center justify-between py-2 pr-4 rounded-lg cursor-pointer transition-colors ${
-                  acc.isGroup ? 'hover:bg-[#F3F3F3] text-[#1E293B] font-semibold text-xs' : 'hover:bg-[#F8F8F8] text-[#525252] text-xs'
+                  acc.isGroup
+                    ? 'hover:bg-[#F3F3F3] text-[#1E293B] font-semibold text-xs'
+                    : 'hover:bg-[#F8F8F8] text-[#525252] text-xs'
                 }`}
               >
                 <div className="flex items-center gap-2">
                   {hasChildren ? (
                     <button className="text-[#7C7C7C] hover:text-[#1E293B]">
-                      {isExp ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                      {isExp ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      )}
                     </button>
                   ) : (
                     <span className="w-3.5" />
@@ -78,7 +83,9 @@ export function ChartOfAccounts() {
                 </div>
 
                 <div className="flex items-center gap-6">
-                  <span className={`font-mono text-xs ${acc.balance > 0 ? 'font-bold text-[#1E293B]' : 'text-[#7C7C7C]'}`}>
+                  <span
+                    className={`font-mono text-xs ${acc.balance > 0 ? 'font-bold text-[#1E293B]' : 'text-[#7C7C7C]'}`}
+                  >
                     {formatMoney(acc.balance)}
                   </span>
                 </div>
@@ -91,8 +98,6 @@ export function ChartOfAccounts() {
       </div>
     )
   }
-
-  const rootGroups: AccountRoot[] = ['Asset', 'Liability', 'Equity', 'Income', 'Expense']
 
   return (
     <div className="flex-1 overflow-y-auto custom-scroll p-8 bg-[#FBFBFB]">

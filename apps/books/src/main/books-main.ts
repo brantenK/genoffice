@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+  watch,
+  type FSWatcher,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -40,44 +49,284 @@ export const DEFAULT_BOOK_SETTINGS: CompanySettings = {
 
 export const CORE_ACCOUNTS: Account[] = [
   // ASSETS
-  { id: 'acc-asset', name: 'Application of Funds (Assets)', rootType: 'Asset', accountType: 'Current Asset', parentId: null, isGroup: true, balance: 1020750 },
-  { id: 'acc-curr-asset', name: 'Current Assets', rootType: 'Asset', accountType: 'Current Asset', parentId: 'acc-asset', isGroup: true, balance: 695750 },
-  { id: 'acc-bank', name: 'FNB Business Cheque Account', rootType: 'Asset', accountType: 'Bank', parentId: 'acc-curr-asset', isGroup: false, balance: 485250 },
-  { id: 'acc-cash', name: 'Petty Cash', rootType: 'Asset', accountType: 'Cash', parentId: 'acc-curr-asset', isGroup: false, balance: 15000 },
-  { id: 'acc-ar', name: 'Accounts Receivable (Debtors)', rootType: 'Asset', accountType: 'Receivable', parentId: 'acc-curr-asset', isGroup: false, balance: 195500 },
-  { id: 'acc-inventory', name: 'Inventory & Materials on Hand', rootType: 'Asset', accountType: 'Current Asset', parentId: 'acc-curr-asset', isGroup: false, balance: 0 },
-  { id: 'acc-fixed-asset', name: 'Fixed Assets', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-asset', isGroup: true, balance: 325000 },
-  { id: 'acc-equip', name: 'Office & IT Equipment', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-fixed-asset', isGroup: false, balance: 85000 },
-  { id: 'acc-vehic', name: 'Site Utility Vehicles', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-fixed-asset', isGroup: false, balance: 240000 },
+  {
+    id: 'acc-asset',
+    name: 'Application of Funds (Assets)',
+    rootType: 'Asset',
+    accountType: 'Current Asset',
+    parentId: null,
+    isGroup: true,
+    balance: 1020750,
+  },
+  {
+    id: 'acc-curr-asset',
+    name: 'Current Assets',
+    rootType: 'Asset',
+    accountType: 'Current Asset',
+    parentId: 'acc-asset',
+    isGroup: true,
+    balance: 695750,
+  },
+  {
+    id: 'acc-bank',
+    name: 'FNB Business Cheque Account',
+    rootType: 'Asset',
+    accountType: 'Bank',
+    parentId: 'acc-curr-asset',
+    isGroup: false,
+    balance: 485250,
+  },
+  {
+    id: 'acc-cash',
+    name: 'Petty Cash',
+    rootType: 'Asset',
+    accountType: 'Cash',
+    parentId: 'acc-curr-asset',
+    isGroup: false,
+    balance: 15000,
+  },
+  {
+    id: 'acc-ar',
+    name: 'Accounts Receivable (Debtors)',
+    rootType: 'Asset',
+    accountType: 'Receivable',
+    parentId: 'acc-curr-asset',
+    isGroup: false,
+    balance: 195500,
+  },
+  {
+    id: 'acc-inventory',
+    name: 'Inventory & Materials on Hand',
+    rootType: 'Asset',
+    accountType: 'Current Asset',
+    parentId: 'acc-curr-asset',
+    isGroup: false,
+    balance: 0,
+  },
+  {
+    id: 'acc-fixed-asset',
+    name: 'Fixed Assets',
+    rootType: 'Asset',
+    accountType: 'Fixed Asset',
+    parentId: 'acc-asset',
+    isGroup: true,
+    balance: 325000,
+  },
+  {
+    id: 'acc-equip',
+    name: 'Office & IT Equipment',
+    rootType: 'Asset',
+    accountType: 'Fixed Asset',
+    parentId: 'acc-fixed-asset',
+    isGroup: false,
+    balance: 85000,
+  },
+  {
+    id: 'acc-vehic',
+    name: 'Site Utility Vehicles',
+    rootType: 'Asset',
+    accountType: 'Fixed Asset',
+    parentId: 'acc-fixed-asset',
+    isGroup: false,
+    balance: 240000,
+  },
 
   // LIABILITIES
-  { id: 'acc-liab', name: 'Source of Funds (Liabilities)', rootType: 'Liability', accountType: 'Current Liability', parentId: null, isGroup: true, balance: 112600 },
-  { id: 'acc-curr-liab', name: 'Current Liabilities', rootType: 'Liability', accountType: 'Current Liability', parentId: 'acc-liab', isGroup: true, balance: 112600 },
-  { id: 'acc-ap', name: 'Accounts Payable (Creditors)', rootType: 'Liability', accountType: 'Payable', parentId: 'acc-curr-liab', isGroup: false, balance: 74200 },
-  { id: 'acc-vat', name: 'SARS VAT Output Payable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 38400 },
-  { id: 'acc-vat-in', name: 'SARS VAT Input Recoverable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 0 },
-  { id: 'acc-payroll-liab', name: 'Payroll & PAYE / UIF Liabilities', rootType: 'Liability', accountType: 'Current Liability', parentId: 'acc-curr-liab', isGroup: false, balance: 0 },
+  {
+    id: 'acc-liab',
+    name: 'Source of Funds (Liabilities)',
+    rootType: 'Liability',
+    accountType: 'Current Liability',
+    parentId: null,
+    isGroup: true,
+    balance: 112600,
+  },
+  {
+    id: 'acc-curr-liab',
+    name: 'Current Liabilities',
+    rootType: 'Liability',
+    accountType: 'Current Liability',
+    parentId: 'acc-liab',
+    isGroup: true,
+    balance: 112600,
+  },
+  {
+    id: 'acc-ap',
+    name: 'Accounts Payable (Creditors)',
+    rootType: 'Liability',
+    accountType: 'Payable',
+    parentId: 'acc-curr-liab',
+    isGroup: false,
+    balance: 74200,
+  },
+  {
+    id: 'acc-vat',
+    name: 'SARS VAT Output Payable',
+    rootType: 'Liability',
+    accountType: 'Tax',
+    parentId: 'acc-curr-liab',
+    isGroup: false,
+    balance: 38400,
+  },
+  {
+    id: 'acc-vat-in',
+    name: 'SARS VAT Input Recoverable',
+    rootType: 'Liability',
+    accountType: 'Tax',
+    parentId: 'acc-curr-liab',
+    isGroup: false,
+    balance: 0,
+  },
+  {
+    id: 'acc-payroll-liab',
+    name: 'Payroll & PAYE / UIF Liabilities',
+    rootType: 'Liability',
+    accountType: 'Current Liability',
+    parentId: 'acc-curr-liab',
+    isGroup: false,
+    balance: 0,
+  },
 
   // EQUITY
-  { id: 'acc-equity', name: 'Equity & Reserves', rootType: 'Equity', accountType: 'Equity', parentId: null, isGroup: true, balance: 700000 },
-  { id: 'acc-retained', name: 'Retained Earnings', rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 600000 },
-  { id: 'acc-capital', name: 'Share Capital', rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 100000 },
-  { id: 'acc-owner-equity', name: "Owner's Drawings & Equity", rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 0 },
+  {
+    id: 'acc-equity',
+    name: 'Equity & Reserves',
+    rootType: 'Equity',
+    accountType: 'Equity',
+    parentId: null,
+    isGroup: true,
+    balance: 700000,
+  },
+  {
+    id: 'acc-retained',
+    name: 'Retained Earnings',
+    rootType: 'Equity',
+    accountType: 'Equity',
+    parentId: 'acc-equity',
+    isGroup: false,
+    balance: 600000,
+  },
+  {
+    id: 'acc-capital',
+    name: 'Share Capital',
+    rootType: 'Equity',
+    accountType: 'Equity',
+    parentId: 'acc-equity',
+    isGroup: false,
+    balance: 100000,
+  },
+  {
+    id: 'acc-owner-equity',
+    name: "Owner's Drawings & Equity",
+    rootType: 'Equity',
+    accountType: 'Equity',
+    parentId: 'acc-equity',
+    isGroup: false,
+    balance: 0,
+  },
 
   // INCOME
-  { id: 'acc-income', name: 'Income', rootType: 'Income', accountType: 'Direct Income', parentId: null, isGroup: true, balance: 1055000 },
-  { id: 'acc-sales', name: 'Tender & Commercial Contracting Sales', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-income', isGroup: false, balance: 820000 },
-  { id: 'acc-consult', name: 'Professional Advisory Fees', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-income', isGroup: false, balance: 235000 },
-  { id: 'acc-interest-income', name: 'Interest & Investment Income', rootType: 'Income', accountType: 'Indirect Income', parentId: 'acc-income', isGroup: false, balance: 0 },
+  {
+    id: 'acc-income',
+    name: 'Income',
+    rootType: 'Income',
+    accountType: 'Direct Income',
+    parentId: null,
+    isGroup: true,
+    balance: 1055000,
+  },
+  {
+    id: 'acc-sales',
+    name: 'Tender & Commercial Contracting Sales',
+    rootType: 'Income',
+    accountType: 'Direct Income',
+    parentId: 'acc-income',
+    isGroup: false,
+    balance: 820000,
+  },
+  {
+    id: 'acc-consult',
+    name: 'Professional Advisory Fees',
+    rootType: 'Income',
+    accountType: 'Direct Income',
+    parentId: 'acc-income',
+    isGroup: false,
+    balance: 235000,
+  },
+  {
+    id: 'acc-interest-income',
+    name: 'Interest & Investment Income',
+    rootType: 'Income',
+    accountType: 'Indirect Income',
+    parentId: 'acc-income',
+    isGroup: false,
+    balance: 0,
+  },
 
   // EXPENSES
-  { id: 'acc-expense', name: 'Expenses', rootType: 'Expense', accountType: 'Direct Expense', parentId: null, isGroup: true, balance: 818000 },
-  { id: 'acc-materials', name: 'Direct Project Materials & Subcontractors', rootType: 'Expense', accountType: 'Direct Expense', parentId: 'acc-expense', isGroup: false, balance: 345000 },
-  { id: 'acc-salaries', name: 'Salaries & Wages', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 380000 },
-  { id: 'acc-rent', name: 'Office Rent & Facilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 65000 },
-  { id: 'acc-utilities', name: 'Water & Electricity Utilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 0 },
-  { id: 'acc-travel', name: 'Site Travel & Logistics', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 28000 },
-  { id: 'acc-deprec', name: 'Depreciation & Amortization', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 0 },
+  {
+    id: 'acc-expense',
+    name: 'Expenses',
+    rootType: 'Expense',
+    accountType: 'Direct Expense',
+    parentId: null,
+    isGroup: true,
+    balance: 818000,
+  },
+  {
+    id: 'acc-materials',
+    name: 'Direct Project Materials & Subcontractors',
+    rootType: 'Expense',
+    accountType: 'Direct Expense',
+    parentId: 'acc-expense',
+    isGroup: false,
+    balance: 345000,
+  },
+  {
+    id: 'acc-salaries',
+    name: 'Salaries & Wages',
+    rootType: 'Expense',
+    accountType: 'Indirect Expense',
+    parentId: 'acc-expense',
+    isGroup: false,
+    balance: 380000,
+  },
+  {
+    id: 'acc-rent',
+    name: 'Office Rent & Facilities',
+    rootType: 'Expense',
+    accountType: 'Indirect Expense',
+    parentId: 'acc-expense',
+    isGroup: false,
+    balance: 65000,
+  },
+  {
+    id: 'acc-utilities',
+    name: 'Water & Electricity Utilities',
+    rootType: 'Expense',
+    accountType: 'Indirect Expense',
+    parentId: 'acc-expense',
+    isGroup: false,
+    balance: 0,
+  },
+  {
+    id: 'acc-travel',
+    name: 'Site Travel & Logistics',
+    rootType: 'Expense',
+    accountType: 'Indirect Expense',
+    parentId: 'acc-expense',
+    isGroup: false,
+    balance: 28000,
+  },
+  {
+    id: 'acc-deprec',
+    name: 'Depreciation & Amortization',
+    rootType: 'Expense',
+    accountType: 'Indirect Expense',
+    parentId: 'acc-expense',
+    isGroup: false,
+    balance: 0,
+  },
 ]
 
 export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
@@ -96,12 +345,14 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
   }
 
   const r = raw as Record<string, unknown>
-  const version = typeof r.version === 'number' && r.version >= 1 ? r.version : CURRENT_BOOKS_SCHEMA_VERSION
+  const version =
+    typeof r.version === 'number' && r.version >= 1 ? r.version : CURRENT_BOOKS_SCHEMA_VERSION
   const updatedAt = typeof r.updatedAt === 'string' && r.updatedAt.trim() ? r.updatedAt : now
 
-  const settings: CompanySettings = (r.settings && typeof r.settings === 'object')
-    ? { ...DEFAULT_BOOK_SETTINGS, ...(r.settings as Partial<CompanySettings>) }
-    : { ...DEFAULT_BOOK_SETTINGS }
+  const settings: CompanySettings =
+    r.settings && typeof r.settings === 'object'
+      ? { ...DEFAULT_BOOK_SETTINGS, ...(r.settings as Partial<CompanySettings>) }
+      : { ...DEFAULT_BOOK_SETTINGS }
 
   const existingAccounts: Account[] = Array.isArray(r.accounts) ? (r.accounts as Account[]) : []
   const accountsMap = new Map<string, Account>()
@@ -109,10 +360,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
     if (acc && typeof acc.id === 'string') {
       accountsMap.set(acc.id, {
         ...acc,
-        balance:
-          typeof acc.balance === 'number' && Number.isFinite(acc.balance)
-            ? acc.balance
-            : 0,
+        balance: typeof acc.balance === 'number' && Number.isFinite(acc.balance) ? acc.balance : 0,
       })
     }
   }
@@ -190,12 +438,15 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
         reference: typeof (item as any).reference === 'string' ? (item as any).reference : '',
         amount: round2((item as any).amount),
         reconciled: (item as any).reconciled,
-        matchedInvoiceId: typeof (item as any).matchedInvoiceId === 'string' ? (item as any).matchedInvoiceId : undefined,
-        reconciledAt: typeof (item as any).reconciledAt === 'string' ? (item as any).reconciledAt : undefined,
+        matchedInvoiceId:
+          typeof (item as any).matchedInvoiceId === 'string'
+            ? (item as any).matchedInvoiceId
+            : undefined,
+        reconciledAt:
+          typeof (item as any).reconciledAt === 'string' ? (item as any).reconciledAt : undefined,
       })
     }
   }
-
 
   return {
     version,
@@ -210,7 +461,9 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
 }
 
 export function readBooksStore(baseDirOrPath: string): BooksDataEnvelope {
-  const filePath = baseDirOrPath.endsWith('books-data.json') ? baseDirOrPath : join(baseDirOrPath, 'books-data.json')
+  const filePath = baseDirOrPath.endsWith('books-data.json')
+    ? baseDirOrPath
+    : join(baseDirOrPath, 'books-data.json')
   if (!existsSync(filePath)) {
     return {
       version: CURRENT_BOOKS_SCHEMA_VERSION,
@@ -252,7 +505,7 @@ export function readBooksStore(baseDirOrPath: string): BooksDataEnvelope {
       writeFileSync(timestampedBackupPath, content, 'utf8')
       writeFileSync(legacyBackupPath, content, 'utf8')
       console.warn(
-        `books-main: Corrupted books file detected. Backed up to ${timestampedBackupPath} and ${legacyBackupPath}`
+        `books-main: Corrupted books file detected. Backed up to ${timestampedBackupPath} and ${legacyBackupPath}`,
       )
     } catch (bakErr) {
       console.error('books-main: Failed to write corrupted backup file', bakErr)
@@ -271,7 +524,9 @@ export function readBooksStore(baseDirOrPath: string): BooksDataEnvelope {
 }
 
 export function writeBooksStore(baseDirOrPath: string, data: unknown): void {
-  const filePath = baseDirOrPath.endsWith('books-data.json') ? baseDirOrPath : join(baseDirOrPath, 'books-data.json')
+  const filePath = baseDirOrPath.endsWith('books-data.json')
+    ? baseDirOrPath
+    : join(baseDirOrPath, 'books-data.json')
   const dir = filePath.replace(/[/\\][^/\\]+$/, '')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
@@ -314,7 +569,7 @@ export function unregisterBooksWebContents(wc: WebContents): void {
 
 export function getActiveBooksWebContents(): WebContents[] {
   return Array.from(activeBooksWebContents).filter(
-    (wc) => typeof wc.isDestroyed !== 'function' || !wc.isDestroyed()
+    (wc) => typeof wc.isDestroyed !== 'function' || !wc.isDestroyed(),
   )
 }
 
@@ -340,7 +595,12 @@ export function broadcastBooksData(data: BooksData, excludeSender?: WebContents)
     // Layer 1 loop suppression: skip excludeSender
     if (excludeSender) {
       if (wc === excludeSender) continue
-      if ((wc as any).id && (excludeSender as any).id && (wc as any).id === (excludeSender as any).id) continue
+      if (
+        (wc as any).id &&
+        (excludeSender as any).id &&
+        (wc as any).id === (excludeSender as any).id
+      )
+        continue
     }
     try {
       wc.send(BOOKS_CHANNELS.dataChanged, data)
@@ -350,7 +610,11 @@ export function broadcastBooksData(data: BooksData, excludeSender?: WebContents)
   }
 }
 
-export function persistBooksData(baseDirOrPath: string, data: unknown, excludeSender?: WebContents): void {
+export function persistBooksData(
+  baseDirOrPath: string,
+  data: unknown,
+  excludeSender?: WebContents,
+): void {
   const validated = migrateAndValidateBooks(data)
   writeBooksStore(baseDirOrPath, validated)
   broadcastBooksData(validated, excludeSender)
@@ -505,7 +769,7 @@ export function registerBooksIpc(): void {
     try {
       const invoiceNo = (invoice?.invoiceNumber || 'INV-0001').replace(/[^a-zA-Z0-9_-]/g, '_')
       const targetPath = join(tmpdir(), `Tax_Invoice_${invoiceNo}.md`)
-      
+
       const content = `# TAX INVOICE: ${invoice?.invoiceNumber}
 
 **Issuer:** ${companyName || 'Zano Consulting (Pty) Ltd'}  
@@ -584,20 +848,23 @@ ${invoice?.notes || 'Standard 30 days payment terms. Please use invoice number a
   })
 
   // Bank reconciliation: Reconcile transaction with invoice
-  ipcMain.handle(BOOKS_CHANNELS.reconcileTransaction, (_e, transactionId: string, invoiceId: string) => {
-    if (_e?.sender) registerBooksWebContents(_e.sender)
-    try {
-      const p = getStoragePath()
-      const result = executeReconciliation({ booksDataPath: p, transactionId, invoiceId })
-      if (result.ok) {
-        const freshData = readBooksStore(p)
-        broadcastBooksData(freshData)
+  ipcMain.handle(
+    BOOKS_CHANNELS.reconcileTransaction,
+    (_e, transactionId: string, invoiceId: string) => {
+      if (_e?.sender) registerBooksWebContents(_e.sender)
+      try {
+        const p = getStoragePath()
+        const result = executeReconciliation({ booksDataPath: p, transactionId, invoiceId })
+        if (result.ok) {
+          const freshData = readBooksStore(p)
+          broadcastBooksData(freshData)
+        }
+        return result
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Failed to reconcile transaction' }
       }
-      return result
-    } catch (err: any) {
-      return { ok: false, error: err?.message || 'Failed to reconcile transaction' }
-    }
-  })
+    },
+  )
 
   // Bank reconciliation: Get settlement suggestions
   ipcMain.handle(BOOKS_CHANNELS.getSettlementSuggestions, (_e) => {
@@ -661,7 +928,7 @@ export function importBankStatement({
 export function computeSettlementSuggestions(booksData: BooksData): SettlementSuggestion[] {
   const transactions = (booksData.bankTransactions || []).filter((t) => !t.reconciled)
   const openInvoices = (booksData.invoices || []).filter(
-    (i) => i.status !== 'Paid' && (i.outstandingAmount ?? i.grandTotal) > 0
+    (i) => i.status !== 'Paid' && (i.outstandingAmount ?? i.grandTotal) > 0,
   )
 
   const suggestions: SettlementSuggestion[] = []
@@ -677,21 +944,32 @@ export function computeSettlementSuggestions(booksData: BooksData): SettlementSu
       const currentOutstanding = round2(
         inv.outstandingAmount !== undefined && inv.outstandingAmount > 0
           ? inv.outstandingAmount
-          : inv.grandTotal
+          : inv.grandTotal,
       )
       const amountMatches = Math.abs(currentOutstanding - targetAmount) < 0.01
 
       // Check text tokens for match
       const textToSearch = `${tx.description} ${tx.reference || ''}`.toLowerCase()
       const invNoMatch = Boolean(
-        inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase())
+        inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase()),
       )
       const tenderMatch = Boolean(
-        inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase())
+        inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase()),
       )
 
       // Split party name into significant keywords (length >= 4, ignoring common stop words)
-      const stopWords = new Set(['city', 'of', 'the', 'and', 'dept', 'ltd', 'pty', 'inc', 'corp', 'co'])
+      const stopWords = new Set([
+        'city',
+        'of',
+        'the',
+        'and',
+        'dept',
+        'ltd',
+        'pty',
+        'inc',
+        'corp',
+        'co',
+      ])
       const partyTokens = (inv.partyName || '')
         .toLowerCase()
         .split(/[^a-z0-9]+/)
@@ -777,7 +1055,10 @@ export function executeReconciliation({
 
   const inv = (booksData.invoices || []).find((i) => i.id === invoiceId)
   if (!inv) return { ok: false, error: `Invoice not found: ${invoiceId}` }
-  if (inv.status === 'Paid' || (inv.outstandingAmount !== undefined && inv.outstandingAmount <= 0)) {
+  if (
+    inv.status === 'Paid' ||
+    (inv.outstandingAmount !== undefined && inv.outstandingAmount <= 0)
+  ) {
     return { ok: false, error: `Invoice already marked Paid: ${invoiceId}` }
   }
   if (inv.status === 'Draft') {
@@ -789,10 +1070,16 @@ export function executeReconciliation({
 
   // Direction validation
   if (inv.type === 'Sales' && tx.amount <= 0) {
-    return { ok: false, error: 'Cannot reconcile a debit/withdrawal transaction against a Sales invoice' }
+    return {
+      ok: false,
+      error: 'Cannot reconcile a debit/withdrawal transaction against a Sales invoice',
+    }
   }
   if (inv.type === 'Purchase' && tx.amount >= 0) {
-    return { ok: false, error: 'Cannot reconcile a credit/deposit transaction against a Purchase bill' }
+    return {
+      ok: false,
+      error: 'Cannot reconcile a credit/deposit transaction against a Purchase bill',
+    }
   }
 
   // 1. Mark transaction reconciled
@@ -805,7 +1092,7 @@ export function executeReconciliation({
   const currentOutstanding = round2(
     inv.outstandingAmount !== undefined && inv.outstandingAmount > 0
       ? inv.outstandingAmount
-      : inv.grandTotal
+      : inv.grandTotal,
   )
   const settledAmount = round2(Math.min(txAmt, currentOutstanding))
   const remainingOutstanding = round2(currentOutstanding - settledAmount)
@@ -827,7 +1114,9 @@ export function executeReconciliation({
   // 4. Update party balance
   const party = booksData.parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
   booksData.parties = recomputePartyBalances(booksData.invoices, booksData.parties)
-  const updatedParty = booksData.parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
+  const updatedParty = booksData.parties.find(
+    (p) => p.id === inv.partyId || p.name === inv.partyName,
+  )
 
   // 5. Post settlement journal entry
   const year = new Date().getFullYear()
@@ -839,7 +1128,7 @@ export function executeReconciliation({
     updatedParty || party,
     jeNumber,
     'acc-bank',
-    `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`
+    `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
   )
   booksData.journalEntries.unshift(settlementJournal)
 
@@ -881,9 +1170,12 @@ export function executeReconciliation({
         let tendersData: any = null
         let writeFn: any = null
         try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const tendersModule = require('../../../tenders/src/main/tenders-main')
-          if (typeof tendersModule.readTendersStore === 'function' && typeof tendersModule.writeTendersStore === 'function') {
+          if (
+            typeof tendersModule.readTendersStore === 'function' &&
+            typeof tendersModule.writeTendersStore === 'function'
+          ) {
             tendersData = tendersModule.readTendersStore(candidatePath)
             writeFn = tendersModule.writeTendersStore
           }
@@ -907,13 +1199,15 @@ export function executeReconciliation({
               for (const m of t.milestones || []) {
                 const matchByInvoiceId = Boolean(m.billedInvoiceId && m.billedInvoiceId === inv.id)
                 const matchByInvoiceNum = Boolean(
-                  m.billedInvoiceNumber && inv.invoiceNumber && m.billedInvoiceNumber === inv.invoiceNumber
+                  m.billedInvoiceNumber &&
+                  inv.invoiceNumber &&
+                  m.billedInvoiceNumber === inv.invoiceNumber,
                 )
                 const matchByRefAndAmount = Boolean(
                   (inv.tenderReference || (inv as any).tenderRef) &&
                   t.referenceNumber === (inv.tenderReference || (inv as any).tenderRef) &&
                   (m.status === 'BILLED' || m.status === 'REACHED') &&
-                  Math.round(m.amount * 100) === Math.round(settledAmount * 100)
+                  Math.round(m.amount * 100) === Math.round(settledAmount * 100),
                 )
 
                 if (matchByInvoiceId || matchByInvoiceNum || matchByRefAndAmount) {
@@ -921,7 +1215,8 @@ export function executeReconciliation({
                   m.paidAt = nowIso
                   m.paidDate = nowIso
                   if (!m.billedInvoiceId) m.billedInvoiceId = inv.id
-                  if (!m.billedInvoiceNumber && inv.invoiceNumber) m.billedInvoiceNumber = inv.invoiceNumber
+                  if (!m.billedInvoiceNumber && inv.invoiceNumber)
+                    m.billedInvoiceNumber = inv.invoiceNumber
                   modified = true
                   tenderMilestonePaid = true
                   matchedMilestoneId = m.id
@@ -959,7 +1254,6 @@ export function executeReconciliation({
     matchedTenderId,
   }
 }
-
 
 export function createBooksView(): WebContentsView {
   registerBooksIpc()

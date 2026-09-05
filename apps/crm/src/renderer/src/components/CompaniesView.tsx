@@ -52,18 +52,14 @@ export function CompaniesView({ companies, onEditCompany, onDeleteCompany }: Com
           </thead>
           <tbody>
             {filtered.map((c) => {
-              const initials = c.name
-                .split(' ')
-                .map((n: string) => n[0])
-                .join('')
-                .toUpperCase()
-                .slice(0, 2)
-
               return (
                 <tr key={c.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <span className="crm-avatar" style={{ background: '#f8fafc', color: '#0284c7' }}>
+                      <span
+                        className="crm-avatar"
+                        style={{ background: '#f8fafc', color: '#0284c7' }}
+                      >
                         <BuildingIcon size={13} />
                       </span>
                       <strong
@@ -76,7 +72,13 @@ export function CompaniesView({ companies, onEditCompany, onDeleteCompany }: Com
                   </td>
                   <td>
                     {c.domain ? (
-                      <span style={{ color: 'var(--crm-accent)', fontFamily: 'monospace', fontSize: '12px' }}>
+                      <span
+                        style={{
+                          color: 'var(--crm-accent)',
+                          fontFamily: 'monospace',
+                          fontSize: '12px',
+                        }}
+                      >
                         {c.domain}
                       </span>
                     ) : (
@@ -86,9 +88,7 @@ export function CompaniesView({ companies, onEditCompany, onDeleteCompany }: Com
                   <td>{c.industry || '—'}</td>
                   <td style={{ color: 'var(--crm-text-secondary)' }}>{c.size || '—'}</td>
                   <td>
-                    {c.city || c.country
-                      ? `${c.city ? c.city + ', ' : ''}${c.country || ''}`
-                      : '—'}
+                    {c.city || c.country ? `${c.city ? c.city + ', ' : ''}${c.country || ''}` : '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

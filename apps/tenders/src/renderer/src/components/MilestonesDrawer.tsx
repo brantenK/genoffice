@@ -1,17 +1,6 @@
 // Contract Milestones Drawer: Delivery progress & Zano Books billing integration
 import { useState } from 'react'
-import {
-  Award,
-  CheckCircle2,
-  Clock,
-  ExternalLink,
-  FileText,
-  Plus,
-  Receipt,
-  Sparkles,
-  X,
-  Zap
-} from 'lucide-react'
+import { Award, CheckCircle2, Clock, ExternalLink, FileText, Receipt, X, Zap } from 'lucide-react'
 import { selectActiveTender, useTendersStore } from '../store'
 import type { ContractMilestone, MilestoneBillingStatus } from '../../shared/types'
 import { Badge, Button, Spinner } from './ui'
@@ -52,10 +41,12 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                 billedAt: nowIso,
                 billedDate: nowIso,
               }
-            : m
+            : m,
         )
         updateTender(tender.id, { milestones: updatedMilestones })
-        setToastMessage(`Tax Invoice ${res.invoiceNumber || res.invoiceId} successfully created in Zano Books!`)
+        setToastMessage(
+          `Tax Invoice ${res.invoiceNumber || res.invoiceId} successfully created in Zano Books!`,
+        )
         // Switch tab to Books
         await window.tendersApi?.openBooks?.()
       } else {
@@ -95,22 +86,36 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between text-xs text-slate-600">
           <span>Total Contract Valuation</span>
           <span className="font-bold text-slate-900">
-            R {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            R{' '}
+            {totalAmount.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </span>
         </div>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
           <div
             className="h-full bg-indigo-600 transition-all duration-300"
-            style={{ width: `${totalAmount > 0 ? Math.min(100, Math.round((billedAmount / totalAmount) * 100)) : 0}%` }}
+            style={{
+              width: `${totalAmount > 0 ? Math.min(100, Math.round((billedAmount / totalAmount) * 100)) : 0}%`,
+            }}
           />
         </div>
         <div className="mt-2 flex items-center justify-between text-[11px]">
           <span className="text-indigo-700 font-medium">
-            Billed: R {billedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            Billed: R{' '}
+            {billedAmount.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </span>
           {reachedAmount > 0 && (
             <span className="text-amber-700 font-medium">
-              Ready to Bill: R {reachedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              Ready to Bill: R{' '}
+              {reachedAmount.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </span>
           )}
         </div>
@@ -121,7 +126,10 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
         <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 animate-in fade-in">
           <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
           <div className="flex-1 font-medium">{toastMessage}</div>
-          <button onClick={() => setToastMessage(null)} className="text-emerald-600 hover:text-emerald-800">
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-emerald-600 hover:text-emerald-800"
+          >
             <X size={14} />
           </button>
         </div>
@@ -145,7 +153,8 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
             <Award size={32} className="mb-2 stroke-[1.5] text-slate-300" />
             <p className="text-sm font-medium text-slate-600">No contract milestones defined</p>
             <p className="mt-1 text-xs text-slate-400">
-              Contract delivery milestones track progressive project phases and generate Books tax invoices.
+              Contract delivery milestones track progressive project phases and generate Books tax
+              invoices.
             </p>
           </div>
         ) : (
@@ -172,7 +181,9 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold text-slate-400">Phase {index + 1}</span>
+                      <span className="text-[11px] font-semibold text-slate-400">
+                        Phase {index + 1}
+                      </span>
                       {isReached && <Badge tone="indigo">Ready to Bill</Badge>}
                       {isBilled && <Badge tone="violet">Billed</Badge>}
                       {isPaid && <Badge tone="green">Paid</Badge>}
@@ -184,16 +195,18 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                   </div>
                   <div className="text-right">
                     <span className="text-sm font-bold text-slate-900">
-                      R {Number(ms.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      R{' '}
+                      {Number(ms.amount || 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </span>
                     <div className="text-[10px] text-slate-500">incl. 15% VAT</div>
                   </div>
                 </div>
 
                 {ms.description && (
-                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">
-                    {ms.description}
-                  </p>
+                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">{ms.description}</p>
                 )}
 
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500">
@@ -205,7 +218,8 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                     )}
                     {(ms as any).paidAt ? (
                       <span className="inline-flex items-center gap-1 font-semibold text-emerald-600">
-                        <CheckCircle2 size={12} className="text-emerald-500" /> Paid: {new Date((ms as any).paidAt).toLocaleDateString()}
+                        <CheckCircle2 size={12} className="text-emerald-500" /> Paid:{' '}
+                        {new Date((ms as any).paidAt).toLocaleDateString()}
                       </span>
                     ) : ms.billedAt ? (
                       <span className="inline-flex items-center gap-1 text-slate-400">
@@ -229,7 +243,8 @@ export function MilestonesDrawer({ onClose }: { onClose: () => void }) {
                           </>
                         ) : (
                           <>
-                            <Zap size={13} className="text-amber-300" /> Bill Milestone in Zano Books
+                            <Zap size={13} className="text-amber-300" /> Bill Milestone in Zano
+                            Books
                           </>
                         )}
                       </button>

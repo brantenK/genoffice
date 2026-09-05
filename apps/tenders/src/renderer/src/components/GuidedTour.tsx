@@ -26,17 +26,16 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          The sidebar takes you everywhere: <strong>Overview</strong> for health and
-          deadlines, <strong>Customers</strong>, <strong>Documents</strong> (your
-          vault), <strong>Tenders</strong> (compliance matrix),{' '}
-          <strong>Company Profile</strong> and <strong>Tutorials</strong>.
+          The sidebar takes you everywhere: <strong>Overview</strong> for health and deadlines,{' '}
+          <strong>Customers</strong>, <strong>Documents</strong> (your vault),{' '}
+          <strong>Tenders</strong> (compliance matrix), <strong>Company Profile</strong> and{' '}
+          <strong>Tutorials</strong>.
         </p>
         <p className="mt-2">
-          Collapse the sidebar with the round arrow on its right edge to gain screen
-          space.
+          Collapse the sidebar with the round arrow on its right edge to gain screen space.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-company-switcher',
@@ -45,12 +44,12 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          Click your company name here to switch between workspaces — each keeps its
-          own customers, vault and tenders. Use <strong>“Add company”</strong> in the
-          switcher to create a second workspace.
+          Click your company name here to switch between workspaces — each keeps its own customers,
+          vault and tenders. Use <strong>“Add company”</strong> in the switcher to create a second
+          workspace.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-help',
@@ -60,11 +59,10 @@ const STEPS: TourStep[] = [
       <>
         <p>
           This Help button re-runs this guided tour any time, and jumps to the{' '}
-          <strong>Tutorials</strong> page with a detailed how-to guide for every
-          feature.
+          <strong>Tutorials</strong> page with a detailed how-to guide for every feature.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-kpi',
@@ -73,13 +71,13 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          KPI cards show vault documents, active customers, loaded tenders and
-          completed projects — click any card to jump to that page. Below them,
-          <strong> “Needs attention”</strong> banners call out expired documents,
-          stale police stamps and docs expiring within 60 days.
+          KPI cards show vault documents, active customers, loaded tenders and completed projects —
+          click any card to jump to that page. Below them,
+          <strong> “Needs attention”</strong> banners call out expired documents, stale police
+          stamps and docs expiring within 60 days.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-runway',
@@ -88,12 +86,12 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          Everything with a date, in order: document expiries, 90-day police-stamp
-          windows, tender closing dates and recommended submit-by times. Use{' '}
-          <strong>Download .ics</strong> to take the whole runway into your calendar.
+          Everything with a date, in order: document expiries, 90-day police-stamp windows, tender
+          closing dates and recommended submit-by times. Use <strong>Download .ics</strong> to take
+          the whole runway into your calendar.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-doc-filters',
@@ -102,16 +100,16 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          Filter documents by <strong>category</strong> (compliance, financial,
-          technical, governance, CV) and by <strong>health</strong>: valid, expired,
-          stale stamp, or no expiry info. Expired documents always sort to the top.
+          Filter documents by <strong>category</strong> (compliance, financial, technical,
+          governance, CV) and by <strong>health</strong>: valid, expired, stale stamp, or no expiry
+          info. Expired documents always sort to the top.
         </p>
         <p className="mt-2">
-          Certified stamps older than <strong>90 days</strong> are flagged as stale
-          (SA police-stamp rule) — re-certify before submitting a bid.
+          Certified stamps older than <strong>90 days</strong> are flagged as stale (SA police-stamp
+          rule) — re-certify before submitting a bid.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-doc-upload',
@@ -120,12 +118,11 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          Click any document card to inspect its metadata, issue / expiry /
-          certified dates, and open the PDF. Click a card to open its detail panel;
-          click again to close.
+          Click any document card to inspect its metadata, issue / expiry / certified dates, and
+          open the PDF. Click a card to open its detail panel; click again to close.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-dropzone',
@@ -139,12 +136,12 @@ const STEPS: TourStep[] = [
           <strong>Load demo RFP</strong> to try the full workflow right now.
         </p>
         <p className="mt-2">
-          Zanostack Tenders reads every page in your browser — including scanned pages —
-          builds the compliance matrix, auto-links matching vault documents and
-          recognizes the issuing authority from its letterhead.
+          Zanostack Tenders reads every page in your browser — including scanned pages — builds the
+          compliance matrix, auto-links matching vault documents and recognizes the issuing
+          authority from its letterhead.
         </p>
       </>
-    )
+    ),
   },
   {
     target: 'tour-tutorials-nav',
@@ -153,14 +150,13 @@ const STEPS: TourStep[] = [
     body: (
       <>
         <p>
-          For step-by-step guides to every feature — shredding, gap analysis,
-          readiness scoring, issuers, deadlines and more — open the{' '}
-          <strong>Tutorials</strong> page any time.
+          For step-by-step guides to every feature — shredding, gap analysis, readiness scoring,
+          issuers, deadlines and more — open the <strong>Tutorials</strong> page any time.
         </p>
         <p className="mt-2">Happy bidding.</p>
       </>
-    )
-  }
+    ),
+  },
 ]
 
 export function GuidedTour() {
@@ -244,14 +240,13 @@ export function GuidedTour() {
   // tooltip placement
   const TOOLTIP_W = 340
   const PAD = 6
-  let tooltipStyle: React.CSSProperties = {}
-  let below = true
+  let tooltipStyle: React.CSSProperties
   if (rect) {
     const left = Math.min(
       Math.max(rect.left + rect.width / 2 - TOOLTIP_W / 2, 12),
-      window.innerWidth - TOOLTIP_W - 12
+      window.innerWidth - TOOLTIP_W - 12,
     )
-    below = rect.bottom + 300 < window.innerHeight
+    const below = rect.bottom + 300 < window.innerHeight
     tooltipStyle = below
       ? { left, top: rect.bottom + PAD + 14, width: TOOLTIP_W }
       : { left, top: rect.top - PAD - 14, width: TOOLTIP_W, transform: 'translateY(-100%)' }
@@ -259,7 +254,7 @@ export function GuidedTour() {
     tooltipStyle = {
       left: Math.max(12, window.innerWidth / 2 - TOOLTIP_W / 2),
       top: '40%',
-      width: TOOLTIP_W
+      width: TOOLTIP_W,
     }
   }
 
@@ -274,7 +269,7 @@ export function GuidedTour() {
             left: rect.left - PAD,
             width: rect.width + PAD * 2,
             height: rect.height + PAD * 2,
-            boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.62)'
+            boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.62)',
           }}
         />
       )}
@@ -298,9 +293,7 @@ export function GuidedTour() {
           </button>
         </div>
         <h3 className="text-sm font-bold text-slate-900">{step.title}</h3>
-        <div className="mt-1.5 text-[12.5px] leading-relaxed text-slate-600">
-          {step.body}
-        </div>
+        <div className="mt-1.5 text-[12.5px] leading-relaxed text-slate-600">{step.body}</div>
         <div className="mt-4 flex items-center justify-between gap-2">
           <button
             type="button"

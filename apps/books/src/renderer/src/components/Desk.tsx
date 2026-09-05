@@ -7,13 +7,11 @@ import {
   FolderTree,
   BookOpen,
   FileSpreadsheet,
-  Settings,
   ChevronLeft,
   ChevronRight,
   Plus,
   ArrowUpRight,
   HelpCircle,
-  Command,
   Landmark,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
@@ -29,14 +27,8 @@ import { InvoicePrintModal } from './InvoicePrintModal'
 import type { BooksNavigationTab } from '../../../shared/types'
 
 export function Desk() {
-  const {
-    activeTab,
-    setActiveTab,
-    activeInvoiceId,
-    setActiveInvoiceId,
-    loadData,
-    data,
-  } = useBooksStore()
+  const { activeTab, setActiveTab, activeInvoiceId, setActiveInvoiceId, loadData, data } =
+    useBooksStore()
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
@@ -53,7 +45,12 @@ export function Desk() {
     }
   }, [])
 
-  const navItems: { id: BooksNavigationTab; label: string; icon: React.ComponentType<{ className?: string }>; section?: string }[] = [
+  const navItems: {
+    id: BooksNavigationTab
+    label: string
+    icon: React.ComponentType<{ className?: string }>
+    section?: string
+  }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'banking', label: 'Banking & Statements', icon: Landmark, section: 'Banking' },
     { id: 'invoices', label: 'Sales Invoices', icon: Receipt, section: 'Sales' },
@@ -89,7 +86,9 @@ export function Desk() {
               </div>
               {sidebarOpen && (
                 <div className="overflow-hidden">
-                  <div className="font-bold text-sm text-[#1E293B] leading-none truncate">Zano Books</div>
+                  <div className="font-bold text-sm text-[#1E293B] leading-none truncate">
+                    Zano Books
+                  </div>
                   <div className="text-[11px] text-[#7C7C7C] truncate mt-1">
                     {data.settings.currency} · Double-Entry
                   </div>
@@ -100,7 +99,11 @@ export function Desk() {
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1 text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#EDEDED] rounded transition-colors"
             >
-              {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              {sidebarOpen ? (
+                <ChevronLeft className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
             </button>
           </div>
 
@@ -149,7 +152,9 @@ export function Desk() {
                         : 'text-[#525252] hover:bg-[#EDEDED]/60 hover:text-[#1E293B]'
                     }`}
                   >
-                    <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#0F766E]' : 'text-[#7C7C7C]'}`} />
+                    <Icon
+                      className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#0F766E]' : 'text-[#7C7C7C]'}`}
+                    />
                     {sidebarOpen && <span className="truncate">{item.label}</span>}
                   </button>
                 </React.Fragment>

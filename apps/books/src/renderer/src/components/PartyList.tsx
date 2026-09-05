@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Plus, Search, Mail, Phone, Building } from 'lucide-react'
 import { useBooksStore } from '../store'
-import type { Party, PartyType } from '../../../shared/types'
+import type { PartyType } from '../../../shared/types'
 
 export function PartyList() {
   const { data, addParty, setActiveTab, setActiveInvoiceId } = useBooksStore()
@@ -54,7 +54,9 @@ export function PartyList() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">Customers & Suppliers</h1>
+          <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">
+            Customers & Suppliers
+          </h1>
           <p className="text-sm text-[#7C7C7C] mt-0.5">
             Directory of commercial counterparties for {settings.companyName}
           </p>
@@ -102,7 +104,10 @@ export function PartyList() {
       {/* Grid of Parties */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filtered.map((party) => (
-          <div key={party.id} className="bg-white rounded-xl border border-[#EDEDED] p-5 shadow-xs flex flex-col justify-between">
+          <div
+            key={party.id}
+            className="bg-white rounded-xl border border-[#EDEDED] p-5 shadow-xs flex flex-col justify-between"
+          >
             <div>
               <div className="flex items-start justify-between mb-2">
                 <span
@@ -166,7 +171,9 @@ export function PartyList() {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-[#EDEDED]">
-            <h2 className="text-lg font-bold text-[#1E293B] mb-4">Add Contact (Customer / Supplier)</h2>
+            <h2 className="text-lg font-bold text-[#1E293B] mb-4">
+              Add Contact (Customer / Supplier)
+            </h2>
             <form onSubmit={handleCreate} className="space-y-3.5 text-xs">
               <div>
                 <label className="block font-semibold text-[#525252] mb-1">Contact Name *</label>
@@ -228,7 +235,9 @@ export function PartyList() {
               </div>
 
               <div>
-                <label className="block font-semibold text-[#525252] mb-1">Physical / Billing Address</label>
+                <label className="block font-semibold text-[#525252] mb-1">
+                  Physical / Billing Address
+                </label>
                 <input
                   type="text"
                   placeholder="Street, City, Postal Code"

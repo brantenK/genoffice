@@ -1,7 +1,7 @@
 // Company vault drawer: mock vault documents with live health assessment
 // (expiry, 90-day police stamp window) + usage count per tender requirements.
 import { useMemo } from 'react'
-import { FileText, ShieldCheck, X } from 'lucide-react'
+import { FileText, X } from 'lucide-react'
 import { DOC_CATEGORY_LABEL } from '../../shared/types'
 import type { DocHealth, VaultDoc } from '../../shared/types'
 import { assessDocHealth, healthSummary, POLICE_STAMP_WINDOW_DAYS } from '../gap'
@@ -12,14 +12,14 @@ const HEALTH_TONE: Record<DocHealth, 'green' | 'red' | 'amber' | 'slate'> = {
   VALID: 'green',
   EXPIRED: 'red',
   STALE_CERTIFICATION: 'amber',
-  NO_EXPIRY_INFO: 'slate'
+  NO_EXPIRY_INFO: 'slate',
 }
 
 const HEALTH_LABEL: Record<DocHealth, string> = {
   VALID: 'Valid',
   EXPIRED: 'Expired',
   STALE_CERTIFICATION: 'Stale stamp',
-  NO_EXPIRY_INFO: 'No expiry info'
+  NO_EXPIRY_INFO: 'No expiry info',
 }
 
 export function VaultDrawer({ onClose }: { onClose: () => void }) {
@@ -41,12 +41,15 @@ export function VaultDrawer({ onClose }: { onClose: () => void }) {
         .map((doc) => ({ doc, rep: assessDocHealth(doc) }))
         .sort(
           (a, b) =>
-            HEALTH_ORDER[a.rep.health] - HEALTH_ORDER[b.rep.health] || a.doc.title.localeCompare(b.doc.title)
+            HEALTH_ORDER[a.rep.health] - HEALTH_ORDER[b.rep.health] ||
+            a.doc.title.localeCompare(b.doc.title),
         ),
-    [vault]
+    [vault],
   )
 
-  const issues = docs.filter((d) => d.rep.health === 'EXPIRED' || d.rep.health === 'STALE_CERTIFICATION')
+  const issues = docs.filter(
+    (d) => d.rep.health === 'EXPIRED' || d.rep.health === 'STALE_CERTIFICATION',
+  )
 
   return (
     <aside className="absolute inset-y-0 right-0 z-20 flex w-[380px] max-w-[90%] flex-col border-l border-slate-200 bg-white shadow-2xl">
@@ -65,7 +68,8 @@ export function VaultDrawer({ onClose }: { onClose: () => void }) {
       {issues.length > 0 && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5">
           <p className="text-xs font-medium text-amber-800">
-            ⚠ {issues.length} document{issues.length === 1 ? '' : 's'} need attention before submission.
+            ⚠ {issues.length} document{issues.length === 1 ? '' : 's'} need attention before
+            submission.
           </p>
         </div>
       )}
@@ -74,7 +78,12 @@ export function VaultDrawer({ onClose }: { onClose: () => void }) {
         <ul className="space-y-2">
           {docs.map(({ doc, rep }) => (
             <li key={doc.id}>
-              <VaultDocCard doc={doc} health={rep.health} summary={healthSummary(doc, rep)} usedBy={usage.get(doc.id) ?? 0} />
+              <VaultDocCard
+                doc={doc}
+                health={rep.health}
+                summary={healthSummary(doc, rep)}
+                usedBy={usage.get(doc.id) ?? 0}
+              />
             </li>
           ))}
         </ul>
@@ -82,7 +91,8 @@ export function VaultDrawer({ onClose }: { onClose: () => void }) {
 
       <div className="shrink-0 border-t border-slate-200 px-4 py-2">
         <p className="text-[11px] text-slate-400">
-          Certified stamps older than {POLICE_STAMP_WINDOW_DAYS} days are flagged stale (police-stamp rule).
+          Certified stamps older than {POLICE_STAMP_WINDOW_DAYS} days are flagged stale
+          (police-stamp rule).
         </p>
       </div>
     </aside>
@@ -93,14 +103,14 @@ const HEALTH_ORDER: Record<DocHealth, number> = {
   EXPIRED: 0,
   STALE_CERTIFICATION: 1,
   NO_EXPIRY_INFO: 2,
-  VALID: 3
+  VALID: 3,
 }
 
 function VaultDocCard({
   doc,
   health,
   summary,
-  usedBy
+  usedBy,
 }: {
   doc: VaultDoc
   health: DocHealth
@@ -110,7 +120,9 @@ function VaultDocCard({
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-slate-800">{doc.title}</p>
+        <p className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-slate-800">
+          {doc.title}
+        </p>
         <Badge tone={HEALTH_TONE[health]}>{HEALTH_LABEL[health]}</Badge>
       </div>
 

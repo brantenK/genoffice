@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import zanoLogo from './assets/zano-logo.png'
 import iconDocx from './assets/file-docx.svg'
@@ -7,7 +7,6 @@ import iconPptx from './assets/file-pptx.svg'
 import iconPdf from './assets/file-pdf.svg'
 import iconMd from './assets/file-md.svg'
 import type {
-  AccountStatus,
   CloudProjectKind,
   CloudProjectsSnapshot,
   HomeApi,
@@ -500,8 +499,6 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
 // Clicking it opens the settings modal directly (SettingsModal.tsx), which hosts
 // login/logout plus preferences (language, theme, save location, update channel).
 
-
-
 function AccountEntry() {
   const { t } = useI18n()
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -520,7 +517,12 @@ function AccountEntry() {
         <span className="account-avatar">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
-            <path d="M8 4.6v3M8 10.4h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            <path
+              d="M8 4.6v3M8 10.4h.01"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
           </svg>
         </span>
         <span className="account-text">
@@ -964,19 +966,6 @@ export function Home() {
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
   // unavailable recent entry (missing flag) the user clicked — offer list removal
   const [confirmMissing, setConfirmMissing] = useState<RecentEntry | null>(null)
-  // name in the greeting; omitted when logged out
-  const [accountName, setAccountName] = useState('')
-  // Projects is web-account data, so its nav entry only shows when logged in
-  const [loggedIn, setLoggedIn] = useState(false)
-  // single source of account state: AccountEntry reports every change (initial
-  // load, login, logout), keeping the greeting name and the nav entry in sync
-  const handleAccountStatus = useCallback((s: AccountStatus | null) => {
-    const on = s?.loggedIn ?? false
-    setLoggedIn(on)
-    if (!on) setCloudMode(false)
-    const name = on ? (s?.email ?? '').split('@')[0] : ''
-    setAccountName(name ? name[0].toUpperCase() + name.slice(1) : '')
-  }, [])
   const [greetAskKey] = useState(
     () => GREET_ASK_KEYS[Math.floor(Math.random() * GREET_ASK_KEYS.length)]!,
   )
@@ -1982,7 +1971,6 @@ export function Home() {
             <span className="nav-label">{t('navStarred')}</span>
             <span className="nav-count">{navCounts.starred}</span>
           </button>
-
         </nav>
 
         {/* project sidebar */}
