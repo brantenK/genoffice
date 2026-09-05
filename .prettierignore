@@ -16,3 +16,6 @@ scripts/drivers/driver.*.mjs
 
 # Vendored third-party sources stay byte-identical to upstream.
 packages/*/src/vendor/
+
+# Multi-agent audit and teamwork artifacts
+.agents/
