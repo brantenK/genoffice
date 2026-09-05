@@ -74,7 +74,7 @@ Direct empirical observations from source analysis, adversarial stress tests, an
   - 10 MB buffer (large scanned municipal RFP PDF): Saved in 10ms, read in 23ms, SHA-256 matched byte-for-byte.
   - 25 MB buffer (heavy engineering blueprint payload): Saved in 157ms, read back with identical SHA-256 hash.
   - Raw binary payloads: 64 KB buffer containing all byte values 0x00 to 0xFF preserved without encoding corruption; ZIP archive header bytes (`PK\x03\x04...`) verified intact.
-  - Boundary filenames: Handled filenames with spaces, unicode (`招标文件_2026年_水务工程.pdf`, `Müntz_Straße_Angebote.pdf`, `Tender_🇿🇦_Water_Infrastructure.pdf`), punctuation (`!@#$%^&*()_+={}[]|;<>?,~.pdf`), Windows reserved device names (`CON.pdf`, `PRN.txt`, `AUX.bin`, `NUL.pdf`, `COM1.dat`, `LPT1.pdf`), and dots-only fallbacks (`"   "`, `"."`, `".."`, `"..."` cleanly default to `tender.pdf`).
+  - Boundary filenames: Handled filenames with spaces, unicode (`Tender_Doc_2026_Water_Works.pdf`, `Müntz_Straße_Angebote.pdf`, `Tender_🇿🇦_Water_Infrastructure.pdf`), punctuation (`!@#$%^&*()_+={}[]|;<>?,~.pdf`), Windows reserved device names (`CON.pdf`, `PRN.txt`, `AUX.bin`, `NUL.pdf`, `COM1.dat`, `LPT1.pdf`), and dots-only fallbacks (`"   "`, `"."`, `".."`, `"..."` cleanly default to `tender.pdf`).
   - Long filenames: 300-character filename caught gracefully by filesystem boundary without unhandled crashes.
 - **Idempotence & Fuzzing:**
   - Deleting non-existent file: returned `ok: true`.

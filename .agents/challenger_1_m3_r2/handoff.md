@@ -228,7 +228,7 @@ VERDICT: APPROVE — All stress tests passed cleanly.
 - **Sequential & Concurrent Deduplication**: 10x sequential sync and 10x concurrent sync (`Promise.all`) both maintained strictly 1 deal in CRM storage.
 - **High-Volume Stress (Suite 2.6)**: 50 concurrent `syncWithCrm` calls resolved with `ok: true`, producing exactly 1 deal with deterministic ID `deal-tender-tender-stress-50`.
 - **Interleaved Concurrency (Suite 2.7)**: 30 concurrent calls across 3 different tenders in mixed order produced exactly 3 deals with zero duplicate entries.
-- **Fidelity & Non-Destructive Isolation (Suite 2.8, 2.9, 2.10)**: Special characters, CJK characters (`供水系统`), emojis (`🚰🇿🇦`), and exact decimal amounts (`987654.32`) were preserved without distortion. Pre-existing non-tender manual CRM deals remained untouched.
+- **Fidelity & Non-Destructive Isolation (Suite 2.8, 2.9, 2.10)**: Special characters, unicode (`Water Supply System`), emojis (`🚰🇿🇦`), and exact decimal amounts (`987654.32`) were preserved without distortion. Pre-existing non-tender manual CRM deals remained untouched.
 
 ---
 
