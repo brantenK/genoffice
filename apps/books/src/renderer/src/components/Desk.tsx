@@ -44,6 +44,15 @@ export function Desk() {
     loadData()
   }, [loadData])
 
+  useEffect(() => {
+    const unsubscribe = window.booksApi?.onDataChanged?.((data) => {
+      useBooksStore.getState().syncFromMain(data)
+    })
+    return () => {
+      unsubscribe?.()
+    }
+  }, [])
+
   const navItems: { id: BooksNavigationTab; label: string; icon: React.ComponentType<{ className?: string }>; section?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'banking', label: 'Banking & Statements', icon: Landmark, section: 'Banking' },

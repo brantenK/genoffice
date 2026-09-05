@@ -3,6 +3,9 @@ import type { BooksData, Invoice, SettlementSuggestion } from './types'
 export const BOOKS_CHANNELS = {
   loadData: 'books:load-data',
   saveData: 'books:save-data',
+  dataChanged: 'books:data-changed',
+  DATA_CHANGED: 'books:data-changed',
+  getData: 'books:get-data',
   exportToSheets: 'books:export-to-sheets',
   openInPdf: 'books:open-in-pdf',
   openInCrm: 'books:open-in-crm',
@@ -15,6 +18,7 @@ export const BOOKS_CHANNELS = {
 export interface BooksApi {
   loadData: () => Promise<BooksData>
   saveData: (data: BooksData) => Promise<boolean>
+  onDataChanged?: (callback: (data: BooksData) => void) => () => void
   exportToSheets: (reportName: string, csvContent: string) => Promise<{ ok: boolean; path?: string; error?: string }>
   openInPdf: (invoice: Invoice, companyName: string) => Promise<{ ok: boolean; path?: string; error?: string }>
   openInCrm: () => Promise<boolean>

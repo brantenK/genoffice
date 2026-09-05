@@ -27,7 +27,18 @@ export function ChartOfAccounts() {
   }
 
   const renderTree = (parentId: string | null = null, depth = 0) => {
-    const children = accounts.filter((a) => a.parentId === parentId)
+    if (depth > 20) return null
+    const isRoot = parentId === null || parentId === undefined
+    const children = accounts.filter((a) => {
+      if (isRoot) {
+        return (
+          a.parentId === null ||
+          a.parentId === undefined ||
+          (depth === 0 && !accounts.some((parent) => parent.id === a.parentId))
+        )
+      }
+      return a.parentId === parentId
+    })
     if (children.length === 0) return null
 
     return (

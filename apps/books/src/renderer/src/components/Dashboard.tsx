@@ -25,15 +25,15 @@ export function Dashboard() {
   const purchaseBills = invoices.filter((i) => i.type === 'Purchase')
   const totalPayable = purchaseBills.reduce((acc, i) => acc + i.outstandingAmount, 0)
 
-  const incomeAccounts = accounts.filter((a) => a.rootType === 'Income')
+  const incomeAccounts = accounts.filter((a) => !a.isGroup && a.rootType === 'Income')
   const totalIncome = incomeAccounts.reduce((acc, a) => acc + a.balance, 0)
 
-  const expenseAccounts = accounts.filter((a) => a.rootType === 'Expense')
+  const expenseAccounts = accounts.filter((a) => !a.isGroup && a.rootType === 'Expense')
   const totalExpenses = expenseAccounts.reduce((acc, a) => acc + a.balance, 0)
 
   const netProfit = totalIncome - totalExpenses
 
-  const bankAccounts = accounts.filter((a) => a.accountType === 'Bank' || a.accountType === 'Cash')
+  const bankAccounts = accounts.filter((a) => !a.isGroup && (a.accountType === 'Bank' || a.accountType === 'Cash'))
   const liquidCash = bankAccounts.reduce((acc, a) => acc + a.balance, 0)
 
   const recentInvoices = invoices.slice(0, 6)

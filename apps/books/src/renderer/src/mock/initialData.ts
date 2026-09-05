@@ -18,6 +18,7 @@ export const initialBooksData: BooksData = {
     { id: 'acc-bank', name: 'FNB Business Cheque Account', rootType: 'Asset', accountType: 'Bank', parentId: 'acc-curr-asset', isGroup: false, balance: 485250 },
     { id: 'acc-cash', name: 'Petty Cash', rootType: 'Asset', accountType: 'Cash', parentId: 'acc-curr-asset', isGroup: false, balance: 15000 },
     { id: 'acc-ar', name: 'Accounts Receivable (Debtors)', rootType: 'Asset', accountType: 'Receivable', parentId: 'acc-curr-asset', isGroup: false, balance: 195500 },
+    { id: 'acc-inventory', name: 'Inventory & Materials on Hand', rootType: 'Asset', accountType: 'Current Asset', parentId: 'acc-curr-asset', isGroup: false, balance: 0 },
     { id: 'acc-fixed-asset', name: 'Fixed Assets', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-asset', isGroup: true, balance: 325000 },
     { id: 'acc-equip', name: 'Office & IT Equipment', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-fixed-asset', isGroup: false, balance: 85000 },
     { id: 'acc-vehic', name: 'Site Utility Vehicles', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-fixed-asset', isGroup: false, balance: 240000 },
@@ -27,23 +28,29 @@ export const initialBooksData: BooksData = {
     { id: 'acc-curr-liab', name: 'Current Liabilities', rootType: 'Liability', accountType: 'Current Liability', parentId: 'acc-liab', isGroup: true, balance: 112600 },
     { id: 'acc-ap', name: 'Accounts Payable (Creditors)', rootType: 'Liability', accountType: 'Payable', parentId: 'acc-curr-liab', isGroup: false, balance: 74200 },
     { id: 'acc-vat', name: 'SARS VAT Output Payable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 38400 },
+    { id: 'acc-vat-in', name: 'SARS VAT Input Recoverable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 0 },
+    { id: 'acc-payroll-liab', name: 'Payroll & PAYE / UIF Liabilities', rootType: 'Liability', accountType: 'Current Liability', parentId: 'acc-curr-liab', isGroup: false, balance: 0 },
 
     // EQUITY
     { id: 'acc-equity', name: 'Equity & Reserves', rootType: 'Equity', accountType: 'Equity', parentId: null, isGroup: true, balance: 700000 },
     { id: 'acc-retained', name: 'Retained Earnings', rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 600000 },
     { id: 'acc-capital', name: 'Share Capital', rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 100000 },
+    { id: 'acc-owner-equity', name: "Owner's Drawings & Equity", rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 0 },
 
     // INCOME
     { id: 'acc-income', name: 'Income', rootType: 'Income', accountType: 'Direct Income', parentId: null, isGroup: true, balance: 1055000 },
     { id: 'acc-sales', name: 'Tender & Commercial Contracting Sales', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-income', isGroup: false, balance: 820000 },
     { id: 'acc-consult', name: 'Professional Advisory Fees', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-income', isGroup: false, balance: 235000 },
+    { id: 'acc-interest-income', name: 'Interest & Investment Income', rootType: 'Income', accountType: 'Indirect Income', parentId: 'acc-income', isGroup: false, balance: 0 },
 
     // EXPENSES
     { id: 'acc-expense', name: 'Expenses', rootType: 'Expense', accountType: 'Direct Expense', parentId: null, isGroup: true, balance: 818000 },
     { id: 'acc-materials', name: 'Direct Project Materials & Subcontractors', rootType: 'Expense', accountType: 'Direct Expense', parentId: 'acc-expense', isGroup: false, balance: 345000 },
     { id: 'acc-salaries', name: 'Salaries & Wages', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 380000 },
-    { id: 'acc-rent', name: 'Office Rent & Utilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 65000 },
+    { id: 'acc-rent', name: 'Office Rent & Facilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 65000 },
+    { id: 'acc-utilities', name: 'Water & Electricity Utilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 0 },
     { id: 'acc-travel', name: 'Site Travel & Logistics', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 28000 },
+    { id: 'acc-deprec', name: 'Depreciation & Amortization', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 0 },
   ],
   parties: [
     {
@@ -94,7 +101,7 @@ export const initialBooksData: BooksData = {
       phone: '+27 11 386 9000',
       taxId: '4019283746',
       address: '148 Katherine Street, Barlow Park',
-      outstandingBalance: 32200,
+      outstandingBalance: 0,
     },
   ],
   invoices: [

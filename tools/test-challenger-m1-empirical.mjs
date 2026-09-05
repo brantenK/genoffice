@@ -685,8 +685,8 @@ test('6.1 Large dataset persistence: 1000 invoices and 500 accounts perform clea
     }
     // ensure 1 core account included in input
     accounts.push({ id: 'acc-bank', balance: 500000 })
-    // Total accounts input = 501. Missing core accounts = 4 (acc-ar, acc-ap, acc-sales, acc-vat).
-    // Expected output accounts = 501 + 4 = 505 accounts.
+    // Total accounts input = 501. Missing core accounts backfilled from CORE_ACCOUNTS.
+    // Expected output accounts = 500 + CORE_ACCOUNTS.length accounts (530 accounts).
 
     const invoices = []
     for (let i = 1; i <= 1000; i++) {
@@ -728,11 +728,11 @@ test('6.1 Large dataset persistence: 1000 invoices and 500 accounts perform clea
     const loaded = readBooksStore(sb.booksPath)
     const tRead = Date.now() - tReadStart
 
-    assert.strictEqual(loaded.accounts.length, 505, '500 custom accounts + 5 core accounts = 505 accounts')
+    assert.strictEqual(loaded.accounts.length, 500 + CORE_ACCOUNTS.length, '500 custom accounts + core accounts backfilled')
     assert.strictEqual(loaded.invoices.length, 1000)
     assert.strictEqual(loaded.invoices[999].invoiceNumber, 'INV-2026-1000')
     assert.strictEqual(loaded.invoices[999].grandTotal, 1150)
-    console.log(`    ℹ️ Large payload (1000 invoices, 505 accounts): Write=${tWrite}ms, Read=${tRead}ms`)
+    console.log(`    ℹ️ Large payload (1000 invoices, ${loaded.accounts.length} accounts): Write=${tWrite}ms, Read=${tRead}ms`)
   } finally {
     sb.cleanup()
   }

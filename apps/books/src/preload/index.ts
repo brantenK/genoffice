@@ -17,6 +17,13 @@ const booksApi: BooksApi = {
     ipcRenderer.invoke(BOOKS_CHANNELS.reconcileTransaction, transactionId, invoiceId),
   getSettlementSuggestions: () =>
     ipcRenderer.invoke(BOOKS_CHANNELS.getSettlementSuggestions),
+  onDataChanged: (callback: (data: BooksData) => void) => {
+    const listener = (_: any, data: BooksData) => callback(data)
+    ipcRenderer.on(BOOKS_CHANNELS.dataChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(BOOKS_CHANNELS.dataChanged, listener)
+    }
+  },
 }
 
 if (process.contextIsolated) {

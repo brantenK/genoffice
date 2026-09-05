@@ -79,3 +79,78 @@ Add automated unit and integration tests covering the deterministic RFP shredder
 - [ ] `npm run typecheck` passes with zero TypeScript errors across `apps/tenders` and dependent apps.
 - [ ] A dedicated test suite for `apps/tenders` runs via automated test command (e.g. `npm test` / Vitest) and passes 100% of tests.
 - [ ] No regression in existing tab navigation or shell startup behavior.
+
+## 2026-09-05T06:42:35Z
+
+Comprehensive audit and hardening of the Zano Books backend (`apps/books`), establishing strict double-entry ledger balancing for all invoice types, full Chart of Accounts harmonization, precise bank reconciliation with partial/exact payment handling, live IPC synchronization (`books:data-changed`), and an automated test suite.
+
+Working directory: c:/Users/brant/OneDrive/Documents/GenOffice/genoffice
+Integrity mode: development
+
+## Requirements
+
+### R1. Strict Double-Entry Bookkeeping & Balanced Journal Posting
+Ensure every accounting transaction produces mathematically balanced journal entries where Total Debits equal Total Credits:
+- **Sales Invoices:** Post balanced entries (Debit Accounts Receivable, Credit Sales Revenue, Credit VAT Output Payable).
+- **Purchase Bills:** Post balanced entries (Debit Expense/Materials, Debit VAT Input if applicable, Credit Accounts Payable).
+- **Invoice Payments & Reversals:** Settle balances accurately, adjusting party balances and posting corresponding ledger journal entries.
+- **Precision:** Eliminate floating-point calculation drift by strictly rounding currency amounts to 2 decimal places.
+
+### R2. Chart of Accounts Harmonization & Schema Invariants
+Harmonize the Chart of Accounts between the Electron main process (`books-main.ts`) and the initial seed data (`initialBooksData.ts`):
+- Ensure clean initializations and migrations preserve the full standard Chart of Accounts structure (Assets, Liabilities, Equity, Income, Expenses, Retained Earnings, Share Capital).
+- Maintain parent-child group relationships so financial summaries and reports calculate correctly without missing accounts.
+
+### R3. Robust Bank Statement Import & Reconciliation Engine
+Harden the bank reconciliation engine and CSV statement import:
+- Accurately parse debit/credit columns, parenthetical negatives, and varying bank statement headers.
+- Eliminate transaction deduplication collisions while correctly updating bank account ledger balances.
+- In `executeReconciliation`, bind settlements to actual transaction amounts rather than blindly assuming full payment, supporting exact matching and partial settlement without corrupting ledger accounts.
+- Preserve tender milestone payment back-propagation (`status: 'PAID'`) when settling tender-linked tax invoices.
+
+### R4. Real-Time IPC Synchronization (`books:data-changed`)
+Implement a `books:data-changed` broadcast event pipeline from the Electron main process to active Books WebContents views:
+- When cross-app actions (such as milestone billing from Zanostack Tenders) write to `books-data.json`, the active Books tab must update immediately without requiring the user to reload the tab.
+- Include loop-suppression guards to prevent echo-loops between store persistence and IPC change events.
+
+### R5. Dedicated Automated Test Suite
+Establish a comprehensive Vitest automated testing suite for `apps/books`:
+- Test double-entry balance invariants (Debit == Credit).
+- Test Sales and Purchase invoice posting and ledger account updates.
+- Test CSV statement parsing and reconciliation settlement math.
+- Test store persistence, schema migrations, and IPC handlers.
+- Ensure 100% tests pass and `npm run typecheck` passes with zero errors across the monorepo.
+
+## Acceptance Criteria
+
+### Bookkeeping & Ledger Invariants
+- [ ] Every posted Journal Entry has `totalDebit === totalCredit` (strictly balanced to 2 decimal places).
+- [ ] Purchase Bills generate balanced journal entries and correctly update Accounts Payable and Direct Expense accounts.
+- [ ] Party outstanding balances accurately reflect invoice totals minus settled amounts.
+
+### Chart of Accounts & Persistence
+- [ ] Full Chart of Accounts (all 22 standard accounts across 5 root categories) is preserved on fresh initialization and store migrations.
+- [ ] Saving data persists atomically via temporary files and renames, with automatic backup upon encountering invalid JSON.
+
+### Bank Reconciliation & Cross-App Sync
+- [ ] Bank statement CSV parser correctly handles standard South African bank statement formats (FNB, Standard Bank, Nedbank, Absa).
+- [ ] Bank reconciliation creates balanced settlement journals and correctly updates Bank and AR/AP balances based on transaction amount.
+- [ ] Milestone billing executed in Tenders immediately broadcasts `books:data-changed` and renders in the open Books tab without a reload.
+
+### Code Quality & Testing
+- [ ] `npm run typecheck` passes with zero TypeScript errors across `apps/books` and the monorepo.
+- [ ] A dedicated test suite for `apps/books` runs via automated test command (e.g. `npm test` / Vitest) with 100% passing tests.
+- [ ] Zero regressions in Books UI navigation or report generation.
+
+## Follow-up — 2026-09-05T10:52:57Z
+
+Server restart interrupted execution. Resume from where stopped.
+Current state:
+- Milestone 1 (Accounting Engine & CoA Harmonization): COMPLETE — all M1 files committed and on disk.
+- Milestone 2 (Strict Double-Entry Journal Posting): Implementation COMPLETE by worker_books_m2_ledger — all M2 files modified on disk (store.ts, InvoiceForm.tsx, accounting.ts).
+Action: Re-evaluate Milestone 2 gate with fresh 5-agent panel, then proceed with Milestones 3, 4, 5 and final certification.
+
+## Follow-up — 2026-09-05T16:33:01Z
+
+Server restart occurred and quota window has expired.
+Action: Revive orchestrator_5 and complete Milestone 5 Gate Evaluation and final monorepo certification.

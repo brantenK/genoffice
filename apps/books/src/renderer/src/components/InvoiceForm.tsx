@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Plus, Trash2, ArrowLeft, Save, Printer } from 'lucide-react'
 import { useBooksStore } from '../store'
 import type { InvoiceItem, InvoiceType } from '../../../shared/types'
+import { round2, calculateInvoiceTotals } from '../../../shared/accounting'
 
 interface InvoiceFormProps {
   type: InvoiceType
@@ -15,9 +16,15 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
     type === 'Sales' ? p.type === 'Customer' : p.type === 'Supplier',
   )
 
-  const relevantAccounts = data.accounts.filter((a) =>
-    type === 'Sales' ? a.rootType === 'Income' : a.rootType === 'Expense',
+  const relevantAccounts = data.accounts.filter(
+    (a) => !a.isGroup && (type === 'Sales' ? a.rootType === 'Income' : a.rootType === 'Expense'),
   )
+
+  const defaultAccount =
+    relevantAccounts[0] ||
+    (type === 'Sales'
+      ? { id: 'acc-sales', name: 'Tender & Commercial Contracting Sales' }
+      : { id: 'acc-materials', name: 'Direct Project Materials & Subcontractors' })
 
   const [partyId, setPartyId] = useState(existing?.partyId || relevantParties[0]?.id || '')
   const [date, setDate] = useState(existing?.date || new Date().toISOString().split('T')[0])
@@ -28,19 +35,33 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
   const [notes, setNotes] = useState(existing?.notes || 'Standard 30 days payment terms.')
 
   const [items, setItems] = useState<InvoiceItem[]>(
-    existing?.items || [
-      {
-        id: `item-${Date.now()}`,
-        itemCode: 'ITEM-01',
-        description: 'Professional Engineering & Site Supervision',
-        accountId: relevantAccounts[0]?.id || 'acc-sales',
-        accountName: relevantAccounts[0]?.name || 'Sales',
-        qty: 1,
-        rate: 50000,
-        taxRate: 15,
-        amount: 50000,
-      },
-    ],
+    existing?.items && existing.items.length > 0
+      ? existing.items.map((it) => ({
+          ...it,
+          accountId: it.accountId || defaultAccount.id,
+          accountName: it.accountName || defaultAccount.name,
+          amount: round2(
+            it.qty != null && it.rate != null
+              ? Number(it.qty) * Number(it.rate)
+              : Number(it.amount) || 0,
+          ),
+        }))
+      : [
+          {
+            id: `item-${Date.now()}`,
+            itemCode: 'ITEM-01',
+            description:
+              type === 'Sales'
+                ? 'Professional Engineering & Site Supervision'
+                : 'Direct Project Materials & Subcontractors',
+            accountId: defaultAccount.id,
+            accountName: defaultAccount.name,
+            qty: 1,
+            rate: type === 'Sales' ? 50000 : 15000,
+            taxRate: 15,
+            amount: type === 'Sales' ? 50000 : 15000,
+          },
+        ],
   )
 
   const updateItem = (id: string, field: keyof InvoiceItem, val: any) => {
@@ -49,7 +70,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
         if (it.id !== id) return it
         const next = { ...it, [field]: val }
         if (field === 'qty' || field === 'rate') {
-          next.amount = (Number(next.qty) || 0) * (Number(next.rate) || 0)
+          const q = field === 'qty' ? Number(val) || 0 : Number(it.qty) || 0
+          const r = field === 'rate' ? Number(val) || 0 : Number(it.rate) || 0
+          next.amount = round2(q * r)
         }
         if (field === 'accountId') {
           const matched = relevantAccounts.find((a) => a.id === val)
@@ -66,13 +89,14 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       {
         id: `item-${Date.now()}`,
         itemCode: `ITEM-${String(prev.length + 1).padStart(2, '0')}`,
-        description: 'Commercial Service Delivery',
-        accountId: relevantAccounts[0]?.id || 'acc-sales',
-        accountName: relevantAccounts[0]?.name || 'Sales',
+        description:
+          type === 'Sales' ? 'Commercial Service Delivery' : 'Direct Project Materials',
+        accountId: defaultAccount.id,
+        accountName: defaultAccount.name,
         qty: 1,
-        rate: 15000,
+        rate: type === 'Sales' ? 15000 : 10000,
         taxRate: 15,
-        amount: 15000,
+        amount: type === 'Sales' ? 15000 : 10000,
       },
     ])
   }
@@ -82,9 +106,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
     setItems((prev) => prev.filter((it) => it.id !== id))
   }
 
-  const subtotal = items.reduce((sum, it) => sum + it.amount, 0)
-  const taxTotal = items.reduce((sum, it) => sum + (it.amount * it.taxRate) / 100, 0)
-  const grandTotal = subtotal + taxTotal
+  const { subtotal, taxTotal, grandTotal } = calculateInvoiceTotals(items)
 
   const handleSave = async (status: 'Draft' | 'Unpaid') => {
     const selectedParty = data.parties.find((p) => p.id === partyId)
@@ -92,7 +114,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       id: existing?.id,
       type,
       partyId,
-      partyName: selectedParty?.name || 'Client',
+      partyName: selectedParty?.name || (type === 'Sales' ? 'Customer' : 'Supplier'),
       date,
       dueDate,
       tenderReference: tenderRef.trim() || undefined,
