@@ -74,6 +74,7 @@ electron-builder.env
 
 .cursor/rules/git-remote.mdc
 __pycache__/
+.pytest_cache/
 /notes/
 /MEMORY.md
 
@@ -87,3 +88,6 @@ _scratch-*
 
 # per-locale string chunks emitted by fork/tools/emit-locales.mjs
 apps/*/src/renderer/i18n/generated/
+
+# Local Deepwork coordination state
+.slim/deepwork/

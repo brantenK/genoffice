@@ -1,4 +1,6 @@
 import { execSync, spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import * as inspector from 'node:inspector'
 import {
   copyFileSync,
   cpSync,
@@ -195,6 +197,9 @@ import { normalizeRecentQuery, pageRecentPaths, statPathEntries } from './recent
 import { TabManager } from './tab-manager'
 import { applyUpdateChannel, initAutoUpdater } from './updater'
 import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
+import { AutomationDispatcher } from './automation-dispatcher'
+import { parseAutomationMode, sanitizeAutomationEnvironment } from './automation-mode'
+import { AutomationServer } from './automation-server'
 
 /**
  * Zanostack unified shell: ONE Electron app, ONE BrowserWindow, hosting the
@@ -205,19 +210,37 @@ import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
  * apps/sheets/out), so build those before running the shell.
  */
 
+const automationMode = parseAutomationMode(process.argv)
+const invalidAutomationLaunch = automationMode.disposition === 'invalid'
+
+if (automationMode.enabled) {
+  // An automation child has no access to renderer/test/debug controls, even
+  // when a developer accidentally forwards a poisoned process environment.
+  process.env = sanitizeAutomationEnvironment(process.env)
+  inspector.close()
+  app.commandLine.removeSwitch('remote-debugging-port')
+}
+
 // ANY unpacked run (`npm run shell`, `npm run dev`, `npx electron .`) must not
 // share the installed app's userData or single-instance lock — otherwise a dev
 // run silently quits and forwards its argv to the running installed Zanostack.
 // GENOFFICE_USER_DATA: test drivers point this at a scratch dir so an
 // automated instance can run alongside the dev instance (separate lock).
-if (!app.isPackaged)
+if (automationMode.enabled) {
+  // Automation never inherits GENOFFICE_USER_DATA or the packaged profile.
+  // The path was derived from the consumed, validated launch record.
+  app.setPath('userData', automationMode.userDataPath)
+} else if (invalidAutomationLaunch) {
+  // Never fall back to a normal profile after an explicit automation failure.
+  app.setPath('userData', automationMode.safeUserDataPath)
+} else if (!app.isPackaged)
   app.setPath(
     'userData',
     process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'Zanostack Dev'),
   )
 
 // The product rename from "AI Office" to Zanostack changed the userData path; migrate old user data once
-if (app.isPackaged) {
+if (app.isPackaged && automationMode.disposition === 'normal') {
   const oldDir = join(app.getPath('appData'), 'AI Office')
   const newDir = app.getPath('userData')
   const newEmpty = !existsSync(newDir) || readdirSync(newDir).length === 0
@@ -257,64 +280,66 @@ const SIDECAR_BIN = app.isPackaged
   ? join(process.resourcesPath, 'native', SIDECAR_EXE)
   : join(APPS_ROOT, 'sheets', 'native', 'xlsx-engine', 'target', 'release', SIDECAR_EXE)
 
-configureDocsRuntime({
-  preloadPath: join(DOCS_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.DOCS_RENDERER_URL,
-  rendererFile: join(DOCS_OUT, 'renderer', 'index.html'),
-})
-configureSheetsRuntime({
-  preloadPath: join(SHEETS_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.SHEETS_RENDERER_URL,
-  rendererFile: join(SHEETS_OUT, 'renderer', 'index.html'),
-  sidecarPath: SIDECAR_BIN,
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  // The sheets AI's create_document (docx/pdf/md) funnels into the docs-owned
-  // creation flow, like the pdf app below.
-  createDocument: createAiDocument,
-})
-configureSlidesRuntime({
-  preloadPath: join(SLIDES_OUT, 'preload', 'index.js'),
-  rendererDevUrl: process.env.SLIDES_RENDERER_URL,
-  rendererFilePath: join(SLIDES_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-})
-configurePdfRuntime({
-  preloadPath: join(PDF_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.PDF_RENDERER_URL,
-  rendererFile: join(PDF_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  createDocument: createAiDocument,
-})
-configureMarkdownRuntime({
-  preloadPath: join(MARKDOWN_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.MARKDOWN_RENDERER_URL,
-  rendererFile: join(MARKDOWN_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-})
-configureCrmRuntime({
-  preloadPath: join(CRM_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.CRM_RENDERER_URL,
-  rendererFile: join(CRM_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  onOpenTenders: () => newTendersTab(),
-  onOpenBooks: () => newBooksTab(),
-})
-configureTendersRuntime({
-  preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.TENDERS_RENDERER_URL,
-  rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  onOpenCrm: () => newCrmTab(),
-  onOpenBooks: () => newBooksTab(),
-})
-configureBooksRuntime({
-  preloadPath: join(BOOKS_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.BOOKS_RENDERER_URL,
-  rendererFile: join(BOOKS_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  onOpenCrm: () => newCrmTab(),
-  onOpenTenders: () => newTendersTab(),
-})
+if (!invalidAutomationLaunch) {
+  configureDocsRuntime({
+    preloadPath: join(DOCS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.DOCS_RENDERER_URL,
+    rendererFile: join(DOCS_OUT, 'renderer', 'index.html'),
+  })
+  configureSheetsRuntime({
+    preloadPath: join(SHEETS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.SHEETS_RENDERER_URL,
+    rendererFile: join(SHEETS_OUT, 'renderer', 'index.html'),
+    sidecarPath: SIDECAR_BIN,
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    // The sheets AI's create_document (docx/pdf/md) funnels into the docs-owned
+    // creation flow, like the pdf app below.
+    createDocument: createAiDocument,
+  })
+  configureSlidesRuntime({
+    preloadPath: join(SLIDES_OUT, 'preload', 'index.js'),
+    rendererDevUrl: process.env.SLIDES_RENDERER_URL,
+    rendererFilePath: join(SLIDES_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+  })
+  configurePdfRuntime({
+    preloadPath: join(PDF_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.PDF_RENDERER_URL,
+    rendererFile: join(PDF_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    createDocument: createAiDocument,
+  })
+  configureMarkdownRuntime({
+    preloadPath: join(MARKDOWN_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.MARKDOWN_RENDERER_URL,
+    rendererFile: join(MARKDOWN_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+  })
+  configureCrmRuntime({
+    preloadPath: join(CRM_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.CRM_RENDERER_URL,
+    rendererFile: join(CRM_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    onOpenTenders: () => newTendersTab(),
+    onOpenBooks: () => newBooksTab(),
+  })
+  configureTendersRuntime({
+    preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.TENDERS_RENDERER_URL,
+    rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    onOpenCrm: () => newCrmTab(),
+    onOpenBooks: () => newBooksTab(),
+  })
+  configureBooksRuntime({
+    preloadPath: join(BOOKS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.BOOKS_RENDERER_URL,
+    rendererFile: join(BOOKS_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    onOpenCrm: () => newCrmTab(),
+    onOpenTenders: () => newTendersTab(),
+  })
+}
 
 // ---- UI language ----
 // Persisted in userData/app-settings.json so the editor modules can read the
@@ -2339,6 +2364,45 @@ const tm = (key: Parameters<typeof tMain>[1], params?: Parameters<typeof tMain>[
 
 let shellWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
+let automationServer: AutomationServer | null = null
+
+async function startAutomationServerWhenReady(): Promise<void> {
+  if (!automationMode.enabled || automationServer || !tabManager) return
+  const manager = tabManager
+  const dispatcher = new AutomationDispatcher(
+    {
+      getStatus: () => ({
+        version: app.getVersion(),
+        automation: true,
+        platform: process.platform,
+      }),
+      listTabs: () => manager.list(),
+      activateTab: (id) => {
+        const found = manager.list().some((tab) => tab.id === id)
+        if (found) manager.activateTab(id)
+        return found
+      },
+      openFile: (path) => openDocumentPath(path),
+      recentFiles: () => readRecentFiles(),
+    },
+    { sessionRoot: automationMode.sessionRoot, inputRoot: automationMode.inputRoot },
+  )
+  const token = randomBytes(32).toString('base64url')
+  const server = new AutomationServer({
+    token,
+    sessionId: automationMode.sessionId,
+    pid: process.pid,
+    metadataPath: automationMode.metadataPath,
+    dispatch: (command) => dispatcher.dispatch(command),
+  })
+  try {
+    await server.start()
+    automationServer = server
+  } catch {
+    await server.abortStartup()
+    app.quit()
+  }
+}
 
 /**
  * When the user creates a file from a specific project view, remember which
@@ -2568,7 +2632,7 @@ function createShellWindow(): void {
     if (tabManager === manager) tabManager = null
   })
 
-  if (process.env.ELECTRON_RENDERER_URL) {
+  if (!automationMode.enabled && process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
@@ -2578,8 +2642,8 @@ function createShellWindow(): void {
   // module so the first docs tab opens near-instantly (TabManager.prewarmDocs)
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => manager.prewarmDocs(), 800)
-    const ssPath = process.env.GENOFFICE_SCREENSHOT_PATH
-    if (ssPath) {
+    const ssPath = !automationMode.enabled ? process.env.GENOFFICE_SCREENSHOT_PATH : undefined
+    if (!automationMode.enabled && ssPath) {
       if (process.env.OPEN_CRM_ON_START) {
         setTimeout(() => manager.openCrmTab(), 300)
       }
@@ -2590,31 +2654,47 @@ function createShellWindow(): void {
         try {
           const act = manager.activeTab()
           const targetWc = act?.view && act.kind !== 'home' ? act.view.webContents : win.webContents
-          targetWc.on('console-message', (_e, level, message) => console.log('[view-console]', level, message))
+          targetWc.on('console-message', (_e, level, message) =>
+            console.log('[view-console]', level, message),
+          )
           if (process.env.CRM_CLICK_NAV) {
-            await targetWc.executeJavaScript(`
+            await targetWc
+              .executeJavaScript(
+                `
               const btns = Array.from(document.querySelectorAll('.crm-segmented-btn, .crm-nav-btn'));
               const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.CRM_CLICK_NAV}'.toLowerCase()));
               if (target) target.click();
-            `).catch(() => {})
+            `,
+              )
+              .catch(() => {})
             await new Promise((r) => setTimeout(r, 600))
           }
           if (process.env.CRM_CLICK_ACTION) {
-            await targetWc.executeJavaScript(`
+            await targetWc
+              .executeJavaScript(
+                `
               const btn = document.querySelector('${process.env.CRM_CLICK_ACTION}');
               if (btn) btn.click();
-            `).catch(() => {})
+            `,
+              )
+              .catch(() => {})
             await new Promise((r) => setTimeout(r, 600))
           }
           if (process.env.TENDERS_DISMISS_INTRO) {
-            await targetWc.executeJavaScript(`
+            await targetWc
+              .executeJavaScript(
+                `
               const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Skip intro'));
               if (btn) btn.click();
-            `).catch(() => {})
+            `,
+              )
+              .catch(() => {})
             await new Promise((r) => setTimeout(r, 600))
           }
           if (process.env.TENDERS_FLOW === 'demo-readiness') {
-            await targetWc.executeJavaScript(`
+            await targetWc
+              .executeJavaScript(
+                `
               (async () => {
                 const navBtns = Array.from(document.querySelectorAll('aside nav button'));
                 const tendersNav = navBtns.find(b => b.textContent && b.textContent.includes('Tenders'));
@@ -2638,19 +2718,27 @@ function createShellWindow(): void {
                   }
                 }
               })()
-            `).catch(() => {})
+            `,
+              )
+              .catch(() => {})
             await new Promise((r) => setTimeout(r, 2500))
           }
           if (process.env.TENDERS_NAV) {
-            await targetWc.executeJavaScript(`
+            await targetWc
+              .executeJavaScript(
+                `
               const btns = Array.from(document.querySelectorAll('aside nav button'));
               const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.TENDERS_NAV}'.toLowerCase()));
               if (target) target.click();
-            `).catch(() => {})
+            `,
+              )
+              .catch(() => {})
             await new Promise((r) => setTimeout(r, 1500))
           }
           if (process.env.TENDERS_ACTION) {
-            const res = await targetWc.executeJavaScript(`
+            const res = await targetWc
+              .executeJavaScript(
+                `
               (() => {
                 const btns = Array.from(document.querySelectorAll('button'));
                 const target = btns.find(b => b.textContent && b.textContent.toLowerCase().includes('${process.env.TENDERS_ACTION}'.toLowerCase()));
@@ -2660,12 +2748,16 @@ function createShellWindow(): void {
                 }
                 return 'NOT FOUND. Available buttons: ' + btns.map(b => b.textContent).join(' | ');
               })()
-            `).catch((err) => 'ERR: ' + err)
+            `,
+              )
+              .catch((err) => 'ERR: ' + err)
             console.log('[screenshot] TENDERS_ACTION:', res)
             await new Promise((r) => setTimeout(r, 4500))
           }
           if (process.env.TENDERS_ACTION2) {
-            const res = await targetWc.executeJavaScript(`
+            const res = await targetWc
+              .executeJavaScript(
+                `
               (() => {
                 const btns = Array.from(document.querySelectorAll('button'));
                 const target = btns.find(b => b.textContent && b.textContent.toLowerCase().includes('${process.env.TENDERS_ACTION2}'.toLowerCase()));
@@ -2675,15 +2767,21 @@ function createShellWindow(): void {
                 }
                 return 'NOT FOUND 2. Available buttons: ' + btns.map(b => b.textContent).join(' | ');
               })()
-            `).catch((err) => 'ERR: ' + err)
+            `,
+              )
+              .catch((err) => 'ERR: ' + err)
             console.log('[screenshot] TENDERS_ACTION2:', res)
             await new Promise((r) => setTimeout(r, 1500))
           }
           if (process.env.TENDERS_CLICK_SELECTOR) {
-            await targetWc.executeJavaScript(`
+            await targetWc
+              .executeJavaScript(
+                `
               const el = document.querySelector('${process.env.TENDERS_CLICK_SELECTOR}');
               if (el) el.click();
-            `).catch(() => {})
+            `,
+              )
+              .catch(() => {})
             await new Promise((r) => setTimeout(r, 800))
           }
           const img = await targetWc.capturePage()
@@ -4323,7 +4421,9 @@ async function installMainProcessProxy(): Promise<void> {
 
 // ---- lifecycle (the shell is the only owner) ----
 
-let pendingLaunchPath = supportedFileIn(process.argv) ?? unsupportedFileIn(process.argv)
+let pendingLaunchPath = automationMode.enabled
+  ? null
+  : (supportedFileIn(process.argv) ?? unsupportedFileIn(process.argv))
 
 // show() does not un-minimize, and on macOS ⌘W destroys the shell window while the
 // app keeps running — either way a file opened from Finder would land out of sight.
@@ -4357,25 +4457,33 @@ app.on('second-instance', (_event, argv, _cwd, additionalData) => {
   if (!file || !openDocumentPath(file)) tabManager?.openHomeTab()
 })
 
-installNavigationGuard(app)
-installContextMenu(app, () => contextMenuLabels(currentLang()))
-registerAiIpc()
-registerProjectIpc()
-registerDocsIpc()
-registerHomeIpc()
-registerTabsIpc()
-registerDroppedFilesIpc()
+if (!invalidAutomationLaunch) {
+  installNavigationGuard(app)
+  installContextMenu(app, () => contextMenuLabels(currentLang()))
+  registerAiIpc()
+  registerProjectIpc()
+  registerDocsIpc()
+  registerHomeIpc()
+  registerTabsIpc()
+  registerDroppedFilesIpc()
 
-// sheets' project:resolveChat goes through the handler registered by docs-main; the sessionId reverse lookup hooks in here
-setSessionPathResolver(resolveSheetsSessionPath)
+  // sheets' project:resolveChat goes through the handler registered by docs-main; the sessionId reverse lookup hooks in here
+  setSessionPathResolver(resolveSheetsSessionPath)
+}
 
 /** Dev-only pid marker for the takeover below; scoped to userData like the lock itself. */
 const devPidFile = () => join(app.getPath('userData'), 'dev-instance.pid')
 
 app.whenReady().then(async () => {
+  if (automationMode.disposition === 'invalid') {
+    // Explicit automation with a malformed, stale, or replayed record must
+    // fail closed; it must not silently turn into a normal launch.
+    app.quit()
+    return
+  }
   const lockData = () => (pendingLaunchPath ? { launchPath: pendingLaunchPath } : {})
   let hasLock = app.requestSingleInstanceLock(lockData())
-  if (!hasLock && !app.isPackaged) {
+  if (!hasLock && !app.isPackaged && !automationMode.enabled) {
     // Dev watch restart: electron-vite SIGTERMs the previous instance and spawns this
     // one immediately. Chromium turns that SIGTERM into a graceful quit (Node's
     // process.on('SIGTERM') never fires in the main process), and the quit can wedge
@@ -4410,7 +4518,7 @@ app.whenReady().then(async () => {
     }
   }
 
-  proxyBootstrap = installMainProcessProxy()
+  if (!automationMode.enabled) proxyBootstrap = installMainProcessProxy()
   app.setAccessibilitySupportEnabled(true)
   // Settle the shared uiLang from saved settings BEFORE any tab renderer can
   // ask 'app:get-language': the editor handlers return the i18n module's
@@ -4442,14 +4550,22 @@ app.whenReady().then(async () => {
   } catch {
     // settings write failures must never block startup
   }
-  initAnalytics()
-  analytics.track('app_launch')
-  startSheetsCaptureServer()
+  if (!automationMode.enabled) {
+    initAnalytics()
+    analytics.track('app_launch')
+    startSheetsCaptureServer()
+  }
   createShellWindow()
   // deferred to ready: labels need currentLang(), which reads app.getLocale()
   installBackToHomeItems()
   installDockMenu()
-  initAutoUpdater(() => shellWindow, currentUpdateChannel())
+  if (!automationMode.enabled) initAutoUpdater(() => shellWindow, currentUpdateChannel())
+
+  if (automationMode.enabled) {
+    shellWindow?.webContents.once('did-finish-load', () => {
+      void startAutomationServerWhenReady()
+    })
+  }
 
   if (!pendingLaunchPath || !openDocumentPath(pendingLaunchPath)) tabManager?.openHomeTab()
   pendingLaunchPath = null
@@ -4465,6 +4581,14 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   // No close prompt may fall through to "Save" during shutdown
-  markSheetsShuttingDown()
-  stopSheetsSidecar()
+  if (!automationMode.enabled) {
+    markSheetsShuttingDown()
+    stopSheetsSidecar()
+  }
+})
+
+// before-quit can be canceled by the existing dirty-document close flow. The
+// endpoint remains available until Electron emits its terminal quit event.
+app.on('quit', () => {
+  if (automationServer) void automationServer.closeAtTerminal()
 })
