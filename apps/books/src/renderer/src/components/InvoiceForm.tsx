@@ -9,7 +9,8 @@ interface InvoiceFormProps {
 }
 
 export function InvoiceForm({ type }: InvoiceFormProps) {
-  const { data, activeInvoiceId, setActiveInvoiceId, saveInvoice, setPrintInvoice } = useBooksStore()
+  const { data, activeInvoiceId, setActiveInvoiceId, saveInvoice, setPrintInvoice } =
+    useBooksStore()
   const existing = data.invoices.find((i) => i.id === activeInvoiceId)
 
   const relevantParties = data.parties.filter((p) =>
@@ -33,6 +34,14 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
   )
   const [tenderRef, setTenderRef] = useState(existing?.tenderReference || '')
   const [notes, setNotes] = useState(existing?.notes || 'Standard 30 days payment terms.')
+  const [discountTotal, setDiscountTotal] = useState(
+    existing?.discountTotal !== undefined ? String(existing.discountTotal) : '',
+  )
+  const [roundOff, setRoundOff] = useState(
+    existing?.roundOff !== undefined ? String(existing.roundOff) : '',
+  )
+
+  const effectiveTaxRate = data.settings.defaultTaxRate ?? 15
 
   const [items, setItems] = useState<InvoiceItem[]>(
     existing?.items && existing.items.length > 0
@@ -58,7 +67,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
             accountName: defaultAccount.name,
             qty: 1,
             rate: type === 'Sales' ? 50000 : 15000,
-            taxRate: 15,
+            taxRate: effectiveTaxRate,
             amount: type === 'Sales' ? 50000 : 15000,
           },
         ],
@@ -89,13 +98,12 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       {
         id: `item-${Date.now()}`,
         itemCode: `ITEM-${String(prev.length + 1).padStart(2, '0')}`,
-        description:
-          type === 'Sales' ? 'Commercial Service Delivery' : 'Direct Project Materials',
+        description: type === 'Sales' ? 'Commercial Service Delivery' : 'Direct Project Materials',
         accountId: defaultAccount.id,
         accountName: defaultAccount.name,
         qty: 1,
         rate: type === 'Sales' ? 15000 : 10000,
-        taxRate: 15,
+        taxRate: effectiveTaxRate,
         amount: type === 'Sales' ? 15000 : 10000,
       },
     ])
@@ -106,7 +114,11 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
     setItems((prev) => prev.filter((it) => it.id !== id))
   }
 
-  const { subtotal, taxTotal, grandTotal } = calculateInvoiceTotals(items)
+  const { subtotal, taxTotal, grandTotal } = calculateInvoiceTotals(items, {
+    taxInclusive: data.settings.taxInclusive,
+    discountTotal: Number(discountTotal) || 0,
+    roundOff: Number(roundOff) || 0,
+  })
 
   const handleSave = async (status: 'Draft' | 'Unpaid') => {
     const selectedParty = data.parties.find((p) => p.id === partyId)
@@ -121,6 +133,10 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       notes,
       items,
       status,
+      ...(discountTotal.trim() && Number(discountTotal) !== 0
+        ? { discountTotal: Number(discountTotal) }
+        : {}),
+      ...(roundOff.trim() && Number(roundOff) !== 0 ? { roundOff: Number(roundOff) } : {}),
     })
   }
 
@@ -137,10 +153,14 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
           </button>
           <div>
             <h1 className="text-xl font-bold text-[#1E293B]">
-              {existing ? `Edit ${existing.invoiceNumber}` : `New ${type === 'Sales' ? 'Sales Invoice' : 'Purchase Bill'}`}
+              {existing
+                ? `Edit ${existing.invoiceNumber}`
+                : `New ${type === 'Sales' ? 'Sales Invoice' : 'Purchase Bill'}`}
             </h1>
             <p className="text-xs text-[#7C7C7C] mt-0.5">
-              {type === 'Sales' ? 'Bill a client or won tender contract' : 'Record an operational vendor expense'}
+              {type === 'Sales'
+                ? 'Bill a client or won tender contract'
+                : 'Record an operational vendor expense'}
             </p>
           </div>
         </div>
@@ -194,7 +214,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#525252] mb-1.5">Invoice Date</label>
+            <label className="block text-xs font-semibold text-[#525252] mb-1.5">
+              Invoice Date
+            </label>
             <input
               type="date"
               value={date}
@@ -204,7 +226,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#525252] mb-1.5">Payment Due Date</label>
+            <label className="block text-xs font-semibold text-[#525252] mb-1.5">
+              Payment Due Date
+            </label>
             <input
               type="date"
               value={dueDate}
@@ -231,7 +255,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       {/* Itemized Line Items Table */}
       <div className="bg-white rounded-xl border border-[#EDEDED] shadow-xs overflow-hidden mb-6">
         <div className="px-6 py-3.5 bg-[#F8F8F8] border-b border-[#EDEDED] flex items-center justify-between">
-          <span className="text-xs font-bold text-[#1E293B] uppercase tracking-wider">Line Items</span>
+          <span className="text-xs font-bold text-[#1E293B] uppercase tracking-wider">
+            Line Items
+          </span>
           <button
             onClick={addItem}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007BE0] hover:underline"
@@ -249,6 +275,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
               <th className="px-4 py-2.5 text-right w-20">Qty</th>
               <th className="px-4 py-2.5 text-right w-28">Rate (excl)</th>
               <th className="px-4 py-2.5 text-right w-20">VAT %</th>
+              <th className="px-4 py-2.5 text-right w-16">Disc %</th>
               <th className="px-6 py-2.5 text-right w-28">Amount</th>
               <th className="px-4 py-2.5 w-10"></th>
             </tr>
@@ -301,9 +328,21 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
                     onChange={(e) => updateItem(it.id, 'taxRate', parseFloat(e.target.value))}
                     className="w-full px-1.5 py-1.5 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none focus:border-[#1E293B]"
                   >
-                    <option value={15}>15%</option>
+                    <option value={effectiveTaxRate}>{effectiveTaxRate}%</option>
                     <option value={0}>0%</option>
                   </select>
+                </td>
+                <td className="px-4 py-2.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.5"
+                    placeholder="0"
+                    value={it.discountRate ?? ''}
+                    onChange={(e) => updateItem(it.id, 'discountRate', parseFloat(e.target.value))}
+                    className="w-full px-1.5 py-1.5 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none focus:border-[#1E293B]"
+                  />
                 </td>
                 <td className="px-6 py-2.5 text-right font-semibold text-[#1E293B]">
                   {data.settings.currencySymbol} {it.amount.toFixed(2)}
@@ -325,7 +364,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       {/* Bottom Summary & Notes */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-[#EDEDED] p-5 shadow-xs">
-          <label className="block text-xs font-semibold text-[#525252] mb-2">Terms & Banking Details</label>
+          <label className="block text-xs font-semibold text-[#525252] mb-2">
+            Terms & Banking Details
+          </label>
           <textarea
             rows={4}
             value={notes}
@@ -338,15 +379,56 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
           <div className="space-y-2.5 text-xs">
             <div className="flex justify-between text-[#7C7C7C]">
               <span>Subtotal</span>
-              <span className="font-semibold text-[#1E293B]">{data.settings.currencySymbol} {subtotal.toFixed(2)}</span>
+              <span className="font-semibold text-[#1E293B]">
+                {data.settings.currencySymbol} {subtotal.toFixed(2)}
+              </span>
             </div>
+
+            {/* Invoice-level discount (VAT-exclusive) */}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[#7C7C7C]">Invoice discount (excl.)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#7C7C7C]">{data.settings.currencySymbol}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={discountTotal}
+                  onChange={(e) => setDiscountTotal(e.target.value)}
+                  className="w-28 px-2 py-1 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none focus:border-[#1E293B]"
+                />
+              </div>
+            </div>
+
             <div className="flex justify-between text-[#7C7C7C]">
-              <span>VAT / Tax (15%)</span>
-              <span className="font-semibold text-[#1E293B]">{data.settings.currencySymbol} {taxTotal.toFixed(2)}</span>
+              <span>VAT / Tax ({effectiveTaxRate}%)</span>
+              <span className="font-semibold text-[#1E293B]">
+                {data.settings.currencySymbol} {taxTotal.toFixed(2)}
+              </span>
             </div>
+
+            {/* Round-off adjustment so the grand total lands on a round number */}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[#7C7C7C]">Round-off</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#7C7C7C]">{data.settings.currencySymbol}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={roundOff}
+                  onChange={(e) => setRoundOff(e.target.value)}
+                  className="w-28 px-2 py-1 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none focus:border-[#1E293B]"
+                />
+              </div>
+            </div>
+
             <div className="pt-3 border-t border-[#EDEDED] flex justify-between text-sm font-bold text-[#1E293B]">
               <span>Grand Total</span>
-              <span className="text-base text-[#10B981]">{data.settings.currencySymbol} {grandTotal.toFixed(2)}</span>
+              <span className="text-base text-[#10B981]">
+                {data.settings.currencySymbol} {grandTotal.toFixed(2)}
+              </span>
             </div>
           </div>
         </div>

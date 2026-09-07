@@ -5,12 +5,14 @@ import {
   Printer,
   Check,
   Trash2,
+  RotateCcw,
   CheckCircle2,
   Clock,
   AlertCircle,
   FileSpreadsheet,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
+import { CreditNoteModal } from './CreditNoteModal'
 import type { Invoice, InvoiceStatus, InvoiceType } from '../../../shared/types'
 
 interface InvoiceListProps {
@@ -18,16 +20,12 @@ interface InvoiceListProps {
 }
 
 export function InvoiceList({ type }: InvoiceListProps) {
-  const {
-    data,
-    setActiveInvoiceId,
-    setPrintInvoice,
-    markInvoicePaid,
-    deleteInvoice,
-  } = useBooksStore()
+  const { data, setActiveInvoiceId, setPrintInvoice, markInvoicePaid, deleteInvoice } =
+    useBooksStore()
 
   const [statusFilter, setStatusFilter] = useState<'All' | InvoiceStatus>('All')
   const [searchTerm, setSearchTerm] = useState('')
+  const [creditNoteFor, setCreditNoteFor] = useState<Invoice | null>(null)
 
   const invoices = data.invoices.filter((i) => i.type === type)
 
@@ -74,10 +72,12 @@ export function InvoiceList({ type }: InvoiceListProps) {
   }
 
   const exportTableToSheets = () => {
-    const header = 'Invoice Number,Type,Customer / Supplier,Date,Due Date,Grand Total,Outstanding Amount,Status,Reference\n'
+    const header =
+      'Invoice Number,Type,Customer / Supplier,Date,Due Date,Grand Total,Outstanding Amount,Status,Reference\n'
     const rows = filteredInvoices
-      .map((i) =>
-        `"${i.invoiceNumber}","${i.type}","${i.partyName}","${i.date}","${i.dueDate}",${i.grandTotal},${i.outstandingAmount},"${i.status}","${i.tenderReference || ''}"`,
+      .map(
+        (i) =>
+          `"${i.invoiceNumber}","${i.type}","${i.partyName}","${i.date}","${i.dueDate}",${i.grandTotal},${i.outstandingAmount},"${i.status}","${i.tenderReference || ''}"`,
       )
       .join('\n')
     if (window.booksApi?.exportToSheets) {
@@ -214,6 +214,19 @@ export function InvoiceList({ type }: InvoiceListProps) {
                         </button>
                       )}
 
+                      {type === 'Sales' &&
+                        !inv.creditNote &&
+                        inv.status !== 'Draft' &&
+                        inv.status !== 'Cancelled' && (
+                          <button
+                            title="Issue Credit Note"
+                            onClick={() => setCreditNoteFor(inv)}
+                            className="p-1.5 text-[#0F766E] hover:bg-[#F0FDFA] rounded-md transition-colors"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                        )}
+
                       <button
                         title="Delete"
                         onClick={() => deleteInvoice(inv.id)}
@@ -229,6 +242,10 @@ export function InvoiceList({ type }: InvoiceListProps) {
           </tbody>
         </table>
       </div>
+
+      {creditNoteFor && (
+        <CreditNoteModal original={creditNoteFor} onClose={() => setCreditNoteFor(null)} />
+      )}
     </div>
   )
 }

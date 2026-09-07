@@ -1,10 +1,41 @@
-import React from 'react'
-import { FileSpreadsheet, TrendingUp, Scale, BookOpen, CheckSquare } from 'lucide-react'
+import React, { useState } from 'react'
+import {
+  BookOpen,
+  CheckSquare,
+  Clock,
+  FileSpreadsheet,
+  Receipt,
+  Scale,
+  TrendingUp,
+} from 'lucide-react'
 import { useBooksStore } from '../store'
+import { agingBuckets, taxRegister } from '../../../shared/reports'
+import type { ReportType } from '../../../shared/types'
 
 export function ReportsView() {
   const { data, activeReport, setActiveReport } = useBooksStore()
-  const { accounts, settings, journalEntries } = data
+  const { accounts, settings, journalEntries, invoices, parties } = data
+  const [agingScope, setAgingScope] = useState<'Sales' | 'Purchase'>('Sales')
+
+  // ReportType in shared/types covers the four legacy statements; the Aging
+  // and Tax Register tabs live in this view only (store/types untouched).
+  type ReportTab = ReportType | 'aging' | 'tax-register'
+  const report = activeReport as ReportTab
+  const setReportTab = (tab: ReportTab) => setActiveReport(tab as ReportType)
+
+  const asOf = new Date().toISOString().split('T')[0]
+  const agingRows = agingBuckets(invoices, parties, asOf, agingScope)
+  const agingTotals = agingRows.reduce(
+    (sum, r) => ({
+      current: sum.current + r.current,
+      days30: sum.days30 + r.days30,
+      days60: sum.days60 + r.days60,
+      days90: sum.days90 + r.days90,
+      total: sum.total + r.total,
+    }),
+    { current: 0, days30: 0, days60: 0, days90: 0, total: 0 },
+  )
+  const taxRows = taxRegister(invoices)
 
   const formatMoney = (val: number) => {
     return `${settings.currencySymbol} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -33,7 +64,7 @@ export function ReportsView() {
     let reportTitle: string
     let csv = ''
 
-    if (activeReport === 'profit-loss') {
+    if (report === 'profit-loss') {
       reportTitle = 'Profit_and_Loss_Statement'
       csv = `Statement,Account Name,Amount (${settings.currency})\n`
       csv += 'INCOME\n'
@@ -47,7 +78,7 @@ export function ReportsView() {
       })
       csv += `Total Expenses,,${totalExpense.toFixed(2)}\n\n`
       csv += `NET PROFIT / (LOSS),,${netProfit.toFixed(2)}\n`
-    } else if (activeReport === 'balance-sheet') {
+    } else if (report === 'balance-sheet') {
       reportTitle = 'Balance_Sheet'
       csv = `Category,Account Name,Amount (${settings.currency})\n`
       csv += 'ASSETS\n'
@@ -66,7 +97,7 @@ export function ReportsView() {
       })
       csv += `Retained Profit / Current Period,,${netProfit.toFixed(2)}\n`
       csv += `Total Equity & Liabilities,,${(totalLiabilities + totalEquity).toFixed(2)}\n`
-    } else if (activeReport === 'trial-balance') {
+    } else if (report === 'trial-balance') {
       reportTitle = 'Trial_Balance'
       csv = `Account Name,Root Type,Debit (${settings.currency}),Credit (${settings.currency})\n`
       let totalDr = 0
@@ -82,6 +113,20 @@ export function ReportsView() {
           csv += `"${a.name}","${a.rootType}",${dr.toFixed(2)},${cr.toFixed(2)}\n`
         })
       csv += `TOTAL,,${totalDr.toFixed(2)},${totalCr.toFixed(2)}\n`
+    } else if (report === 'aging') {
+      reportTitle = `Aging_Report_${agingScope === 'Sales' ? 'Receivable' : 'Payable'}`
+      csv = `Party,Current,30 Days,60 Days,90+ Days,Total\n`
+      agingRows.forEach((r) => {
+        csv += `"${r.partyName}",${r.current.toFixed(2)},${r.days30.toFixed(2)},${r.days60.toFixed(2)},${r.days90.toFixed(2)},${r.total.toFixed(2)}\n`
+      })
+      csv += `TOTAL,${agingTotals.current.toFixed(2)},${agingTotals.days30.toFixed(2)},${agingTotals.days60.toFixed(2)},${agingTotals.days90.toFixed(2)},${agingTotals.total.toFixed(2)}\n`
+    } else if (report === 'tax-register') {
+      reportTitle = 'Tax_Register'
+      csv = `Tax Rate,Sales Taxable,Sales VAT (Output),Purchase Taxable,Purchase VAT (Input)\n`
+      taxRows.forEach((r) => {
+        const label = r.taxRate === null ? 'TOTAL' : `${r.taxRate}%`
+        csv += `"${label}",${r.salesTaxable.toFixed(2)},${r.salesTax.toFixed(2)},${r.purchaseTaxable.toFixed(2)},${r.purchaseTax.toFixed(2)}\n`
+      })
     } else {
       reportTitle = 'General_Ledger'
       csv = `Date,Entry Number,Account,Debit,Credit,Remark\n`
@@ -122,7 +167,7 @@ export function ReportsView() {
         <button
           onClick={() => setActiveReport('profit-loss')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
-            activeReport === 'profit-loss'
+            report === 'profit-loss'
               ? 'bg-[#1E293B] text-white'
               : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
@@ -134,7 +179,7 @@ export function ReportsView() {
         <button
           onClick={() => setActiveReport('balance-sheet')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
-            activeReport === 'balance-sheet'
+            report === 'balance-sheet'
               ? 'bg-[#1E293B] text-white'
               : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
@@ -146,7 +191,7 @@ export function ReportsView() {
         <button
           onClick={() => setActiveReport('trial-balance')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
-            activeReport === 'trial-balance'
+            report === 'trial-balance'
               ? 'bg-[#1E293B] text-white'
               : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
@@ -158,7 +203,7 @@ export function ReportsView() {
         <button
           onClick={() => setActiveReport('general-ledger')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
-            activeReport === 'general-ledger'
+            report === 'general-ledger'
               ? 'bg-[#1E293B] text-white'
               : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
@@ -166,10 +211,34 @@ export function ReportsView() {
           <BookOpen className="w-3.5 h-3.5" />
           General Ledger
         </button>
+
+        <button
+          onClick={() => setReportTab('aging')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+            report === 'aging'
+              ? 'bg-[#1E293B] text-white'
+              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          Aging
+        </button>
+
+        <button
+          onClick={() => setReportTab('tax-register')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+            report === 'tax-register'
+              ? 'bg-[#1E293B] text-white'
+              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+          }`}
+        >
+          <Receipt className="w-3.5 h-3.5" />
+          Tax Register
+        </button>
       </div>
 
       {/* --- REPORT 1: PROFIT AND LOSS --- */}
-      {activeReport === 'profit-loss' && (
+      {report === 'profit-loss' && (
         <div className="bg-white rounded-xl border border-[#EDEDED] p-8 shadow-xs max-w-4xl">
           <div className="text-center pb-6 border-b border-[#EDEDED] mb-6">
             <h2 className="text-lg font-bold text-[#1E293B]">{settings.companyName}</h2>
@@ -226,7 +295,7 @@ export function ReportsView() {
       )}
 
       {/* --- REPORT 2: BALANCE SHEET --- */}
-      {activeReport === 'balance-sheet' && (
+      {report === 'balance-sheet' && (
         <div className="bg-white rounded-xl border border-[#EDEDED] p-8 shadow-xs max-w-4xl">
           <div className="text-center pb-6 border-b border-[#EDEDED] mb-6">
             <h2 className="text-lg font-bold text-[#1E293B]">{settings.companyName}</h2>
@@ -309,7 +378,7 @@ export function ReportsView() {
       )}
 
       {/* --- REPORT 3: TRIAL BALANCE --- */}
-      {activeReport === 'trial-balance' && (
+      {report === 'trial-balance' && (
         <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
           <table className="w-full text-left text-xs">
             <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
@@ -344,7 +413,7 @@ export function ReportsView() {
       )}
 
       {/* --- REPORT 4: GENERAL LEDGER --- */}
-      {activeReport === 'general-ledger' && (
+      {report === 'general-ledger' && (
         <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
           <table className="w-full text-left text-xs">
             <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
@@ -374,6 +443,154 @@ export function ReportsView() {
                   </tr>
                 )),
               )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* --- REPORT 5: AGING (AR / AP) --- */}
+      {report === 'aging' && (
+        <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-bold text-[#1E293B]">
+                Accounts {agingScope === 'Sales' ? 'Receivable' : 'Payable'} Aging
+              </h2>
+              <p className="text-xs text-[#7C7C7C] mt-0.5">As of {asOf}</p>
+            </div>
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-[#F8F8F8] border border-[#EDEDED]">
+              <button
+                onClick={() => setAgingScope('Sales')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  agingScope === 'Sales'
+                    ? 'bg-[#1E293B] text-white'
+                    : 'text-[#7C7C7C] hover:text-[#1E293B]'
+                }`}
+              >
+                Sales (AR)
+              </button>
+              <button
+                onClick={() => setAgingScope('Purchase')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  agingScope === 'Purchase'
+                    ? 'bg-[#1E293B] text-white'
+                    : 'text-[#7C7C7C] hover:text-[#1E293B]'
+                }`}
+              >
+                Purchase (AP)
+              </button>
+            </div>
+          </div>
+          <table className="w-full text-left text-xs">
+            <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
+              <tr>
+                <th className="px-4 py-3">Party</th>
+                <th className="px-4 py-3 text-right">Current</th>
+                <th className="px-4 py-3 text-right">30 Days</th>
+                <th className="px-4 py-3 text-right">60 Days</th>
+                <th className="px-4 py-3 text-right">90+ Days</th>
+                <th className="px-4 py-3 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EDEDED]">
+              {agingRows.map((row) => (
+                <tr key={row.partyId} className="hover:bg-[#FBFBFB]">
+                  <td className="px-4 py-2.5 font-medium text-[#1E293B]">{row.partyName}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                    {formatMoney(row.current)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                    {formatMoney(row.days30)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                    {formatMoney(row.days60)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                    {formatMoney(row.days90)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono font-semibold text-[#1E293B]">
+                    {formatMoney(row.total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-[#F8F8F8] font-bold text-[#1E293B]">
+                <td className="px-4 py-3">Total</td>
+                <td className="px-4 py-3 text-right font-mono">
+                  {formatMoney(agingTotals.current)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono">
+                  {formatMoney(agingTotals.days30)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono">
+                  {formatMoney(agingTotals.days60)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono">
+                  {formatMoney(agingTotals.days90)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono">{formatMoney(agingTotals.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          {agingRows.length === 0 && (
+            <p className="text-xs text-[#7C7C7C] mt-4">
+              No open {agingScope === 'Sales' ? 'sales invoices' : 'purchase bills'} in this aging
+              view.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* --- REPORT 6: TAX REGISTER --- */}
+      {report === 'tax-register' && (
+        <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold text-[#1E293B]">Tax Register (VAT)</h2>
+            <p className="text-xs text-[#7C7C7C] mt-0.5">
+              VAT Output = Sales VAT · VAT Input = Purchase VAT
+            </p>
+          </div>
+          <table className="w-full text-left text-xs">
+            <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
+              <tr>
+                <th className="px-4 py-3">Rate</th>
+                <th className="px-4 py-3 text-right">Sales Taxable</th>
+                <th className="px-4 py-3 text-right">Sales VAT (Output)</th>
+                <th className="px-4 py-3 text-right">Purchase Taxable</th>
+                <th className="px-4 py-3 text-right">Purchase VAT (Input)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EDEDED]">
+              {taxRows.map((row) => {
+                const isTotal = row.taxRate === null
+                return (
+                  <tr
+                    key={isTotal ? 'total' : `rate-${row.taxRate}`}
+                    className={isTotal ? 'bg-[#F8F8F8]' : 'hover:bg-[#FBFBFB]'}
+                  >
+                    <td
+                      className={`px-4 py-2.5 ${
+                        isTotal ? 'font-bold text-[#1E293B]' : 'font-medium text-[#1E293B]'
+                      }`}
+                    >
+                      {isTotal ? 'TOTAL' : `${row.taxRate}%`}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                      {formatMoney(row.salesTaxable)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                      {formatMoney(row.salesTax)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                      {formatMoney(row.purchaseTaxable)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
+                      {formatMoney(row.purchaseTax)}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

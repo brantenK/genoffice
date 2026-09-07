@@ -13,10 +13,17 @@ import {
   ArrowUpRight,
   HelpCircle,
   Landmark,
+  Wallet,
+  Settings2,
+  History,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
+import { SetupWizard } from './SetupWizard'
 import { Dashboard } from './Dashboard'
 import { BankingView } from './BankingView'
+import { PaymentsView } from './PaymentsView'
+import { SettingsView } from './SettingsView'
+import { AuditLogView } from './AuditLogView'
 import { InvoiceList } from './InvoiceList'
 import { InvoiceForm } from './InvoiceForm'
 import { PartyList } from './PartyList'
@@ -27,8 +34,15 @@ import { InvoicePrintModal } from './InvoicePrintModal'
 import type { BooksNavigationTab } from '../../../shared/types'
 
 export function Desk() {
-  const { activeTab, setActiveTab, activeInvoiceId, setActiveInvoiceId, loadData, data } =
-    useBooksStore()
+  const {
+    activeTab,
+    setActiveTab,
+    activeInvoiceId,
+    setActiveInvoiceId,
+    loadData,
+    data,
+    needsSetup,
+  } = useBooksStore()
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
@@ -45,6 +59,10 @@ export function Desk() {
     }
   }, [])
 
+  if (needsSetup) {
+    return <SetupWizard />
+  }
+
   const navItems: {
     id: BooksNavigationTab
     label: string
@@ -53,12 +71,15 @@ export function Desk() {
   }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'banking', label: 'Banking & Statements', icon: Landmark, section: 'Banking' },
+    { id: 'payments', label: 'Payments', icon: Wallet, section: 'Banking' },
     { id: 'invoices', label: 'Sales Invoices', icon: Receipt, section: 'Sales' },
     { id: 'parties', label: 'Customers & Parties', icon: Users, section: 'Sales' },
     { id: 'purchases', label: 'Purchase Bills', icon: ShoppingBag, section: 'Purchases' },
     { id: 'accounts', label: 'Chart of Accounts', icon: FolderTree, section: 'Accounting' },
     { id: 'journal', label: 'Journal Entries', icon: BookOpen, section: 'Accounting' },
+    { id: 'audit', label: 'Audit Log', icon: History, section: 'Accounting' },
     { id: 'reports', label: 'Financial Reports', icon: FileSpreadsheet, section: 'Reports' },
+    { id: 'settings', label: 'Settings', icon: Settings2, section: 'Settings' },
   ]
 
   const handleOpenCrm = () => {
@@ -205,12 +226,15 @@ export function Desk() {
           <>
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'banking' && <BankingView />}
+            {activeTab === 'payments' && <PaymentsView />}
             {activeTab === 'invoices' && <InvoiceList type="Sales" />}
             {activeTab === 'purchases' && <InvoiceList type="Purchase" />}
             {activeTab === 'parties' && <PartyList />}
             {activeTab === 'accounts' && <ChartOfAccounts />}
             {activeTab === 'journal' && <JournalEntryList />}
+            {activeTab === 'audit' && <AuditLogView />}
             {activeTab === 'reports' && <ReportsView />}
+            {activeTab === 'settings' && <SettingsView />}
           </>
         )}
       </main>

@@ -127,7 +127,7 @@ jobs:
           npm run build -w @genoffice/books
 
       - name: Business app workflow E2E suite
-        run: node tools/verify-suite-workflows.mjs
+        run: npx tsx tools/verify-suite-workflows.mjs
 
   e2e:
     # 22.04, not -latest: 24.04's AppArmor hardening blocks Electron renderer

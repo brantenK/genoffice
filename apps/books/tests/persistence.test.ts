@@ -38,10 +38,26 @@ describe('F20 & F3 Chart of Accounts Harmonization & Resilient Persistence Suite
         updatedAt: new Date().toISOString(),
         settings: { ...DEFAULT_BOOK_SETTINGS },
         accounts: [...CORE_ACCOUNTS],
-        parties: [
-          { id: 'p1', name: 'Test Customer', type: 'Customer', outstandingBalance: 5000 },
+        parties: [{ id: 'p1', name: 'Test Customer', type: 'Customer', outstandingBalance: 5000 }],
+        invoices: [
+          {
+            id: 'i1',
+            invoiceNumber: 'INV-2026-001',
+            type: 'Sales',
+            partyId: 'p1',
+            partyName: 'Test Customer',
+            date: '2026-09-01',
+            dueDate: '2026-10-01',
+            items: [],
+            subtotal: 5000,
+            taxTotal: 0,
+            grandTotal: 5000,
+            outstandingAmount: 5000,
+            status: 'Unpaid',
+            createdAt: '2026-09-01T00:00:00Z',
+            updatedAt: '2026-09-01T00:00:00Z',
+          },
         ],
-        invoices: [],
         journalEntries: [],
         bankTransactions: [],
       }
@@ -57,6 +73,7 @@ describe('F20 & F3 Chart of Accounts Harmonization & Resilient Persistence Suite
       const readBack = readBooksStore(booksFilePath)
       expect(readBack.parties).toHaveLength(1)
       expect(readBack.parties[0].name).toBe('Test Customer')
+      // Party balances are derived from open invoices (ledger-first).
       expect(readBack.parties[0].outstandingBalance).toBe(5000)
     })
 

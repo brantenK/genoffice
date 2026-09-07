@@ -2,27 +2,65 @@ import { create } from 'zustand'
 import type {
   BooksData,
   BooksNavigationTab,
+  CompanySettings,
   Invoice,
+  InvoiceItem,
   InvoiceStatus,
   JournalEntry,
   Party,
+  PaymentAllocation,
   ReportType,
 } from '../../shared/types'
-import { initialBooksData } from './mock/initialData'
+import { EMPTY_ACCOUNTS, DEFAULT_BOOK_SETTINGS } from '../../shared/chart'
+import { appendAudit, createAuditEntry } from '../../shared/audit'
 import {
   round2,
   calculateInvoiceTotals,
   createSalesInvoiceJournal,
   createPurchaseBillJournal,
   createSettlementJournal,
+  createBankImportJournal,
+  createReconciliationJournal,
+  computeAccountBalances,
+  nextInvoiceNumber,
+  nextJournalNumber,
   recomputePartyBalances,
   parseBankStatementCsv,
   deduplicateBankTransactions,
 } from '../../shared/accounting'
+import {
+  applyPayment,
+  createPaymentJournal,
+  dropInvoiceFromPayments,
+  linkPaymentToBankTransaction,
+  paymentCoverage,
+  planImportCoverage,
+} from '../../shared/payments'
+import { closePeriod, isDateLocked } from '../../shared/closing'
+import {
+  createCreditNoteJournal,
+  validateCreditNote,
+  repostPlanForPartialSettlement,
+  reversalJournalRemoval,
+} from '../../shared/credit-notes'
+
+/** A fresh, empty ledger — shown until the first-run setup wizard saves. */
+export const emptyBooksData: BooksData = {
+  version: 1,
+  updatedAt: new Date().toISOString(),
+  settings: { ...DEFAULT_BOOK_SETTINGS },
+  accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
+  parties: [],
+  invoices: [],
+  journalEntries: [],
+  bankTransactions: [],
+}
 
 interface BooksState {
   activeTab: BooksNavigationTab
   data: BooksData
+  /** True on first run, when no books-data.json exists yet. */
+  needsSetup: boolean
   activeInvoiceId: string | null
   invoiceStatusFilter: 'All' | InvoiceStatus
   activeReport: ReportType
@@ -36,14 +74,32 @@ interface BooksState {
   setActiveReport: (report: ReportType) => void
   setPrintInvoice: (invoice: Invoice | null) => void
   setSearchTerm: (term: string) => void
+  completeSetup: (ledger: BooksData) => Promise<void>
+  updateSettings: (patch: Partial<CompanySettings>) => Promise<void>
+  closeFinancialYear: (throughDate: string) => Promise<{ ok: boolean; error?: string }>
+  saveCreditNote: (input: {
+    originalInvoiceId: string
+    date?: string
+    items?: InvoiceItem[]
+    notes?: string
+  }) => Promise<{ ok: boolean; creditNote?: Invoice; error?: string }>
   loadData: () => Promise<void>
   saveInvoice: (invoice: Partial<Invoice>) => Promise<void>
   markInvoicePaid: (invoiceId: string) => Promise<void>
   deleteInvoice: (invoiceId: string) => Promise<void>
   addParty: (party: Omit<Party, 'id' | 'outstandingBalance'>) => Promise<void>
-  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'posted'>) => Promise<void>
+  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'posted'>) => Promise<boolean>
   importBankStatementCsv: (csvContent: string) => Promise<any>
   reconcileTransaction: (transactionId: string, invoiceId: string) => Promise<any>
+  recordPayment: (input: {
+    partyId: string
+    date?: string
+    type?: 'received' | 'paid' | 'refund'
+    method?: string
+    reference?: string
+    allocations: PaymentAllocation[]
+  }) => Promise<{ ok: boolean; error?: string }>
+  deletePayment: (paymentId: string) => Promise<void>
   syncFromMain: (incomingData: BooksData) => void
   persist: () => Promise<void>
 }
@@ -60,6 +116,8 @@ export function computeDataHash(data: BooksData): string {
       invoices: data.invoices,
       journalEntries: data.journalEntries,
       bankTransactions: data.bankTransactions,
+      payments: data.payments,
+      auditLog: data.auditLog,
     })
   } catch {
     return String(data)
@@ -80,7 +138,8 @@ function getBooksApi() {
 
 export const useBooksStore = create<BooksState>((set, get) => ({
   activeTab: 'dashboard',
-  data: initialBooksData,
+  data: emptyBooksData,
+  needsSetup: false,
   activeInvoiceId: null,
   invoiceStatusFilter: 'All',
   activeReport: 'profit-loss',
@@ -94,6 +153,65 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   setPrintInvoice: (invoice) => set({ printInvoice: invoice }),
   setSearchTerm: (term) => set({ searchTerm: term }),
 
+  completeSetup: async (ledger) => {
+    const api = getBooksApi()
+    const setupLedger = appendAudit(
+      ledger,
+      createAuditEntry(
+        'setup.complete',
+        `Completed first-run setup for ${ledger.settings?.companyName || 'new company'}`,
+      ),
+    )
+    if (!api?.saveData) {
+      lastSavedHash = computeDataHash(setupLedger)
+      set({ data: setupLedger, needsSetup: false })
+      return
+    }
+    const saved = await api.saveData(setupLedger)
+    lastSavedHash = computeDataHash(setupLedger)
+    set({ data: setupLedger, needsSetup: !saved })
+  },
+
+  updateSettings: async (patch) => {
+    const { data, persist } = get()
+    const nextSettings = {
+      ...data.settings,
+      ...patch,
+      defaultTaxRate:
+        patch.defaultTaxRate !== undefined
+          ? round2(Number(patch.defaultTaxRate) || 0)
+          : data.settings.defaultTaxRate,
+      taxInclusive:
+        patch.taxInclusive !== undefined ? Boolean(patch.taxInclusive) : data.settings.taxInclusive,
+    }
+    set({
+      data: appendAudit(
+        { ...data, settings: nextSettings, updatedAt: new Date().toISOString() },
+        createAuditEntry('settings.update', `Updated settings for ${nextSettings.companyName}`),
+      ),
+    })
+    await persist()
+  },
+
+  closeFinancialYear: async (throughDate) => {
+    const { data, persist } = get()
+    const result = closePeriod(data, throughDate)
+    if (!result.ok || !result.data) {
+      return { ok: false, error: result.error || 'Unable to close the financial year' }
+    }
+    set({
+      data: appendAudit(
+        result.data,
+        createAuditEntry(
+          'period.close',
+          `Closed financial period through ${throughDate} — income and expenses moved to retained earnings`,
+        ),
+      ),
+    })
+    await persist()
+    return { ok: true }
+  },
+
   loadData: async () => {
     const api = getBooksApi()
     if (api?.loadData) {
@@ -101,16 +219,18 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         const stored = await api.loadData()
         if (stored && stored.accounts && stored.invoices) {
           lastSavedHash = computeDataHash(stored)
-          set({ data: stored })
+          set({ data: stored, needsSetup: false })
           return
         }
+        // No store on disk yet — first run: show the setup wizard.
+        set({ data: emptyBooksData, needsSetup: true })
+        return
       } catch (err) {
         console.warn('[books-store] Failed to load data from IPC:', err)
       }
     }
-    // Fallback to initial seed
-    lastSavedHash = computeDataHash(initialBooksData)
-    set({ data: initialBooksData })
+    // No IPC bridge (dev fallback): treat as unconfigured.
+    set({ data: emptyBooksData, needsSetup: true })
   },
 
   syncFromMain: (incomingData: BooksData) => {
@@ -121,6 +241,12 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       return
     }
     lastSavedHash = incomingHash
+
+    // A real ledger arrived (e.g. written by CRM/Tenders while the setup
+    // wizard was showing) — the first-run state is over.
+    if (Array.isArray(incomingData.accounts) && Array.isArray(incomingData.invoices)) {
+      useBooksStore.setState({ needsSetup: false })
+    }
 
     const accounts = Array.isArray(incomingData.accounts) ? incomingData.accounts : []
     const invoices = Array.isArray(incomingData.invoices) ? incomingData.invoices : []
@@ -133,6 +259,8 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const bankTransactions = Array.isArray(incomingData.bankTransactions)
       ? incomingData.bankTransactions
       : []
+    const payments = Array.isArray(incomingData.payments) ? incomingData.payments : []
+    const auditLog = Array.isArray(incomingData.auditLog) ? incomingData.auditLog : []
     const settings = incomingData.settings || get().data.settings
 
     const nextData: BooksData = {
@@ -143,6 +271,8 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       invoices,
       journalEntries,
       bankTransactions,
+      payments,
+      auditLog,
     }
 
     set({ data: nextData })
@@ -168,6 +298,24 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const oldInvoice = partial.id ? data.invoices.find((i) => i.id === partial.id) : undefined
     const isEdit = !!oldInvoice
 
+    // A multi-invoice payment has one balanced journal. Editing only one of
+    // its invoices would require splitting/re-posting that payment journal;
+    // block the edit until that dedicated allocation editor exists rather than
+    // silently deleting the other invoice's settlement from the ledger.
+    if (
+      oldInvoice &&
+      (data.payments || []).some(
+        (payment) =>
+          payment.allocations.length > 1 &&
+          payment.allocations.some((allocation) => allocation.invoiceId === oldInvoice.id),
+      )
+    ) {
+      console.warn(
+        `[books-store] Rejected edit of ${oldInvoice.invoiceNumber}: it belongs to a multi-invoice payment`,
+      )
+      return
+    }
+
     const rawItems = partial.items || oldInvoice?.items || []
     const items = rawItems.map((it, idx) => {
       let lineAmt = 0
@@ -186,14 +334,35 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       }
     })
 
-    const totals = calculateInvoiceTotals(items)
-    const status: InvoiceStatus = partial.status || oldInvoice?.status || 'Unpaid'
+    const totals = calculateInvoiceTotals(items, {
+      taxInclusive: data.settings.taxInclusive,
+      discountTotal: partial.discountTotal !== undefined ? Number(partial.discountTotal) : 0,
+      roundOff: partial.roundOff !== undefined ? Number(partial.roundOff) : 0,
+    })
+    let status: InvoiceStatus = partial.status || oldInvoice?.status || 'Unpaid'
 
     let outstandingAmount: number
     if (!isEdit) {
       outstandingAmount = status === 'Paid' ? 0 : totals.grandTotal
     } else {
-      if (status === 'Paid') {
+      // I5: a paid invoice edited to a larger amount is no longer fully
+      // paid — the plan keeps the already-received portion paid and turns
+      // the delta back into outstanding, instead of blindly re-settling the
+      // whole new total.
+      const wasPostedEdit = oldInvoice.status !== 'Draft' && oldInvoice.status !== 'Cancelled'
+      if (wasPostedEdit) {
+        const plan = repostPlanForPartialSettlement(oldInvoice, {
+          ...oldInvoice,
+          grandTotal: totals.grandTotal,
+          status,
+        })
+        if (partial.outstandingAmount !== undefined) {
+          outstandingAmount = round2(partial.outstandingAmount)
+        } else {
+          outstandingAmount = plan.newOutstanding
+          status = plan.status
+        }
+      } else if (status === 'Paid') {
         outstandingAmount = 0
       } else if (oldInvoice.status === 'Draft' && status !== 'Draft') {
         outstandingAmount = totals.grandTotal
@@ -214,12 +383,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       invoiceNumber:
         partial.invoiceNumber ||
         oldInvoice?.invoiceNumber ||
-        (() => {
-          const prefix = type === 'Purchase' ? 'BILL' : 'INV'
-          const year = new Date().getFullYear()
-          const count = data.invoices.filter((i) => i.type === type).length + 1
-          return `${prefix}-${year}-${String(count).padStart(3, '0')}`
-        })(),
+        nextInvoiceNumber(data.invoices, type, partial.date),
       type,
       partyId: partial.partyId || oldInvoice?.partyId || '',
       partyName:
@@ -233,6 +397,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       subtotal: totals.subtotal,
       taxTotal: totals.taxTotal,
       grandTotal: totals.grandTotal,
+      ...(partial.discountTotal !== undefined
+        ? { discountTotal: Number(partial.discountTotal) }
+        : {}),
+      ...(partial.roundOff !== undefined ? { roundOff: Number(partial.roundOff) } : {}),
       outstandingAmount,
       status,
       notes:
@@ -248,13 +416,32 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       updatedAt: now,
     }
 
-    // Determine if this save is a posting event (F7)
-    const isPosting =
-      (!oldInvoice && targetInvoice.status !== 'Draft') ||
-      (oldInvoice && oldInvoice.status === 'Draft' && targetInvoice.status !== 'Draft')
+    // Determine if this save is a posting event: every non-draft invoice
+    // must be reflected in the ledger. Editing a previously posted invoice
+    // reverses its old entries and re-posts with the new line items, so the
+    // ledger always agrees with the invoice (never a stale posting).
+    const isPosting = targetInvoice.status !== 'Draft'
+    const wasPosted =
+      oldInvoice && oldInvoice.status !== 'Draft' && oldInvoice.status !== 'Cancelled'
 
-    const nextAccounts = data.accounts.map((a) => ({ ...a }))
+    // Closed-period lock: nothing new may post into a locked period (period
+    // close moved income/expense to retained earnings). Editing an invoice
+    // whose OLD date is locked also fires: the reversal removes a posting
+    // that the close already swept, which would un-close the period.
+    const lockedTargetDate = isPosting && isDateLocked(data, targetInvoice.date)
+    const lockedOldDate =
+      isPosting && wasPosted && oldInvoice ? isDateLocked(data, oldInvoice.date) : false
+    if (lockedTargetDate || lockedOldDate) {
+      console.warn(
+        `[books-store] Rejected posting into closed period: ${targetInvoice.date} (closed through ${data.settings.closedThrough})`,
+      )
+      return
+    }
+
+    // Ledger-first: posting only appends journal entries; account balances
+    // are always recomputed from the journals afterwards.
     const nextJournals = [...data.journalEntries]
+    let nextPayments = data.payments || []
 
     // Resolve or auto-create party
     const partiesPool = [...data.parties]
@@ -277,119 +464,58 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     }
 
     if (isPosting) {
-      if (targetInvoice.type === 'Sales') {
-        // Sales Invoice posting (F5): Debit AR, Credit Sales Revenue, Credit VAT Output
-        const journal = createSalesInvoiceJournal(targetInvoice, nextAccounts, resolvedParty)
-        nextJournals.unshift(journal)
+      // Editing a previously posted invoice: reverse its old entries first,
+      // then re-post with the new line items.
+      if (wasPosted) {
+        const oldNumber = oldInvoice.invoiceNumber
+        nextJournals.splice(
+          0,
+          nextJournals.length,
+          ...reversalJournalRemoval(oldNumber, nextJournals),
+        )
 
-        // Increment AR
-        const arAcc = nextAccounts.find((a) => a.id === 'acc-ar')
-        if (arAcc) {
-          arAcc.balance = round2(arAcc.balance + targetInvoice.grandTotal)
-        }
+        // C1: the payment journals die with the reversed posting, so the
+        // Payment records referencing this invoice must die with them —
+        // otherwise deletePayment later reverses a journal that no longer
+        // exists and the invoice/ledger/party state silently diverges.
+        nextPayments = dropInvoiceFromPayments(data.payments || [], oldInvoice.id, oldNumber)
 
-        // Increment Revenue accounts for line items
-        const incomeGroups = new Map<string, number>()
-        for (const it of targetInvoice.items) {
-          const accId = it.accountId || 'acc-sales'
-          incomeGroups.set(accId, round2((incomeGroups.get(accId) || 0) + it.amount))
-        }
-        if (incomeGroups.size === 0) {
-          incomeGroups.set('acc-sales', targetInvoice.subtotal)
-        } else {
-          const entries = Array.from(incomeGroups.entries())
-          const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
-          const diff = round2(targetInvoice.subtotal - sumAmt)
-          if (diff !== 0 && entries.length > 0) {
-            incomeGroups.set(
-              entries[entries.length - 1][0],
-              round2(incomeGroups.get(entries[entries.length - 1][0])! + diff),
-            )
-          }
-        }
-        for (const [accId, amt] of incomeGroups.entries()) {
-          const acc = nextAccounts.find((a) => a.id === accId)
-          if (acc) {
-            acc.balance = round2(acc.balance + amt)
-          }
-        }
-
-        // Increment VAT Output
-        if (targetInvoice.taxTotal !== 0) {
-          const vatAcc = nextAccounts.find((a) => a.id === 'acc-vat' || a.id === 'acc-vat-out')
-          if (vatAcc) {
-            vatAcc.balance = round2(vatAcc.balance + targetInvoice.taxTotal)
-          }
-        }
-      } else {
-        // Purchase Bill posting (F6): Debit Expense, Debit VAT Input, Credit AP
-        const journal = createPurchaseBillJournal(targetInvoice, nextAccounts, resolvedParty)
-        nextJournals.unshift(journal)
-
-        // Increment AP
-        const apAcc = nextAccounts.find((a) => a.id === 'acc-ap')
-        if (apAcc) {
-          apAcc.balance = round2(apAcc.balance + targetInvoice.grandTotal)
-        }
-
-        // Increment Expense accounts for line items
-        const expenseGroups = new Map<string, number>()
-        for (const it of targetInvoice.items) {
-          const accId = it.accountId || 'acc-materials'
-          expenseGroups.set(accId, round2((expenseGroups.get(accId) || 0) + it.amount))
-        }
-        if (expenseGroups.size === 0) {
-          expenseGroups.set('acc-materials', targetInvoice.subtotal)
-        } else {
-          const entries = Array.from(expenseGroups.entries())
-          const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
-          const diff = round2(targetInvoice.subtotal - sumAmt)
-          if (diff !== 0 && entries.length > 0) {
-            expenseGroups.set(
-              entries[entries.length - 1][0],
-              round2(expenseGroups.get(entries[entries.length - 1][0])! + diff),
-            )
-          }
-        }
-        for (const [accId, amt] of expenseGroups.entries()) {
-          const acc = nextAccounts.find((a) => a.id === accId)
-          if (acc) {
-            acc.balance = round2(acc.balance + amt)
-          }
-        }
-
-        // Increment VAT Input
-        if (targetInvoice.taxTotal > 0) {
-          const vatInAcc =
-            nextAccounts.find((a) => a.id === 'acc-vat-in') ||
-            nextAccounts.find((a) => a.id === 'acc-vat')
-          if (vatInAcc) {
-            vatInAcc.balance = round2(vatInAcc.balance + targetInvoice.taxTotal)
-          }
+        // The old settlement journal is removed with the old posting, so the
+        // already-paid portion must be re-posted as a settlement — otherwise
+        // editing a partially settled invoice would wipe the paid amount from
+        // the ledger. This covers BOTH the Unpaid and the Paid-edit case: a
+        // paid invoice edited to a larger amount is no longer fully paid, and
+        // only the amount actually received may hit Bank (I5).
+        const plan = repostPlanForPartialSettlement(oldInvoice, targetInvoice)
+        if (plan.paidAmount > 0) {
+          nextJournals.unshift(
+            createSettlementJournal(
+              targetInvoice,
+              data.accounts,
+              plan.paidAmount,
+              resolvedParty,
+              nextJournalNumber(nextJournals, targetInvoice.date),
+            ),
+          )
         }
       }
 
-      // Immediate settlement if created as 'Paid'
-      if (targetInvoice.status === 'Paid') {
+      const postingJournal =
+        targetInvoice.type === 'Sales'
+          ? createSalesInvoiceJournal(targetInvoice, data.accounts, resolvedParty)
+          : createPurchaseBillJournal(targetInvoice, data.accounts, resolvedParty)
+      nextJournals.unshift(postingJournal)
+
+      // Immediate settlement only for invoices created (not edited) as 'Paid'
+      // — edited invoices settle exactly the previously-paid portion above.
+      if (targetInvoice.status === 'Paid' && !wasPosted) {
         const settlementJournal = createSettlementJournal(
           targetInvoice,
-          nextAccounts,
+          data.accounts,
           targetInvoice.grandTotal,
           resolvedParty,
         )
         nextJournals.unshift(settlementJournal)
-
-        if (targetInvoice.type === 'Sales') {
-          const bankAcc = nextAccounts.find((a) => a.id === 'acc-bank')
-          if (bankAcc) bankAcc.balance = round2(bankAcc.balance + targetInvoice.grandTotal)
-          const arAcc = nextAccounts.find((a) => a.id === 'acc-ar')
-          if (arAcc) arAcc.balance = Math.max(0, round2(arAcc.balance - targetInvoice.grandTotal))
-        } else {
-          const apAcc = nextAccounts.find((a) => a.id === 'acc-ap')
-          if (apAcc) apAcc.balance = Math.max(0, round2(apAcc.balance - targetInvoice.grandTotal))
-          const bankAcc = nextAccounts.find((a) => a.id === 'acc-bank')
-          if (bankAcc) bankAcc.balance = round2(bankAcc.balance - targetInvoice.grandTotal)
-        }
       }
     }
 
@@ -397,17 +523,27 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       ? data.invoices.map((inv) => (inv.id === targetInvoice.id ? targetInvoice : inv))
       : [targetInvoice, ...data.invoices]
 
-    // Enforce Party Balance Invariant (F9)
+    // Ledger-first: derive balances from journals, then enforce the party
+    // balance invariant from open invoices.
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
     const nextParties = recomputePartyBalances(nextInvoices, partiesPool)
 
     set({
-      data: {
-        ...data,
-        invoices: nextInvoices,
-        parties: nextParties,
-        accounts: nextAccounts,
-        journalEntries: nextJournals,
-      },
+      data: appendAudit(
+        {
+          ...data,
+          invoices: nextInvoices,
+          parties: nextParties,
+          accounts: nextAccounts,
+          journalEntries: nextJournals,
+          payments: nextPayments,
+        },
+        createAuditEntry(
+          'invoice.save',
+          `Saved invoice ${targetInvoice.invoiceNumber} (${targetInvoice.status})`,
+          { invoiceNumber: targetInvoice.invoiceNumber, amount: round2(targetInvoice.grandTotal) },
+        ),
+      ),
       activeInvoiceId: null,
     })
 
@@ -415,65 +551,30 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   },
 
   markInvoicePaid: async (invoiceId) => {
-    const { data, persist } = get()
+    const { data } = get()
     const inv = data.invoices.find((i) => i.id === invoiceId)
-    if (!inv) return
-    if (inv.status === 'Paid') return
-
+    if (!inv || inv.status === 'Paid') return
     const settlementAmount = round2(
       inv.outstandingAmount > 0 ? inv.outstandingAmount : inv.grandTotal,
     )
-    const party =
-      data.parties.find((p) => p.id === inv.partyId) ||
-      data.parties.find((p) => p.name.toLowerCase() === inv.partyName.toLowerCase())
+    if (settlementAmount <= 0) return
 
-    const nextAccounts = data.accounts.map((a) => ({ ...a }))
-    const nextJournals = [...data.journalEntries]
-
-    if (settlementAmount > 0) {
-      // Generate settlement journal (F8)
-      const settlementJournal = createSettlementJournal(inv, nextAccounts, settlementAmount, party)
-      nextJournals.unshift(settlementJournal)
-
-      // Update ledger balances
-      if (inv.type === 'Sales') {
-        const bankAcc = nextAccounts.find((a) => a.id === 'acc-bank')
-        if (bankAcc) bankAcc.balance = round2(bankAcc.balance + settlementAmount)
-        const arAcc = nextAccounts.find((a) => a.id === 'acc-ar')
-        if (arAcc) arAcc.balance = Math.max(0, round2(arAcc.balance - settlementAmount))
-      } else {
-        const apAcc = nextAccounts.find((a) => a.id === 'acc-ap')
-        if (apAcc) apAcc.balance = Math.max(0, round2(apAcc.balance - settlementAmount))
-        const bankAcc = nextAccounts.find((a) => a.id === 'acc-bank')
-        if (bankAcc) bankAcc.balance = round2(bankAcc.balance - settlementAmount)
-      }
-    }
-
-    const nextInvoices = data.invoices.map((i) =>
-      i.id === invoiceId
-        ? {
-            ...i,
-            status: 'Paid' as InvoiceStatus,
-            outstandingAmount: 0,
-            updatedAt: new Date().toISOString(),
-          }
-        : i,
-    )
-
-    // Recompute party balances (F9)
-    const nextParties = recomputePartyBalances(nextInvoices, data.parties)
-
-    set({
-      data: {
-        ...data,
-        invoices: nextInvoices,
-        parties: nextParties,
-        accounts: nextAccounts,
-        journalEntries: nextJournals,
-      },
+    // Mark Paid is a convenience UI action, not a second settlement engine.
+    // Route it through recordPayment so statement linking, partial coverage,
+    // audit history, and deletion all behave exactly like a normal receipt.
+    await get().recordPayment({
+      partyId: inv.partyId,
+      date: new Date().toISOString().split('T')[0],
+      method: 'Manual settlement',
+      reference: `Marked paid: ${inv.invoiceNumber}`,
+      allocations: [
+        {
+          invoiceId: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          amount: settlementAmount,
+        },
+      ],
     })
-
-    await persist()
   },
 
   deleteInvoice: async (invoiceId) => {
@@ -481,104 +582,32 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const target = data.invoices.find((i) => i.id === invoiceId)
     if (!target) return
 
-    const nextAccounts = data.accounts.map((a) => ({ ...a }))
+    if (
+      (data.payments || []).some(
+        (payment) =>
+          payment.allocations.length > 1 &&
+          payment.allocations.some((allocation) => allocation.invoiceId === target.id),
+      )
+    ) {
+      console.warn(
+        `[books-store] Rejected delete of ${target.invoiceNumber}: it belongs to a multi-invoice payment`,
+      )
+      return
+    }
+
+    // Closed-period lock: deleting a posted invoice removes a posting the
+    // close already swept — retained earnings would be misstated forever.
+    if (target.status !== 'Draft' && isDateLocked(data, target.date)) {
+      console.warn(
+        `[books-store] Rejected deleting invoice dated in closed period: ${target.invoiceNumber} (${target.date}, closed through ${data.settings.closedThrough})`,
+      )
+      return
+    }
+
+    // Reversal is journal-based: drop every entry that references this
+    // invoice, then recompute balances from the remaining journals.
     let nextJournals = [...data.journalEntries]
-
     if (target.status !== 'Draft') {
-      if (target.type === 'Sales') {
-        const arReduction =
-          target.status === 'Paid'
-            ? 0
-            : target.outstandingAmount > 0
-              ? target.outstandingAmount
-              : target.grandTotal
-        const bankReduction = round2(target.grandTotal - arReduction)
-
-        if (arReduction > 0) {
-          const arAcc = nextAccounts.find((a) => a.id === 'acc-ar')
-          if (arAcc) arAcc.balance = Math.max(0, round2(arAcc.balance - arReduction))
-        }
-        if (bankReduction > 0) {
-          const bankAcc = nextAccounts.find((a) => a.id === 'acc-bank')
-          if (bankAcc) bankAcc.balance = round2(bankAcc.balance - bankReduction)
-        }
-
-        const incomeGroups = new Map<string, number>()
-        for (const it of target.items || []) {
-          const accId = it.accountId || 'acc-sales'
-          incomeGroups.set(accId, round2((incomeGroups.get(accId) || 0) + it.amount))
-        }
-        if (incomeGroups.size === 0) {
-          incomeGroups.set('acc-sales', target.subtotal)
-        } else {
-          const entries = Array.from(incomeGroups.entries())
-          const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
-          const diff = round2(target.subtotal - sumAmt)
-          if (diff !== 0 && entries.length > 0) {
-            incomeGroups.set(
-              entries[entries.length - 1][0],
-              round2(incomeGroups.get(entries[entries.length - 1][0])! + diff),
-            )
-          }
-        }
-        for (const [accId, amt] of incomeGroups.entries()) {
-          const acc = nextAccounts.find((a) => a.id === accId)
-          if (acc) acc.balance = Math.max(0, round2(acc.balance - amt))
-        }
-
-        if (target.taxTotal !== 0) {
-          const vatAcc = nextAccounts.find((a) => a.id === 'acc-vat' || a.id === 'acc-vat-out')
-          if (vatAcc) vatAcc.balance = Math.max(0, round2(vatAcc.balance - target.taxTotal))
-        }
-      } else {
-        const apReduction =
-          target.status === 'Paid'
-            ? 0
-            : target.outstandingAmount > 0
-              ? target.outstandingAmount
-              : target.grandTotal
-        const bankAddition = round2(target.grandTotal - apReduction)
-
-        if (apReduction > 0) {
-          const apAcc = nextAccounts.find((a) => a.id === 'acc-ap')
-          if (apAcc) apAcc.balance = Math.max(0, round2(apAcc.balance - apReduction))
-        }
-        if (bankAddition > 0) {
-          const bankAcc = nextAccounts.find((a) => a.id === 'acc-bank')
-          if (bankAcc) bankAcc.balance = round2(bankAcc.balance + bankAddition)
-        }
-
-        const expenseGroups = new Map<string, number>()
-        for (const it of target.items || []) {
-          const accId = it.accountId || 'acc-materials'
-          expenseGroups.set(accId, round2((expenseGroups.get(accId) || 0) + it.amount))
-        }
-        if (expenseGroups.size === 0) {
-          expenseGroups.set('acc-materials', target.subtotal)
-        } else {
-          const entries = Array.from(expenseGroups.entries())
-          const sumAmt = entries.reduce((s, [, amt]) => round2(s + amt), 0)
-          const diff = round2(target.subtotal - sumAmt)
-          if (diff !== 0 && entries.length > 0) {
-            expenseGroups.set(
-              entries[entries.length - 1][0],
-              round2(expenseGroups.get(entries[entries.length - 1][0])! + diff),
-            )
-          }
-        }
-        for (const [accId, amt] of expenseGroups.entries()) {
-          const acc = nextAccounts.find((a) => a.id === accId)
-          if (acc) acc.balance = Math.max(0, round2(acc.balance - amt))
-        }
-
-        if (target.taxTotal !== 0) {
-          const vatInAcc =
-            nextAccounts.find((a) => a.id === 'acc-vat-in') ||
-            nextAccounts.find((a) => a.id === 'acc-vat')
-          if (vatInAcc) vatInAcc.balance = Math.max(0, round2(vatInAcc.balance - target.taxTotal))
-        }
-      }
-
       nextJournals = nextJournals.filter((je) => {
         const matchesRemarks = je.remarks && je.remarks.includes(target.invoiceNumber)
         const matchesItem = je.items.some(
@@ -588,21 +617,159 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       })
     }
 
+    // C1: payment journals die with the reversed posting — the Payment
+    // records referencing this invoice must die with them.
+    const nextPayments = dropInvoiceFromPayments(
+      data.payments || [],
+      target.id,
+      target.invoiceNumber,
+    )
+
     const nextInvoices = data.invoices.filter((i) => i.id !== invoiceId)
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
     const nextParties = recomputePartyBalances(nextInvoices, data.parties)
 
     set({
-      data: {
-        ...data,
-        invoices: nextInvoices,
-        parties: nextParties,
-        accounts: nextAccounts,
-        journalEntries: nextJournals,
-      },
+      data: appendAudit(
+        {
+          ...data,
+          invoices: nextInvoices,
+          parties: nextParties,
+          accounts: nextAccounts,
+          journalEntries: nextJournals,
+          payments: nextPayments,
+        },
+        createAuditEntry('invoice.delete', `Deleted invoice ${target.invoiceNumber}`, {
+          invoiceNumber: target.invoiceNumber,
+          amount: round2(target.grandTotal),
+        }),
+      ),
       activeInvoiceId: null,
     })
 
     await persist()
+  },
+
+  saveCreditNote: async (input) => {
+    const { data, persist } = get()
+    const original = data.invoices.find((i) => i.id === input.originalInvoiceId)
+    if (!original) return { ok: false, error: 'Original invoice not found' }
+    if (original.status === 'Draft' || original.status === 'Cancelled') {
+      return { ok: false, error: 'Cannot credit a draft or cancelled invoice' }
+    }
+
+    // Closed-period lock: the reversal journal Dr's income dated in the
+    // locked period — crediting an invoice the close already swept would
+    // un-close the period.
+    if (isDateLocked(data, original.date)) {
+      return {
+        ok: false,
+        error: `Cannot credit ${original.invoiceNumber}: it is dated in a closed period (closed through ${data.settings.closedThrough})`,
+      }
+    }
+
+    const now = new Date().toISOString()
+    const items: InvoiceItem[] =
+      input.items && input.items.length > 0
+        ? input.items
+        : original.items.map((it) => ({ ...it, id: `cn-item-${Date.now()}-${it.id}` }))
+
+    // M5: a full credit note of a discounted invoice must mirror the
+    // original's discount/round-off so its totals match and validation
+    // (capped at the original grandTotal) can pass.
+    const totals = calculateInvoiceTotals(items, {
+      taxInclusive: data.settings.taxInclusive,
+      discountTotal:
+        input.items && input.items.length > 0
+          ? 0
+          : original.discountTotal !== undefined
+            ? Number(original.discountTotal)
+            : 0,
+      roundOff:
+        input.items && input.items.length > 0
+          ? 0
+          : original.roundOff !== undefined
+            ? Number(original.roundOff)
+            : 0,
+    })
+
+    const creditNote: Invoice = {
+      id: `cn-${Date.now()}`,
+      invoiceNumber: nextInvoiceNumber(data.invoices, original.type, input.date, 'CN'),
+      type: original.type,
+      partyId: original.partyId,
+      partyName: original.partyName,
+      date: input.date || now.split('T')[0],
+      dueDate: original.dueDate,
+      items,
+      subtotal: totals.subtotal,
+      taxTotal: totals.taxTotal,
+      grandTotal: totals.grandTotal,
+      ...(original.discountTotal !== undefined ? { discountTotal: original.discountTotal } : {}),
+      ...(original.roundOff !== undefined ? { roundOff: original.roundOff } : {}),
+      // A credit note reduces what the party owes: the outstanding balance
+      // is negative so recomputePartyBalances subtracts it.
+      outstandingAmount: -round2(totals.grandTotal),
+      status: 'Unpaid',
+      creditNote: true,
+      creditedInvoiceId: original.id,
+      notes:
+        input.notes !== undefined ? input.notes : `Credit note against ${original.invoiceNumber}`,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    // I2: cumulative credit notes against the same invoice may never exceed
+    // the original total.
+    const existingCreditNotes = data.invoices.filter(
+      (i) => i.creditNote && i.creditedInvoiceId === original.id,
+    )
+    const validation = validateCreditNote({
+      invoice: creditNote,
+      originalInvoice: original,
+      paidAmount: 0,
+      existingCreditNotes,
+    })
+    if (!validation.ok) return { ok: false, error: validation.error }
+
+    const party =
+      data.parties.find((p) => p.id === original.partyId) ||
+      data.parties.find((p) => p.name.toLowerCase() === original.partyName.toLowerCase())
+
+    // Ledger-first: post the balanced reversal journal, then derive balances.
+    const nextJournals = [
+      createCreditNoteJournal(
+        creditNote,
+        data.accounts,
+        party,
+        nextJournalNumber(data.journalEntries, creditNote.date),
+      ),
+      ...data.journalEntries,
+    ]
+    const nextInvoices = [creditNote, ...data.invoices]
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
+    const nextParties = recomputePartyBalances(nextInvoices, data.parties)
+
+    set({
+      data: appendAudit(
+        {
+          ...data,
+          invoices: nextInvoices,
+          parties: nextParties,
+          accounts: nextAccounts,
+          journalEntries: nextJournals,
+        },
+        createAuditEntry(
+          'credit-note.issue',
+          `Issued credit note ${creditNote.invoiceNumber} against ${original.invoiceNumber}`,
+          { invoiceNumber: creditNote.invoiceNumber, amount: round2(creditNote.grandTotal) },
+        ),
+      ),
+      activeInvoiceId: null,
+    })
+
+    await persist()
+    return { ok: true, creditNote }
   },
 
   addParty: async (party) => {
@@ -613,46 +780,64 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       outstandingBalance: 0,
     }
     set({
-      data: {
-        ...data,
-        parties: [...data.parties, newParty],
-      },
+      data: appendAudit(
+        {
+          ...data,
+          parties: [...data.parties, newParty],
+        },
+        createAuditEntry('party.add', `Added party ${newParty.name} (${newParty.type})`),
+      ),
     })
     await persist()
   },
 
   addJournalEntry: async (entry) => {
     const { data, persist } = get()
-    const count = data.journalEntries.length + 1
-    const entryNumber = `JE-${new Date().getFullYear()}-${String(count).padStart(3, '0')}`
+    // Closed-period lock: a manual entry dated in the locked period could
+    // un-zero income/expense the close already swept.
+    if (entry.date && isDateLocked(data, entry.date)) {
+      console.warn(
+        `[books-store] Rejected journal entry dated in closed period: ${entry.date} (closed through ${data.settings.closedThrough})`,
+      )
+      return false
+    }
+    const sumDebits = round2((entry.items || []).reduce((s, it) => s + (it.debit || 0), 0))
+    const sumCredits = round2((entry.items || []).reduce((s, it) => s + (it.credit || 0), 0))
+    if (sumDebits !== sumCredits) {
+      console.warn('[books-store] Rejected unbalanced journal entry', entry)
+      return false
+    }
+    const entryNumber = nextJournalNumber(data.journalEntries, entry.date)
     const newEntry: JournalEntry = {
       ...entry,
       id: `je-${Date.now()}`,
       entryNumber,
+      totalDebit: sumDebits,
+      totalCredit: sumCredits,
       posted: true,
     }
 
-    // Apply debit/credit to accounts
-    const nextAccounts = [...data.accounts]
-    for (const item of entry.items) {
-      const idx = nextAccounts.findIndex((a) => a.id === item.accountId)
-      if (idx !== -1) {
-        const acc = nextAccounts[idx]
-        const isAssetOrExpense = acc.rootType === 'Asset' || acc.rootType === 'Expense'
-        const netChange = isAssetOrExpense ? item.debit - item.credit : item.credit - item.debit
-        nextAccounts[idx] = { ...acc, balance: round2(acc.balance + netChange) }
-      }
-    }
+    // Ledger-first: append the entry, then derive balances from journals.
+    const nextJournals = [newEntry, ...data.journalEntries]
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
 
     set({
-      data: {
-        ...data,
-        journalEntries: [newEntry, ...data.journalEntries],
-        accounts: nextAccounts,
-      },
+      data: appendAudit(
+        {
+          ...data,
+          journalEntries: nextJournals,
+          accounts: nextAccounts,
+        },
+        createAuditEntry(
+          'journal.add',
+          `Posted journal entry ${newEntry.entryNumber} (${sumDebits.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`,
+          { amount: round2(sumDebits) },
+        ),
+      ),
     })
 
     await persist()
+    return true
   },
 
   importBankStatementCsv: async (csvContent: string) => {
@@ -678,20 +863,48 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       existing,
     )
 
-    const nextAccounts = data.accounts.map((a) => {
-      if (a.id === 'acc-bank') {
-        return { ...a, balance: round2(a.balance + netAdjustment) }
+    // I3 parity with the main-process path: plan payment coverage the same
+    // way (fully covered lines pre-reconciled with no journal; partially
+    // covered lines post only the uncovered remainder).
+    const coverage = planImportCoverage(data, toAdd)
+    const storedToAdd = toAdd.map((tx) => {
+      const plan = coverage.get(tx.id)
+      if (!plan || !plan.fullyCovered) return tx
+      return {
+        ...tx,
+        reconciled: true,
+        matchedInvoiceId: plan.matchedInvoiceId,
+        reconciledAt: new Date().toISOString(),
       }
-      return a
     })
+
+    // Ledger-first: each imported transaction posts against Bank Suspense.
+    const nextJournals = [...data.journalEntries]
+    for (const tx of toAdd) {
+      const plan = coverage.get(tx.id)
+      const uncovered = round2(Math.abs(tx.amount || 0) - (plan?.coveredAmount || 0))
+      if (uncovered <= 0.005) continue
+      const remainderTx = { ...tx, amount: tx.amount > 0 ? uncovered : -uncovered }
+      nextJournals.unshift(
+        createBankImportJournal(remainderTx, data.accounts, nextJournalNumber(nextJournals, tx.date)),
+      )
+    }
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
     const bankAccount = nextAccounts.find((a) => a.id === 'acc-bank')
 
     set({
-      data: {
-        ...data,
-        bankTransactions: [...existing, ...toAdd],
-        accounts: nextAccounts,
-      },
+      data: appendAudit(
+        {
+          ...data,
+          bankTransactions: [...existing, ...storedToAdd],
+          journalEntries: nextJournals,
+          accounts: nextAccounts,
+        },
+        createAuditEntry(
+          'bank.import',
+          `Imported ${toAdd.length} bank transaction${toAdd.length === 1 ? '' : 's'} from CSV (${skippedDuplicates} duplicate${skippedDuplicates === 1 ? '' : 's'} skipped)`,
+        ),
+      ),
     })
     await persist()
 
@@ -788,36 +1001,52 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const nextParties = recomputePartyBalances(nextInvoices, data.parties)
     const updatedParty = nextParties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
 
-    const nextAccounts = data.accounts.map((acc) => {
-      if (inv.type === 'Sales' && acc.id === 'acc-ar') {
-        return { ...acc, balance: Math.max(0, round2(acc.balance - settledAmount)) }
-      }
-      if (inv.type === 'Purchase' && acc.id === 'acc-ap') {
-        return { ...acc, balance: Math.max(0, round2(acc.balance - settledAmount)) }
-      }
-      return acc
-    })
-
-    const jeNumber = `JE-${new Date().getFullYear()}-${String(data.journalEntries.length + 1).padStart(3, '0')}`
-    const settlementJournal = createSettlementJournal(
-      inv,
-      nextAccounts,
-      settledAmount,
-      updatedParty || party,
-      jeNumber,
-      'acc-bank',
-      `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
+    // Ledger-first: if the transaction was imported from a bank statement,
+    // its import journal already moved the bank account, so this leg clears
+    // suspense against Receivable/Payable. Legacy transactions post the full
+    // direct settlement (Dr/Cr Bank). Balances derive from journals.
+    const hasImportJournal = (data.journalEntries || []).some(
+      (je) => je.remarks && je.remarks.includes(`Bank statement import: ${tx.id}`),
     )
+    let settlementJournal: JournalEntry
+    if (hasImportJournal) {
+      settlementJournal = createReconciliationJournal(
+        tx,
+        inv,
+        data.accounts,
+        settledAmount,
+        nextJournalNumber(data.journalEntries, tx.date),
+      )
+    } else {
+      settlementJournal = createSettlementJournal(
+        inv,
+        data.accounts,
+        settledAmount,
+        updatedParty || party,
+        nextJournalNumber(data.journalEntries, tx.date),
+        'acc-bank',
+        `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
+      )
+    }
+    const nextJournals = [settlementJournal, ...data.journalEntries]
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
 
     set({
-      data: {
-        ...data,
-        bankTransactions: nextBankTransactions,
-        invoices: nextInvoices,
-        parties: nextParties,
-        accounts: nextAccounts,
-        journalEntries: [settlementJournal, ...data.journalEntries],
-      },
+      data: appendAudit(
+        {
+          ...data,
+          bankTransactions: nextBankTransactions,
+          invoices: nextInvoices,
+          parties: nextParties,
+          accounts: nextAccounts,
+          journalEntries: nextJournals,
+        },
+        createAuditEntry(
+          'bank.reconcile',
+          `Reconciled ${tx.description || 'bank transaction'} against invoice ${inv.invoiceNumber}`,
+          { invoiceNumber: inv.invoiceNumber, amount: round2(settledAmount) },
+        ),
+      ),
     })
 
     await persist()
@@ -831,5 +1060,177 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       invoiceStatus: nextStatus,
       partyBalance: updatedParty ? updatedParty.outstandingBalance : party?.outstandingBalance,
     }
+  },
+
+  recordPayment: async (input) => {
+    const { data, persist } = get()
+
+    // Pure validation + allocation (never mutates balances directly).
+    const result = applyPayment(data, input)
+    if (!result.ok || !result.payment || !result.updatedInvoices) {
+      return { ok: false, error: result.error || 'Unable to record payment' }
+    }
+    const payment = result.payment
+
+    // Phase-3 unification: the payment IS the bank movement — pre-reconcile
+    // any matching unreconciled statement line so the same cash can never be
+    // double-posted by a later statement import.
+    const linked = linkPaymentToBankTransaction(data, payment)
+
+    // C1: when the matched transaction already has an import journal (Flow B:
+    // statement imported BEFORE the payment), the bank movement is already
+    // booked — the payment leg must clear Suspense instead of moving Bank a
+    // second time (same convention as createReconciliationJournal).
+    const matchedTx = linked.matchedTransactionId
+      ? (linked.bankTransactions.find((t) => t.id === linked.matchedTransactionId) ?? null)
+      : null
+    const hasImportJournal =
+      matchedTx !== null &&
+      (data.journalEntries || []).some((je) =>
+        je.remarks ? je.remarks.includes(`Bank statement import: ${matchedTx.id}`) : false,
+      )
+
+    // Ledger-first: post the balanced payment journal, then derive balances.
+    const journal = createPaymentJournal(
+      payment,
+      result.updatedInvoices,
+      data.accounts,
+      nextJournalNumber(data.journalEntries, payment.date),
+      hasImportJournal
+        ? { suspenseAmount: linked.coveredAmount || 0 }
+        : undefined,
+    )
+    const nextJournals = [journal, ...data.journalEntries]
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
+    const nextParties = recomputePartyBalances(result.updatedInvoices, data.parties)
+
+    set({
+      data: appendAudit(
+        {
+          ...data,
+          bankTransactions: linked.bankTransactions,
+          payments: [payment, ...(data.payments || [])],
+          invoices: result.updatedInvoices,
+          journalEntries: nextJournals,
+          accounts: nextAccounts,
+          parties: nextParties,
+        },
+        createAuditEntry(
+          'payment.record',
+          `Recorded ${payment.type} payment of ${payment.total.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from ${payment.partyName}`,
+          { paymentId: payment.id, amount: round2(payment.total) },
+        ),
+      ),
+    })
+
+    await persist()
+    return { ok: true }
+  },
+
+  deletePayment: async (paymentId) => {
+    const { data, persist } = get()
+    const payment = (data.payments || []).find((p) => p.id === paymentId)
+    if (!payment) return
+
+    // Restore each allocation onto its invoice (status back to Unpaid when > 0).
+    // Refunds restore in the opposite direction: a refunded credit note's
+    // credit balance grows back (outstanding -= amount).
+    const nextInvoices = data.invoices.map((inv) => {
+      const alloc = payment.allocations.find((a) => a.invoiceId === inv.id)
+      if (!alloc) return inv
+      const current = round2(
+        inv.outstandingAmount !== undefined && inv.outstandingAmount !== null
+          ? inv.outstandingAmount
+          : inv.grandTotal,
+      )
+      const restored = round2(
+        payment.type === 'refund' ? current - alloc.amount : current + alloc.amount,
+      )
+      return {
+        ...inv,
+        outstandingAmount: restored,
+        // Restoring a full refund turns a paid credit note back into an
+        // unpaid negative balance; only an exact zero stays Paid.
+        status: (restored === 0 ? 'Paid' : 'Unpaid') as InvoiceStatus,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+
+    // Reversal is journal-based: drop the payment's entries (matched by the
+    // `Payment ${paymentId}` marker in entry or item remarks), then recompute.
+    const nextJournals = data.journalEntries.filter((je) => {
+      const matchesRemarks = je.remarks && je.remarks.includes(`Payment ${paymentId}`)
+      const matchesItem = je.items.some(
+        (it) => it.remark && it.remark.includes(`Payment ${paymentId}`),
+      )
+      return !matchesRemarks && !matchesItem
+    })
+
+    // Exact payment-to-statement reversal: remove only links owned by this
+    // payment (never infer ownership from invoice/text), then replace any
+    // prior import remainder journal with the new uncovered statement amount.
+    let nextBankTransactions = data.bankTransactions || []
+    const affectedTxs = (data.bankTransactions || []).filter((t) =>
+      (t.paymentLinks || []).some((link) => link.paymentId === payment.id),
+    )
+    for (const affected of affectedTxs) {
+      // Drop all old import journals for this statement line; the remainder
+      // is recalculated below after removing the payment link.
+      for (let i = nextJournals.length - 1; i >= 0; i--) {
+        if (nextJournals[i].remarks?.includes(`Bank statement import: ${affected.id}`)) {
+          nextJournals.splice(i, 1)
+        }
+      }
+      const remainingLinks = (affected.paymentLinks || []).filter(
+        (link) => link.paymentId !== payment.id,
+      )
+      const covered = paymentCoverage({ ...affected, paymentLinks: remainingLinks })
+      const uncovered = round2(Math.abs(affected.amount) - covered)
+      const fullyCovered = uncovered <= 0.005
+      const firstLink = remainingLinks[0]
+      nextBankTransactions = nextBankTransactions.map((t) =>
+        t.id === affected.id
+          ? {
+              ...t,
+              paymentLinks: remainingLinks.length > 0 ? remainingLinks : undefined,
+              reconciled: fullyCovered,
+              matchedInvoiceId: fullyCovered ? firstLink?.invoiceId : undefined,
+              reconciledAt: fullyCovered ? new Date().toISOString() : undefined,
+            }
+          : t,
+      )
+      if (uncovered > 0.005) {
+        nextJournals.unshift(
+          createBankImportJournal(
+            { ...affected, amount: affected.amount > 0 ? uncovered : -uncovered },
+            data.accounts,
+            nextJournalNumber(nextJournals, affected.date),
+          ),
+        )
+      }
+    }
+
+    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
+    const nextParties = recomputePartyBalances(nextInvoices, data.parties)
+
+    set({
+      data: appendAudit(
+        {
+          ...data,
+          bankTransactions: nextBankTransactions,
+          payments: (data.payments || []).filter((p) => p.id !== paymentId),
+          invoices: nextInvoices,
+          journalEntries: nextJournals,
+          accounts: nextAccounts,
+          parties: nextParties,
+        },
+        createAuditEntry('payment.delete', `Deleted payment ${payment.id}`, {
+          paymentId: payment.id,
+          amount: round2(payment.total),
+        }),
+      ),
+    })
+
+    await persist()
   },
 }))

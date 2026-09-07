@@ -1,5 +1,5 @@
 import React from 'react'
-import { X, Printer, PenTool } from 'lucide-react'
+import { X, Printer, FileDown } from 'lucide-react'
 import { useBooksStore } from '../store'
 
 export function InvoicePrintModal() {
@@ -31,8 +31,8 @@ export function InvoicePrintModal() {
               onClick={handleOpenPdf}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#0D655E] shadow-xs"
             >
-              <PenTool className="w-3.5 h-3.5" />
-              Sign in Zanostack PDF
+              <FileDown className="w-3.5 h-3.5" />
+              Print / PDF
             </button>
             <button
               onClick={() => window.print()}
@@ -55,18 +55,28 @@ export function InvoicePrintModal() {
           {/* Header & Logo */}
           <div className="flex justify-between items-start border-b border-[#EDEDED] pb-6">
             <div>
-              <h1 className="text-xl font-bold text-[#1E293B] tracking-tight">{settings.companyName}</h1>
+              <h1 className="text-xl font-bold text-[#1E293B] tracking-tight">
+                {settings.companyName}
+              </h1>
               <p className="text-[#7C7C7C] mt-1">{settings.address}</p>
-              <p className="text-[#7C7C7C]">VAT Reg: {settings.taxNumber} · Email: {settings.email}</p>
+              <p className="text-[#7C7C7C]">
+                VAT Reg: {settings.taxNumber} · Email: {settings.email}
+              </p>
             </div>
             <div className="text-right">
               <span className="text-2xl font-black text-[#1E293B] uppercase tracking-wider">
                 {printInvoice.type === 'Sales' ? 'TAX INVOICE' : 'PURCHASE BILL'}
               </span>
-              <p className="font-mono text-sm font-bold text-[#1E293B] mt-1">{printInvoice.invoiceNumber}</p>
-              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 ${
-                printInvoice.status === 'Paid' ? 'bg-[#F3FCF5] text-[#30A66D]' : 'bg-[#FDFAED] text-[#DB7706]'
-              }`}>
+              <p className="font-mono text-sm font-bold text-[#1E293B] mt-1">
+                {printInvoice.invoiceNumber}
+              </p>
+              <span
+                className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 ${
+                  printInvoice.status === 'Paid'
+                    ? 'bg-[#F3FCF5] text-[#30A66D]'
+                    : 'bg-[#FDFAED] text-[#DB7706]'
+                }`}
+              >
                 {printInvoice.status.toUpperCase()}
               </span>
             </div>
@@ -75,7 +85,9 @@ export function InvoicePrintModal() {
           {/* Bill To & Dates */}
           <div className="grid grid-cols-2 gap-8">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#7C7C7C]">Billed To:</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#7C7C7C]">
+                Billed To:
+              </span>
               <p className="text-sm font-bold text-[#1E293B] mt-1">{printInvoice.partyName}</p>
               {printInvoice.tenderReference && (
                 <p className="text-xs text-[#0F766E] font-medium mt-1">
@@ -130,15 +142,21 @@ export function InvoicePrintModal() {
             <div className="w-64 space-y-2 border-t border-[#EDEDED] pt-3">
               <div className="flex justify-between text-[#7C7C7C]">
                 <span>Subtotal (excl):</span>
-                <span className="font-mono text-[#1E293B]">{formatMoney(printInvoice.subtotal)}</span>
+                <span className="font-mono text-[#1E293B]">
+                  {formatMoney(printInvoice.subtotal)}
+                </span>
               </div>
               <div className="flex justify-between text-[#7C7C7C]">
                 <span>VAT (15%):</span>
-                <span className="font-mono text-[#1E293B]">{formatMoney(printInvoice.taxTotal)}</span>
+                <span className="font-mono text-[#1E293B]">
+                  {formatMoney(printInvoice.taxTotal)}
+                </span>
               </div>
               <div className="flex justify-between font-bold text-sm text-[#1E293B] pt-2 border-t border-[#EDEDED]">
                 <span>Grand Total:</span>
-                <span className="font-mono text-base text-[#1E293B]">{formatMoney(printInvoice.grandTotal)}</span>
+                <span className="font-mono text-base text-[#1E293B]">
+                  {formatMoney(printInvoice.grandTotal)}
+                </span>
               </div>
               <div className="flex justify-between font-bold text-xs text-[#DB7706] pt-1">
                 <span>Balance Due:</span>
@@ -149,8 +167,13 @@ export function InvoicePrintModal() {
 
           {/* Notes & Banking Details */}
           <div className="pt-6 border-t border-[#EDEDED] text-[11px] text-[#7C7C7C] space-y-1">
-            <span className="font-bold uppercase tracking-wider text-[#525252]">Payment Instructions:</span>
-            <p>{printInvoice.notes || 'Please deposit into company FNB account using invoice number as reference.'}</p>
+            <span className="font-bold uppercase tracking-wider text-[#525252]">
+              Payment Instructions:
+            </span>
+            <p>
+              {printInvoice.notes ||
+                'Please deposit into company FNB account using invoice number as reference.'}
+            </p>
           </div>
         </div>
       </div>

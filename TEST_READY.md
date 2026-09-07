@@ -1,8 +1,9 @@
 # TEST_READY: Zanostack Suite Workflow Verification
 
 ## Executive Summary
+
 The comprehensive End-to-End Test Suite for the Zanostack Suite Workflows is complete, verified, and certified **READY**.
-The test runner is located at `tools/verify-suite-workflows.mjs` and executes standalone in Node.js without requiring a full desktop Electron launch.
+The test runner is located at `tools/verify-suite-workflows.mjs` and executes standalone (via `tsx`) without requiring a full desktop Electron launch.
 
 - **Total Test Cases**: 56
 - **Total Passing**: 56 (100%)
@@ -15,7 +16,9 @@ The test runner is located at `tools/verify-suite-workflows.mjs` and executes st
 ## Test Inventory & Coverage by Tier
 
 ### Tier 1: Feature Coverage (24 Tests)
+
 Validates core functionality and acceptance criteria for all 4 primary requirements:
+
 - **R1 Data Sync Architecture (6 Tests)**:
   - `T1.R1.1`: CRM deals schema v0 legacy array to v1 envelope migration (`{ version: 1, updatedAt, deals }`).
   - `T1.R1.2`: CRM deal field validation, sanitization, and probability clamping (0-100).
@@ -46,7 +49,9 @@ Validates core functionality and acceptance criteria for all 4 primary requireme
   - `T1.R4.6`: 1-click reconciliation action (marks invoice Paid, sets transaction reconciled, updates party, posts journal).
 
 ### Tier 2: Boundary & Corner Cases (22 Tests)
+
 Tests edge cases, extreme inputs, and corruption resiliency:
+
 - **R1 Boundary Cases (5 Tests)**:
   - `T2.R1.1`: Corrupted JSON in `deals.json` preserves `.corrupted.bak` without wiping existing data.
   - `T2.R1.2`: Corrupted JSON in `tenders-data.json` preserves `.corrupted.bak`.
@@ -75,7 +80,9 @@ Tests edge cases, extreme inputs, and corruption resiliency:
   - `T2.R4.6`: Disambiguation between identical amounts based on text token confidence (`HIGH` vs `MEDIUM`).
 
 ### Tier 3: Cross-Feature Combinations (5 Tests)
+
 Validates inter-app lifecycle workflows:
+
 - `T3.1`: CRM Deal Won -> Sales Invoice Created in Books -> Bank CSV Ingestion -> 1-Click Reconcile.
 - `T3.2`: Tenders Milestone Billed -> Tax Invoice Created -> Bank CSV Referencing Tender -> 1-Click Reconcile.
 - `T3.3`: Multi-Entity Commercial Batch (CRM Won Deal + Tender Milestone + Supplier Purchase Bill settled in one statement).
@@ -83,7 +90,9 @@ Validates inter-app lifecycle workflows:
 - `T3.5`: Dual Settlement Disambiguation (two invoices with identical amounts; verifies description/reference text matching promotes one to HIGH confidence).
 
 ### Tier 4: Real-World Application Scenarios (5 Scenarios)
+
 Validates full-scale enterprise workloads:
+
 - `T4.1`: Municipal Water Tender (`RFP-WTR-2026-04`) + Corporate Cloud Rollout (`Helios Clean Energy`) Complete Commercial Cycle.
 - `T4.2`: High-Volume Monthly Commercial Settlement (5 concurrent CRM deals across sectors, batch invoicing, statement import with customer deposits and overheads).
 - `T4.3`: Multi-Stage Tender Delivery & Sequential Progress Payments (`Phase 1` billed & paid -> `Phase 2` reached & billed -> Books general ledger continuity verified).
@@ -95,34 +104,39 @@ Validates full-scale enterprise workloads:
 ## How to Run the Tests
 
 ### Full Test Suite
+
 ```bash
-node tools/verify-suite-workflows.mjs
+npx tsx tools/verify-suite-workflows.mjs
 ```
 
 ### Specific Tiers
+
 ```bash
-node tools/verify-suite-workflows.mjs --tier 1
-node tools/verify-suite-workflows.mjs --tier 2
-node tools/verify-suite-workflows.mjs --tier 3
-node tools/verify-suite-workflows.mjs --tier 4
+npx tsx tools/verify-suite-workflows.mjs --tier 1
+npx tsx tools/verify-suite-workflows.mjs --tier 2
+npx tsx tools/verify-suite-workflows.mjs --tier 3
+npx tsx tools/verify-suite-workflows.mjs --tier 4
 ```
 
 ### Specific Requirements
+
 ```bash
-node tools/verify-suite-workflows.mjs --feature r1
-node tools/verify-suite-workflows.mjs --feature r2
-node tools/verify-suite-workflows.mjs --feature r3
-node tools/verify-suite-workflows.mjs --feature r4
+npx tsx tools/verify-suite-workflows.mjs --feature r1
+npx tsx tools/verify-suite-workflows.mjs --feature r2
+npx tsx tools/verify-suite-workflows.mjs --feature r3
+npx tsx tools/verify-suite-workflows.mjs --feature r4
 ```
 
 ### Machine-Readable JSON Output (for CI/CD)
+
 ```bash
-node tools/verify-suite-workflows.mjs --json
+npx tsx tools/verify-suite-workflows.mjs --json
 ```
 
 ---
 
 ## Compliance & Certification
+
 - **Dual Track Methodology**: Certified compliant with `TEST_INFRA.md`.
 - **Requirements Coverage**: 100% of acceptance criteria in `ORIGINAL_REQUEST.md` (R1, R2, R3, R4) verified.
 - **Independence & Isolation**: Every test runs in an ephemeral sandbox without mutating user profile directories.

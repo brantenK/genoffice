@@ -31,8 +31,7 @@ import type {
   TenderRecord,
   TendersData,
 } from '../shared/types'
-import { readBooksStore, writeBooksStore } from '../../../books/src/main/books-main'
-import type { Invoice } from '../../../books/src/shared/types'
+import { issueSalesInvoiceInBooks } from '../../../books/src/main/books-core'
 import { MOCK_COMPANY } from '../renderer/src/mock/company'
 import { MOCK_CUSTOMERS } from '../renderer/src/mock/customers'
 import { MOCK_VAULT } from '../renderer/src/mock/vault'
@@ -1087,32 +1086,7 @@ ${requirements
           }
         }
 
-        const booksDir = join(app.getPath('userData'), 'books')
-        const booksPath = join(booksDir, 'books-data.json')
-        const booksData = readBooksStore(booksPath)
-
         const issuer = issuingAuthority || foundTender.issuingBody || 'Municipal Water Authority'
-        let party = booksData.parties.find((p) => p.name.toLowerCase() === issuer.toLowerCase())
-
-        if (!party) {
-          party = {
-            id: `party-${randomUUID().slice(0, 8)}`,
-            name: issuer,
-            type: 'Customer',
-            email: `procurement@${issuer.toLowerCase().replace(/[^a-z0-9]/g, '') || 'gov'}.gov.za`,
-            outstandingBalance: 0,
-          }
-          booksData.parties.push(party)
-        }
-
-        const year = new Date().getFullYear()
-        const count = booksData.invoices.length
-        const invoiceNumber = `INV-${year}-${String(count + 1).padStart(3, '0')}`
-        const invoiceId = `inv-${randomUUID().slice(0, 8)}`
-
-        const grandTotal = Math.round(billAmount * 100) / 100
-        const subtotal = Math.round((grandTotal / 1.15) * 100) / 100
-        const taxTotal = Math.round((grandTotal - subtotal) * 100) / 100
         const today = new Date().toISOString().split('T')[0]
         const dueDate =
           foundMilestone.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
@@ -1121,85 +1095,32 @@ ${requirements
           milestoneTitle || foundMilestone.name || foundMilestone.title || 'Delivery Milestone'
         const itemDescription = `${mName} per ${ref}`
 
-        const newTaxInvoice: Invoice = {
-          id: invoiceId,
-          invoiceNumber,
-          type: 'Sales',
-          partyId: party.id,
-          partyName: party.name,
-          date: today,
-          dueDate,
-          items: [
-            {
-              id: `item-${randomUUID().slice(0, 8)}`,
-              itemCode: 'TENDER-PROGRESS',
-              description: itemDescription,
-              accountId: 'acc-sales',
-              accountName: 'Tender & Commercial Contracting Sales',
-              qty: 1,
-              rate: subtotal,
-              taxRate: 15,
-              amount: subtotal,
-            },
-          ],
-          subtotal,
-          taxTotal,
-          grandTotal,
-          outstandingAmount: grandTotal,
-          status: 'Unpaid',
+        // Single posting path: Books owns party resolution, VAT-inclusive
+        // pricing, central invoice numbering, journal posting and persistence.
+        const booksPath = join(app.getPath('userData'), 'books', 'books-data.json')
+        const result = issueSalesInvoiceInBooks({
+          booksDataPath: booksPath,
+          partyName: issuer,
+          itemDescription,
+          itemCode: 'TENDER-PROGRESS',
+          accountId: 'acc-sales',
+          accountName: 'Tender & Commercial Contracting Sales',
+          amount: billAmount,
           tenderReference: ref,
           notes: customNotes || 'Payment terms: 30 days net from tax invoice submission.',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }
-
-        booksData.invoices.unshift(newTaxInvoice)
-        party.outstandingBalance = Math.round((party.outstandingBalance + grandTotal) * 100) / 100
-
-        // Double-entry ledger accounts adjustment
-        for (const acc of booksData.accounts) {
-          if (acc.id === 'acc-ar') acc.balance = Math.round((acc.balance + grandTotal) * 100) / 100
-          if (acc.id === 'acc-sales') acc.balance = Math.round((acc.balance + subtotal) * 100) / 100
-          if (acc.id === 'acc-vat') acc.balance = Math.round((acc.balance + taxTotal) * 100) / 100
-        }
-
-        // Balanced Journal Entry
-        booksData.journalEntries.unshift({
-          id: `je-${randomUUID().slice(0, 8)}`,
-          entryNumber: `JE-${year}-${booksData.journalEntries.length + 1}`,
           date: today,
-          totalDebit: grandTotal,
-          totalCredit: grandTotal,
-          remarks: `Milestone Tax Invoice ${invoiceNumber} for Tender ${ref}`,
-          posted: true,
-          items: [
-            {
-              id: `jei-1`,
-              accountId: 'acc-ar',
-              accountName: 'Accounts Receivable',
-              debit: grandTotal,
-              credit: 0,
-              partyId: party.id,
-              partyName: party.name,
-            },
-            {
-              id: `jei-2`,
-              accountId: 'acc-sales',
-              accountName: 'Tender & Commercial Contracting Sales',
-              debit: 0,
-              credit: subtotal,
-            },
-            {
-              id: `jei-3`,
-              accountId: 'acc-vat',
-              accountName: 'SARS VAT Output Payable',
-              debit: 0,
-              credit: taxTotal,
-            },
-          ],
+          dueDate,
         })
 
-        writeBooksStore(booksPath, booksData)
+        if (!result.ok || !result.invoice) {
+          return { ok: false, error: result.error || 'Failed to bill milestone in Books' }
+        }
+
+        const invoiceNumber = result.invoice.invoiceNumber
+        const invoiceId = result.invoice.id
+        const grandTotal = result.invoice.grandTotal
+        const subtotal = result.invoice.subtotal
+        const taxTotal = result.invoice.taxTotal
 
         // Update milestone in tenders data store
         const nowIso = new Date().toISOString()

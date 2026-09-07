@@ -14,14 +14,36 @@
  * - Tier 3: Cross-Feature Combinations (Pairwise)
  * - Tier 4: Real-World Commercial Workload Scenarios
  *
- * Directly executable via: node tools/verify-suite-workflows.mjs
+ * Directly executable via: npx tsx tools/verify-suite-workflows.mjs
+ * (tsx is required: the R2/R3 posting paths exercise the REAL books-core
+ * module at apps/books/src/main/books-core.ts — never a duplicated copy.)
  * Exits with code 0 on pass, code 1 on failure, code 2 on CLI usage error.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+  rmSync,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+
+// ----------------------------------------------------------------------------
+// REAL BOOKS CORE (SINGLE POSTING PATH)
+// ----------------------------------------------------------------------------
+// The R2 (CRM invoicing) and R3 (Tenders milestone billing) flows must post
+// through the REAL production implementation — issueSalesInvoiceInBooks from
+// the pure books-core module. This tool seeds sandboxes with its own fixture
+// writers, but party resolution, VAT-inclusive pricing, central invoice
+// numbering, journal posting, ledger recompute and persistence are all
+// performed by the code under test.
+const booksCore = await import('../apps/books/src/main/books-core.ts')
+const booksAccounting = await import('../apps/books/src/shared/accounting.ts')
 
 // ============================================================================
 // 1. CLI ARGUMENT PARSING & CONFIGURATION
@@ -30,9 +52,9 @@ import { randomUUID } from 'node:crypto'
 const args = process.argv.slice(2)
 
 const config = {
-  tier: 'all',        // '1', '2', '3', '4', 'all'
-  milestone: 'all',   // 'm1', 'm2', 'm3', 'm4', 'all'
-  feature: 'all',     // 'r1', 'r2', 'r3', 'r4', 'all'
+  tier: 'all', // '1', '2', '3', '4', 'all'
+  milestone: 'all', // 'm1', 'm2', 'm3', 'm4', 'all'
+  feature: 'all', // 'r1', 'r2', 'r3', 'r4', 'all'
   verbose: false,
   json: false,
   keepSandbox: false,
@@ -65,7 +87,7 @@ for (let i = 0; i < args.length; i++) {
 function printHelp() {
   console.log(`
 Zanostack Suite Workflows Verification Runner
-Usage: node tools/verify-suite-workflows.mjs [options]
+Usage: npx tsx tools/verify-suite-workflows.mjs [options]
 
 Options:
   --tier <1|2|3|4|all>        Filter tests by tier (default: all)
@@ -143,16 +165,83 @@ function createInitialBooksData() {
       phone: '+27 11 982 4000',
     },
     accounts: [
-      { id: 'acc-bank', name: 'FNB Business Cheque Account', rootType: 'Asset', accountType: 'Bank', parentId: 'acc-curr-asset', isGroup: false, balance: 485250 },
-      { id: 'acc-ar', name: 'Accounts Receivable (Debtors)', rootType: 'Asset', accountType: 'Receivable', parentId: 'acc-curr-asset', isGroup: false, balance: 195500 },
-      { id: 'acc-ap', name: 'Accounts Payable (Creditors)', rootType: 'Liability', accountType: 'Payable', parentId: 'acc-curr-liab', isGroup: false, balance: 74200 },
-      { id: 'acc-sales', name: 'Tender & Commercial Contracting Sales', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-operating-rev', isGroup: false, balance: 820000 },
-      { id: 'acc-vat', name: 'SARS VAT Output Payable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 38400 },
+      {
+        id: 'acc-bank',
+        name: 'FNB Business Cheque Account',
+        rootType: 'Asset',
+        accountType: 'Bank',
+        parentId: 'acc-curr-asset',
+        isGroup: false,
+        balance: 485250,
+      },
+      {
+        id: 'acc-ar',
+        name: 'Accounts Receivable (Debtors)',
+        rootType: 'Asset',
+        accountType: 'Receivable',
+        parentId: 'acc-curr-asset',
+        isGroup: false,
+        balance: 195500,
+      },
+      {
+        id: 'acc-ap',
+        name: 'Accounts Payable (Creditors)',
+        rootType: 'Liability',
+        accountType: 'Payable',
+        parentId: 'acc-curr-liab',
+        isGroup: false,
+        balance: 74200,
+      },
+      {
+        id: 'acc-sales',
+        name: 'Tender & Commercial Contracting Sales',
+        rootType: 'Income',
+        accountType: 'Direct Income',
+        parentId: 'acc-income',
+        isGroup: false,
+        balance: 820000,
+      },
+      {
+        id: 'acc-vat',
+        name: 'SARS VAT Output Payable',
+        rootType: 'Liability',
+        accountType: 'Tax',
+        parentId: 'acc-curr-liab',
+        isGroup: false,
+        balance: 38400,
+      },
     ],
     parties: [
-      { id: 'party-1', name: 'City of Ekurhuleni Water Dept', type: 'Customer', email: 'procurement@ekurhuleni.gov.za', phone: '+27 11 999 0000', taxId: '4010192837', address: 'Kempton Park Civic Centre', outstandingBalance: 145000 },
-      { id: 'party-2', name: 'Helios Clean Energy', type: 'Customer', email: 'billing@heliosclean.com', phone: '+27 21 444 1234', taxId: '4110293847', address: 'Century City, Cape Town', outstandingBalance: 50500 },
-      { id: 'party-supp-1', name: 'Apex Valve Supplies (Pty) Ltd', type: 'Supplier', email: 'orders@apexvalve.co.za', phone: '+27 11 888 7777', taxId: '4990192834', address: 'Germiston Industrial Park', outstandingBalance: 45000 },
+      {
+        id: 'party-1',
+        name: 'City of Ekurhuleni Water Dept',
+        type: 'Customer',
+        email: 'procurement@ekurhuleni.gov.za',
+        phone: '+27 11 999 0000',
+        taxId: '4010192837',
+        address: 'Kempton Park Civic Centre',
+        outstandingBalance: 145000,
+      },
+      {
+        id: 'party-2',
+        name: 'Helios Clean Energy',
+        type: 'Customer',
+        email: 'billing@heliosclean.com',
+        phone: '+27 21 444 1234',
+        taxId: '4110293847',
+        address: 'Century City, Cape Town',
+        outstandingBalance: 50500,
+      },
+      {
+        id: 'party-supp-1',
+        name: 'Apex Valve Supplies (Pty) Ltd',
+        type: 'Supplier',
+        email: 'orders@apexvalve.co.za',
+        phone: '+27 11 888 7777',
+        taxId: '4990192834',
+        address: 'Germiston Industrial Park',
+        outstandingBalance: 45000,
+      },
     ],
     invoices: [
       {
@@ -164,7 +253,17 @@ function createInitialBooksData() {
         date: '2026-08-15',
         dueDate: '2026-09-15',
         items: [
-          { id: 'item-1', itemCode: 'VALVE-REFURB', description: 'Phase 1 Reservoir Valve Refurbishment per RFP-WTR-2026-04', accountId: 'acc-sales', accountName: 'Tender & Commercial Contracting Sales', qty: 1, rate: 126086.96, taxRate: 15, amount: 126086.96 },
+          {
+            id: 'item-1',
+            itemCode: 'VALVE-REFURB',
+            description: 'Phase 1 Reservoir Valve Refurbishment per RFP-WTR-2026-04',
+            accountId: 'acc-sales',
+            accountName: 'Tender & Commercial Contracting Sales',
+            qty: 1,
+            rate: 126086.96,
+            taxRate: 15,
+            amount: 126086.96,
+          },
         ],
         subtotal: 126086.96,
         taxTotal: 18913.04,
@@ -185,7 +284,17 @@ function createInitialBooksData() {
         date: '2026-08-20',
         dueDate: '2026-09-20',
         items: [
-          { id: 'item-supp-1', itemCode: 'VALVE-KIT', description: 'Heavy Duty 300mm Valve Seals Kit', accountId: 'acc-ap', accountName: 'Accounts Payable', qty: 2, rate: 19565.22, taxRate: 15, amount: 39130.44 },
+          {
+            id: 'item-supp-1',
+            itemCode: 'VALVE-KIT',
+            description: 'Heavy Duty 300mm Valve Seals Kit',
+            accountId: 'acc-ap',
+            accountName: 'Accounts Payable',
+            qty: 2,
+            rate: 19565.22,
+            taxRate: 15,
+            amount: 39130.44,
+          },
         ],
         subtotal: 39130.44,
         taxTotal: 5869.56,
@@ -372,31 +481,17 @@ function migrateAndValidateTendersData(raw) {
 }
 
 function migrateAndValidateBooksData(raw) {
-  if (!raw || typeof raw !== 'object') {
-    return createInitialBooksData()
-  }
-
-  const base = createInitialBooksData()
-  const accounts = Array.isArray(raw.accounts) && raw.accounts.length > 0 ? raw.accounts : base.accounts
-  const parties = Array.isArray(raw.parties) ? raw.parties : base.parties
-  const invoices = Array.isArray(raw.invoices) ? raw.invoices : base.invoices
-  const journalEntries = Array.isArray(raw.journalEntries) ? raw.journalEntries : []
-  const bankTransactions = Array.isArray(raw.bankTransactions) ? raw.bankTransactions : []
-
-  return {
-    version: 1,
-    updatedAt: new Date().toISOString(),
-    settings: { ...base.settings, ...(raw.settings || {}) },
-    accounts,
-    parties,
-    invoices,
-    journalEntries,
-    bankTransactions,
-  }
+  // R1/R4 fixture migration must run through the REAL ledger-first migration
+  // (opening-balance synthesis + journal-derived balances), never a copy.
+  return booksCore.migrateAndValidateBooks(raw)
 }
 
 function safeMergeTenderIntoCrmDeals(crmDealsPath, tenderDeal) {
-  const currentEnvelope = safeReadJsonWithBackup(crmDealsPath, () => ({ version: 1, updatedAt: new Date().toISOString(), deals: [] }))
+  const currentEnvelope = safeReadJsonWithBackup(crmDealsPath, () => ({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    deals: [],
+  }))
   const validated = migrateAndValidateCrmDeals(currentEnvelope)
 
   const existingIdx = validated.deals.findIndex((d) => d.id === tenderDeal.id)
@@ -429,9 +524,16 @@ function safeMergeTenderIntoCrmDeals(crmDealsPath, tenderDeal) {
 // ----------------------------------------------------------------------------
 // R2: CRM TO ZANO BOOKS INVOICING BRIDGE
 // ----------------------------------------------------------------------------
+// Guarding (deal lookup, won-stage, duplicate-billing) is CRM-side logic that
+// lives here; the POSTING itself delegates to the real books-core
+// issueSalesInvoiceInBooks — the same single path crm-main.ts uses.
 
 function executeCreateInvoiceFromDeal({ crmDealsPath, booksDataPath, dealId, onOpenBooks }) {
-  const crmEnvelope = safeReadJsonWithBackup(crmDealsPath, () => ({ version: 1, updatedAt: '', deals: [] }))
+  const crmEnvelope = safeReadJsonWithBackup(crmDealsPath, () => ({
+    version: 1,
+    updatedAt: '',
+    deals: [],
+  }))
   const dealsData = migrateAndValidateCrmDeals(crmEnvelope)
   const deal = dealsData.deals.find((d) => d.id === dealId)
 
@@ -444,122 +546,58 @@ function executeCreateInvoiceFromDeal({ crmDealsPath, booksDataPath, dealId, onO
   }
 
   if (deal.invoiceNumber || deal.invoiceId) {
-    return { ok: false, error: `Deal already invoiced: ${deal.invoiceNumber}` }
+    return { ok: false, error: `Deal already invoiced: ${deal.invoiceNumber || deal.invoiceId}` }
   }
 
-  const booksEnvelope = safeReadJsonWithBackup(booksDataPath, () => createInitialBooksData())
-  const booksData = migrateAndValidateBooksData(booksEnvelope)
-
-  const partyName = deal.companyName || deal.name || 'Valued Client'
-  let party = booksData.parties.find((p) => p.name.toLowerCase() === partyName.toLowerCase())
-
-  if (!party) {
-    party = {
-      id: `party-${randomUUID().slice(0, 8)}`,
-      name: partyName,
-      type: 'Customer',
-      email: 'accounts@' + partyName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com',
-      outstandingBalance: 0,
-    }
-    booksData.parties.push(party)
-  }
-
-  const year = new Date().getFullYear()
-  const nextSeq = String(booksData.invoices.length + 1).padStart(3, '0')
-  const invoiceNumber = `INV-${year}-${nextSeq}`
-  const invoiceId = `inv-${randomUUID().slice(0, 8)}`
-
-  const grandTotal = Math.round(Number(deal.amount || 0) * 100) / 100
-  const subtotal = Math.round((grandTotal / 1.15) * 100) / 100
-  const taxTotal = Math.round((grandTotal - subtotal) * 100) / 100
-  const today = new Date().toISOString().split('T')[0]
-  const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-
-  const newInvoice = {
-    id: invoiceId,
-    invoiceNumber,
-    type: 'Sales',
-    partyId: party.id,
-    partyName: party.name,
-    date: today,
-    dueDate,
-    items: [
-      {
-        id: `item-${randomUUID().slice(0, 8)}`,
-        itemCode: 'COMMERCIAL-DELIVERY',
-        description: `${deal.name} - Commercial Implementation & Services`,
-        accountId: 'acc-sales',
-        accountName: 'Tender & Commercial Contracting Sales',
-        qty: 1,
-        rate: subtotal,
-        taxRate: 15,
-        amount: subtotal,
-      },
-    ],
-    subtotal,
-    taxTotal,
-    grandTotal,
-    outstandingAmount: grandTotal,
-    status: 'Unpaid',
-    notes: 'Payment terms: Net 30 days upon invoice receipt.',
+  // Single posting path: the REAL Books core owns party resolution,
+  // VAT-inclusive pricing, central invoice numbering, journal posting,
+  // ledger recompute and atomic persistence.
+  const result = booksCore.issueSalesInvoiceInBooks({
+    booksDataPath,
+    partyName: deal.companyName || deal.name || 'Valued Client',
+    itemDescription: `${deal.name} - Commercial Implementation & Services`,
+    itemCode: 'COMMERCIAL-DELIVERY',
+    accountId: 'acc-sales',
+    accountName: 'Tender & Commercial Contracting Sales',
+    amount: Number(deal.amount || 0),
     crmDealId: deal.id,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-
-  booksData.invoices.unshift(newInvoice)
-  party.outstandingBalance = Math.round((party.outstandingBalance + grandTotal) * 100) / 100
-
-  // Double-entry ledger adjustment
-  for (const acc of booksData.accounts) {
-    if (acc.id === 'acc-ar') acc.balance = Math.round((acc.balance + grandTotal) * 100) / 100
-    if (acc.id === 'acc-sales') acc.balance = Math.round((acc.balance + subtotal) * 100) / 100
-    if (acc.id === 'acc-vat') acc.balance = Math.round((acc.balance + taxTotal) * 100) / 100
-  }
-
-  // Balanced Journal Entry
-  booksData.journalEntries.unshift({
-    id: `je-${randomUUID().slice(0, 8)}`,
-    entryNumber: `JE-${year}-${booksData.journalEntries.length + 1}`,
-    date: today,
-    totalDebit: grandTotal,
-    totalCredit: grandTotal,
-    remarks: `Sales Invoice ${invoiceNumber} for CRM Deal: ${deal.name}`,
-    posted: true,
-    items: [
-      { id: `jei-1`, accountId: 'acc-ar', accountName: 'Accounts Receivable', debit: grandTotal, credit: 0, partyId: party.id, partyName: party.name },
-      { id: `jei-2`, accountId: 'acc-sales', accountName: 'Tender & Commercial Contracting Sales', debit: 0, credit: subtotal },
-      { id: `jei-3`, accountId: 'acc-vat', accountName: 'SARS VAT Output Payable', debit: 0, credit: taxTotal },
-    ],
+    notes: 'Payment terms: Net 30 days upon invoice receipt.',
   })
 
-  atomicWriteJson(booksDataPath, booksData)
+  if (!result.ok || !result.invoice) {
+    return { ok: false, error: result.error || 'Failed to create invoice in Books' }
+  }
+  const invoice = result.invoice
 
   // Back-reference onto CRM Deal
-  deal.invoiceId = invoiceId
-  deal.invoiceNumber = invoiceNumber
+  deal.invoiceId = invoice.id
+  deal.invoiceNumber = invoice.invoiceNumber
   deal.invoicedAt = new Date().toISOString()
   deal.updatedAt = new Date().toISOString()
   atomicWriteJson(crmDealsPath, dealsData)
 
   if (typeof onOpenBooks === 'function') {
-    onOpenBooks(invoiceId)
+    onOpenBooks(invoice.id)
   }
 
   return {
     ok: true,
-    invoiceId,
-    invoiceNumber,
-    grandTotal,
-    subtotal,
-    taxTotal,
-    partyName: party.name,
+    invoiceId: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
+    grandTotal: invoice.grandTotal,
+    subtotal: invoice.subtotal,
+    taxTotal: invoice.taxTotal,
+    partyName: invoice.partyName,
   }
 }
 
 // ----------------------------------------------------------------------------
 // R3: TENDERS CONTRACT MILESTONE BILLING BRIDGE
 // ----------------------------------------------------------------------------
+// Guarding (tender/milestone lookup, BILLED idempotency, REACHED eligibility)
+// is Tenders-side logic that lives here; the POSTING itself delegates to the
+// real books-core issueSalesInvoiceInBooks — the same single path
+// tenders-main.ts uses.
 
 function executeBillMilestoneInBooks({
   tendersDataPath,
@@ -601,7 +639,10 @@ function executeBillMilestoneInBooks({
   }
 
   if (foundMilestone.status === 'BILLED') {
-    return { ok: false, error: `Milestone already billed with invoice: ${foundMilestone.billedInvoiceId}` }
+    return {
+      ok: false,
+      error: `Milestone already billed with invoice: ${foundMilestone.billedInvoiceId || foundMilestone.billedInvoiceNumber}`,
+    }
   }
 
   if (foundMilestone.status !== 'REACHED') {
@@ -613,114 +654,50 @@ function executeBillMilestoneInBooks({
     return { ok: false, error: `Milestone billing amount must be greater than 0: ${billAmount}` }
   }
 
-  const booksEnvelope = safeReadJsonWithBackup(booksDataPath, () => createInitialBooksData())
-  const booksData = migrateAndValidateBooksData(booksEnvelope)
-
   const issuer = issuingAuthority || foundTender.issuingBody || 'Procurement Authority'
-  let party = booksData.parties.find((p) => p.name.toLowerCase() === issuer.toLowerCase())
-
-  if (!party) {
-    party = {
-      id: `party-${randomUUID().slice(0, 8)}`,
-      name: issuer,
-      type: 'Customer',
-      email: 'procurement@' + issuer.toLowerCase().replace(/[^a-z0-9]/g, '') + '.gov.za',
-      outstandingBalance: 0,
-    }
-    booksData.parties.push(party)
-  }
-
-  const year = new Date().getFullYear()
-  const invoiceNumber = `INV-${year}-${String(booksData.invoices.length + 1).padStart(3, '0')}`
-  const invoiceId = `inv-${randomUUID().slice(0, 8)}`
-
-  const grandTotal = Math.round(billAmount * 100) / 100
-  const subtotal = Math.round((grandTotal / 1.15) * 100) / 100
-  const taxTotal = Math.round((grandTotal - subtotal) * 100) / 100
-  const today = new Date().toISOString().split('T')[0]
-  const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
   const ref = tenderReference || foundTender.referenceNumber || 'RFP-CONTRACT'
   const title = milestoneTitle || foundMilestone.title || 'Milestone Delivery'
 
-  const newTaxInvoice = {
-    id: invoiceId,
-    invoiceNumber,
-    type: 'Sales',
-    partyId: party.id,
-    partyName: party.name,
-    date: today,
-    dueDate,
-    items: [
-      {
-        id: `item-${randomUUID().slice(0, 8)}`,
-        itemCode: 'TENDER-PROGRESS',
-        description: `${title} per ${ref}`,
-        accountId: 'acc-sales',
-        accountName: 'Tender & Commercial Contracting Sales',
-        qty: 1,
-        rate: subtotal,
-        taxRate: 15,
-        amount: subtotal,
-      },
-    ],
-    subtotal,
-    taxTotal,
-    grandTotal,
-    outstandingAmount: grandTotal,
-    status: 'Unpaid',
+  // Single posting path: the REAL Books core owns party resolution,
+  // VAT-inclusive pricing, central invoice numbering, journal posting,
+  // ledger recompute and atomic persistence.
+  const result = booksCore.issueSalesInvoiceInBooks({
+    booksDataPath,
+    partyName: issuer,
+    itemDescription: `${title} per ${ref}`,
+    itemCode: 'TENDER-PROGRESS',
+    accountId: 'acc-sales',
+    accountName: 'Tender & Commercial Contracting Sales',
+    amount: billAmount,
     tenderReference: ref,
     notes: notes || `Tender Milestone Progress Claim. Ref: ${ref}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-
-  booksData.invoices.unshift(newTaxInvoice)
-  party.outstandingBalance = Math.round((party.outstandingBalance + grandTotal) * 100) / 100
-
-  // Ledger updates
-  for (const acc of booksData.accounts) {
-    if (acc.id === 'acc-ar') acc.balance = Math.round((acc.balance + grandTotal) * 100) / 100
-    if (acc.id === 'acc-sales') acc.balance = Math.round((acc.balance + subtotal) * 100) / 100
-    if (acc.id === 'acc-vat') acc.balance = Math.round((acc.balance + taxTotal) * 100) / 100
-  }
-
-  // Journal Entry
-  booksData.journalEntries.unshift({
-    id: `je-${randomUUID().slice(0, 8)}`,
-    entryNumber: `JE-${year}-${booksData.journalEntries.length + 1}`,
-    date: today,
-    totalDebit: grandTotal,
-    totalCredit: grandTotal,
-    remarks: `Milestone Tax Invoice ${invoiceNumber} for Tender ${ref}`,
-    posted: true,
-    items: [
-      { id: `jei-1`, accountId: 'acc-ar', accountName: 'Accounts Receivable', debit: grandTotal, credit: 0, partyId: party.id, partyName: party.name },
-      { id: `jei-2`, accountId: 'acc-sales', accountName: 'Tender & Commercial Contracting Sales', debit: 0, credit: subtotal },
-      { id: `jei-3`, accountId: 'acc-vat', accountName: 'SARS VAT Output Payable', debit: 0, credit: taxTotal },
-    ],
   })
 
-  atomicWriteJson(booksDataPath, booksData)
+  if (!result.ok || !result.invoice) {
+    return { ok: false, error: result.error || 'Failed to bill milestone in Books' }
+  }
+  const invoice = result.invoice
 
   // Update milestone status in Tenders
   foundMilestone.status = 'BILLED'
-  foundMilestone.billedInvoiceId = invoiceId
+  foundMilestone.billedInvoiceId = invoice.id
+  foundMilestone.billedInvoiceNumber = invoice.invoiceNumber
   foundMilestone.billedDate = new Date().toISOString()
   tendersData.updatedAt = new Date().toISOString()
   atomicWriteJson(tendersDataPath, tendersData)
 
   if (typeof onOpenBooks === 'function') {
-    onOpenBooks(invoiceId)
+    onOpenBooks(invoice.id)
   }
 
   return {
     ok: true,
-    invoiceId,
-    invoiceNumber,
+    invoiceId: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
     tenderReference: ref,
-    grandTotal,
-    subtotal,
-    taxTotal,
+    grandTotal: invoice.grandTotal,
+    subtotal: invoice.subtotal,
+    taxTotal: invoice.taxTotal,
   }
 }
 
@@ -729,272 +706,38 @@ function executeBillMilestoneInBooks({
 // ----------------------------------------------------------------------------
 
 function parseBankStatementCsv(csvText) {
-  const lines = csvText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
-  if (lines.length < 2) return []
-
-  const headerLine = lines[0]
-  const headers = headerLine.split(',').map((h) => h.trim().toLowerCase().replace(/['"]/g, ''))
-
-  const dateIdx = headers.findIndex((h) => h.includes('date'))
-  const descIdx = headers.findIndex((h) => h.includes('desc') || h.includes('details') || h.includes('narrative'))
-  const refIdx = headers.findIndex((h) => h.includes('ref'))
-  const amountIdx = headers.findIndex((h) => h === 'amount' || h === 'value')
-  const debitIdx = headers.findIndex((h) => h.includes('debit'))
-  const creditIdx = headers.findIndex((h) => h.includes('credit'))
-
-  const transactions = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const rawLine = lines[i]
-    // Simple CSV parser handling quotes
-    const cols = []
-    let curr = ''
-    let inQuote = false
-
-    for (let c = 0; c < rawLine.length; c++) {
-      const char = rawLine[c]
-      if (char === '"') {
-        inQuote = !inQuote
-      } else if (char === ',' && !inQuote) {
-        cols.push(curr.trim())
-        curr = ''
-      } else {
-        curr += char
-      }
-    }
-    cols.push(curr.trim())
-
-    if (cols.length === 0 || !cols.some((c) => c.length > 0)) continue
-
-    const date = dateIdx >= 0 ? cols[dateIdx] : new Date().toISOString().split('T')[0]
-    const description = descIdx >= 0 ? cols[descIdx] : 'Bank Transaction'
-    const reference = refIdx >= 0 ? cols[refIdx] : ''
-
-    let amount = 0
-    if (amountIdx >= 0 && cols[amountIdx]) {
-      let clean = cols[amountIdx].replace(/[R$\s]/g, '').replace(/,/g, '')
-      // Handle parenthesized negative: (25000) or (R 25,000)
-      if (clean.startsWith('(') && clean.endsWith(')')) {
-        clean = '-' + clean.slice(1, -1)
-      }
-      amount = parseFloat(clean) || 0
-    } else if (debitIdx >= 0 || creditIdx >= 0) {
-      const debRaw = debitIdx >= 0 && cols[debitIdx] ? cols[debitIdx].replace(/[R$\s]/g, '').replace(/,/g, '') : '0'
-      const credRaw = creditIdx >= 0 && cols[creditIdx] ? cols[creditIdx].replace(/[R$\s]/g, '').replace(/,/g, '') : '0'
-      const deb = parseFloat(debRaw) || 0
-      const cred = parseFloat(credRaw) || 0
-      amount = cred > 0 ? cred : -deb
-    }
-
-    if (isNaN(amount) || amount === 0) continue
-
-    transactions.push({
-      id: `tx-${randomUUID().slice(0, 8)}`,
-      accountId: 'acc-bank',
-      date,
-      description,
-      reference,
-      amount: Math.round(amount * 100) / 100,
-      reconciled: false,
-    })
-  }
-
-  return transactions
+  // Real SA bank-CSV parser from the shared accounting module.
+  return booksAccounting.parseBankStatementCsv(csvText)
 }
 
 function importBankStatement({ booksDataPath, csvContent }) {
-  const booksEnvelope = safeReadJsonWithBackup(booksDataPath, () => createInitialBooksData())
-  const booksData = migrateAndValidateBooksData(booksEnvelope)
-
-  const parsed = parseBankStatementCsv(csvContent)
-  if (parsed.length === 0) {
-    return { ok: false, error: 'No valid transactions found in statement CSV' }
-  }
-
-  // Deduplicate against existing bank transactions by fingerprint
-  const existing = booksData.bankTransactions || []
-  const existingFingerprints = new Set(existing.map((t) => `${t.date}|${t.description}|${t.amount}`))
-
-  const toAdd = []
-  let netAdjustment = 0
-
-  for (const tx of parsed) {
-    const fp = `${tx.date}|${tx.description}|${tx.amount}`
-    if (!existingFingerprints.has(fp)) {
-      toAdd.push(tx)
-      netAdjustment += tx.amount
-      existingFingerprints.add(fp)
-    }
-  }
-
-  booksData.bankTransactions = [...existing, ...toAdd]
-
-  // Adjust Bank Account ledger balance by net transaction amount
-  const bankAccount = booksData.accounts.find((a) => a.id === 'acc-bank')
-  if (bankAccount) {
-    bankAccount.balance = Math.round((bankAccount.balance + netAdjustment) * 100) / 100
-  }
-
-  booksData.updatedAt = new Date().toISOString()
-  atomicWriteJson(booksDataPath, booksData)
-
-  return {
-    ok: true,
-    importedCount: toAdd.length,
-    skippedDuplicates: parsed.length - toAdd.length,
-    netAdjustment: Math.round(netAdjustment * 100) / 100,
-    newBankBalance: bankAccount ? bankAccount.balance : null,
-    transactions: toAdd,
-  }
+  // REAL production import: posts Dr/Cr Bank vs Bank Suspense journal entries
+  // and derives balances from journals. The legacy copy mutated the stored
+  // bank balance directly with no journal — that behavior no longer exists.
+  return booksCore.importBankStatement({ booksDataPath, csvContent })
 }
 
 function computeSettlementSuggestions(booksData) {
-  const transactions = (booksData.bankTransactions || []).filter((t) => !t.reconciled)
-  const openInvoices = (booksData.invoices || []).filter((i) => i.status !== 'Paid' && i.outstandingAmount > 0)
-
-  const suggestions = []
-
-  for (const tx of transactions) {
-    const isDeposit = tx.amount > 0
-    const targetType = isDeposit ? 'Sales' : 'Purchase'
-    const targetAmount = Math.abs(tx.amount)
-
-    const candidates = openInvoices.filter((i) => i.type === targetType)
-
-    for (const inv of candidates) {
-      const amountMatches = Math.abs(inv.outstandingAmount - targetAmount) < 0.01
-
-      if (!amountMatches) continue
-
-      // Check text tokens for HIGH confidence match
-      const textToSearch = `${tx.description} ${tx.reference || ''}`.toLowerCase()
-      const invNoMatch = inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase())
-      const tenderMatch = inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase())
-
-      // Split party name into significant keywords (length >= 4, ignoring common stop words)
-      const stopWords = new Set(['city', 'of', 'the', 'and', 'dept', 'ltd', 'pty', 'inc', 'corp', 'co'])
-      const partyTokens = (inv.partyName || '')
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter((t) => t.length >= 4 && !stopWords.has(t))
-
-      const partyMatch =
-        (inv.partyName && textToSearch.includes(inv.partyName.toLowerCase())) ||
-        (partyTokens.length > 0 && partyTokens.some((t) => textToSearch.includes(t)))
-
-      let confidence = 'MEDIUM'
-      let reason = 'Exact amount matches outstanding invoice'
-
-      if (invNoMatch) {
-        confidence = 'HIGH'
-        reason = `Exact amount match and contains invoice number: ${inv.invoiceNumber}`
-      } else if (tenderMatch) {
-        confidence = 'HIGH'
-        reason = `Exact amount match and contains tender reference: ${inv.tenderReference}`
-      } else if (partyMatch) {
-        confidence = 'HIGH'
-        reason = `Exact amount match and contains counterparty name: ${inv.partyName}`
-      }
-
-      suggestions.push({
-        transactionId: tx.id,
-        invoiceId: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        partyName: inv.partyName,
-        invoiceType: inv.type,
-        amount: targetAmount,
-        confidence,
-        reason,
-      })
-    }
-  }
-
-  return suggestions
+  return booksCore.computeSettlementSuggestions(booksData)
 }
 
 function executeReconciliation({ booksDataPath, transactionId, invoiceId }) {
-  const booksEnvelope = safeReadJsonWithBackup(booksDataPath, () => createInitialBooksData())
-  const booksData = migrateAndValidateBooksData(booksEnvelope)
+  // REAL reconciliation core (books-core is pure; tender back-propagation
+  // lives in the electron wrapper and is covered by the vitest suite).
+  return booksCore.executeReconciliationCore({ booksDataPath, transactionId, invoiceId })
+}
 
-  const tx = (booksData.bankTransactions || []).find((t) => t.id === transactionId)
-  if (!tx) return { ok: false, error: `Transaction not found: ${transactionId}` }
-  if (tx.reconciled) return { ok: false, error: `Transaction already reconciled: ${transactionId}` }
-
-  const inv = (booksData.invoices || []).find((i) => i.id === invoiceId)
-  if (!inv) return { ok: false, error: `Invoice not found: ${invoiceId}` }
-  if (inv.status === 'Paid') return { ok: false, error: `Invoice already marked Paid: ${invoiceId}` }
-
-  // 1. Mark transaction reconciled
-  tx.reconciled = true
-  tx.matchedInvoiceId = inv.id
-  tx.reconciledAt = new Date().toISOString()
-
-  // 2. Mark invoice Paid and clear outstanding
-  const settledAmount = inv.outstandingAmount
-  inv.status = 'Paid'
-  inv.outstandingAmount = 0
-  inv.updatedAt = new Date().toISOString()
-
-  // 3. Update party balance
-  const party = booksData.parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
-  if (party) {
-    party.outstandingBalance = Math.max(0, Math.round((party.outstandingBalance - settledAmount) * 100) / 100)
-  }
-
-  // 4. Update ledger accounts (offset Receivable or Payable against Bank settlement)
-  for (const acc of booksData.accounts) {
-    if (inv.type === 'Sales' && acc.id === 'acc-ar') {
-      acc.balance = Math.max(0, Math.round((acc.balance - settledAmount) * 100) / 100)
-    }
-    if (inv.type === 'Purchase' && acc.id === 'acc-ap') {
-      acc.balance = Math.max(0, Math.round((acc.balance - settledAmount) * 100) / 100)
-    }
-  }
-
-  // 5. Post settlement journal entry
-  const year = new Date().getFullYear()
-  const jeNumber = `JE-${year}-${booksData.journalEntries.length + 1}`
-  const today = new Date().toISOString().split('T')[0]
-
-  const journalItems =
-    inv.type === 'Sales'
-      ? [
-          { id: 'jei-rec-1', accountId: 'acc-bank', accountName: 'FNB Business Cheque Account', debit: settledAmount, credit: 0 },
-          { id: 'jei-rec-2', accountId: 'acc-ar', accountName: 'Accounts Receivable', debit: 0, credit: settledAmount, partyId: party?.id, partyName: party?.name },
-        ]
-      : [
-          { id: 'jei-rec-1', accountId: 'acc-ap', accountName: 'Accounts Payable', debit: settledAmount, credit: 0, partyId: party?.id, partyName: party?.name },
-          { id: 'jei-rec-2', accountId: 'acc-bank', accountName: 'FNB Business Cheque Account', debit: 0, credit: settledAmount },
-        ]
-
-  booksData.journalEntries.unshift({
-    id: `je-${randomUUID().slice(0, 8)}`,
-    entryNumber: jeNumber,
-    date: today,
-    totalDebit: settledAmount,
-    totalCredit: settledAmount,
-    remarks: `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
-    posted: true,
-    items: journalItems,
-  })
-
-  booksData.updatedAt = new Date().toISOString()
-  atomicWriteJson(booksDataPath, booksData)
-
-  return {
-    ok: true,
-    transactionId,
-    invoiceId,
-    invoiceNumber: inv.invoiceNumber,
-    settledAmount,
-    invoiceStatus: inv.status,
-    partyBalance: party ? party.outstandingBalance : null,
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message || 'Assertion failed')
   }
 }
 
-// ============================================================================
-// 4. TEST HARNESS & ASSERTION FRAMEWORK
-// ============================================================================
+assert.strictEqual = (actual, expected, msg) => {
+  if (actual !== expected) {
+    throw new Error(`${msg ? msg + ': ' : ''}Expected [${expected}] but received [${actual}]`)
+  }
+}
 
 class TestHarness {
   constructor() {
@@ -1022,7 +765,9 @@ class TestHarness {
       console.log(`\n======================================================================`)
       console.log(`   ZANOSTACK SUITE WORKFLOW VERIFICATION (E2E TRACK)`)
       console.log(`======================================================================`)
-      console.log(`Plan: ${activeTests.length} tests selected (Filter: Tier=${config.tier}, Milestone=${config.milestone}, Feature=${config.feature})\n`)
+      console.log(
+        `Plan: ${activeTests.length} tests selected (Filter: Tier=${config.tier}, Milestone=${config.milestone}, Feature=${config.feature})\n`,
+      )
     }
 
     for (const t of activeTests) {
@@ -1084,7 +829,9 @@ class TestHarness {
       )
     } else {
       console.log(`\n----------------------------------------------------------------------`)
-      console.log(`Results: ${this.passed} passed, ${this.failed} failed out of ${activeTests.length} tests (${duration}ms)`)
+      console.log(
+        `Results: ${this.passed} passed, ${this.failed} failed out of ${activeTests.length} tests (${duration}ms)`,
+      )
       if (this.failed === 0) {
         console.log(`🎉 ALL SUITE WORKFLOW VERIFICATIONS PASSED SUCCESSFULLY!`)
       } else {
@@ -1097,31 +844,15 @@ class TestHarness {
   }
 }
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(message || 'Assertion failed')
-  }
-}
-
-assert.strictEqual = (actual, expected, msg) => {
-  if (actual !== expected) {
-    throw new Error(`${msg ? msg + ': ' : ''}Expected [${expected}] but received [${actual}]`)
-  }
-}
-
-assert.deepStrictEqual = (actual, expected, msg) => {
-  const aStr = JSON.stringify(actual)
-  const eStr = JSON.stringify(expected)
-  if (aStr !== eStr) {
-    throw new Error(`${msg ? msg + ': ' : ''}Expected ${eStr} but received ${aStr}`)
-  }
-}
-
 assert.closeTo = (actual, expected, delta = 0.01, msg) => {
   if (Math.abs(actual - expected) > delta) {
-    throw new Error(`${msg ? msg + ': ' : ''}Expected ${actual} to be close to ${expected} (+/- ${delta})`)
+    throw new Error(
+      `${msg ? msg + ': ' : ''}Expected ${actual} to be close to ${expected} (+/- ${delta})`,
+    )
   }
 }
+
+// ============================================================================
 
 // ============================================================================
 // 5. TEST SUITE DEFINITION (TIERS 1 - 4)
@@ -1135,7 +866,13 @@ const suite = new TestHarness()
 
 // R1.1: CRM deals schema v0 -> v1 migration
 suite.register(
-  { id: 'T1.R1.1', name: 'CRM deals schema v0 legacy array to v1 envelope migration', tier: 1, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T1.R1.1',
+    name: 'CRM deals schema v0 legacy array to v1 envelope migration',
+    tier: 1,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     // Write legacy v0 raw array
     const rawV0 = createInitialCrmDeals()
@@ -1154,10 +891,22 @@ suite.register(
 
 // R1.2: CRM deal field validation and sanitation
 suite.register(
-  { id: 'T1.R1.2', name: 'CRM deal field validation, sanitization and probability clamping', tier: 1, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T1.R1.2',
+    name: 'CRM deal field validation, sanitization and probability clamping',
+    tier: 1,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const rawWithBadFields = [
-      { id: 'deal-bad-1', name: 'Unclamped High', amount: '150000', probability: 150, stage: 'invalid_stage' },
+      {
+        id: 'deal-bad-1',
+        name: 'Unclamped High',
+        amount: '150000',
+        probability: 150,
+        stage: 'invalid_stage',
+      },
       { id: 'deal-bad-2', name: 'Unclamped Low', amount: -500, probability: -40, stage: 'won' },
       { id: '', name: '', amount: null },
     ]
@@ -1171,13 +920,23 @@ suite.register(
     assert.strictEqual(validated.deals[1].probability, 0, 'Negative probability clamped to 0')
     assert.strictEqual(validated.deals[1].amount, 0, 'Negative amount coerced to 0')
     assert(validated.deals[2].id.startsWith('deal-'), 'Missing ID assigned valid UUID format')
-    assert.strictEqual(validated.deals[2].name, 'Untitled Opportunity', 'Empty name assigned default')
+    assert.strictEqual(
+      validated.deals[2].name,
+      'Untitled Opportunity',
+      'Empty name assigned default',
+    )
   },
 )
 
 // R1.3: Tenders data envelope validation
 suite.register(
-  { id: 'T1.R1.3', name: 'Tenders data envelope validation and structure verification', tier: 1, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T1.R1.3',
+    name: 'Tenders data envelope validation and structure verification',
+    tier: 1,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const initialTenders = createInitialTendersData()
     atomicWriteJson(sandbox.tendersDataPath, initialTenders)
@@ -1188,13 +947,23 @@ suite.register(
     assert.strictEqual(validated.version, 1, 'Tenders envelope must be version 1')
     assert.strictEqual(validated.activeCompanyId, 'comp-zano-01', 'activeCompanyId preserved')
     assert(Array.isArray(validated.workspaces), 'Workspaces must be an array')
-    assert.strictEqual(validated.workspaces[0].tenders[0].referenceNumber, 'RFP-WTR-2026-04', 'RFP reference retained')
+    assert.strictEqual(
+      validated.workspaces[0].tenders[0].referenceNumber,
+      'RFP-WTR-2026-04',
+      'RFP reference retained',
+    )
   },
 )
 
 // R1.4: Books data envelope preservation
 suite.register(
-  { id: 'T1.R1.4', name: 'Books data envelope preservation and Chart of Accounts integrity', tier: 1, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T1.R1.4',
+    name: 'Books data envelope preservation and Chart of Accounts integrity',
+    tier: 1,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const initialBooks = createInitialBooksData()
     atomicWriteJson(sandbox.booksDataPath, initialBooks)
@@ -1203,16 +972,34 @@ suite.register(
     const validated = migrateAndValidateBooksData(raw)
 
     assert.strictEqual(validated.version, 1, 'Books envelope must be version 1')
-    assert(validated.accounts.some((a) => a.id === 'acc-bank'), 'acc-bank preserved')
-    assert(validated.accounts.some((a) => a.id === 'acc-ar'), 'acc-ar preserved')
-    assert(validated.accounts.some((a) => a.id === 'acc-sales'), 'acc-sales preserved')
-    assert(validated.accounts.some((a) => a.id === 'acc-vat'), 'acc-vat preserved')
+    assert(
+      validated.accounts.some((a) => a.id === 'acc-bank'),
+      'acc-bank preserved',
+    )
+    assert(
+      validated.accounts.some((a) => a.id === 'acc-ar'),
+      'acc-ar preserved',
+    )
+    assert(
+      validated.accounts.some((a) => a.id === 'acc-sales'),
+      'acc-sales preserved',
+    )
+    assert(
+      validated.accounts.some((a) => a.id === 'acc-vat'),
+      'acc-vat preserved',
+    )
   },
 )
 
 // R1.5: Atomic write verification
 suite.register(
-  { id: 'T1.R1.5', name: 'Atomic persistence verification (temp file + renameSync)', tier: 1, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T1.R1.5',
+    name: 'Atomic persistence verification (temp file + renameSync)',
+    tier: 1,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const payload = { test: 'atomic_persistence', timestamp: Date.now() }
     const dest = join(sandbox.root, 'atomic-test.json')
@@ -1227,10 +1014,20 @@ suite.register(
 
 // R1.6: Safe external merge
 suite.register(
-  { id: 'T1.R1.6', name: 'Safe external merge: Tenders syncs into CRM deals without dropping records', tier: 1, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T1.R1.6',
+    name: 'Safe external merge: Tenders syncs into CRM deals without dropping records',
+    tier: 1,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const initialDeals = createInitialCrmDeals()
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals: initialDeals })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: initialDeals,
+    })
 
     const newTenderDeal = {
       id: 'deal-tender-sync-1',
@@ -1245,18 +1042,38 @@ suite.register(
 
     const after = JSON.parse(readFileSync(sandbox.crmDealsPath, 'utf8'))
     assert.strictEqual(after.version, 1, 'Version envelope retained')
-    assert.strictEqual(after.deals.length, initialDeals.length + 1, 'New deal appended without dropping existing ones')
-    assert(after.deals.some((d) => d.id === 'deal-1'), 'Existing deal-1 retained')
-    assert(after.deals.some((d) => d.id === 'deal-tender-sync-1'), 'Synced deal present')
+    assert.strictEqual(
+      after.deals.length,
+      initialDeals.length + 1,
+      'New deal appended without dropping existing ones',
+    )
+    assert(
+      after.deals.some((d) => d.id === 'deal-1'),
+      'Existing deal-1 retained',
+    )
+    assert(
+      after.deals.some((d) => d.id === 'deal-tender-sync-1'),
+      'Synced deal present',
+    )
   },
 )
 
 // R2.1: Won deal eligibility check
 suite.register(
-  { id: 'T1.R2.1', name: 'CRM to Books invoicing: Won deal eligibility check', tier: 1, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T1.R2.1',
+    name: 'CRM to Books invoicing: Won deal eligibility check',
+    tier: 1,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
     const deals = createInitialCrmDeals()
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     // Attempt on non-won deal (deal-1 is negotiation)
@@ -1281,12 +1098,28 @@ suite.register(
 
 // R2.2: Sales invoice creation with full mapping
 suite.register(
-  { id: 'T1.R2.2', name: 'CRM to Books invoicing: Full sales invoice mapping and VAT calculation', tier: 1, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T1.R2.2',
+    name: 'CRM to Books invoicing: Full sales invoice mapping and VAT calculation',
+    tier: 1,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
     const deals = [
-      { id: 'deal-test-won', name: 'Solar Microgrid Architecture', companyName: 'Helios Clean Energy', amount: 115000, stage: 'won' },
+      {
+        id: 'deal-test-won',
+        name: 'Solar Microgrid Architecture',
+        companyName: 'Helios Clean Energy',
+        amount: 115000,
+        stage: 'won',
+      },
     ]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1297,7 +1130,11 @@ suite.register(
 
     assert(res.ok, 'Invoice creation succeeded')
     assert.strictEqual(res.grandTotal, 115000, 'Grand total matches valuation')
-    assert.strictEqual(res.subtotal, 100000, 'Subtotal correctly calculates 15% VAT base (115000 / 1.15)')
+    assert.strictEqual(
+      res.subtotal,
+      100000,
+      'Subtotal correctly calculates 15% VAT base (115000 / 1.15)',
+    )
     assert.strictEqual(res.taxTotal, 15000, 'Tax total matches 15% VAT')
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
@@ -1311,10 +1148,28 @@ suite.register(
 
 // R2.3: crmDealId linking on Books sales invoice
 suite.register(
-  { id: 'T1.R2.3', name: 'CRM to Books invoicing: crmDealId link on Books invoice', tier: 1, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T1.R2.3',
+    name: 'CRM to Books invoicing: crmDealId link on Books invoice',
+    tier: 1,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-link-42', name: 'Enterprise Cloud', companyName: 'Acme Cloud', amount: 80000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-link-42',
+        name: 'Enterprise Cloud',
+        companyName: 'Acme Cloud',
+        amount: 80000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1331,10 +1186,28 @@ suite.register(
 
 // R2.4: Deal back-reference update in CRM deals.json
 suite.register(
-  { id: 'T1.R2.4', name: 'CRM to Books invoicing: CRM deal back-reference update', tier: 1, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T1.R2.4',
+    name: 'CRM to Books invoicing: CRM deal back-reference update',
+    tier: 1,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-backref-99', name: 'Security Audit', companyName: 'CyberCorp', amount: 50000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-backref-99',
+        name: 'Security Audit',
+        companyName: 'CyberCorp',
+        amount: 50000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1354,10 +1227,28 @@ suite.register(
 
 // R2.5: Books double-entry ledger update
 suite.register(
-  { id: 'T1.R2.5', name: 'CRM to Books invoicing: Books double-entry ledger update & journal entry', tier: 1, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T1.R2.5',
+    name: 'CRM to Books invoicing: Books double-entry ledger update & journal entry',
+    tier: 1,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-ledger-1', name: 'Data Pipeline', companyName: 'DataCo', amount: 115000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-ledger-1',
+        name: 'Data Pipeline',
+        companyName: 'DataCo',
+        amount: 115000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
 
     const booksInitial = createInitialBooksData()
     const arBefore = booksInitial.accounts.find((a) => a.id === 'acc-ar').balance
@@ -1388,10 +1279,28 @@ suite.register(
 
 // R2.6: Books tab activation trigger
 suite.register(
-  { id: 'T1.R2.6', name: 'CRM to Books invoicing: Shell tab activation trigger callback', tier: 1, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T1.R2.6',
+    name: 'CRM to Books invoicing: Shell tab activation trigger callback',
+    tier: 1,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-tab-trigger', name: 'Tab Trigger Deal', companyName: 'Helios Clean Energy', amount: 35000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-tab-trigger',
+        name: 'Tab Trigger Deal',
+        companyName: 'Helios Clean Energy',
+        amount: 35000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     let tabActivatedWithInvoice = null
@@ -1410,7 +1319,13 @@ suite.register(
 
 // R3.1: Tender milestone reached status eligibility
 suite.register(
-  { id: 'T1.R3.1', name: 'Tenders milestone billing: Status eligibility (REACHED required)', tier: 1, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T1.R3.1',
+    name: 'Tenders milestone billing: Status eligibility (REACHED required)',
+    tier: 1,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1438,7 +1353,13 @@ suite.register(
 
 // R3.2: Tax invoice creation linked to RFP-WTR-2026-04
 suite.register(
-  { id: 'T1.R3.2', name: 'Tenders milestone billing: Tax invoice creation linked to RFP-WTR-2026-04', tier: 1, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T1.R3.2',
+    name: 'Tenders milestone billing: Tax invoice creation linked to RFP-WTR-2026-04',
+    tier: 1,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1456,7 +1377,11 @@ suite.register(
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
     const inv = books.invoices.find((i) => i.id === res.invoiceId)
-    assert.strictEqual(inv.tenderReference, 'RFP-WTR-2026-04', 'Invoice has tenderReference in Books')
+    assert.strictEqual(
+      inv.tenderReference,
+      'RFP-WTR-2026-04',
+      'Invoice has tenderReference in Books',
+    )
     assert.strictEqual(inv.grandTotal, 145000, 'Grand total is 145000')
     assert.strictEqual(inv.subtotal, 126086.96, 'Subtotal is 126086.96')
     assert.strictEqual(inv.taxTotal, 18913.04, 'Tax total is 18913.04')
@@ -1465,11 +1390,19 @@ suite.register(
 
 // R3.3: Issuing authority party mapping
 suite.register(
-  { id: 'T1.R3.3', name: 'Tenders milestone billing: Issuing authority party mapping & balance adjustment', tier: 1, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T1.R3.3',
+    name: 'Tenders milestone billing: Issuing authority party mapping & balance adjustment',
+    tier: 1,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     const initialBooks = createInitialBooksData()
-    const partyBefore = initialBooks.parties.find((p) => p.name === 'City of Ekurhuleni Water Dept').outstandingBalance
+    const partyBefore = initialBooks.parties.find(
+      (p) => p.name === 'City of Ekurhuleni Water Dept',
+    ).outstandingBalance
     atomicWriteJson(sandbox.booksDataPath, initialBooks)
 
     executeBillMilestoneInBooks({
@@ -1483,13 +1416,23 @@ suite.register(
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
     const partyAfter = books.parties.find((p) => p.name === 'City of Ekurhuleni Water Dept')
-    assert.strictEqual(partyAfter.outstandingBalance, partyBefore + 145000, 'Party outstanding balance incremented')
+    assert.strictEqual(
+      partyAfter.outstandingBalance,
+      partyBefore + 145000,
+      'Party outstanding balance incremented',
+    )
   },
 )
 
 // R3.4: Milestone progress line item format
 suite.register(
-  { id: 'T1.R3.4', name: 'Tenders milestone billing: Line item description and tax rate', tier: 1, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T1.R3.4',
+    name: 'Tenders milestone billing: Line item description and tax rate',
+    tier: 1,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1507,14 +1450,24 @@ suite.register(
     const inv = books.invoices.find((i) => i.id === res.invoiceId)
     const item = inv.items[0]
 
-    assert.strictEqual(item.description, 'Phase 1 Reservoir Valve Refurbishment per RFP-WTR-2026-04', 'Item description formatted accurately')
+    assert.strictEqual(
+      item.description,
+      'Phase 1 Reservoir Valve Refurbishment per RFP-WTR-2026-04',
+      'Item description formatted accurately',
+    )
     assert.strictEqual(item.taxRate, 15, 'Tax rate is 15%')
   },
 )
 
 // R3.5: Milestone status updated to BILLED
 suite.register(
-  { id: 'T1.R3.5', name: 'Tenders milestone billing: Milestone status updated to BILLED in tenders-data.json', tier: 1, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T1.R3.5',
+    name: 'Tenders milestone billing: Milestone status updated to BILLED in tenders-data.json',
+    tier: 1,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1536,7 +1489,13 @@ suite.register(
 
 // R3.6: Books tab activation trigger on milestone billing
 suite.register(
-  { id: 'T1.R3.6', name: 'Tenders milestone billing: Shell tab activation trigger callback', tier: 1, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T1.R3.6',
+    name: 'Tenders milestone billing: Shell tab activation trigger callback',
+    tier: 1,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1558,7 +1517,13 @@ suite.register(
 
 // R4.1: Standard bank statement CSV parsing
 suite.register(
-  { id: 'T1.R4.1', name: 'Bank statement reconciliation: Standard bank CSV parsing', tier: 1, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T1.R4.1',
+    name: 'Bank statement reconciliation: Standard bank CSV parsing',
+    tier: 1,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     const csv = `Date,Description,Reference,Amount
 2026-08-28,Ekurhuleni Municipality Payment,RFP-WTR-2026-04,145000.00
@@ -1575,7 +1540,13 @@ suite.register(
 
 // R4.2: Bank transaction ingestion into acc-bank
 suite.register(
-  { id: 'T1.R4.2', name: 'Bank statement reconciliation: Ingestion into bankTransactions list', tier: 1, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T1.R4.2',
+    name: 'Bank statement reconciliation: Ingestion into bankTransactions list',
+    tier: 1,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-01,Ekurhuleni Water Dept Settlement,RFP-WTR-2026-04,145000.00`
@@ -1586,13 +1557,23 @@ suite.register(
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
     assert.strictEqual(books.bankTransactions.length, 1, 'bankTransactions list updated')
-    assert.strictEqual(books.bankTransactions[0].accountId, 'acc-bank', 'Designated acc-bank account')
+    assert.strictEqual(
+      books.bankTransactions[0].accountId,
+      'acc-bank',
+      'Designated acc-bank account',
+    )
   },
 )
 
 // R4.3: Bank ledger balance adjustment
 suite.register(
-  { id: 'T1.R4.3', name: 'Bank statement reconciliation: Bank ledger balance adjustment by net amount', tier: 1, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T1.R4.3',
+    name: 'Bank statement reconciliation: Bank ledger balance adjustment by net amount',
+    tier: 1,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     const initialBooks = createInitialBooksData()
     const balanceBefore = initialBooks.accounts.find((a) => a.id === 'acc-bank').balance // 485250
@@ -1604,17 +1585,31 @@ suite.register(
 
     const res = importBankStatement({ booksDataPath: sandbox.booksDataPath, csvContent: csv })
     assert.strictEqual(res.netAdjustment, 60000, 'Net adjustment is 100000 - 40000 = 60000')
-    assert.strictEqual(res.newBankBalance, balanceBefore + 60000, 'acc-bank balance increased by net amount')
+    assert.strictEqual(
+      res.newBankBalance,
+      balanceBefore + 60000,
+      'acc-bank balance increased by net amount',
+    )
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
     const bankAcc = books.accounts.find((a) => a.id === 'acc-bank')
-    assert.strictEqual(bankAcc.balance, balanceBefore + 60000, 'acc-bank.balance persisted in storage')
+    assert.strictEqual(
+      bankAcc.balance,
+      balanceBefore + 60000,
+      'acc-bank.balance persisted in storage',
+    )
   },
 )
 
 // R4.4: Settlement suggestion matching for deposits (Sales invoices)
 suite.register(
-  { id: 'T1.R4.4', name: 'Bank statement reconciliation: Settlement suggestions for deposits (Sales invoices)', tier: 1, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T1.R4.4',
+    name: 'Bank statement reconciliation: Settlement suggestions for deposits (Sales invoices)',
+    tier: 1,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-01,Direct Deposit Ekurhuleni,RFP-WTR-2026-04,145000.00`
@@ -1634,7 +1629,13 @@ suite.register(
 
 // R4.5: Settlement suggestion matching for withdrawals (Purchase bills)
 suite.register(
-  { id: 'T1.R4.5', name: 'Bank statement reconciliation: Settlement suggestions for withdrawals (Purchase bills)', tier: 1, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T1.R4.5',
+    name: 'Bank statement reconciliation: Settlement suggestions for withdrawals (Purchase bills)',
+    tier: 1,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-02,Apex Valve Supplies Pmt,BILL-2026-012,-45000.00`
@@ -1653,7 +1654,13 @@ suite.register(
 
 // R4.6: 1-click reconciliation action
 suite.register(
-  { id: 'T1.R4.6', name: 'Bank statement reconciliation: 1-click reconciliation execution', tier: 1, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T1.R4.6',
+    name: 'Bank statement reconciliation: 1-click reconciliation execution',
+    tier: 1,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-01,Ekurhuleni Municipality Settlement,RFP-WTR-2026-04,145000.00`
@@ -1691,12 +1698,22 @@ suite.register(
 
 // T2.R1.1: Corrupted JSON handling in deals.json
 suite.register(
-  { id: 'T2.R1.1', name: 'Boundary R1: Corrupted JSON in deals.json preserves .corrupted.bak', tier: 2, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T2.R1.1',
+    name: 'Boundary R1: Corrupted JSON in deals.json preserves .corrupted.bak',
+    tier: 2,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const corruptContent = `[{"id": "deal-broken", "name": "Malformed JSON`
     writeFileSync(sandbox.crmDealsPath, corruptContent, 'utf8')
 
-    const fallback = safeReadJsonWithBackup(sandbox.crmDealsPath, () => ({ version: 1, updatedAt: '', deals: [] }))
+    const fallback = safeReadJsonWithBackup(sandbox.crmDealsPath, () => ({
+      version: 1,
+      updatedAt: '',
+      deals: [],
+    }))
     assert.strictEqual(fallback.version, 1, 'Returns fallback without crashing')
 
     // Find backup file
@@ -1708,10 +1725,18 @@ suite.register(
 
 // T2.R1.2: Corrupted JSON handling in tenders-data.json
 suite.register(
-  { id: 'T2.R1.2', name: 'Boundary R1: Corrupted JSON in tenders-data.json preserves .corrupted.bak', tier: 2, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T2.R1.2',
+    name: 'Boundary R1: Corrupted JSON in tenders-data.json preserves .corrupted.bak',
+    tier: 2,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     writeFileSync(sandbox.tendersDataPath, `{ "invalid": unquoted_val `, 'utf8')
-    const fallback = safeReadJsonWithBackup(sandbox.tendersDataPath, () => createInitialTendersData())
+    const fallback = safeReadJsonWithBackup(sandbox.tendersDataPath, () =>
+      createInitialTendersData(),
+    )
 
     assert.strictEqual(fallback.version, 1, 'Returns clean initial tenders data')
     assert(fallback.workspaces.length > 0, 'Workspaces initialized safely')
@@ -1720,22 +1745,41 @@ suite.register(
 
 // T2.R1.3: Corrupted JSON handling in books-data.json
 suite.register(
-  { id: 'T2.R1.3', name: 'Boundary R1: Corrupted JSON in books-data.json preserves .corrupted.bak', tier: 2, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T2.R1.3',
+    name: 'Boundary R1: Corrupted JSON in books-data.json preserves .corrupted.bak',
+    tier: 2,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     writeFileSync(sandbox.booksDataPath, `<<<NOT_JSON>>>`, 'utf8')
     const fallback = safeReadJsonWithBackup(sandbox.booksDataPath, () => createInitialBooksData())
 
     assert.strictEqual(fallback.version, 1, 'Returns clean initial books data')
-    assert(fallback.accounts.some((a) => a.id === 'acc-bank'), 'Core Chart of Accounts retained')
+    assert(
+      fallback.accounts.some((a) => a.id === 'acc-bank'),
+      'Core Chart of Accounts retained',
+    )
   },
 )
 
 // T2.R1.4: Empty / zero-byte data files initialization
 suite.register(
-  { id: 'T2.R1.4', name: 'Boundary R1: Zero-byte data files initialized with safe defaults', tier: 2, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T2.R1.4',
+    name: 'Boundary R1: Zero-byte data files initialized with safe defaults',
+    tier: 2,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     writeFileSync(sandbox.crmDealsPath, '', 'utf8')
-    const fallback = safeReadJsonWithBackup(sandbox.crmDealsPath, () => ({ version: 1, updatedAt: new Date().toISOString(), deals: [] }))
+    const fallback = safeReadJsonWithBackup(sandbox.crmDealsPath, () => ({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: [],
+    }))
 
     assert.strictEqual(fallback.version, 1, 'Initialized version 1')
     assert.strictEqual(fallback.deals.length, 0, 'Empty deals list')
@@ -1744,27 +1788,62 @@ suite.register(
 
 // T2.R1.5: Schema evolution preservation (custom/future attributes)
 suite.register(
-  { id: 'T2.R1.5', name: 'Boundary R1: Unknown future fields preserved during migration round-trip', tier: 2, milestone: 'm1', feature: 'r1' },
+  {
+    id: 'T2.R1.5',
+    name: 'Boundary R1: Unknown future fields preserved during migration round-trip',
+    tier: 2,
+    milestone: 'm1',
+    feature: 'r1',
+  },
   async (sandbox) => {
     const forwardCompatibleData = {
       version: 1,
       updatedAt: new Date().toISOString(),
       futureFlag: 'ENABLE_AI_SYNAPSE',
       deals: [
-        { id: 'deal-fut-1', name: 'AI Deal', amount: 50000, stage: 'won', probability: 90, customTaxTag: 'SECTION_12J' },
+        {
+          id: 'deal-fut-1',
+          name: 'AI Deal',
+          amount: 50000,
+          stage: 'won',
+          probability: 90,
+          customTaxTag: 'SECTION_12J',
+        },
       ],
     }
     const migrated = migrateAndValidateCrmDeals(forwardCompatibleData)
-    assert.strictEqual(migrated.deals[0].customTaxTag, 'SECTION_12J', 'Custom future attributes preserved')
+    assert.strictEqual(
+      migrated.deals[0].customTaxTag,
+      'SECTION_12J',
+      'Custom future attributes preserved',
+    )
   },
 )
 
 // T2.R2.1: Zero valuation deal handling
 suite.register(
-  { id: 'T2.R2.1', name: 'Boundary R2: Zero valuation deal handling (amount = 0)', tier: 2, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T2.R2.1',
+    name: 'Boundary R2: Zero valuation deal rejected (amount = 0)',
+    tier: 2,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-zero', name: 'Pro Bono Implementation', companyName: 'Charity Foundation', amount: 0, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-zero',
+        name: 'Pro Bono Implementation',
+        companyName: 'Charity Foundation',
+        amount: 0,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1773,19 +1852,49 @@ suite.register(
       dealId: 'deal-zero',
     })
 
-    assert(res.ok, 'Zero valuation invoice succeeds without division error')
-    assert.strictEqual(res.grandTotal, 0, 'Grand total is 0')
-    assert.strictEqual(res.subtotal, 0, 'Subtotal is 0')
-    assert.strictEqual(res.taxTotal, 0, 'Tax total is 0')
+    // The real books-core posting path rejects non-positive amounts, so a
+    // zero-valuation deal must fail cleanly without creating an invoice.
+    assert(!res.ok, 'Zero valuation invoice rejected by the real posting path')
+    assert(res.error.includes('greater than 0'), 'Error states amount must be greater than 0')
+
+    const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
+    assert.strictEqual(
+      books.invoices.length,
+      2,
+      'No invoice created for zero-amount deal (fixture invoices only)',
+    )
+    assert.strictEqual(
+      books.journalEntries.length,
+      0,
+      'No journal entry posted for zero-amount deal',
+    )
   },
 )
 
 // T2.R2.2: Fractional cents and floating-point valuation handling
 suite.register(
-  { id: 'T2.R2.2', name: 'Boundary R2: Fractional cents valuation handling (subtotal + tax === grandTotal)', tier: 2, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T2.R2.2',
+    name: 'Boundary R2: Fractional cents valuation handling (subtotal + tax === grandTotal)',
+    tier: 2,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-fractional', name: 'Complex Rate Work', companyName: 'Quant Labs', amount: 115000.55, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-fractional',
+        name: 'Complex Rate Work',
+        companyName: 'Quant Labs',
+        amount: 115000.55,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1795,16 +1904,39 @@ suite.register(
     })
 
     assert(res.ok, 'Invoice created')
-    assert.closeTo(res.subtotal + res.taxTotal, res.grandTotal, 0.001, 'Subtotal + taxTotal exactly equals grandTotal')
+    assert.closeTo(
+      res.subtotal + res.taxTotal,
+      res.grandTotal,
+      0.001,
+      'Subtotal + taxTotal exactly equals grandTotal',
+    )
   },
 )
 
 // T2.R2.3: Extreme valuation handling
 suite.register(
-  { id: 'T2.R2.3', name: 'Boundary R2: Extreme enterprise valuation handling (R 100,000,000.00)', tier: 2, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T2.R2.3',
+    name: 'Boundary R2: Extreme enterprise valuation handling (R 100,000,000.00)',
+    tier: 2,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-extreme', name: 'National Fiber Backhaul', companyName: 'Telecom Infra', amount: 100000000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-extreme',
+        name: 'National Fiber Backhaul',
+        companyName: 'Telecom Infra',
+        amount: 100000000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1820,10 +1952,28 @@ suite.register(
 
 // T2.R2.4: Missing party auto-creation
 suite.register(
-  { id: 'T2.R2.4', name: 'Boundary R2: Auto-creation of missing party in Books', tier: 2, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T2.R2.4',
+    name: 'Boundary R2: Auto-creation of missing party in Books',
+    tier: 2,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-new-party', name: 'AI Pilot', companyName: 'Brand New Startup Ltd', amount: 45000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-new-party',
+        name: 'AI Pilot',
+        companyName: 'Brand New Startup Ltd',
+        amount: 45000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1837,16 +1987,41 @@ suite.register(
     const party = books.parties.find((p) => p.name === 'Brand New Startup Ltd')
     assert(party, 'New party automatically created in parties list')
     assert.strictEqual(party.type, 'Customer', 'Created as Customer type')
-    assert.strictEqual(party.outstandingBalance, 45000, 'Party balance reflects initial invoice')
+    const createdInv = books.invoices.find((i) => i.crmDealId === 'deal-new-party')
+    assert(createdInv, 'Invoice linked to the deal via crmDealId')
+    // Ledger-first: the party balance is derived from the open invoice, so it
+    // equals the real core's VAT-inclusive grandTotal (which may round a cent
+    // off the raw deal valuation).
+    assert.strictEqual(
+      party.outstandingBalance,
+      createdInv.grandTotal,
+      'Party balance reflects initial invoice',
+    )
+    assert.closeTo(
+      party.outstandingBalance,
+      45000,
+      0.011,
+      'Party balance within a cent of the deal valuation',
+    )
   },
 )
 
 // T2.R2.5: Deal with missing companyName falls back gracefully
 suite.register(
-  { id: 'T2.R2.5', name: 'Boundary R2: Deal with missing companyName falls back gracefully', tier: 2, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T2.R2.5',
+    name: 'Boundary R2: Deal with missing companyName falls back gracefully',
+    tier: 2,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
     const deals = [{ id: 'deal-no-comp', name: 'Direct Sponsorship', amount: 20000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res = executeCreateInvoiceFromDeal({
@@ -1862,10 +2037,28 @@ suite.register(
 
 // T2.R2.6: Duplicate invoice creation guard
 suite.register(
-  { id: 'T2.R2.6', name: 'Boundary R2: Duplicate invoicing guard (prevents double-billing a deal)', tier: 2, milestone: 'm2', feature: 'r2' },
+  {
+    id: 'T2.R2.6',
+    name: 'Boundary R2: Duplicate invoicing guard (prevents double-billing a deal)',
+    tier: 2,
+    milestone: 'm2',
+    feature: 'r2',
+  },
   async (sandbox) => {
-    const deals = [{ id: 'deal-dup', name: 'Single Opportunity', companyName: 'Helios Clean Energy', amount: 85000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: 'deal-dup',
+        name: 'Single Opportunity',
+        companyName: 'Helios Clean Energy',
+        amount: 85000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     const res1 = executeCreateInvoiceFromDeal({
@@ -1887,7 +2080,13 @@ suite.register(
 
 // T2.R3.1: Milestone with zero amount handling
 suite.register(
-  { id: 'T2.R3.1', name: 'Boundary R3: Milestone with zero progress amount rejected', tier: 2, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T2.R3.1',
+    name: 'Boundary R3: Milestone with zero progress amount rejected',
+    tier: 2,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     const tendersData = createInitialTendersData()
     tendersData.workspaces[0].tenders[0].milestones[0].amount = 0
@@ -1908,7 +2107,13 @@ suite.register(
 
 // T2.R3.2: Milestone with special characters & formatting
 suite.register(
-  { id: 'T2.R3.2', name: 'Boundary R3: Special characters in RFP reference and issuer name', tier: 2, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T2.R3.2',
+    name: 'Boundary R3: Special characters in RFP reference and issuer name',
+    tier: 2,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1931,7 +2136,13 @@ suite.register(
 
 // T2.R3.3: Attempt to bill non-existent milestone
 suite.register(
-  { id: 'T2.R3.3', name: 'Boundary R3: Attempt to bill non-existent milestone ID', tier: 2, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T2.R3.3',
+    name: 'Boundary R3: Attempt to bill non-existent milestone ID',
+    tier: 2,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1950,7 +2161,13 @@ suite.register(
 
 // T2.R3.4: Re-billing an already BILLED milestone rejected
 suite.register(
-  { id: 'T2.R3.4', name: 'Boundary R3: Idempotency guard (re-billing already BILLED milestone rejected)', tier: 2, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T2.R3.4',
+    name: 'Boundary R3: Idempotency guard (re-billing already BILLED milestone rejected)',
+    tier: 2,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1976,7 +2193,13 @@ suite.register(
 
 // T2.R3.5: Auto-creation of issuing authority party if missing from Books
 suite.register(
-  { id: 'T2.R3.5', name: 'Boundary R3: Auto-creation of tender issuing authority party in Books', tier: 2, milestone: 'm3', feature: 'r3' },
+  {
+    id: 'T2.R3.5',
+    name: 'Boundary R3: Auto-creation of tender issuing authority party in Books',
+    tier: 2,
+    milestone: 'm3',
+    feature: 'r3',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -1998,7 +2221,13 @@ suite.register(
 
 // T2.R4.1: Unmatched bank transactions remain unreconciled
 suite.register(
-  { id: 'T2.R4.1', name: 'Boundary R4: Unmatched bank transactions remain unreconciled with zero false positives', tier: 2, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T2.R4.1',
+    name: 'Boundary R4: Unmatched bank transactions remain unreconciled with zero false positives',
+    tier: 2,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-01,Monthly Bank Service Fee,FEE-001,-350.00`
@@ -2007,13 +2236,23 @@ suite.register(
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
     const suggestions = computeSettlementSuggestions(books)
 
-    assert.strictEqual(suggestions.length, 0, 'No false positive suggestions for non-matching bank fee')
+    assert.strictEqual(
+      suggestions.length,
+      0,
+      'No false positive suggestions for non-matching bank fee',
+    )
   },
 )
 
 // T2.R4.2: Duplicate CSV import detection
 suite.register(
-  { id: 'T2.R4.2', name: 'Boundary R4: Duplicate CSV import detection prevents transaction duplication', tier: 2, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T2.R4.2',
+    name: 'Boundary R4: Duplicate CSV import detection prevents transaction duplication',
+    tier: 2,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-01,Ekurhuleni Municipality Settlement,RFP-WTR-2026-04,145000.00`
@@ -2032,7 +2271,13 @@ suite.register(
 
 // T2.R4.3: Malformed CSV rows skipped gracefully
 suite.register(
-  { id: 'T2.R4.3', name: 'Boundary R4: Malformed CSV rows, empty lines, and trailing commas skipped', tier: 2, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T2.R4.3',
+    name: 'Boundary R4: Malformed CSV rows, empty lines, and trailing commas skipped',
+    tier: 2,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     const csv = `Date,Description,Reference,Amount
 ,,,
@@ -2041,13 +2286,23 @@ suite.register(
 2026-09-02,Another Valid,REF-2,2000.00,
 `
     const parsed = parseBankStatementCsv(csv)
-    assert.strictEqual(parsed.length, 2, 'Malformed lines filtered, exactly 2 valid transactions parsed')
+    assert.strictEqual(
+      parsed.length,
+      2,
+      'Malformed lines filtered, exactly 2 valid transactions parsed',
+    )
   },
 )
 
 // T2.R4.4: Currency formatting variants
 suite.register(
-  { id: 'T2.R4.4', name: 'Boundary R4: Currency formatting variants (R, $, spaces, commas)', tier: 2, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T2.R4.4',
+    name: 'Boundary R4: Currency formatting variants (R, $, spaces, commas)',
+    tier: 2,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     const csv = `Date,Description,Reference,Amount
 2026-09-01,Rand Formatted,R1,"R 145,000.00"
@@ -2063,17 +2318,31 @@ suite.register(
 
 // T2.R4.5: Re-reconciling already reconciled transaction or invoice rejected
 suite.register(
-  { id: 'T2.R4.5', name: 'Boundary R4: Re-reconciling already reconciled transaction rejected', tier: 2, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T2.R4.5',
+    name: 'Boundary R4: Re-reconciling already reconciled transaction rejected',
+    tier: 2,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
     const csv = `Date,Description,Reference,Amount\n2026-09-01,Ekurhuleni Settlement,RFP-WTR-2026-04,145000.00`
     const imp = importBankStatement({ booksDataPath: sandbox.booksDataPath, csvContent: csv })
     const txId = imp.transactions[0].id
 
-    const res1 = executeReconciliation({ booksDataPath: sandbox.booksDataPath, transactionId: txId, invoiceId: 'inv-1' })
+    const res1 = executeReconciliation({
+      booksDataPath: sandbox.booksDataPath,
+      transactionId: txId,
+      invoiceId: 'inv-1',
+    })
     assert(res1.ok, 'First reconciliation succeeds')
 
-    const res2 = executeReconciliation({ booksDataPath: sandbox.booksDataPath, transactionId: txId, invoiceId: 'inv-1' })
+    const res2 = executeReconciliation({
+      booksDataPath: sandbox.booksDataPath,
+      transactionId: txId,
+      invoiceId: 'inv-1',
+    })
     assert(!res2.ok, 'Second reconciliation must fail')
     assert(res2.error.includes('already reconciled'), 'Error states already reconciled')
   },
@@ -2081,7 +2350,13 @@ suite.register(
 
 // T2.R4.6: Disambiguation between identical amounts
 suite.register(
-  { id: 'T2.R4.6', name: 'Boundary R4: Disambiguation between identical amounts based on text token confidence', tier: 2, milestone: 'm4', feature: 'r4' },
+  {
+    id: 'T2.R4.6',
+    name: 'Boundary R4: Disambiguation between identical amounts based on text token confidence',
+    tier: 2,
+    milestone: 'm4',
+    feature: 'r4',
+  },
   async (sandbox) => {
     const books = createInitialBooksData()
     // Add second invoice with identical grandTotal of 145000
@@ -2116,8 +2391,16 @@ suite.register(
 
     assert(ekurhuleniMatch, 'Ekurhuleni invoice suggested')
     assert(heliosMatch, 'Helios invoice suggested due to identical amount')
-    assert.strictEqual(ekurhuleniMatch.confidence, 'HIGH', 'Ekurhuleni promoted to HIGH confidence by token match')
-    assert.strictEqual(heliosMatch.confidence, 'MEDIUM', 'Helios remains MEDIUM confidence (amount match only)')
+    assert.strictEqual(
+      ekurhuleniMatch.confidence,
+      'HIGH',
+      'Ekurhuleni promoted to HIGH confidence by token match',
+    )
+    assert.strictEqual(
+      heliosMatch.confidence,
+      'MEDIUM',
+      'Helios remains MEDIUM confidence (amount match only)',
+    )
   },
 )
 
@@ -2127,12 +2410,30 @@ suite.register(
 
 // T3.1: End-to-end flow: CRM deal won -> Sales invoice -> Bank CSV -> Reconcile
 suite.register(
-  { id: 'T3.1', name: 'Pairwise Flow: CRM Deal Won -> Sales Invoice in Books -> Bank CSV Ingestion -> 1-Click Reconcile', tier: 3, milestone: 'm4', feature: 'all' },
+  {
+    id: 'T3.1',
+    name: 'Pairwise Flow: CRM Deal Won -> Sales Invoice in Books -> Bank CSV Ingestion -> 1-Click Reconcile',
+    tier: 3,
+    milestone: 'm4',
+    feature: 'all',
+  },
   async (sandbox) => {
     // 1. Setup CRM Deal
     const dealId = 'deal-flow-1'
-    const deals = [{ id: dealId, name: 'Sovereign Cloud Migration', companyName: 'Helios Clean Energy', amount: 92000, stage: 'won' }]
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    const deals = [
+      {
+        id: dealId,
+        name: 'Sovereign Cloud Migration',
+        companyName: 'Helios Clean Energy',
+        amount: 92000,
+        stage: 'won',
+      },
+    ]
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     // 2. Trigger CRM to Books Invoicing
@@ -2153,7 +2454,9 @@ suite.register(
     // 4. Suggestion Matching
     const booksAfterImport = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
     const suggestions = computeSettlementSuggestions(booksAfterImport)
-    const match = suggestions.find((s) => s.transactionId === txId && s.invoiceId === invRes.invoiceId)
+    const match = suggestions.find(
+      (s) => s.transactionId === txId && s.invoiceId === invRes.invoiceId,
+    )
     assert(match, 'Step 3: Suggestion computed')
     assert.strictEqual(match.confidence, 'HIGH', 'HIGH confidence on invoice number reference')
 
@@ -2177,7 +2480,13 @@ suite.register(
 
 // T3.2: End-to-end flow: Tenders milestone billed -> Tax invoice -> Bank CSV referencing tender -> Reconcile
 suite.register(
-  { id: 'T3.2', name: 'Pairwise Flow: Tenders Milestone Billed -> Tax Invoice -> Bank CSV -> Reconcile', tier: 3, milestone: 'm4', feature: 'all' },
+  {
+    id: 'T3.2',
+    name: 'Pairwise Flow: Tenders Milestone Billed -> Tax Invoice -> Bank CSV -> Reconcile',
+    tier: 3,
+    milestone: 'm4',
+    feature: 'all',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -2217,9 +2526,19 @@ suite.register(
 
 // T3.3: Multi-entity commercial batch
 suite.register(
-  { id: 'T3.3', name: 'Pairwise Flow: Multi-entity Commercial Batch (CRM Won + Tender Milestone + Supplier Bill)', tier: 3, milestone: 'm4', feature: 'all' },
+  {
+    id: 'T3.3',
+    name: 'Pairwise Flow: Multi-entity Commercial Batch (CRM Won + Tender Milestone + Supplier Bill)',
+    tier: 3,
+    milestone: 'm4',
+    feature: 'all',
+  },
   async (sandbox) => {
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals: createInitialCrmDeals() })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: createInitialCrmDeals(),
+    })
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     const initialBooks = createInitialBooksData()
     // Remove pre-seeded inv-1 so billing ms-01 creates the authoritative tender invoice
@@ -2227,9 +2546,18 @@ suite.register(
     atomicWriteJson(sandbox.booksDataPath, initialBooks)
 
     // CRM Deal Invoice
-    const crmInv = executeCreateInvoiceFromDeal({ crmDealsPath: sandbox.crmDealsPath, booksDataPath: sandbox.booksDataPath, dealId: 'deal-3' })
+    const crmInv = executeCreateInvoiceFromDeal({
+      crmDealsPath: sandbox.crmDealsPath,
+      booksDataPath: sandbox.booksDataPath,
+      dealId: 'deal-3',
+    })
     // Tender Milestone Invoice
-    const tenderInv = executeBillMilestoneInBooks({ tendersDataPath: sandbox.tendersDataPath, booksDataPath: sandbox.booksDataPath, tenderId: 'tender-wtr-04', milestoneId: 'ms-01' })
+    const tenderInv = executeBillMilestoneInBooks({
+      tendersDataPath: sandbox.tendersDataPath,
+      booksDataPath: sandbox.booksDataPath,
+      tenderId: 'tender-wtr-04',
+      milestoneId: 'ms-01',
+    })
 
     // Single monthly bank CSV statement with 3 settlements
     const csv = `Date,Description,Reference,Amount
@@ -2247,7 +2575,11 @@ suite.register(
     // Reconcile all 3
     for (const s of suggestions) {
       if (s.confidence === 'HIGH') {
-        const rec = executeReconciliation({ booksDataPath: sandbox.booksDataPath, transactionId: s.transactionId, invoiceId: s.invoiceId })
+        const rec = executeReconciliation({
+          booksDataPath: sandbox.booksDataPath,
+          transactionId: s.transactionId,
+          invoiceId: s.invoiceId,
+        })
         assert(rec.ok, `Reconciled ${s.invoiceNumber}`)
       }
     }
@@ -2260,12 +2592,26 @@ suite.register(
 
 // T3.4: Post-Invoicing Tenders-to-CRM External Sync
 suite.register(
-  { id: 'T3.4', name: 'Pairwise Flow: Tenders sync after CRM invoicing preserves invoice back-references', tier: 3, milestone: 'm4', feature: 'all' },
+  {
+    id: 'T3.4',
+    name: 'Pairwise Flow: Tenders sync after CRM invoicing preserves invoice back-references',
+    tier: 3,
+    milestone: 'm4',
+    feature: 'all',
+  },
   async (sandbox) => {
     // 1. Setup CRM and invoice deal-3
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals: createInitialCrmDeals() })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: createInitialCrmDeals(),
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
-    const crmInv = executeCreateInvoiceFromDeal({ crmDealsPath: sandbox.crmDealsPath, booksDataPath: sandbox.booksDataPath, dealId: 'deal-3' })
+    const crmInv = executeCreateInvoiceFromDeal({
+      crmDealsPath: sandbox.crmDealsPath,
+      booksDataPath: sandbox.booksDataPath,
+      dealId: 'deal-3',
+    })
 
     // 2. Perform external sync from Tenders
     safeMergeTenderIntoCrmDeals(sandbox.crmDealsPath, {
@@ -2278,15 +2624,28 @@ suite.register(
     // 3. Verify deal-3 still has invoice back-references
     const crmAfter = JSON.parse(readFileSync(sandbox.crmDealsPath, 'utf8'))
     const deal3 = crmAfter.deals.find((d) => d.id === 'deal-3')
-    assert.strictEqual(deal3.invoiceId, crmInv.invoiceId, 'Invoice ID back-reference preserved after external sync')
+    assert.strictEqual(
+      deal3.invoiceId,
+      crmInv.invoiceId,
+      'Invoice ID back-reference preserved after external sync',
+    )
     assert.strictEqual(deal3.invoiceNumber, crmInv.invoiceNumber, 'Invoice number preserved')
-    assert(crmAfter.deals.some((d) => d.id === 'deal-tender-new-44'), 'New tender deal present')
+    assert(
+      crmAfter.deals.some((d) => d.id === 'deal-tender-new-44'),
+      'New tender deal present',
+    )
   },
 )
 
 // T3.5: Dual Settlement Disambiguation
 suite.register(
-  { id: 'T3.5', name: 'Pairwise Flow: Disambiguation between two identical customer invoice amounts', tier: 3, milestone: 'm4', feature: 'all' },
+  {
+    id: 'T3.5',
+    name: 'Pairwise Flow: Disambiguation between two identical customer invoice amounts',
+    tier: 3,
+    milestone: 'm4',
+    feature: 'all',
+  },
   async (sandbox) => {
     const books = createInitialBooksData()
     // Add two invoices with identical amounts (85,000)
@@ -2325,8 +2684,16 @@ suite.register(
     const alphaMatch = suggestions.find((s) => s.invoiceId === 'inv-alpha')
     const betaMatch = suggestions.find((s) => s.invoiceId === 'inv-beta')
 
-    assert.strictEqual(alphaMatch.confidence, 'HIGH', 'Alpha promoted to HIGH confidence based on token match')
-    assert.strictEqual(betaMatch.confidence, 'MEDIUM', 'Beta remains MEDIUM confidence based on amount only')
+    assert.strictEqual(
+      alphaMatch.confidence,
+      'HIGH',
+      'Alpha promoted to HIGH confidence based on token match',
+    )
+    assert.strictEqual(
+      betaMatch.confidence,
+      'MEDIUM',
+      'Beta remains MEDIUM confidence based on amount only',
+    )
   },
 )
 
@@ -2336,10 +2703,20 @@ suite.register(
 
 // T4.1: Complete Commercial Cycle
 suite.register(
-  { id: 'T4.1', name: 'Real-World Scenario 1: Municipal Water Tender + Corporate Cloud Rollout Complete Commercial Cycle', tier: 4, milestone: 'all', feature: 'all' },
+  {
+    id: 'T4.1',
+    name: 'Real-World Scenario 1: Municipal Water Tender + Corporate Cloud Rollout Complete Commercial Cycle',
+    tier: 4,
+    milestone: 'all',
+    feature: 'all',
+  },
   async (sandbox) => {
     // 1. Initialize all 3 suites
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals: createInitialCrmDeals() })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: createInitialCrmDeals(),
+    })
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     const initialBooks = createInitialBooksData()
     // Remove pre-seeded inv-1 so billing ms-01 creates the authoritative tender invoice
@@ -2370,7 +2747,10 @@ suite.register(
 2026-09-05,Apex Valve Supplies Procurement,BILL-2026-012,-45000.00
 2026-09-06,Bank Service Account Monthly Fee,FEE-SEP26,-450.00`
 
-    const importRes = importBankStatement({ booksDataPath: sandbox.booksDataPath, csvContent: statementCsv })
+    const importRes = importBankStatement({
+      booksDataPath: sandbox.booksDataPath,
+      csvContent: statementCsv,
+    })
     assert.strictEqual(importRes.importedCount, 4, 'All 4 transactions imported')
 
     // 5. Match suggestions and reconcile each
@@ -2406,7 +2786,13 @@ suite.register(
 
 // T4.2: High-Volume Monthly Commercial Settlement
 suite.register(
-  { id: 'T4.2', name: 'Real-World Scenario 2: High-Volume Monthly Commercial Settlement (5 concurrent won deals)', tier: 4, milestone: 'all', feature: 'all' },
+  {
+    id: 'T4.2',
+    name: 'Real-World Scenario 2: High-Volume Monthly Commercial Settlement (5 concurrent won deals)',
+    tier: 4,
+    milestone: 'all',
+    feature: 'all',
+  },
   async (sandbox) => {
     const deals = []
     for (let i = 1; i <= 5; i++) {
@@ -2418,13 +2804,21 @@ suite.register(
         stage: 'won',
       })
     }
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals,
+    })
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     // Invoice all 5 deals in Books
     const createdInvoices = []
     for (const d of deals) {
-      const res = executeCreateInvoiceFromDeal({ crmDealsPath: sandbox.crmDealsPath, booksDataPath: sandbox.booksDataPath, dealId: d.id })
+      const res = executeCreateInvoiceFromDeal({
+        crmDealsPath: sandbox.crmDealsPath,
+        booksDataPath: sandbox.booksDataPath,
+        dealId: d.id,
+      })
       assert(res.ok, `Invoiced deal ${d.id}`)
       createdInvoices.push(res)
     }
@@ -2433,13 +2827,18 @@ suite.register(
     const csvRows = ['Date,Description,Reference,Amount']
     for (let i = 0; i < createdInvoices.length; i++) {
       const inv = createdInvoices[i]
-      csvRows.push(`2026-09-0${i + 1},Client Corp ${i + 1} Wire,${inv.invoiceNumber},${inv.grandTotal}.00`)
+      csvRows.push(
+        `2026-09-0${i + 1},Client Corp ${i + 1} Wire,${inv.invoiceNumber},${inv.grandTotal}.00`,
+      )
     }
     // Plus 2 unmatched interest/fee entries
     csvRows.push(`2026-09-10,Monthly Credit Interest Earned,INT-01,340.50`)
     csvRows.push(`2026-09-11,International Transfer Fee,FEE-INT,-120.00`)
 
-    const importRes = importBankStatement({ booksDataPath: sandbox.booksDataPath, csvContent: csvRows.join('\n') })
+    const importRes = importBankStatement({
+      booksDataPath: sandbox.booksDataPath,
+      csvContent: csvRows.join('\n'),
+    })
     assert.strictEqual(importRes.importedCount, 7, 'Imported 7 statement lines')
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
@@ -2447,7 +2846,11 @@ suite.register(
     assert.strictEqual(suggestions.length, 5, 'Exactly 5 settlement matches identified')
 
     for (const s of suggestions) {
-      executeReconciliation({ booksDataPath: sandbox.booksDataPath, transactionId: s.transactionId, invoiceId: s.invoiceId })
+      executeReconciliation({
+        booksDataPath: sandbox.booksDataPath,
+        transactionId: s.transactionId,
+        invoiceId: s.invoiceId,
+      })
     }
 
     const booksFinal = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
@@ -2458,7 +2861,13 @@ suite.register(
 
 // T4.3: Multi-Stage Tender Delivery & Progress Payments
 suite.register(
-  { id: 'T4.3', name: 'Real-World Scenario 3: Multi-Stage Tender Delivery & Sequential Progress Payments', tier: 4, milestone: 'all', feature: 'all' },
+  {
+    id: 'T4.3',
+    name: 'Real-World Scenario 3: Multi-Stage Tender Delivery & Sequential Progress Payments',
+    tier: 4,
+    milestone: 'all',
+    feature: 'all',
+  },
   async (sandbox) => {
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
@@ -2475,7 +2884,11 @@ suite.register(
     // Reconcile Phase 1 payment
     const csv1 = `Date,Description,Reference,Amount\n2026-09-01,Ekurhuleni Treasury Pmt 1,RFP-WTR-2026-04,145000.00`
     const imp1 = importBankStatement({ booksDataPath: sandbox.booksDataPath, csvContent: csv1 })
-    executeReconciliation({ booksDataPath: sandbox.booksDataPath, transactionId: imp1.transactions[0].id, invoiceId: bill1.invoiceId })
+    executeReconciliation({
+      booksDataPath: sandbox.booksDataPath,
+      transactionId: imp1.transactions[0].id,
+      invoiceId: bill1.invoiceId,
+    })
 
     // Progress project: Phase 2 milestone ms-02 reaches REACHED status
     const tendersMid = JSON.parse(readFileSync(sandbox.tendersDataPath, 'utf8'))
@@ -2493,24 +2906,53 @@ suite.register(
     assert(bill2.ok, 'Phase 2 billed successfully')
 
     const tendersFinal = JSON.parse(readFileSync(sandbox.tendersDataPath, 'utf8'))
-    const allBilled = tendersFinal.workspaces[0].tenders[0].milestones.every((m) => m.status === 'BILLED')
+    const allBilled = tendersFinal.workspaces[0].tenders[0].milestones.every(
+      (m) => m.status === 'BILLED',
+    )
     assert(allBilled, 'Both tender milestones are now in BILLED status')
   },
 )
 
 // T4.4: Concurrent Cross-App Mutation Stress
 suite.register(
-  { id: 'T4.4', name: 'Real-World Scenario 4: Concurrent Cross-App Mutation Stress (CRM + Tenders + Books)', tier: 4, milestone: 'all', feature: 'all' },
+  {
+    id: 'T4.4',
+    name: 'Real-World Scenario 4: Concurrent Cross-App Mutation Stress (CRM + Tenders + Books)',
+    tier: 4,
+    milestone: 'all',
+    feature: 'all',
+  },
   async (sandbox) => {
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals: createInitialCrmDeals() })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: createInitialCrmDeals(),
+    })
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     // Interleaved operations
-    safeMergeTenderIntoCrmDeals(sandbox.crmDealsPath, { id: 'deal-stress-1', name: 'Interleaved 1', amount: 50000 })
-    executeCreateInvoiceFromDeal({ crmDealsPath: sandbox.crmDealsPath, booksDataPath: sandbox.booksDataPath, dealId: 'deal-3' })
-    safeMergeTenderIntoCrmDeals(sandbox.crmDealsPath, { id: 'deal-stress-2', name: 'Interleaved 2', amount: 75000 })
-    executeBillMilestoneInBooks({ tendersDataPath: sandbox.tendersDataPath, booksDataPath: sandbox.booksDataPath, tenderId: 'tender-wtr-04', milestoneId: 'ms-01' })
+    safeMergeTenderIntoCrmDeals(sandbox.crmDealsPath, {
+      id: 'deal-stress-1',
+      name: 'Interleaved 1',
+      amount: 50000,
+    })
+    executeCreateInvoiceFromDeal({
+      crmDealsPath: sandbox.crmDealsPath,
+      booksDataPath: sandbox.booksDataPath,
+      dealId: 'deal-3',
+    })
+    safeMergeTenderIntoCrmDeals(sandbox.crmDealsPath, {
+      id: 'deal-stress-2',
+      name: 'Interleaved 2',
+      amount: 75000,
+    })
+    executeBillMilestoneInBooks({
+      tendersDataPath: sandbox.tendersDataPath,
+      booksDataPath: sandbox.booksDataPath,
+      tenderId: 'tender-wtr-04',
+      milestoneId: 'ms-01',
+    })
 
     const crmFinal = JSON.parse(readFileSync(sandbox.crmDealsPath, 'utf8'))
     const booksFinal = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
@@ -2519,23 +2961,48 @@ suite.register(
     assert.strictEqual(crmFinal.version, 1, 'CRM version intact')
     assert.strictEqual(booksFinal.version, 1, 'Books version intact')
     assert.strictEqual(tendersFinal.version, 1, 'Tenders version intact')
-    assert(crmFinal.deals.some((d) => d.id === 'deal-stress-1'), 'Interleaved deal 1 saved')
-    assert(crmFinal.deals.some((d) => d.id === 'deal-stress-2'), 'Interleaved deal 2 saved')
+    assert(
+      crmFinal.deals.some((d) => d.id === 'deal-stress-1'),
+      'Interleaved deal 1 saved',
+    )
+    assert(
+      crmFinal.deals.some((d) => d.id === 'deal-stress-2'),
+      'Interleaved deal 2 saved',
+    )
     assert(crmFinal.deals.find((d) => d.id === 'deal-3').invoiceNumber, 'Deal 3 invoiced')
   },
 )
 
 // T4.5: Financial Year-End Trial Balance Integrity
 suite.register(
-  { id: 'T4.5', name: 'Real-World Scenario 5: Financial Year-End Double-Entry Trial Balance Integrity', tier: 4, milestone: 'all', feature: 'all' },
+  {
+    id: 'T4.5',
+    name: 'Real-World Scenario 5: Financial Year-End Double-Entry Trial Balance Integrity',
+    tier: 4,
+    milestone: 'all',
+    feature: 'all',
+  },
   async (sandbox) => {
-    atomicWriteJson(sandbox.crmDealsPath, { version: 1, updatedAt: new Date().toISOString(), deals: createInitialCrmDeals() })
+    atomicWriteJson(sandbox.crmDealsPath, {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      deals: createInitialCrmDeals(),
+    })
     atomicWriteJson(sandbox.tendersDataPath, createInitialTendersData())
     atomicWriteJson(sandbox.booksDataPath, createInitialBooksData())
 
     // Invoicing and milestone billing
-    const crmInv = executeCreateInvoiceFromDeal({ crmDealsPath: sandbox.crmDealsPath, booksDataPath: sandbox.booksDataPath, dealId: 'deal-3' })
-    const tenderBill = executeBillMilestoneInBooks({ tendersDataPath: sandbox.tendersDataPath, booksDataPath: sandbox.booksDataPath, tenderId: 'tender-wtr-04', milestoneId: 'ms-01' })
+    const crmInv = executeCreateInvoiceFromDeal({
+      crmDealsPath: sandbox.crmDealsPath,
+      booksDataPath: sandbox.booksDataPath,
+      dealId: 'deal-3',
+    })
+    const tenderBill = executeBillMilestoneInBooks({
+      tendersDataPath: sandbox.tendersDataPath,
+      booksDataPath: sandbox.booksDataPath,
+      tenderId: 'tender-wtr-04',
+      milestoneId: 'ms-01',
+    })
 
     // Statements and reconciliations
     const csv = `Date,Description,Reference,Amount
@@ -2545,14 +3012,22 @@ suite.register(
 
     for (const tx of imp.transactions) {
       const invId = tx.amount === 145000 ? tenderBill.invoiceId : crmInv.invoiceId
-      executeReconciliation({ booksDataPath: sandbox.booksDataPath, transactionId: tx.id, invoiceId: invId })
+      executeReconciliation({
+        booksDataPath: sandbox.booksDataPath,
+        transactionId: tx.id,
+        invoiceId: invId,
+      })
     }
 
     const books = JSON.parse(readFileSync(sandbox.booksDataPath, 'utf8'))
 
     // Verify all posted journal entries are balanced (totalDebit === totalCredit)
     for (const je of books.journalEntries) {
-      assert.strictEqual(je.totalDebit, je.totalCredit, `Journal Entry ${je.entryNumber} is balanced`)
+      assert.strictEqual(
+        je.totalDebit,
+        je.totalCredit,
+        `Journal Entry ${je.entryNumber} is balanced`,
+      )
     }
 
     // Verify liquid cash balance is strictly positive and non-negative

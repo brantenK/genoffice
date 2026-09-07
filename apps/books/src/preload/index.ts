@@ -15,8 +15,11 @@ const booksApi: BooksApi = {
     ipcRenderer.invoke(BOOKS_CHANNELS.importBankStatementCsv, csvContent),
   reconcileTransaction: (transactionId: string, invoiceId: string) =>
     ipcRenderer.invoke(BOOKS_CHANNELS.reconcileTransaction, transactionId, invoiceId),
-  getSettlementSuggestions: () =>
-    ipcRenderer.invoke(BOOKS_CHANNELS.getSettlementSuggestions),
+  getSettlementSuggestions: () => ipcRenderer.invoke(BOOKS_CHANNELS.getSettlementSuggestions),
+  backupNow: () => ipcRenderer.invoke(BOOKS_CHANNELS.backupNow),
+  listBackups: () => ipcRenderer.invoke(BOOKS_CHANNELS.listBackups),
+  restoreBackup: (backupName: string) =>
+    ipcRenderer.invoke(BOOKS_CHANNELS.restoreBackup, backupName),
   onDataChanged: (callback: (data: BooksData) => void) => {
     const listener = (_: any, data: BooksData) => callback(data)
     ipcRenderer.on(BOOKS_CHANNELS.dataChanged, listener)
@@ -32,6 +35,4 @@ if (process.contextIsolated) {
   } catch (error) {
     console.error('[books-preload] Failed to expose booksApi:', error)
   }
-} else {
-  ;(window as any).booksApi = booksApi
 }

@@ -1,12 +1,10 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { randomUUID } from 'node:crypto'
 import { app, ipcMain, WebContentsView } from 'electron'
 import { CRM_CHANNELS } from '../shared/ipc'
 import type { Activity, Company, Contact, Deal, DealStage } from '../shared/types'
-import { readBooksStore, writeBooksStore } from '../../../books/src/main/books-main'
-import type { Invoice, JournalEntry } from '../../../books/src/shared/types'
+import { issueSalesInvoiceInBooks } from '../../../books/src/main/books-core'
 import { CrmStore } from './crm-store'
 
 export interface CrmRuntimeConfig {
@@ -59,12 +57,16 @@ export function registerCrmIpc(): void {
 
   // Contacts
   ipcMain.handle(CRM_CHANNELS.listContacts, () => s.getContacts())
-  ipcMain.handle(CRM_CHANNELS.saveContact, (_e, contact: Partial<Contact>) => s.saveContact(contact))
+  ipcMain.handle(CRM_CHANNELS.saveContact, (_e, contact: Partial<Contact>) =>
+    s.saveContact(contact),
+  )
   ipcMain.handle(CRM_CHANNELS.deleteContact, (_e, id: string) => s.deleteContact(id))
 
   // Companies
   ipcMain.handle(CRM_CHANNELS.listCompanies, () => s.getCompanies())
-  ipcMain.handle(CRM_CHANNELS.saveCompany, (_e, company: Partial<Company>) => s.saveCompany(company))
+  ipcMain.handle(CRM_CHANNELS.saveCompany, (_e, company: Partial<Company>) =>
+    s.saveCompany(company),
+  )
   ipcMain.handle(CRM_CHANNELS.deleteCompany, (_e, id: string) => s.deleteCompany(id))
 
   // Activities
@@ -78,7 +80,8 @@ export function registerCrmIpc(): void {
   ipcMain.handle(CRM_CHANNELS.exportToSheets, () => {
     try {
       const deals = s.getDeals()
-      const header = 'Deal Name,Company,Contact,Stage,Amount ($),Probability (%),Expected Close Date\n'
+      const header =
+        'Deal Name,Company,Contact,Stage,Amount ($),Probability (%),Expected Close Date\n'
       const rows = deals
         .map((d) => {
           const name = `"${(d.name || '').replace(/"/g, '""')}"`
@@ -191,118 +194,26 @@ ${deal.notes ? `> ${deal.notes}\n\n` : ''}
         }
       }
 
-      const booksDir = join(app.getPath('userData'), 'books')
-      const booksPath = join(booksDir, 'books-data.json')
-      const booksData = readBooksStore(booksPath)
-
-      const partyName = deal.companyName || deal.name || 'Valued Client'
-      let party = booksData.parties.find(
-        (p) => p.name.toLowerCase() === partyName.toLowerCase(),
-      )
-
-      if (!party) {
-        party = {
-          id: `party-${randomUUID().slice(0, 8)}`,
-          name: partyName,
-          type: 'Customer',
-          email: `accounts@${partyName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com`,
-          outstandingBalance: 0,
-        }
-        booksData.parties.push(party)
-      }
-
-      const year = new Date().getFullYear()
-      const count = booksData.invoices.length
-      const invoiceNumber = `INV-${year}-${String(count + 1).padStart(3, '0')}`
-      const invoiceId = `inv-${randomUUID().slice(0, 8)}`
-
-      const grandTotal = Math.round(Number(deal.amount || 0) * 100) / 100
-      const subtotal = Math.round((grandTotal / 1.15) * 100) / 100
-      const taxTotal = Math.round((grandTotal - subtotal) * 100) / 100
-      const today = new Date().toISOString().split('T')[0]
-      const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-
-      const newInvoice: Invoice = {
-        id: invoiceId,
-        invoiceNumber,
-        type: 'Sales',
-        partyId: party.id,
-        partyName: party.name,
-        date: today,
-        dueDate,
-        items: [
-          {
-            id: `item-${randomUUID().slice(0, 8)}`,
-            itemCode: 'COMMERCIAL-DELIVERY',
-            description: `${deal.name} - Commercial Implementation & Services`,
-            accountId: 'acc-sales',
-            accountName: 'Tender & Commercial Contracting Sales',
-            qty: 1,
-            rate: subtotal,
-            taxRate: 15,
-            amount: subtotal,
-          },
-        ],
-        subtotal,
-        taxTotal,
-        grandTotal,
-        outstandingAmount: grandTotal,
-        status: 'Unpaid',
-        notes: 'Payment terms: Net 30 days upon invoice receipt.',
+      // Single posting path: Books owns party resolution, VAT-inclusive
+      // pricing, central invoice numbering, journal posting and persistence.
+      const booksPath = join(app.getPath('userData'), 'books', 'books-data.json')
+      const result = issueSalesInvoiceInBooks({
+        booksDataPath: booksPath,
+        partyName: deal.companyName || deal.name || 'Valued Client',
+        itemDescription: `${deal.name} - Commercial Implementation & Services`,
+        itemCode: 'COMMERCIAL-DELIVERY',
+        accountId: 'acc-sales',
+        accountName: 'Tender & Commercial Contracting Sales',
+        amount: Number(deal.amount || 0),
         crmDealId: deal.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        notes: 'Payment terms: Net 30 days upon invoice receipt.',
+      })
+
+      if (!result.ok || !result.invoice) {
+        return { ok: false, error: result.error || 'Failed to create invoice in Books' }
       }
-
-      booksData.invoices.unshift(newInvoice)
-      party.outstandingBalance = Math.round((party.outstandingBalance + grandTotal) * 100) / 100
-
-      // Double-entry ledger adjustment
-      for (const acc of booksData.accounts) {
-        if (acc.id === 'acc-ar') acc.balance = Math.round((acc.balance + grandTotal) * 100) / 100
-        if (acc.id === 'acc-sales') acc.balance = Math.round((acc.balance + subtotal) * 100) / 100
-        if (acc.id === 'acc-vat') acc.balance = Math.round((acc.balance + taxTotal) * 100) / 100
-      }
-
-      // Balanced Journal Entry
-      const nextJeNumber = `JE-${year}-${booksData.journalEntries.length + 1}`
-      const newJournalEntry: JournalEntry = {
-        id: `je-${randomUUID().slice(0, 8)}`,
-        entryNumber: nextJeNumber,
-        date: today,
-        totalDebit: grandTotal,
-        totalCredit: grandTotal,
-        remarks: `Sales Invoice ${invoiceNumber} for CRM Deal: ${deal.name}`,
-        posted: true,
-        items: [
-          {
-            id: `jei-${randomUUID().slice(0, 8)}`,
-            accountId: 'acc-ar',
-            accountName: 'Accounts Receivable',
-            debit: grandTotal,
-            credit: 0,
-            partyId: party.id,
-            partyName: party.name,
-          },
-          {
-            id: `jei-${randomUUID().slice(0, 8)}`,
-            accountId: 'acc-sales',
-            accountName: 'Tender & Commercial Contracting Sales',
-            debit: 0,
-            credit: subtotal,
-          },
-          {
-            id: `jei-${randomUUID().slice(0, 8)}`,
-            accountId: 'acc-vat',
-            accountName: 'SARS VAT Output Payable',
-            debit: 0,
-            credit: taxTotal,
-          },
-        ],
-      }
-      booksData.journalEntries.unshift(newJournalEntry)
-
-      writeBooksStore(booksPath, booksData)
+      const invoiceNumber = result.invoice.invoiceNumber
+      const invoiceId = result.invoice.id
 
       // Update CRM deal in deals.json with back-reference
       s.saveDeal({

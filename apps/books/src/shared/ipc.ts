@@ -13,14 +13,36 @@ export const BOOKS_CHANNELS = {
   importBankStatementCsv: 'books:import-bank-statement-csv',
   reconcileTransaction: 'books:reconcile-transaction',
   getSettlementSuggestions: 'books:get-settlement-suggestions',
+  backupNow: 'books:backup-now',
+  listBackups: 'books:list-backups',
+  restoreBackup: 'books:restore-backup',
 } as const
+
+export interface BackupResult {
+  ok: boolean
+  path?: string
+  error?: string
+}
+
+export interface BackupFileInfo {
+  name: string
+  path: string
+  size: number
+  modifiedAt: string
+}
 
 export interface BooksApi {
   loadData: () => Promise<BooksData>
   saveData: (data: BooksData) => Promise<boolean>
   onDataChanged?: (callback: (data: BooksData) => void) => () => void
-  exportToSheets: (reportName: string, csvContent: string) => Promise<{ ok: boolean; path?: string; error?: string }>
-  openInPdf: (invoice: Invoice, companyName: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+  exportToSheets: (
+    reportName: string,
+    csvContent: string,
+  ) => Promise<{ ok: boolean; path?: string; error?: string }>
+  openInPdf: (
+    invoice: Invoice,
+    companyName: string,
+  ) => Promise<{ ok: boolean; path?: string; error?: string }>
   openInCrm: () => Promise<boolean>
   openInTenders: () => Promise<boolean>
   importBankStatementCsv: (csvContent: string) => Promise<{
@@ -31,8 +53,14 @@ export interface BooksApi {
     newBankBalance?: number
     error?: string
   }>
-  reconcileTransaction: (transactionId: string, invoiceId: string) => Promise<{ ok: boolean; error?: string }>
+  reconcileTransaction: (
+    transactionId: string,
+    invoiceId: string,
+  ) => Promise<{ ok: boolean; error?: string }>
   getSettlementSuggestions: () => Promise<SettlementSuggestion[]>
+  backupNow: () => Promise<BackupResult>
+  listBackups: () => Promise<BackupFileInfo[]>
+  restoreBackup: (backupName: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 declare global {
@@ -40,4 +68,3 @@ declare global {
     booksApi?: BooksApi
   }
 }
-

@@ -372,7 +372,7 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
       stopBooksStoreWatcher()
     })
 
-    it('internal writeBooksStore updates lastBroadcastJson preventing redundant watcher broadcast', async () => {
+    it('core writeBooksStore broadcasts once while the watcher suppresses its duplicate echo', async () => {
       writeBooksStore(booksFilePath, initialBooksData)
 
       const observer = createMockWebContents('observer-internal')
@@ -380,7 +380,9 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
 
       startBooksStoreWatcher(booksFilePath)
 
-      // Internal write sets lastBroadcastJson
+      // Core-originated writes (CRM/Tenders included) must update active Books
+      // tabs immediately; the watcher then sees the same JSON and emits no
+      // second notification.
       const mutated = {
         ...initialBooksData,
         parties: [{ id: 'p-int', name: 'Internal Party', type: 'Customer' as const, outstandingBalance: 100 }],
@@ -389,8 +391,9 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
 
       await delay(250)
 
-      // The watcher observed the file change, but currentJson === lastBroadcastJson, so 0 redundant broadcasts
-      expect(observer.getReceived()).toHaveLength(0)
+      expect(observer.getReceived()).toHaveLength(1)
+      expect(observer.getReceived()[0].channel).toBe(BOOKS_CHANNELS.dataChanged)
+      expect(observer.getReceived()[0].data.parties[0].name).toBe('Internal Party')
 
       stopBooksStoreWatcher()
     })

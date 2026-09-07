@@ -28,6 +28,7 @@ directly on this repository as usual.
 
   Each app is an npm workspace with its own `src/main` (Electron main
   process), `src/renderer` (React UI), and optional `tests/`.
+
 - `packages/*` — pure TypeScript engine and shared packages (no Electron
   dependency, unit-tested): docx/pptx engines, AI agent core, providers,
   i18n, UI kit.
@@ -68,7 +69,7 @@ For changes touching the business apps (CRM, Tenders, Books) or the cross-app
 integration layer, also run the workflow E2E suite:
 
 ```bash
-node tools/verify-suite-workflows.mjs   # 56 tests, must exit 0
+npx tsx tools/verify-suite-workflows.mjs   # 56 tests, must exit 0
 ```
 
 Formatting is intentionally incremental: existing files are not reformatted

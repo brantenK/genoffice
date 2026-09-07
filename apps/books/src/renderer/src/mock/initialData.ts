@@ -1,4 +1,43 @@
-import type { BooksData } from '../../../shared/types'
+import type { BooksData, Account } from '../../../shared/types'
+import { EMPTY_ACCOUNTS } from '../../../shared/chart'
+import { computeAccountBalances, createOpeningJournal } from '../../../shared/accounting'
+
+/**
+ * Demo/test seed. Ledger-first: the opening-balances journal entry is
+ * generated from the stored balances, and every account balance (including
+ * groups) is then derived from that journal — so this seed is always
+ * internally consistent and satisfies balance == sum-of-journals.
+ */
+const SEED_BALANCES: Record<string, number> = {
+  'acc-bank': 485250,
+  'acc-cash': 15000,
+  'acc-ar': 195500,
+  'acc-equip': 85000,
+  'acc-vehic': 240000,
+  'acc-ap': 74200,
+  'acc-vat': 38400,
+  'acc-retained': 571150,
+  'acc-capital': 100000,
+  'acc-sales': 820000,
+  'acc-consult': 235000,
+  'acc-materials': 345000,
+  'acc-salaries': 380000,
+  'acc-rent': 65000,
+  'acc-travel': 28000,
+}
+
+const baseAccounts: Account[] = EMPTY_ACCOUNTS.map((a) => ({
+  ...a,
+  balance: SEED_BALANCES[a.id] || 0,
+}))
+
+const openingJournalEntry = createOpeningJournal(baseAccounts, {
+  date: '2026-03-01',
+  entryNumber: 'JE-OPENING-2026',
+  remarks: 'Opening balances (demo seed)',
+})
+
+const initialAccounts: Account[] = computeAccountBalances(baseAccounts, [openingJournalEntry])
 
 export const initialBooksData: BooksData = {
   settings: {
@@ -11,47 +50,7 @@ export const initialBooksData: BooksData = {
     email: 'accounts@zanostack.tech',
     phone: '+27 11 555 0192',
   },
-  accounts: [
-    // ASSETS
-    { id: 'acc-asset', name: 'Application of Funds (Assets)', rootType: 'Asset', accountType: 'Current Asset', parentId: null, isGroup: true, balance: 1020750 },
-    { id: 'acc-curr-asset', name: 'Current Assets', rootType: 'Asset', accountType: 'Current Asset', parentId: 'acc-asset', isGroup: true, balance: 695750 },
-    { id: 'acc-bank', name: 'FNB Business Cheque Account', rootType: 'Asset', accountType: 'Bank', parentId: 'acc-curr-asset', isGroup: false, balance: 485250 },
-    { id: 'acc-cash', name: 'Petty Cash', rootType: 'Asset', accountType: 'Cash', parentId: 'acc-curr-asset', isGroup: false, balance: 15000 },
-    { id: 'acc-ar', name: 'Accounts Receivable (Debtors)', rootType: 'Asset', accountType: 'Receivable', parentId: 'acc-curr-asset', isGroup: false, balance: 195500 },
-    { id: 'acc-inventory', name: 'Inventory & Materials on Hand', rootType: 'Asset', accountType: 'Current Asset', parentId: 'acc-curr-asset', isGroup: false, balance: 0 },
-    { id: 'acc-fixed-asset', name: 'Fixed Assets', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-asset', isGroup: true, balance: 325000 },
-    { id: 'acc-equip', name: 'Office & IT Equipment', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-fixed-asset', isGroup: false, balance: 85000 },
-    { id: 'acc-vehic', name: 'Site Utility Vehicles', rootType: 'Asset', accountType: 'Fixed Asset', parentId: 'acc-fixed-asset', isGroup: false, balance: 240000 },
-
-    // LIABILITIES
-    { id: 'acc-liab', name: 'Source of Funds (Liabilities)', rootType: 'Liability', accountType: 'Current Liability', parentId: null, isGroup: true, balance: 112600 },
-    { id: 'acc-curr-liab', name: 'Current Liabilities', rootType: 'Liability', accountType: 'Current Liability', parentId: 'acc-liab', isGroup: true, balance: 112600 },
-    { id: 'acc-ap', name: 'Accounts Payable (Creditors)', rootType: 'Liability', accountType: 'Payable', parentId: 'acc-curr-liab', isGroup: false, balance: 74200 },
-    { id: 'acc-vat', name: 'SARS VAT Output Payable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 38400 },
-    { id: 'acc-vat-in', name: 'SARS VAT Input Recoverable', rootType: 'Liability', accountType: 'Tax', parentId: 'acc-curr-liab', isGroup: false, balance: 0 },
-    { id: 'acc-payroll-liab', name: 'Payroll & PAYE / UIF Liabilities', rootType: 'Liability', accountType: 'Current Liability', parentId: 'acc-curr-liab', isGroup: false, balance: 0 },
-
-    // EQUITY
-    { id: 'acc-equity', name: 'Equity & Reserves', rootType: 'Equity', accountType: 'Equity', parentId: null, isGroup: true, balance: 700000 },
-    { id: 'acc-retained', name: 'Retained Earnings', rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 600000 },
-    { id: 'acc-capital', name: 'Share Capital', rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 100000 },
-    { id: 'acc-owner-equity', name: "Owner's Drawings & Equity", rootType: 'Equity', accountType: 'Equity', parentId: 'acc-equity', isGroup: false, balance: 0 },
-
-    // INCOME
-    { id: 'acc-income', name: 'Income', rootType: 'Income', accountType: 'Direct Income', parentId: null, isGroup: true, balance: 1055000 },
-    { id: 'acc-sales', name: 'Tender & Commercial Contracting Sales', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-income', isGroup: false, balance: 820000 },
-    { id: 'acc-consult', name: 'Professional Advisory Fees', rootType: 'Income', accountType: 'Direct Income', parentId: 'acc-income', isGroup: false, balance: 235000 },
-    { id: 'acc-interest-income', name: 'Interest & Investment Income', rootType: 'Income', accountType: 'Indirect Income', parentId: 'acc-income', isGroup: false, balance: 0 },
-
-    // EXPENSES
-    { id: 'acc-expense', name: 'Expenses', rootType: 'Expense', accountType: 'Direct Expense', parentId: null, isGroup: true, balance: 818000 },
-    { id: 'acc-materials', name: 'Direct Project Materials & Subcontractors', rootType: 'Expense', accountType: 'Direct Expense', parentId: 'acc-expense', isGroup: false, balance: 345000 },
-    { id: 'acc-salaries', name: 'Salaries & Wages', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 380000 },
-    { id: 'acc-rent', name: 'Office Rent & Facilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 65000 },
-    { id: 'acc-utilities', name: 'Water & Electricity Utilities', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 0 },
-    { id: 'acc-travel', name: 'Site Travel & Logistics', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 28000 },
-    { id: 'acc-deprec', name: 'Depreciation & Amortization', rootType: 'Expense', accountType: 'Indirect Expense', parentId: 'acc-expense', isGroup: false, balance: 0 },
-  ],
+  accounts: initialAccounts,
   parties: [
     {
       id: 'party-1',
@@ -255,37 +254,6 @@ export const initialBooksData: BooksData = {
       updatedAt: '2026-08-10T12:00:00Z',
     },
   ],
-  journalEntries: [
-    {
-      id: 'je-1',
-      entryNumber: 'JE-2026-001',
-      date: '2026-08-05',
-      items: [
-        {
-          id: 'je-item-1',
-          accountId: 'acc-bank',
-          accountName: 'FNB Business Cheque Account',
-          debit: 85000,
-          credit: 0,
-          remark: 'EFT Payment from Apex Infrastructure',
-        },
-        {
-          id: 'je-item-2',
-          accountId: 'acc-ar',
-          accountName: 'Accounts Receivable (Debtors)',
-          partyId: 'party-3',
-          partyName: 'Apex Infrastructure Holdings',
-          debit: 0,
-          credit: 85000,
-          remark: 'Settlement for INV-2026-003',
-        },
-      ],
-      totalDebit: 85000,
-      totalCredit: 85000,
-      remarks: 'Payment received for Invoice INV-2026-003',
-      posted: true,
-    },
-  ],
+  journalEntries: [openingJournalEntry],
   bankTransactions: [],
 }
-
