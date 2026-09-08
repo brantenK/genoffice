@@ -101,4 +101,9 @@ export const zhTW = {
   aiScopeColumns: '已選取 {names} 共 {count} 欄',
   aiScopeRangeTip: 'AI 會把「這一欄 / 這些列 / 選取部分」理解為該範圍；送出後本輪固定不變',
   aiScopeClearTitle: '取消該範圍，本次針對整張工作表',
+  aiPhaseInspect: '正在查看活頁簿',
+  aiPhaseRead: '正在讀取儲存格',
+  aiPhaseWrite: '正在寫入儲存格',
+  aiPhaseVerify: '正在核對結果',
+  aiPhaseDone: '已完成',
 } satisfies Record<keyof typeof zh, string>

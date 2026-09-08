@@ -108,4 +108,9 @@ export const nl = {
   aiScopeRangeTip:
     'AI leest "deze kolom / deze rijen / het geselecteerde deel" als dit bereik; bij verzenden wordt het voor de hele run vastgezet',
   aiScopeClearTitle: 'Bereikbereik wissen en het hele blad gebruiken',
+  aiPhaseInspect: 'Werkmap inspecteren…',
+  aiPhaseRead: 'Cellen lezen…',
+  aiPhaseWrite: 'Cellen schrijven…',
+  aiPhaseVerify: 'Resultaten controleren…',
+  aiPhaseDone: 'Klaar',
 } satisfies Record<keyof typeof zh, string>

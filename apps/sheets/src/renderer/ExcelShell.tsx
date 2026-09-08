@@ -212,6 +212,8 @@ interface ExcelShellProps {
   readonly canRedo: boolean
   /// AutoSave toggle in the tab row (docs/slides parity).
   readonly autoSave: boolean
+  /// true while the post-run autosave reopens the workbook session (composer disabled meanwhile).
+  readonly aiSaving: boolean
   readonly onAutoSaveChange: (on: boolean) => void
   /// Non-null while a floating chart is selected in the grid.
   readonly selectedChart: SelectedChartRibbon | null
@@ -357,6 +359,7 @@ export function ExcelShell({
   canUndo,
   canRedo,
   autoSave,
+  aiSaving,
   onAutoSaveChange,
   selectedChart,
   pageLayout,
@@ -635,6 +638,7 @@ export function ExcelShell({
           prompt={prompt}
           preview={preview}
           aiBusy={aiBusy}
+          aiSaving={aiSaving}
           onPromptChange={onPromptChange}
           onSend={onSend}
           onStop={onStop}

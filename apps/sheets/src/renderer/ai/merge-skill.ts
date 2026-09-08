@@ -98,6 +98,7 @@ export function createMergeSkill(deps: MergeSkillDeps): AgentSkill {
         if (skipped.length > 0) lines.push(`Skipped: ${skipped.join('; ')}`)
         return {
           output: lines.join('\n'),
+          mutated: true,
           summary: `merged ${result.importedSheets} sheets`,
         }
       } catch (error: unknown) {

@@ -106,4 +106,9 @@ export const id = {
   aiScopeRangeTip:
     'AI membaca "kolom ini / baris ini / bagian yang dipilih" sebagai rentang ini, dan dikunci selama proses berjalan setelah Anda mengirim',
   aiScopeClearTitle: 'Hapus cakupan rentang dan gunakan seluruh lembar',
+  aiPhaseInspect: 'Meninjau buku kerja…',
+  aiPhaseRead: 'Membaca sel…',
+  aiPhaseWrite: 'Menulis sel…',
+  aiPhaseVerify: 'Memeriksa hasil…',
+  aiPhaseDone: 'Selesai',
 } satisfies Record<keyof typeof zh, string>

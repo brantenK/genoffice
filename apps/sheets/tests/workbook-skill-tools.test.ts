@@ -904,7 +904,9 @@ describe('executeWorkbookTool: propose_operations', () => {
       fakeDeps({ proposeOperations, readCells }),
     )
     expect(result.output).toContain('#DIV/0!')
-    expect(result.output).toContain('⚠️ Formula error values present')
+    expect(result.output).toContain('errors:')
+    expect(result.output).toContain('- C1 = #DIV/0!')
+    expect(result.output).toContain('ONCE more in this run')
   })
 
   it('waits for the async apply and reports success only after it lands', async () => {

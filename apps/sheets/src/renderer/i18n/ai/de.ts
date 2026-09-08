@@ -108,4 +108,9 @@ export const de = {
   aiScopeRangeTip:
     'Die KI versteht „diese Spalte / diese Zeilen / die Auswahl“ als diesen Bereich; beim Senden wird er für den Lauf fixiert',
   aiScopeClearTitle: 'Bereichsvorgabe aufheben und das ganze Blatt verwenden',
+  aiPhaseInspect: 'Arbeitsmappe wird geprüft…',
+  aiPhaseRead: 'Zellen werden gelesen…',
+  aiPhaseWrite: 'Zellen werden geschrieben…',
+  aiPhaseVerify: 'Ergebnisse werden überprüft…',
+  aiPhaseDone: 'Erledigt',
 } satisfies Record<keyof typeof zh, string>

@@ -5,6 +5,7 @@ import type { ChangePlan } from '../../domain/workbook.types'
 import { ATTACHMENT_IMAGE_EXTS, type AttachmentMeta } from '../../shared/desktop-api'
 import { useI18n, type TFunc } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
+import { agentProgressFromTools } from './agent-progress'
 import { SHEET_NAV_SCHEME } from './sheet-nav'
 import sendEnterOn from '../assets/send-enter-on.png'
 import sendEnterOff from '../assets/send-enter-off.png'
@@ -219,6 +220,7 @@ export function AiChatPanel({
   prompt,
   preview,
   aiBusy,
+  aiSaving,
   onPromptChange,
   onSend,
   onStop,
@@ -250,6 +252,7 @@ export function AiChatPanel({
   readonly prompt: string
   readonly preview: ChangePlan | null
   readonly aiBusy: boolean
+  readonly aiSaving: boolean
   readonly onPromptChange: (prompt: string) => void
   /** Send the composer text, or the given instruction when provided (used by the
    *  failed-run Retry, which also resends the message's original attachments;
@@ -445,7 +448,7 @@ export function AiChatPanel({
     )
   }
 
-  const canSend = prompt.trim().length > 0 && !aiBusy
+  const canSend = prompt.trim().length > 0 && !aiBusy && !aiSaving
 
   /** [B12](sheetnav://B12) links in answers jump the grid to the cited range */
   const citationNav = { scheme: SHEET_NAV_SCHEME, onNavigate: onCitation }
@@ -585,6 +588,9 @@ export function AiChatPanel({
               </>
             ) : (
               <>
+                {entry.streaming && (
+                  <AgentProgressCard tools={entry.tools} streaming={entry.streaming} />
+                )}
                 {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
                 {entry.text ? (
                   <Markdown text={entry.text} nav={citationNav} />
@@ -847,6 +853,28 @@ function IconNewChat({ size }: { size: number }): React.JSX.Element {
       />
       <path d="M12.2 9.4v4M10.2 11.4h4" />
     </Svg>
+  )
+}
+
+function AgentProgressCard({
+  tools,
+  streaming,
+}: {
+  tools: readonly AiToolChip[]
+  streaming: boolean
+}): React.JSX.Element {
+  const { t: tr } = useI18n()
+  const progress = agentProgressFromTools(tools, streaming)
+  return (
+    <div className="ai-agent-progress" role="status" aria-live="polite">
+      <div className="ai-agent-progress-row">
+        <span className="ai-agent-progress-label">{tr(progress.labelKey)}</span>
+        <span className="ai-agent-progress-pct">{progress.pct}%</span>
+      </div>
+      <div className="ai-agent-progress-track" aria-hidden>
+        <div className="ai-agent-progress-fill" style={{ width: `${progress.pct}%` }} />
+      </div>
+    </div>
   )
 }
 

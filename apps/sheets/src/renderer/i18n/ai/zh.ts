@@ -100,4 +100,9 @@ export const zh = {
   aiScopeColumns: '已选中 {names} 共 {count} 列',
   aiScopeRangeTip: 'AI 会把"这一列 / 这些行 / 选中部分"理解为该区域；发送后本轮固定不变',
   aiScopeClearTitle: '取消该区域范围，本次针对整张表',
+  aiPhaseInspect: '正在查看工作簿',
+  aiPhaseRead: '正在读取单元格',
+  aiPhaseWrite: '正在写入单元格',
+  aiPhaseVerify: '正在核对结果',
+  aiPhaseDone: '已完成',
 }

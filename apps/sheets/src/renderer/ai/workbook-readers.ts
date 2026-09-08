@@ -322,6 +322,9 @@ export function getActiveSheetInfo(
       sheetName: worksheet.getSheetName(),
       knownAddresses: [],
       loadedRange,
+      // a fully preloaded import backs reads outside the viewport too —
+      // the AI's compact data window is only truthful then
+      ...(state.flags?.preloadComplete ? { preloaded: true } : {}),
       sheets: workbook.getSheets().map((sheet) => {
         const extent = lazySheetScreenExtent(state, sheet.getSheetId())
         const meta = state.file.sheets.find((candidate) => candidate.id === sheet.getSheetId())

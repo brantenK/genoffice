@@ -107,4 +107,9 @@ export const it = {
   aiScopeRangeTip:
     "L'IA interpreta «questa colonna / queste righe / la parte selezionata» come questo intervallo, che all'invio resta fisso per tutta l'esecuzione",
   aiScopeClearTitle: "Rimuovi l'ambito dell'intervallo e usa tutto il foglio",
+  aiPhaseInspect: 'Ispezione della cartella di lavoro…',
+  aiPhaseRead: 'Lettura delle celle…',
+  aiPhaseWrite: 'Scrittura delle celle…',
+  aiPhaseVerify: 'Verifica dei risultati…',
+  aiPhaseDone: 'Completato',
 } satisfies Record<keyof typeof zh, string>

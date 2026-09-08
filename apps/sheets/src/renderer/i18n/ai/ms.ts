@@ -107,4 +107,9 @@ export const ms = {
   aiScopeRangeTip:
     'AI membaca "lajur ini / baris ini / bahagian yang dipilih" sebagai julat ini, dan ia dikunci sepanjang larian selepas anda hantar',
   aiScopeClearTitle: 'Buang skop julat dan gunakan seluruh helaian',
+  aiPhaseInspect: 'Sedang memeriksa buku kerja…',
+  aiPhaseRead: 'Sedang membaca sel…',
+  aiPhaseWrite: 'Sedang menulis sel…',
+  aiPhaseVerify: 'Sedang menyemak hasil…',
+  aiPhaseDone: 'Selesai',
 } satisfies Record<keyof typeof zh, string>

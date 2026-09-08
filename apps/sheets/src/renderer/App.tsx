@@ -37,7 +37,6 @@ import {
   queueVisualInstall,
   readCopySourceDirect,
   sheetOutline,
-  syncUniver,
   univerDefinedNames,
   installFindRevealFix,
   installInjectorResolutionGuard,
@@ -76,6 +75,7 @@ import {
   type PlanContext,
   type StreamedRefSheet,
 } from './plan-operations'
+import { applyCellChangesBatched } from './batch-cell-values'
 import { isNumericIdentifierText } from './cell-warning'
 import { consumePendingUndoCarry, undoStackDepth } from './undo-carry'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -518,6 +518,12 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     localStorage.setItem('ai-sheets-auto-save', autoSave ? '1' : '0')
   }, [autoSave])
+  // The post-run autosave reopens the sidecar session and reinstalls the
+  // workbook; an edit sent or undone inside that swap window would land in
+  // the old state and be lost, so sends/undo wait for it to finish.
+  const [aiSaving, setAiSaving] = useState(false)
+  const aiSavingRef = useRef(aiSaving)
+  aiSavingRef.current = aiSaving
   // AutoSave tick (docs/slides parity): every 30 s and on window blur, flush
   // pending edits of the open workbook. The journal is read at tick time so
   // the interval stays stable; demo mode has no backing file and is skipped.
@@ -1162,7 +1168,8 @@ export function App(): React.JSX.Element {
             persistChatMessage('assistant', finalText, runToolsRef.current)
           }
           setAiRunScope(undefined)
-          void autoSaveCompletedAiRun().finally(() => setAiBusy(false))
+          setAiBusy(false)
+          void autoSaveCompletedAiRun()
         },
         onError: (error) => {
           setMessage(error)
@@ -1189,7 +1196,8 @@ export function App(): React.JSX.Element {
             return next
           })
           setAiRunScope(undefined)
-          void autoSaveCompletedAiRun().finally(() => setAiBusy(false))
+          setAiBusy(false)
+          void autoSaveCompletedAiRun()
         },
       },
     })
@@ -1233,7 +1241,8 @@ export function App(): React.JSX.Element {
 
   function runAgent(instruction: string, sentAttachments: readonly AttachmentMeta[]): void {
     const loop = agentLoopRef.current
-    if (!instruction.trim() || !loop || loop.busy || runStartingRef.current) return
+    if (!instruction.trim() || !loop || loop.busy || runStartingRef.current || aiSavingRef.current)
+      return
     runStartingRef.current = true
     // Freeze the selection scope for the whole run: users go on clicking around
     // while the AI works, so a live read would retarget "this column" mid-run.
@@ -2671,7 +2680,7 @@ export function App(): React.JSX.Element {
     retryIndex?: number,
   ): void {
     const instruction = (overrideInstruction ?? prompt).trim()
-    if (!instruction || aiBusy) return
+    if (!instruction || aiBusy || aiSavingRef.current) return
     runToolsRef.current = []
     // The message consumes the composer attachments: they ride along (echoed on the
     // bubble, images multimodal, files via the files skill) and the composer clears.
@@ -2808,39 +2817,46 @@ export function App(): React.JSX.Element {
    * successful writes in one save. A canceled/failed Save As leaves both the
    * journal and inline undo available. */
   async function autoSaveCompletedAiRun(): Promise<void> {
-    const applies = aiApplyPromisesRef.current
-    aiApplyPromisesRef.current = []
-    if (applies.length === 0) return
-    const results = await Promise.all(applies)
-    if (!results.some(Boolean)) return
-    const state = lazyWorkbookRef.current
-    if (!state || journalSize(state.editJournal) === 0) return
-    // AutoSave off = the user decides when the file is written: the
-    // run's edits stay pending in the journal, so the offered Undo / ⌘Z keeps
-    // working (saving would reopen the session and reset the undo stack).
-    if (!autoSaveRef.current) {
-      setMessage(t('appAiChangesNotSaved'))
-      return
-    }
-    // AutoSave-driven write after an AI run: silent like the interval autosave.
-    await handleSave('save', true)
-    const after = lazyWorkbookRef.current
-    if (after && journalSize(after.editJournal) === 0) {
-      // Saving reopens the sidecar session and resets Univer's undo stack.
-      patchLastAssistant(({ autoApplied: _autoApplied, ...entry }) => entry)
-      // Sheets' analog of slides' deckName: propose the first AI-named sheet as
-      // the file name. The main process no-ops unless the file still carries the
-      // shell's auto-created untitled name, so user-chosen names are never touched.
-      const candidate = after.file.sheets
-        .map((sheet) => sheet.name.trim())
-        .find((name) => name.length > 0 && !DEFAULT_SHEET_NAME_RE.test(name))
-      if (candidate) {
-        try {
-          await window.desktopApi.autoRenameWorkbook(after.file.sessionId, candidate)
-        } catch {
-          // naming is best-effort; the save itself already succeeded
+    aiSavingRef.current = true
+    setAiSaving(true)
+    try {
+      const applies = aiApplyPromisesRef.current
+      aiApplyPromisesRef.current = []
+      if (applies.length === 0) return
+      const results = await Promise.all(applies)
+      if (!results.some(Boolean)) return
+      const state = lazyWorkbookRef.current
+      if (!state || journalSize(state.editJournal) === 0) return
+      // AutoSave off = the user decides when the file is written: the
+      // run's edits stay pending in the journal, so the offered Undo / ⌘Z keeps
+      // working (saving would reopen the session and reset the undo stack).
+      if (!autoSaveRef.current) {
+        setMessage(t('appAiChangesNotSaved'))
+        return
+      }
+      // AutoSave-driven write after an AI run: silent like the interval autosave.
+      await handleSave('save', true)
+      const after = lazyWorkbookRef.current
+      if (after && journalSize(after.editJournal) === 0) {
+        // Saving reopens the sidecar session and resets Univer's undo stack.
+        patchLastAssistant(({ autoApplied: _autoApplied, ...entry }) => entry)
+        // Sheets' analog of slides' deckName: propose the first AI-named sheet as
+        // the file name. The main process no-ops unless the file still carries the
+        // shell's auto-created untitled name, so user-chosen names are never touched.
+        const candidate = after.file.sheets
+          .map((sheet) => sheet.name.trim())
+          .find((name) => name.length > 0 && !DEFAULT_SHEET_NAME_RE.test(name))
+        if (candidate) {
+          try {
+            await window.desktopApi.autoRenameWorkbook(after.file.sessionId, candidate)
+          } catch {
+            // naming is best-effort; the save itself already succeeded
+          }
         }
       }
+    } finally {
+      aiSavingRef.current = false
+      setAiSaving(false)
     }
   }
 
@@ -2912,8 +2928,14 @@ export function App(): React.JSX.Element {
         // full-snapshot syncUniver would then resurrect the undone content.
         journalSuppression.active = true
         try {
-          syncUniver(univerRef.current, adapterRef.current.getSnapshot())
           const workbook = univerRef.current?.univerAPI.getActiveWorkbook()
+          if (workbook && plan.cellChanges.length > 0) {
+            applyCellChangesBatched((sheetId) => {
+              const worksheet = workbook.getSheetBySheetId(sheetId)
+              if (!worksheet) throw new Error(`Unknown sheet: ${sheetId}`)
+              return worksheet
+            }, plan.cellChanges)
+          }
           for (const formatChange of plan.formatChanges) {
             const worksheet = workbook?.getSheetBySheetId(formatChange.sheetId)
             if (worksheet)
@@ -4221,22 +4243,8 @@ export function App(): React.JSX.Element {
           )
         }
       }
-      for (const change of stored.plan.cellChanges) {
-        const range = sheetById(change.sheetId).getRange(change.address)
-        if (change.after.formula) range.setFormula(change.after.formula)
-        else if (change.after.value === null) range.clearContent()
-        else {
-          // Explicit f/si null mirrors the cell editor: overwriting a formula
-          // cell with a value must clear the formula (in Univer and journal).
-          // A rich-text target also needs p cleared, or setValues merges and
-          // the old document keeps rendering over the new value.
-          const wasRich = range.getCellDatas()[0]?.[0]?.p != null
-          range.setValues([
-            wasRich
-              ? [{ v: change.after.value, f: null, si: null, p: null }]
-              : [{ v: change.after.value, f: null, si: null }],
-          ])
-        }
+      if (stored.plan.cellChanges.length > 0) {
+        applyCellChangesBatched(sheetById, stored.plan.cellChanges)
         anyApplied = true
       }
       // Same facade setters as the ribbon, so the edit journal records them
@@ -4288,6 +4296,7 @@ export function App(): React.JSX.Element {
   }
 
   function handleUndo(steps?: number): void {
+    if (aiSavingRef.current) return
     const count =
       typeof steps === 'number' && Number.isFinite(steps) ? Math.max(1, Math.floor(steps)) : 1
     const fromAiBatch = typeof steps === 'number'
@@ -5163,6 +5172,7 @@ export function App(): React.JSX.Element {
         selectionFormat={selectionFormat}
         statusMessage={message}
         aiBusy={aiBusy}
+        aiSaving={aiSaving}
         chat={chat}
         historicChat={historicChat}
         attachments={attachments}

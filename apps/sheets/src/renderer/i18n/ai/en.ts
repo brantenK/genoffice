@@ -107,4 +107,9 @@ export const en = {
   aiScopeRangeTip:
     'AI reads "this column / these rows / the selected part" as this range, and it stays fixed for the run once you send',
   aiScopeClearTitle: 'Drop the range scope and target the whole sheet',
+  aiPhaseInspect: 'Inspecting workbook',
+  aiPhaseRead: 'Reading cells',
+  aiPhaseWrite: 'Writing cells',
+  aiPhaseVerify: 'Checking results',
+  aiPhaseDone: 'Done',
 } satisfies Record<keyof typeof zh, string>

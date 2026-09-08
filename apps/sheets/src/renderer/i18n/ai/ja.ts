@@ -106,4 +106,9 @@ export const ja = {
   aiScopeRangeTip:
     'AI は「この列 / これらの行 / 選択部分」をこの範囲として解釈します。送信すると今回の実行中は固定されます',
   aiScopeClearTitle: '範囲指定を解除してシート全体を対象にする',
+  aiPhaseInspect: 'ブックを確認中…',
+  aiPhaseRead: 'セルを読み取り中…',
+  aiPhaseWrite: 'セルを書き込み中…',
+  aiPhaseVerify: '結果を検証中…',
+  aiPhaseDone: '完了',
 } satisfies Record<keyof typeof zh, string>

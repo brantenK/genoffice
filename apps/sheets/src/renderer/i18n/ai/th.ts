@@ -106,4 +106,9 @@ export const th = {
   aiScopeRangeTip:
     'AI จะตีความ "คอลัมน์นี้ / แถวเหล่านี้ / ส่วนที่เลือก" เป็นช่วงนี้ และจะถูกตรึงไว้ตลอดการทำงานเมื่อคุณส่ง',
   aiScopeClearTitle: 'ยกเลิกขอบเขตช่วงนี้และใช้ทั้งแผ่นงาน',
+  aiPhaseInspect: 'กำลังตรวจสอบเวิร์กบุ๊ก…',
+  aiPhaseRead: 'กำลังอ่านเซลล์…',
+  aiPhaseWrite: 'กำลังเขียนเซลล์…',
+  aiPhaseVerify: 'กำลังตรวจทานผลลัพธ์…',
+  aiPhaseDone: 'เสร็จสิ้น',
 } satisfies Record<keyof typeof zh, string>
