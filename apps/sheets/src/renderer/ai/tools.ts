@@ -246,6 +246,8 @@ export interface SheetsSkillDeps {
     operations: readonly WorkbookOperation[],
     summary: string,
   ): { ok: true; plan: ChangePlan; applied?: Promise<ApplyOutcome> } | { ok: false; error: string }
+  /** Factual workbook subphase used by the live status card. */
+  onWorkbookPhase?(phase: 'applying' | 'verifying'): void
   /** AI create_document: write a new standalone file (xlsx/csv from a
    * worksheet; docx/pdf/md from content) into the default save folder and
    * open it in a new tab (ai/create-document.ts). */
@@ -1484,6 +1486,7 @@ export function executeWorkbookTool(
       }
       const outcome = deps.proposeOperations(operations, summaryInput.trim())
       if (!outcome.ok) return fail(t('aiToolPropose'), outcome.error)
+      deps.onWorkbookPhase?.('applying')
       const summary = summaryInput.trim()
       const finish = (
         appliedNotices: readonly string[] = [],
@@ -1519,6 +1522,7 @@ export function executeWorkbookTool(
         if (formulaCells.length === 0) {
           return { output: base, mutated: true, summary }
         }
+        deps.onWorkbookPhase?.('verifying')
         return (async (): Promise<ToolExecution> => {
           await new Promise((resolve) => setTimeout(resolve, FORMULA_RECALC_DELAY_MS))
           const shown = formulaCells.slice(0, MAX_READBACK_FORMULAS)

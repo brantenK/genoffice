@@ -7,5 +7,6 @@ export default defineConfig({
   root: 'src/renderer',
   server: {
     port: 5180,
+    strictPort: true,
   },
 })

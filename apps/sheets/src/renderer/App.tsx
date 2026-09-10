@@ -130,7 +130,9 @@ import {
   AgentLoop,
   COMPLETED_VIA_TOOLS_TEXT,
   composeSkills,
+  type AgentActivity,
   type AgentImage,
+  type AgentPhase,
 } from '@genoffice/agent-core'
 import type { AiSettings } from '@genoffice/ai-provider'
 import {
@@ -177,6 +179,13 @@ import {
   type SheetsSkillDeps,
 } from './ai/tools'
 import type { AiChatMessage } from './ai/AiChatPanel'
+import {
+  applyActivity,
+  applyPhase,
+  applyWorkbookPhase,
+  finishRun,
+  startRun,
+} from './ai/agent-run-status'
 import { pruneFailedExchange } from './ai/retry-prune'
 import { parseSheetNavHref } from './ai/sheet-nav'
 import {
@@ -1030,6 +1039,24 @@ export function App(): React.JSX.Element {
     })
   }
 
+  function patchAssistantRunStatus(kind: 'phase', event: AgentPhase): void
+  function patchAssistantRunStatus(kind: 'activity', event: AgentActivity): void
+  function patchAssistantRunStatus(
+    kind: 'phase' | 'activity',
+    event: AgentPhase | AgentActivity,
+  ): void {
+    patchLastAssistant((entry) => {
+      const current = entry.runStatus ?? startRun(Date.now())
+      return {
+        ...entry,
+        runStatus:
+          kind === 'phase'
+            ? applyPhase(current, event as AgentPhase, Date.now())
+            : applyActivity(current, event as AgentActivity),
+      }
+    })
+  }
+
   /** Tool activity for the whole run (args/output included, accumulated across
    * turns) — for full transcript persistence */
   const runToolsRef = useRef<
@@ -1050,7 +1077,11 @@ export function App(): React.JSX.Element {
       transport: createElectronTransport(() => aiSettingsRef.current!),
       systemSuffix: aiLangDirective,
       skill: composeSkills('sheets+files', '', [
-        createWorkbookSkill(sheetsSkillDeps()),
+        createWorkbookSkill(sheetsSkillDeps(), {
+          onTaskPlan: (taskPlan) => {
+            patchLastAssistant((entry) => ({ ...entry, taskPlan }))
+          },
+        }),
         createFilesSkill(availableAttachments),
         createMergeSkill({
           getAttachments: availableAttachments,
@@ -1064,6 +1095,8 @@ export function App(): React.JSX.Element {
         createImageSkill(() => false),
       ]),
       events: {
+        onPhase: (phase) => patchAssistantRunStatus('phase', phase),
+        onActivity: (activity) => patchAssistantRunStatus('activity', activity),
         onText: (text) => {
           if (text) runLastTextRef.current = text
           // Status bar (and the ribbon-row status span) show a short state only;
@@ -1075,6 +1108,8 @@ export function App(): React.JSX.Element {
           patchLastAssistant((entry) => ({ ...entry, text, isError: false }))
         },
         onToolStart: (call) => {
+          // update_task_plan is UI state, not workbook work; never count or render it as a tool step.
+          if (call.name === 'update_task_plan') return
           // Live "running" chip: replaced in place by onToolExecuted
           patchLastAssistant((entry) => ({
             ...entry,
@@ -1090,6 +1125,7 @@ export function App(): React.JSX.Element {
           }))
         },
         onToolExecuted: ({ call, execution }) => {
+          if (call.name === 'update_task_plan') return
           if (execution.mutated) runMutatedRef.current = true
           const input = safeJsonInput(call.input)
           const output = execution.output
@@ -1120,7 +1156,7 @@ export function App(): React.JSX.Element {
             }
           })
         },
-        onDone: ({ text, cancelled, turnLimit }) => {
+        onDone: ({ text, cancelled, turnLimit, truncated }) => {
           // Prefer tool summaries when the model finished via tools with no prose
           // (agent-core fills history with COMPLETED_VIA_TOOLS_TEXT so follow-ups
           // stay provider-safe; the UI can show the real work that ran).
@@ -1150,14 +1186,17 @@ export function App(): React.JSX.Element {
             : runLastTextRef.current ||
               toolSummaries ||
               (runMutatedRef.current ? t('appAiNoSummary') : t('appAiNoAction'))
-          const finalText = turnLimit
-            ? [prose, t('appAiTurnLimit')].filter(Boolean).join('\n\n')
-            : prose || fallback
+          const finalText = truncated
+            ? [prose, t('aiTruncated')].filter(Boolean).join('\n\n')
+            : turnLimit
+              ? [prose, t('appAiTurnLimit')].filter(Boolean).join('\n\n')
+              : prose || fallback
           setMessage(cancelled ? t('appAiStopped') : t('appAiDone'))
           patchLastAssistant((entry) => ({
             ...entry,
             text: finalText,
             streaming: false,
+            runStatus: finishRun(),
             isError: false,
             // A stop mid-tool can leave a running placeholder behind — drop it
             tools: entry.tools.filter((tl) => !tl.running),
@@ -1190,6 +1229,7 @@ export function App(): React.JSX.Element {
                 text: error,
                 isError: true,
                 streaming: false,
+                runStatus: finishRun(),
                 tools: last.tools.filter((tl) => !tl.running),
               }
             }
@@ -1253,7 +1293,14 @@ export function App(): React.JSX.Element {
     runMutatedRef.current = false
     setAiBusy(true)
     setMessage(t('appAiThinking'))
-    appendChat({ role: 'assistant', text: '', tools: [], streaming: true })
+    appendChat({
+      role: 'assistant',
+      text: '',
+      tools: [],
+      streaming: true,
+      runStatus: startRun(Date.now()),
+      taskPlan: null,
+    })
     void collectImageAttachments(sentAttachments)
       .then((images) => {
         runStartingRef.current = false
@@ -1365,6 +1412,11 @@ export function App(): React.JSX.Element {
       traceDependents: (sheetId, address) =>
         traceWorkbookDependents(readContext(), sheetId, address),
       proposeOperations,
+      onWorkbookPhase: (phase) =>
+        patchLastAssistant((entry) => ({
+          ...entry,
+          runStatus: applyWorkbookPhase(entry.runStatus ?? startRun(Date.now()), phase),
+        })),
       createDocument: (request) => createAiDocument({ univerRef, lazyWorkbookRef }, request),
     }
   }

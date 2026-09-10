@@ -347,7 +347,17 @@ describe('ensureLazyRangeLoaded', () => {
       getSheetId: () => 'sheet-1',
       getSheet: () => ({ getRowManager: () => ({ getRow: () => undefined }) }),
       getRange: (row: number, column: number) => ({
-        setValues: (values: unknown[][]) => written.push({ row, column, data: values[0]?.[0] }),
+        setValues: (values: unknown[][] | Record<number, Record<number, unknown>>) => {
+          if (Array.isArray(values)) {
+            written.push({ row, column, data: values[0]?.[0] })
+            return
+          }
+          for (const [absoluteRow, cells] of Object.entries(values)) {
+            for (const [absoluteColumn, data] of Object.entries(cells)) {
+              written.push({ row: Number(absoluteRow), column: Number(absoluteColumn), data })
+            }
+          }
+        },
         clearContent: () => written.push({ row, column, data: null }),
         clearFormat: () => undefined,
       }),

@@ -3,7 +3,10 @@ import {
   AgentLoop,
   COMPLETED_VIA_TOOLS_TEXT,
   composeSkills,
+  type AgentActivity,
   type AgentMessage,
+  type AgentPhase,
+  type AgentPhaseKind,
   type AgentSkill,
   type AgentStreamCallbacks,
   type AgentToolCall,
@@ -52,7 +55,119 @@ function makeSkill(execute?: (call: AgentToolCall) => ToolExecution): AgentSkill
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
+const publicPhaseKinds: AgentPhaseKind[] = [
+  'requesting',
+  'thinking',
+  'responding',
+  'tool-input',
+  'tool-running',
+]
+const publicPhase: AgentPhase = { kind: publicPhaseKinds[0]! }
+const publicActivity: AgentActivity = { kind: 'wire', at: 1 }
+void publicPhase
+void publicActivity
+
 describe('AgentLoop', () => {
+  it('emits requesting before every model turn and forwards transport phase and activity', async () => {
+    const order: string[] = []
+    const transport: AgentTransport = {
+      stream: (_request, cb) => {
+        order.push('stream')
+        queueMicrotask(() => {
+          cb.onPhase?.({ kind: 'thinking' })
+          cb.onActivity?.({ kind: 'reasoning', at: 10 })
+          cb.onPhase?.({ kind: 'responding' })
+          cb.onActivity?.({ kind: 'text', at: 11 })
+          cb.onDone()
+        })
+        return { cancel: vi.fn() }
+      },
+    }
+    const loop = new AgentLoop({
+      transport,
+      skill: makeSkill(),
+      events: {
+        onPhase: (phase) => order.push(`phase:${phase.kind}`),
+        onActivity: (activity) => order.push(`activity:${activity.kind}`),
+      },
+    })
+
+    loop.run('question')
+    await flush()
+
+    expect(order).toEqual([
+      'phase:requesting',
+      'stream',
+      'phase:thinking',
+      'activity:reasoning',
+      'phase:responding',
+      'activity:text',
+    ])
+  })
+
+  it('emits tool-running with the tool name immediately before executing a tool', async () => {
+    const order: string[] = []
+    const transport = scriptedTransport([
+      (cb) => {
+        cb.onToolCall({ id: 't1', name: 'do_thing', input: {} })
+        cb.onDone()
+      },
+      (cb) => cb.onDone(),
+    ])
+    const loop = new AgentLoop({
+      transport,
+      skill: makeSkill(() => {
+        order.push('execute')
+        return { output: 'ok', summary: 'done' }
+      }),
+      events: {
+        onPhase: (phase) => {
+          if (phase.kind === 'tool-running') order.push(`phase:${phase.toolName}`)
+        },
+      },
+    })
+
+    loop.run('question')
+    await flush()
+    await flush()
+
+    expect(order).toEqual(['phase:do_thing', 'execute'])
+  })
+
+  it('ignores stale phase and activity callbacks after reset starts a new run', async () => {
+    const callbacks: AgentStreamCallbacks[] = []
+    const transport: AgentTransport = {
+      stream: (_request, cb) => {
+        callbacks.push(cb)
+        return { cancel: vi.fn() }
+      },
+    }
+    const phases: AgentPhase[] = []
+    const activities: AgentActivity[] = []
+    const loop = new AgentLoop({
+      transport,
+      skill: makeSkill(),
+      events: {
+        onPhase: (phase) => phases.push(phase),
+        onActivity: (activity) => activities.push(activity),
+      },
+    })
+
+    loop.run('old run')
+    await flush()
+    loop.reset()
+    loop.run('new run')
+    await flush()
+    expect(callbacks).toHaveLength(2)
+
+    callbacks[0]!.onPhase?.({ kind: 'responding' })
+    callbacks[0]!.onActivity?.({ kind: 'text', at: 1 })
+    callbacks[1]!.onPhase?.({ kind: 'thinking' })
+    callbacks[1]!.onActivity?.({ kind: 'reasoning', at: 2 })
+
+    expect(phases).toEqual([{ kind: 'requesting' }, { kind: 'requesting' }, { kind: 'thinking' }])
+    expect(activities).toEqual([{ kind: 'reasoning', at: 2 }])
+  })
   it('runs a plain-text turn to completion', async () => {
     const transport = scriptedTransport([
       (cb) => {
