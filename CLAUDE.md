@@ -2,6 +2,64 @@
 
 Guidance for AI agents and human contributors working in this repo.
 
+## Git and fork workflow (mandatory)
+
+This checkout is a Zanostack fork of GenOffice. Treat the branch roles as part
+of the product architecture, not as a suggestion:
+
+| Name       | Role                                                                         |
+| ---------- | ---------------------------------------------------------------------------- |
+| `upstream` | The original GenOffice repository. Read/fetch from it for upstream tracking. |
+| `origin`   | The Zanostack GitHub repository. Normal fork pushes go here.                 |
+| `main`     | Read-only, fast-forward-only mirror of `upstream/main`.                      |
+| `product`  | Zanostack development and release branch. Fork work belongs here.            |
+
+### Normal work and pushes
+
+1. Before a commit, merge, or push, inspect the facts first:
+
+   ```bash
+   git status --short --branch
+   git branch -vv
+   git remote -v
+   ```
+
+   Confirm the current branch and its tracking target. Do not infer them from a
+   branch name, an old conversation, or a GitHub page.
+
+2. Start ordinary Zanostack work from `product`, or from a short-lived branch
+   created from `product`. Target `product` when opening an internal pull
+   request.
+3. For a feature branch's first push, verify its name and push only to the fork:
+
+   ```bash
+   git push -u origin <branch-name>
+   ```
+
+   For later pushes, use plain `git push` only after confirming it tracks the
+   intended `origin/<branch-name>`.
+
+4. Never push Zanostack work to `upstream`. A generic fix can go upstream only
+   through an intentional, separately prepared upstream contribution.
+
+### Mirror and safety rules
+
+- Do not commit to, merge fork work into, rebase onto, reset, or normally push
+  `main`. Its normal update is only a fast-forward from `upstream/main`.
+- Never use `--force`, `--force-with-lease`, or a destructive reset on any
+  remote branch unless the repository owner explicitly asks for that exact
+  operation. First create and verify a named backup branch.
+- Do not run `npm run sync:upstream` or `fork/tools/sync-upstream.mjs` casually.
+  Read `fork/RUNBOOK.md`, ensure the worktree is clean, and follow its sync
+  procedure.
+- If branch tracking, the push destination, divergence, merge conflicts, or the
+  intended target is unclear, stop. Report `git status --short --branch`,
+  `git branch -vv`, and `git remote -v`; do not try to repair Git state by
+  guessing.
+
+`fork/RUNBOOK.md` is the detailed maintenance procedure. Read
+`fork/COMPLIANCE.md` after every upstream integration.
+
 ## Theming rules (mandatory)
 
 The suite supports light / dark / system UI themes. The switching mechanism is a
