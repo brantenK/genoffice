@@ -196,7 +196,7 @@ function SortCheck({ visible }: { visible: boolean }): ReactElement {
       <path
         d="M3 8.5L6.5 12L13 4.5"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -317,7 +317,7 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
             <path
               d="M7 1v12M1 7h12"
               stroke="currentColor"
-              strokeWidth="1.7"
+              strokeWidth="1.4"
               strokeLinecap="round"
             />
           </svg>
@@ -367,7 +367,7 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
                     <path
                       d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3.1c.44 0 .85.19 1.13.52L8.4 4.4H13A1.5 1.5 0 0 1 14.5 5.9v5.6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z"
                       stroke="currentColor"
-                      strokeWidth="1.2"
+                      strokeWidth="1.4"
                       strokeLinejoin="round"
                     />
                   </svg>
@@ -680,7 +680,7 @@ function CloudProjectsView() {
                 <path
                   d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7A1.5 1.5 0 0 0 12.5 12V9.5M9.5 2.5h4v4M13 3l-5.5 5.5"
                   stroke="currentColor"
-                  strokeWidth="1.3"
+                  strokeWidth="1.4"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -924,14 +924,14 @@ function DropToOpenOverlay(): ReactElement | null {
           <path
             d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.4"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
           <path
             d="M4 16.5v2A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-2"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.4"
             strokeLinecap="round"
           />
         </svg>
@@ -1402,23 +1402,23 @@ export function Home() {
   interface AppNavItem {
     ext: string
     label: string
-    hint: string
+    hint?: string
     action: () => void
   }
 
   const OFFICE_APP_ITEMS: AppNavItem[] = [
-    { ext: 'docx', label: t('filterDocs'), hint: t('newDoc'), action: handleNewDoc },
-    { ext: 'xlsx', label: t('filterSheets'), hint: t('newSheet'), action: handleNewSheet },
-    { ext: 'pptx', label: t('filterSlides'), hint: t('newSlide'), action: handleNewSlide },
-    { ext: 'pdf', label: t('filterPdf'), hint: t('newPdf'), action: handleNewPdf },
-    { ext: 'md', label: t('filterMd'), hint: t('newMarkdown'), action: handleNewMarkdown },
-    { ext: 'html', label: t('filterHtml'), hint: t('newHtml'), action: handleNewHtml },
+    { ext: 'docx', label: t('appNavNewDoc'), action: handleNewDoc },
+    { ext: 'xlsx', label: t('appNavNewSheet'), action: handleNewSheet },
+    { ext: 'pptx', label: t('appNavNewSlide'), action: handleNewSlide },
+    { ext: 'pdf', label: t('appNavNewPdf'), action: handleNewPdf },
+    { ext: 'md', label: t('appNavNewMd'), action: handleNewMarkdown },
+    { ext: 'html', label: t('appNavNewHtml'), action: handleNewHtml },
   ]
 
   const BUSINESS_APP_ITEMS: AppNavItem[] = [
-    { ext: 'crm', label: 'CRM', hint: 'Sales pipeline', action: handleNewCrm },
-    { ext: 'tenders', label: 'Tenders', hint: 'Bids & RFP', action: handleNewTenders },
-    { ext: 'books', label: 'Books', hint: 'Finance & invoicing', action: handleNewBooks },
+    { ext: 'crm', label: t('bizCrm'), hint: t('bizCrmHint'), action: handleNewCrm },
+    { ext: 'tenders', label: t('bizTenders'), hint: t('bizTendersHint'), action: handleNewTenders },
+    { ext: 'books', label: t('bizBooks'), hint: t('bizBooksHint'), action: handleNewBooks },
   ]
 
   function renderAppNavGroup(heading: StringKey, items: AppNavItem[]) {
@@ -1430,9 +1430,9 @@ export function Home() {
             key={item.ext}
             className="nav-item app-nav-item"
             onClick={() => void item.action()}
-            data-tip={item.hint}
+            {...(item.hint ? { 'data-tip': item.hint } : {})}
           >
-            <FileBadge ext={item.ext} size={18} />
+            <FileBadge ext={item.ext} size={16} />
             <span className="nav-label">{item.label}</span>
           </button>
         ))}
@@ -1440,32 +1440,33 @@ export function Home() {
     )
   }
 
-  /** The one primary action left on the canvas: pick a file from disk. */
-  function renderOpenAction() {
+  /** The one primary action left on the canvas: create a doc (+ open local globally). */
+  function renderCanvasActions(scope: 'global' | 'project') {
     return (
-      <div className="quick-cards">
-        <button
-          className="quick-card"
-          onClick={() => void window.aiOffice.browse()}
-          data-tip={OPEN_LOCAL_EXTENSIONS}
-        >
-          <span className="quick-folder">
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3.1c.44 0 .85.19 1.13.52L8.4 4.4H13A1.5 1.5 0 0 1 14.5 5.9v5.6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span className="quick-text">
-            <span className="quick-title-row">
-              <span className="quick-title">{t('openLocal')}</span>
-            </span>
-            <span className="quick-sub">{OPEN_LOCAL_EXTENSIONS}</span>
-          </span>
+      <div className="canvas-actions">
+        <button className="canvas-primary" onClick={handleNewDoc}>
+          {t('appNavNewDoc')}
         </button>
+        {scope === 'global' && (
+          <button className="quick-card" onClick={() => void window.aiOffice.browse()}>
+            <span className="quick-folder">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3.1c.44 0 .85.19 1.13.52L8.4 4.4H13A1.5 1.5 0 0 1 14.5 5.9v5.6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span className="quick-text">
+              <span className="quick-title-row">
+                <span className="quick-title">{t('openLocal')}</span>
+              </span>
+              <span className="quick-sub">{OPEN_LOCAL_EXTENSIONS}</span>
+            </span>
+          </button>
+        )}
       </div>
     )
   }
@@ -1544,7 +1545,7 @@ export function Home() {
                 d="M8 1.9l1.9 3.85 4.25.62-3.07 3 .72 4.23L8 11.6l-3.8 2 .72-4.23-3.07-3 4.25-.62z"
                 fill={entry.starred ? '#f5a623' : 'none'}
                 stroke={entry.starred ? '#f5a623' : 'currentColor'}
-                strokeWidth="1.2"
+                strokeWidth="1.4"
                 strokeLinejoin="round"
               />
             </svg>
@@ -1641,7 +1642,7 @@ export function Home() {
                           <path
                             d="M4.5 2.5l4 3.5-4 3.5"
                             stroke="currentColor"
-                            strokeWidth="1.3"
+                            strokeWidth="1.4"
                             strokeLinecap="round"
                             fill="none"
                           />
@@ -1710,7 +1711,7 @@ export function Home() {
           <div className="section-head">
             <span className="section-label">{t('secQuickStart')}</span>
           </div>
-          {renderOpenAction()}
+          {renderCanvasActions('project')}
         </section>
 
         <section className="recents" aria-label={t('secProjectFiles')}>
@@ -1776,12 +1777,12 @@ export function Home() {
                 <path
                   d="M6.29297 3.75H14.1729C14.4927 3.75 14.7979 3.88392 15.0146 4.11914L18.5566 7.96387C18.7512 8.17512 18.8593 8.45208 18.8594 8.73926V19.1055C18.8593 19.7376 18.346 20.25 17.7139 20.25H6.29297C5.66091 20.2499 5.14855 19.7375 5.14844 19.1055V4.89453C5.14855 4.26247 5.66091 3.75011 6.29297 3.75Z"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
                 <path
                   d="M13.8984 4V7.11C13.8984 8.15382 14.7446 9 15.7884 9H18.8984"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
               </svg>
               <span className="empty-hint">{t('projEmptyHint')}</span>
@@ -1841,7 +1842,7 @@ export function Home() {
               <span className="hero-ask">{t(greetAskKey)}</span>
             </h1>
           </div>
-          {renderOpenAction()}
+          {renderCanvasActions('global')}
         </section>
 
         <section
@@ -1901,12 +1902,12 @@ export function Home() {
                 <path
                   d="M6.29297 3.75H14.1729C14.4927 3.75 14.7979 3.88392 15.0146 4.11914L18.5566 7.96387C18.7512 8.17512 18.8593 8.45208 18.8594 8.73926V19.1055C18.8593 19.7376 18.346 20.25 17.7139 20.25H6.29297C5.66091 20.2499 5.14855 19.7375 5.14844 19.1055V4.89453C5.14855 4.26247 5.66091 3.75011 6.29297 3.75Z"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
                 <path
                   d="M13.8984 4V7.11C13.8984 8.15382 14.7446 9 15.7884 9H18.8984"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
               </svg>
               <span className="empty-hint">
@@ -1972,11 +1973,11 @@ export function Home() {
             }}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
               <path
                 d="M8 4.8V8l2.2 1.6"
                 stroke="currentColor"
-                strokeWidth="1.3"
+                strokeWidth="1.4"
                 strokeLinecap="round"
               />
             </svg>
@@ -1995,7 +1996,7 @@ export function Home() {
               <path
                 d="M8 1.9l1.9 3.85 4.25.62-3.07 3 .72 4.23L8 11.6l-3.8 2 .72-4.23-3.07-3 4.25-.62z"
                 stroke="currentColor"
-                strokeWidth="1.3"
+                strokeWidth="1.4"
                 strokeLinejoin="round"
               />
             </svg>
@@ -2006,7 +2007,7 @@ export function Home() {
 
         {/* app launcher: office suite vs the separate business apps */}
         <div className="sidebar-divider" />
-        {renderAppNavGroup('navOfficeApps', OFFICE_APP_ITEMS)}
+        {renderAppNavGroup('navCreate', OFFICE_APP_ITEMS)}
         {renderAppNavGroup('navBusinessApps', BUSINESS_APP_ITEMS)}
 
         {/* project sidebar */}
