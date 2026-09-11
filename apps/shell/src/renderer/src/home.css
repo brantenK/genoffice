@@ -186,6 +186,43 @@ body.vib .home {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- sidebar app launcher (office suite vs business apps) ---- */
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+/* a second group reads as its own section without another divider line */
+.app-nav + .app-nav {
+  margin-top: 16px;
+}
+
+.app-nav-heading {
+  padding: 0 10px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.app-nav-item {
+  padding: 6px 10px;
+  font-size: 13.5px;
+}
+
+.app-nav-item img {
+  flex-shrink: 0;
+}
+
+.app-nav-item .nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- bottom-left account entry (today = Genspark login, later = signup/account system) ---- */
 /* clicking it opens the settings modal (settings.css) directly, which hosts
    login/logout plus preferences (language / theme / save location / update channel) */

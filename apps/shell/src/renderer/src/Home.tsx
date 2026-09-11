@@ -1395,33 +1395,55 @@ export function Home() {
     void window.aiOffice.newPdf(selectedProjectId ? { projectId: selectedProjectId } : undefined)
   }
 
-  const NEW_ITEMS = [
-    { ext: 'docx', title: t('newDoc'), sub: '.docx', action: handleNewDoc },
-    { ext: 'xlsx', title: t('newSheet'), sub: '.xlsx', action: handleNewSheet },
-    { ext: 'pptx', title: t('newSlide'), sub: '.pptx', action: handleNewSlide },
-    { ext: 'md', title: t('newMarkdown'), sub: '.md', action: handleNewMarkdown },
-    { ext: 'html', title: t('newHtml'), sub: '.html', action: handleNewHtml },
-    { ext: 'crm', title: 'CRM', sub: 'Pipeline', action: handleNewCrm },
-    { ext: 'tenders', title: 'Tenders', sub: 'Bids & RFP', action: handleNewTenders },
-    { ext: 'books', title: 'Books', sub: 'Finance & Invoicing', action: handleNewBooks },
-    { ext: 'pdf', title: t('newPdf'), sub: '.pdf', action: handleNewPdf },
+  // ── App navigation (sidebar) ──────────────────────────
+  // The durable app launcher lives in the sidebar so the Home canvas stays
+  // calm. Each entry runs the same handler the old quick-create cards did, so
+  // project-aware office creation (selectedProjectId) is unchanged.
+  interface AppNavItem {
+    ext: string
+    label: string
+    hint: string
+    action: () => void
+  }
+
+  const OFFICE_APP_ITEMS: AppNavItem[] = [
+    { ext: 'docx', label: t('filterDocs'), hint: t('newDoc'), action: handleNewDoc },
+    { ext: 'xlsx', label: t('filterSheets'), hint: t('newSheet'), action: handleNewSheet },
+    { ext: 'pptx', label: t('filterSlides'), hint: t('newSlide'), action: handleNewSlide },
+    { ext: 'pdf', label: t('filterPdf'), hint: t('newPdf'), action: handleNewPdf },
+    { ext: 'md', label: t('filterMd'), hint: t('newMarkdown'), action: handleNewMarkdown },
+    { ext: 'html', label: t('filterHtml'), hint: t('newHtml'), action: handleNewHtml },
   ]
 
-  function renderQuickCards() {
+  const BUSINESS_APP_ITEMS: AppNavItem[] = [
+    { ext: 'crm', label: 'CRM', hint: 'Sales pipeline', action: handleNewCrm },
+    { ext: 'tenders', label: 'Tenders', hint: 'Bids & RFP', action: handleNewTenders },
+    { ext: 'books', label: 'Books', hint: 'Finance & invoicing', action: handleNewBooks },
+  ]
+
+  function renderAppNavGroup(heading: StringKey, items: AppNavItem[]) {
     return (
-      <div className="quick-cards">
-        {NEW_ITEMS.map((item) => (
-          <button key={item.ext} className="quick-card" onClick={() => void item.action()}>
-            <FileBadge ext={item.ext} size={30} />
-            <span className="quick-text">
-              <span className="quick-title-row">
-                <span className="quick-title">{item.title}</span>
-                <span className="ai-chip">AI</span>
-              </span>
-              <span className="quick-sub">{item.sub}</span>
-            </span>
+      <div className="app-nav">
+        <div className="app-nav-heading">{t(heading)}</div>
+        {items.map((item) => (
+          <button
+            key={item.ext}
+            className="nav-item app-nav-item"
+            onClick={() => void item.action()}
+            data-tip={item.hint}
+          >
+            <FileBadge ext={item.ext} size={18} />
+            <span className="nav-label">{item.label}</span>
           </button>
         ))}
+      </div>
+    )
+  }
+
+  /** The one primary action left on the canvas: pick a file from disk. */
+  function renderOpenAction() {
+    return (
+      <div className="quick-cards">
         <button
           className="quick-card"
           onClick={() => void window.aiOffice.browse()}
@@ -1688,7 +1710,7 @@ export function Home() {
           <div className="section-head">
             <span className="section-label">{t('secQuickStart')}</span>
           </div>
-          {renderQuickCards()}
+          {renderOpenAction()}
         </section>
 
         <section className="recents" aria-label={t('secProjectFiles')}>
@@ -1819,7 +1841,7 @@ export function Home() {
               <span className="hero-ask">{t(greetAskKey)}</span>
             </h1>
           </div>
-          {renderQuickCards()}
+          {renderOpenAction()}
         </section>
 
         <section
@@ -1981,6 +2003,11 @@ export function Home() {
             <span className="nav-count">{navCounts.starred}</span>
           </button>
         </nav>
+
+        {/* app launcher: office suite vs the separate business apps */}
+        <div className="sidebar-divider" />
+        {renderAppNavGroup('navOfficeApps', OFFICE_APP_ITEMS)}
+        {renderAppNavGroup('navBusinessApps', BUSINESS_APP_ITEMS)}
 
         {/* project sidebar */}
         {projectMode && (

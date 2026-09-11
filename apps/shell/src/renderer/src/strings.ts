@@ -4,6 +4,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: '最近',
     navStarred: '收藏',
+    navOfficeApps: '办公应用',
+    navBusinessApps: '业务应用',
     navCloud: 'Genspark Projects',
     cloudSubtitle: '在网页端用 Genspark AI 创建的项目。编辑在浏览器中继续——点击任意项目即可打开。',
     cloudSearchPlaceholder: '搜索 {n} 个项目…',
@@ -237,6 +239,8 @@ export const strings = {
   en: {
     navRecent: 'Recent',
     navStarred: 'Starred',
+    navOfficeApps: 'Office Apps',
+    navBusinessApps: 'Business Apps',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Projects created on the web with Genspark AI. Editing continues in your browser — click any project to open it.',
@@ -470,6 +474,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: '最近使用',
     navStarred: 'お気に入り',
+    navOfficeApps: 'オフィスアプリ',
+    navBusinessApps: 'ビジネスアプリ',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Web で Genspark AI を使って作成したプロジェクト。編集はブラウザで続行します。クリックで開きます。',
@@ -717,6 +723,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: '최근 사용',
     navStarred: '즐겨찾기',
+    navOfficeApps: '오피스 앱',
+    navBusinessApps: '비즈니스 앱',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Genspark AI로 웹에서 만든 프로젝트입니다. 편집은 브라우저에서 계속됩니다. 프로젝트를 클릭하면 열립니다.',
@@ -958,6 +966,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'Récents',
     navStarred: 'Favoris',
+    navOfficeApps: 'Applications de bureau',
+    navBusinessApps: 'Applications métier',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       "Projets créés sur le web avec Genspark AI. L'édition continue dans votre navigateur — cliquez sur un projet pour l'ouvrir.",
@@ -1208,6 +1218,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'Zuletzt verwendet',
     navStarred: 'Favoriten',
+    navOfficeApps: 'Office-Apps',
+    navBusinessApps: 'Business-Apps',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Mit Genspark AI im Web erstellte Projekte. Die Bearbeitung läuft im Browser weiter – klicken Sie auf ein Projekt, um es zu öffnen.',
@@ -1460,6 +1472,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'Recientes',
     navStarred: 'Destacados',
+    navOfficeApps: 'Aplicaciones de oficina',
+    navBusinessApps: 'Aplicaciones de empresa',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Proyectos creados en la web con Genspark AI. La edición continúa en tu navegador: haz clic en un proyecto para abrirlo.',
@@ -1711,6 +1725,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'ล่าสุด',
     navStarred: 'รายการโปรด',
+    navOfficeApps: 'แอปสำนักงาน',
+    navBusinessApps: 'แอปธุรกิจ',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'โปรเจกต์ที่สร้างบนเว็บด้วย Genspark AI แก้ไขต่อได้ในเบราว์เซอร์ — คลิกโปรเจกต์เพื่อเปิด',
@@ -1952,6 +1968,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'Terbaru',
     navStarred: 'Berbintang',
+    navOfficeApps: 'Aplikasi kantor',
+    navBusinessApps: 'Aplikasi bisnis',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Proyek yang dibuat di web dengan Genspark AI. Pengeditan berlanjut di browser — klik proyek untuk membukanya.',
@@ -2197,6 +2215,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'Недавние',
     navStarred: 'Избранное',
+    navOfficeApps: 'Офисные приложения',
+    navBusinessApps: 'Бизнес-приложения',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Проекты, созданные в вебе с Genspark AI. Редактирование продолжается в браузере — нажмите на проект, чтобы открыть его.',
@@ -2443,6 +2463,8 @@ export const strings = {
     // Sidebar navigation
     navRecent: 'الأخيرة',
     navStarred: 'المفضلة',
+    navOfficeApps: 'تطبيقات المكتب',
+    navBusinessApps: 'تطبيقات الأعمال',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'مشاريع أُنشئت على الويب باستخدام Genspark AI. يستمر التحرير في المتصفح — انقر على أي مشروع لفتحه.',
@@ -2684,6 +2706,8 @@ export const strings = {
   pt: {
     navRecent: 'Recentes',
     navStarred: 'Favoritos',
+    navOfficeApps: 'Aplicativos de escritório',
+    navBusinessApps: 'Aplicativos de negócios',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Projetos criados na web com o Genspark AI. A edição continua no navegador — clique em um projeto para abri-lo.',
@@ -2922,6 +2946,8 @@ export const strings = {
   it: {
     navRecent: 'Recenti',
     navStarred: 'Preferiti',
+    navOfficeApps: 'App per ufficio',
+    navBusinessApps: 'App aziendali',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Progetti creati sul web con Genspark AI. La modifica continua nel browser: fai clic su un progetto per aprirlo.',
@@ -3159,6 +3185,8 @@ export const strings = {
   pl: {
     navRecent: 'Ostatnie',
     navStarred: 'Ulubione',
+    navOfficeApps: 'Aplikacje biurowe',
+    navBusinessApps: 'Aplikacje biznesowe',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Projekty utworzone w sieci za pomocą Genspark AI. Edycja jest kontynuowana w przeglądarce — kliknij projekt, aby go otworzyć.',
@@ -3395,6 +3423,8 @@ export const strings = {
   cs: {
     navRecent: 'Nedávné',
     navStarred: 'Oblíbené',
+    navOfficeApps: 'Kancelářské aplikace',
+    navBusinessApps: 'Obchodní aplikace',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Projekty vytvořené na webu pomocí Genspark AI. Úpravy pokračují v prohlížeči — klikněte na projekt a otevřete ho.',
@@ -3633,6 +3663,8 @@ export const strings = {
   nl: {
     navRecent: 'Recent',
     navStarred: 'Favorieten',
+    navOfficeApps: 'Kantoorapps',
+    navBusinessApps: 'Bedrijfsapps',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Projecten gemaakt op het web met Genspark AI. Bewerken gaat verder in je browser — klik op een project om het te openen.',
@@ -3871,6 +3903,8 @@ export const strings = {
   ms: {
     navRecent: 'Terkini',
     navStarred: 'Berbintang',
+    navOfficeApps: 'Aplikasi pejabat',
+    navBusinessApps: 'Aplikasi perniagaan',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Projek yang dicipta di web dengan Genspark AI. Penyuntingan diteruskan dalam pelayar — klik projek untuk membukanya.',
@@ -4109,6 +4143,8 @@ export const strings = {
   he: {
     navRecent: 'אחרונים',
     navStarred: 'מועדפים',
+    navOfficeApps: 'יישומי משרד',
+    navBusinessApps: 'יישומי עסקים',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'פרויקטים שנוצרו באינטרנט עם Genspark AI. העריכה נמשכת בדפדפן — לחצו על פרויקט כדי לפתוח אותו.',
@@ -4337,6 +4373,8 @@ export const strings = {
   hi: {
     navRecent: 'हाल के',
     navStarred: 'तारांकित',
+    navOfficeApps: 'ऑफ़िस ऐप्स',
+    navBusinessApps: 'बिज़नेस ऐप्स',
     navCloud: 'Genspark Projects',
     cloudSubtitle:
       'Genspark AI के साथ वेब पर बनाए गए प्रोजेक्ट। संपादन ब्राउज़र में जारी रहता है — खोलने के लिए किसी प्रोजेक्ट पर क्लिक करें।',
@@ -4574,6 +4612,8 @@ export const strings = {
   'zh-TW': {
     navRecent: '最近',
     navStarred: '收藏',
+    navOfficeApps: '辦公應用',
+    navBusinessApps: '業務應用',
     navCloud: 'Genspark Projects',
     cloudSubtitle: '在網頁端用 Genspark AI 建立的專案。編輯在瀏覽器中繼續——點擊任意專案即可開啟。',
     cloudSearchPlaceholder: '搜尋 {n} 個專案…',
