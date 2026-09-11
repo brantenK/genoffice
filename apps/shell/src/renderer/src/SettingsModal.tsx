@@ -25,7 +25,7 @@ import type {
 } from '@genoffice/ai-provider'
 import { useI18n } from './locale'
 import type { StringKey, TFunc } from './locale'
-import type { AccountStatus, AiCatalogEntry, UiTheme } from '../../shared/home-api'
+import type { AiCatalogEntry, UiTheme } from '../../shared/home-api'
 import { ProviderLogo } from './provider-logos'
 import './settings.css'
 
@@ -274,14 +274,10 @@ function AiModelPane({ t }: { t: TFunc }) {
     let alive = true
     void window.aiOffice.getAiSettings?.().then((s) => {
       if (!alive || !s) return
-      // The switch is disabled with genspark, so never present it stranded
-      // off. Display-only: s.provider may be the activeProvider fallback for
-      // a half-configured BYOK selection, so writing anything back here would
-      // clobber the stored choice — the main process heals a genuine legacy
-      // genspark+off file itself, judged on the raw stored provider.
-      if (s.provider === 'genspark' && s.gskToolsEnabled === false) {
-        s = { ...s, gskToolsEnabled: true }
-      }
+      // Genspark is not a Zanostack provider. A legacy selection opens on the
+      // BYOK default without exposing account/login controls; it is only
+      // persisted if the user explicitly saves settings.
+      if (s.provider === 'genspark') s = { ...s, provider: 'anthropic', gskToolsEnabled: false }
       setSettings(s)
       const codex = s.providers.codex
       if (codex) {
@@ -302,7 +298,9 @@ function AiModelPane({ t }: { t: TFunc }) {
     baseUrl: undefined,
     cliPath: undefined,
   }
-  const isGenspark = provider === 'genspark'
+  // Genspark is not exposed by the Zanostack provider catalog. Legacy settings
+  // degrade to BYOK fields rather than restoring login/credit affordances.
+  const isGenspark = false
   const isCodex = provider === 'codex'
 
   const touch = () => {
@@ -327,12 +325,7 @@ function AiModelPane({ t }: { t: TFunc }) {
     touch()
   }
   const selectProvider = (id: AiSettings['provider']) => {
-    // cloud tools cannot be off with genspark (chat runs through gsk anyway)
-    setSettings({
-      ...settings,
-      provider: id,
-      ...(id === 'genspark' ? { gskToolsEnabled: true } : {}),
-    })
+    setSettings({ ...settings, provider: id })
     touch()
   }
   const save = () => {
@@ -505,26 +498,6 @@ function AiModelPane({ t }: { t: TFunc }) {
           onBlur={commitMaxTokens}
         />
       </div>
-      <div className="set-field">
-        <div className="set-field-text">
-          <div className="set-field-stack">
-            <div className="set-field-label">{t('setAiGskTools')}</div>
-            <div className="set-field-desc">{t('setAiGskToolsDesc')}</div>
-          </div>
-        </div>
-        {/* locked on with the genspark provider — chat runs through gsk anyway */}
-        <button
-          className="set-switch"
-          role="switch"
-          aria-checked={settings.gskToolsEnabled !== false}
-          aria-label={t('setAiGskTools')}
-          disabled={isGenspark}
-          onClick={() => {
-            setSettings({ ...settings, gskToolsEnabled: settings.gskToolsEnabled === false })
-            touch()
-          }}
-        />
-      </div>
       <div className="set-pane-footer">
         <AiStatusPill
           status={
@@ -575,12 +548,39 @@ function AiMediaPane({ t }: { t: TFunc }) {
   useEffect(() => {
     let alive = true
     void window.aiOffice.getAiSettings?.().then((s) => {
-      if (alive && s) setSettings(s)
+      if (!alive || !s) return
+      const mediaProviders = new Set(mediaCatalog.map((provider) => provider.id))
+      const firstMedia = mediaCatalog[0]?.id
+      const firstVideo = mediaCatalog.find((provider) => provider.videoAnalysis)?.id ?? firstMedia
+      const searchProviders = new Set(searchCatalog.map((provider) => provider.id))
+      const firstSearch = searchCatalog[0]?.id
+      setSettings({
+        ...s,
+        gskToolsEnabled: false,
+        media: s.media
+          ? {
+              ...s.media,
+              imageProvider: mediaProviders.has(s.media.imageProvider)
+                ? s.media.imageProvider
+                : (firstMedia ?? s.media.imageProvider),
+              analysisProvider: mediaProviders.has(s.media.analysisProvider)
+                ? s.media.analysisProvider
+                : (firstMedia ?? s.media.analysisProvider),
+              videoAnalysisProvider: mediaProviders.has(s.media.videoAnalysisProvider)
+                ? s.media.videoAnalysisProvider
+                : (firstVideo ?? s.media.videoAnalysisProvider),
+            }
+          : s.media,
+        search:
+          s.search && firstSearch && !searchProviders.has(s.search.provider)
+            ? { ...s.search, provider: firstSearch }
+            : s.search,
+      })
     })
     return () => {
       alive = false
     }
-  }, [])
+  }, [mediaCatalog, searchCatalog])
 
   if (!settings?.media || !settings.search) return null
   const media: AiMediaSettings = settings.media
@@ -634,32 +634,23 @@ function AiMediaPane({ t }: { t: TFunc }) {
     setTesting(true)
     setTestResult(null)
     try {
-      const vendors = new Set<AiMediaProviderId>(
-        [media.imageProvider, media.analysisProvider, media.videoAnalysisProvider].filter(
-          (id) => id !== 'genspark',
-        ),
-      )
+      const vendors = new Set<AiMediaProviderId>([
+        media.imageProvider,
+        media.analysisProvider,
+        media.videoAnalysisProvider,
+      ])
       const checks: Promise<{ ok: boolean; error?: string } | undefined>[] = [...vendors].map(
         (id) =>
           window.aiOffice.testAiMediaSettings?.({ provider: id, config: mediaConfigOf(id) }) ??
           Promise.resolve(undefined),
       )
-      if (search.provider !== 'genspark') {
-        checks.push(
-          window.aiOffice.testAiSearchSettings?.({
-            provider: search.provider,
-            apiKey: search.providers[search.provider]?.apiKey ?? '',
-          }) ?? Promise.resolve(undefined),
-        )
-      }
-      if (checks.length === 0) {
-        checks.push(
-          window.aiOffice.testAiMediaSettings?.({
-            provider: 'genspark',
-            config: mediaConfigOf('genspark'),
-          }) ?? Promise.resolve(undefined),
-        )
-      }
+      checks.push(
+        window.aiOffice.testAiSearchSettings?.({
+          provider: search.provider,
+          apiKey:
+            search.provider === 'genspark' ? '' : (search.providers[search.provider]?.apiKey ?? ''),
+        }) ?? Promise.resolve(undefined),
+      )
       const results = await Promise.all(checks)
       setTestResult(results.find((r) => r && !r.ok) ?? { ok: true })
     } catch (error) {
@@ -827,25 +818,19 @@ function AiMediaPane({ t }: { t: TFunc }) {
       <section key={cap}>
         <h4 className="set-pane-subtitle">{title}</h4>
         {providerRow(title, id, options, pick)}
-        <div className="set-field-desc set-ai-note">
-          {id === 'genspark' ? t('setAiMediaGensparkHint') : meta.description}
-        </div>
-        {id !== 'genspark' && (
-          <>
-            {modelRow(
-              `set-ai-${cap}-model`,
-              cap === 'image' ? meta.imageModels : meta.analysisModels,
-              cap === 'image' ? meta.defaultImageModel : meta.defaultAnalysisModel,
-              config[modelField],
-              (m) => updateMediaConfig(id, { [modelField]: m }),
-            )}
-            {keyRow(`set-ai-${cap}-key`, config.apiKey, meta.keyPlaceholder, (v) =>
-              updateMediaConfig(id, { apiKey: v }),
-            )}
-            {baseUrlRow(`set-ai-${cap}-base-url`, meta, config.baseUrl ?? '', (v) =>
-              updateMediaConfig(id, { baseUrl: v }),
-            )}
-          </>
+        <div className="set-field-desc set-ai-note">{meta.description}</div>
+        {modelRow(
+          `set-ai-${cap}-model`,
+          cap === 'image' ? meta.imageModels : meta.analysisModels,
+          cap === 'image' ? meta.defaultImageModel : meta.defaultAnalysisModel,
+          config[modelField],
+          (m) => updateMediaConfig(id, { [modelField]: m }),
+        )}
+        {keyRow(`set-ai-${cap}-key`, config.apiKey, meta.keyPlaceholder, (v) =>
+          updateMediaConfig(id, { apiKey: v }),
+        )}
+        {baseUrlRow(`set-ai-${cap}-base-url`, meta, config.baseUrl ?? '', (v) =>
+          updateMediaConfig(id, { baseUrl: v }),
         )}
       </section>
     )
@@ -865,11 +850,7 @@ function AiMediaPane({ t }: { t: TFunc }) {
           setSearch({ ...search, provider: v as AiSearchSettings['provider'] }),
         )}
         <div className="set-field-desc set-ai-note">
-          {search.provider === 'genspark'
-            ? t('setAiSearchGensparkHint')
-            : searchMeta?.imageSearch
-              ? t('setAiSearchSerperHint')
-              : t('setAiSearchTavilyHint')}
+          {searchMeta?.imageSearch ? t('setAiSearchSerperHint') : t('setAiSearchTavilyHint')}
         </div>
         {search.provider !== 'genspark' &&
           keyRow('set-ai-search-key', searchKey, searchMeta?.keyPlaceholder ?? 'API Key', (v) =>
@@ -961,35 +942,12 @@ function AiStatusPill({ status }: { status: AiStatus | null }) {
 }
 
 export interface SettingsModalProps {
-  status: AccountStatus | null
-  loggingOut: boolean
-  /** browser sign-in in progress (spinner shows on the account entry) */
-  loginWaiting: boolean
-  /** device auth URL while waiting — rescue actions when the browser did not auto-open */
-  loginUrl: string | null
-  urlCopied: boolean
-  onOpenLoginUrl: () => void
-  onCopyLoginUrl: () => void
   onClose: () => void
-  /** closes the modal and launches the Genspark login flow (progress shows on the account entry) */
-  onLogin: () => void
-  onLogout: () => void
 }
 
-export function SettingsModal({
-  status,
-  loggingOut,
-  loginWaiting,
-  loginUrl,
-  urlCopied,
-  onOpenLoginUrl,
-  onCopyLoginUrl,
-  onClose,
-  onLogin,
-  onLogout,
-}: SettingsModalProps) {
+export function SettingsModal({ onClose }: SettingsModalProps) {
   const { lang, setLang, t } = useI18n()
-  const [section, setSection] = useState<SectionId>('account')
+  const [section, setSection] = useState<SectionId>('aiModel')
   const [theme, setTheme] = useState<UiTheme>('system')
   const [saveDir, setSaveDir] = useState('')
   const [analyticsOn, setAnalyticsOn] = useState(true)
@@ -1057,9 +1015,6 @@ export function SettingsModal({
     })
   }
 
-  const loggedIn = status?.loggedIn ?? false
-  const email = status?.email ?? ''
-
   return (
     <div
       className="set-overlay"
@@ -1099,48 +1054,14 @@ export function SettingsModal({
             {section === 'account' && (
               <>
                 <h3 className="set-pane-title">{t('setSecAccount')}</h3>
-                <Field label={t('setEmail')} value={loggedIn ? email : t('setNotLoggedIn')} />
-                {loggedIn && (
-                  <Field
-                    label={t('credits')}
-                    value={
-                      status?.creditBalance === undefined
-                        ? '—'
-                        : Math.floor(status.creditBalance).toLocaleString('en-US')
-                    }
-                    action={
-                      <button
-                        className="set-btn"
-                        data-tip={t('creditsTip')}
-                        onClick={() => void window.aiOffice.openCreditUsage?.()}
-                      >
-                        {t('setViewUsage')}
-                      </button>
-                    }
-                  />
-                )}
-                <div className="set-pane-footer">
-                  {loggedIn ? (
-                    <button className="set-btn danger" disabled={loggingOut} onClick={onLogout}>
-                      {loggingOut ? t('loggingOut') : t('logout')}
-                    </button>
-                  ) : (
-                    <>
-                      {loginWaiting && loginUrl && (
-                        <>
-                          <button className="set-btn" onClick={onOpenLoginUrl}>
-                            {t('loginOpenManually')}
-                          </button>
-                          <button className="set-btn" onClick={onCopyLoginUrl}>
-                            {urlCopied ? t('loginCopied') : t('loginCopyUrl')}
-                          </button>
-                        </>
-                      )}
-                      <button className="set-btn primary" onClick={onLogin}>
-                        {loginWaiting ? t('waitingShort') : t('loginGenspark')}
-                      </button>
-                    </>
-                  )}
+                <Field label={t('setEmail')} value={t('setNotLoggedIn')} />
+                <div className="set-field">
+                  <div className="set-field-text">
+                    <div className="set-field-stack">
+                      <div className="set-field-label">{t('setAiByokNote')}</div>
+                      <div className="set-field-desc">{t('setAiKeyHint')}</div>
+                    </div>
+                  </div>
                 </div>
               </>
             )}

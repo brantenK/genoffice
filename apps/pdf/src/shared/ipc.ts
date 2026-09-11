@@ -7,6 +7,7 @@ export const PDF_CHANNELS = {
   readFile: 'pdf:read-file',
   save: 'pdf:save',
   autoRename: 'pdf:auto-rename',
+  fileRenamed: 'pdf:file-renamed',
   isUntitled: 'pdf:is-untitled',
   validateTextEdits: 'pdf:validate-text-edits',
   listEditFonts: 'pdf:list-edit-fonts',
@@ -49,7 +50,7 @@ export const PDF_CHANNELS = {
   aiPanelPrefsChanged: 'app:ai-panel-prefs-changed',
 } as const
 
-export const VISUAL_SIGNATURE_CONTENT_PREFIX = 'GenOffice visual signature field: '
+export const VISUAL_SIGNATURE_CONTENT_PREFIX = 'Zanostack visual signature field: '
 
 /** Signature strokes: pad pixel coords, scaled proportionally and y-flipped when placed on the page */
 export interface SignatureStrokes {
@@ -183,7 +184,7 @@ export type DrawingInput =
       color: [number, number, number]
       at: [number, number]
       contents: string
-      /** Annotation author (/T); omitted → 'GenOffice' */
+      /** Annotation author (/T); omitted → 'Zanostack' */
       author?: string
       /** Creation time (ms since epoch) → /CreationDate and /M; omitted → save time */
       createdMs?: number
@@ -398,7 +399,7 @@ export interface PageImageRef {
   aboveText: boolean
 }
 
-/** Editable metadata for a GenOffice static form fill embedded as a page image. */
+/** Editable metadata for a Zanostack static form fill embedded as a page image. */
 export interface StaticFormFillRecord {
   id: string
   kind: 'text' | 'check' | 'cross'
@@ -521,7 +522,7 @@ export interface ValidateTextEditsRequest {
   edits: TextEditInput[]
 }
 
-/** Extract pages into a new PDF written to the GenOffice save dir and opened in a new tab */
+/** Extract pages into a new PDF written to the Zanostack save dir and opened in a new tab */
 export interface ExtractPagesRequest {
   path: string
   /** Page indices in the file as saved (the renderer flushes first, so visible positions) */
@@ -611,7 +612,7 @@ export interface SetPageSizeRequest {
 export type SetPageSizeResult = { ok: true } | { ok: false; error: string }
 
 /** Split every page into a grid of pages (inverse of merge pages), written to the
- * GenOffice save dir and opened in a new tab */
+ * Zanostack save dir and opened in a new tab */
 export interface SplitPagesRequest {
   path: string
   perPage: 2 | 4 | 9
@@ -682,6 +683,8 @@ export interface PdfApi {
       The main process renames only while the file still carries the shell's auto-created
       untitled name, so user-chosen names are never touched. */
   autoRename(path: string, baseName: string): Promise<PdfAutoRenameResult>
+  /** Shell/Home renamed the open file; update the renderer's live path. */
+  onFileRenamed(handler: (event: { oldPath: string; newPath: string }) => void): () => void
   /** Whether the file is a shell-created blank still carrying its untitled name
       (gates the after-AI-run silent save; a PDF the user merely opened must never auto-write) */
   isUntitled(path: string): Promise<boolean>
@@ -694,7 +697,7 @@ export interface PdfApi {
   canDrawText(text: string, font?: string, bold?: boolean, italic?: boolean): Promise<boolean>
   /** Enumerate the content-stream images of every page (for image edit mode) */
   listPageImages(path: string): Promise<PageImageRef[]>
-  /** Read GenOffice static-fill metadata stored inside the PDF. */
+  /** Read Zanostack static-fill metadata stored inside the PDF. */
   listStaticFormFills(path: string): Promise<StaticFormFillRecord[]>
   /** System-OCR one rendered page image (PNG, base64); null when no engine is
       available on this platform, [] when recognition failed for this image */

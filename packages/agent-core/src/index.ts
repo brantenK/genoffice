@@ -1,6 +1,9 @@
 export type {
+  AgentActivity,
   AgentImage,
   AgentMessage,
+  AgentPhase,
+  AgentPhaseKind,
   AgentStreamCallbacks,
   AgentStreamHandle,
   AgentStreamRequest,
@@ -27,5 +30,9 @@ export type {
   CompactionOptions,
   ToolExecutedEvent,
 } from './loop'
-export { createIpcTransport, IPC_STREAM_SILENCE_TIMEOUT_MS } from './electron-transport'
+export {
+  createIpcTransport,
+  IPC_STREAM_ABSOLUTE_TIMEOUT_MS,
+  IPC_STREAM_SILENCE_TIMEOUT_MS,
+} from './electron-transport'
 export type { IpcStreamChunk, IpcStreamStart, IpcTransportOptions } from './electron-transport'

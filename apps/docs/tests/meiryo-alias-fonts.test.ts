@@ -57,7 +57,7 @@ describe('Meiryo UI GO', () => {
   })
 })
 
-describe('GenOffice UI Kana JP (Meiryo UI advances, full height)', () => {
+describe('Zanostack UI Kana JP (Meiryo UI advances, full height)', () => {
   const regular = readWoff2(join(FONTS, 'GenOfficeUIKanaJP-Regular.woff2'))
   const bold = readWoff2(join(FONTS, 'GenOfficeUIKanaJP-Bold.woff2'))
   const near = (font: typeof regular, cp: number, em: number) =>

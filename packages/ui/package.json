@@ -33,6 +33,8 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@fontsource/instrument-serif": "^5.2.8",
+    "@fontsource/plus-jakarta-sans": "^5.2.8",
     "@genoffice/i18n": "*",
     "@genoffice/pptx-render": "*"
   }

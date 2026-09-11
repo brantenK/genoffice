@@ -2,9 +2,9 @@
  * Chrome tokens (surface/text/border/…, AI panel --color-*) come from
  * @genoffice/ui/tokens.css; nothing here may shadow those names. */
 :root {
-  --excel-green: #217346;
-  --excel-green-dark: #185c37;
-  --excel-green-soft: #e9f3ed;
+  --excel-green: #16864a;
+  --excel-green-dark: #0f5c34;
+  --excel-green-soft: #e7f2ec;
   --accent: var(--excel-green);
   --accent-dark: var(--excel-green-dark);
   --accent-soft: var(--excel-green-soft);
@@ -104,8 +104,8 @@
 }
 
 [data-theme='dark'] {
-  --accent: #34a853;
-  --accent-dark: #58b380;
+  --accent: #2fbd74;
+  --accent-dark: #8fe3b3;
   --accent-soft: #1d3328;
   --surface-hover: #333;
   --ribbon-hover: #333;
@@ -136,8 +136,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --accent: #34a853;
-    --accent-dark: #58b380;
+    --accent: #2fbd74;
+    --accent-dark: #8fe3b3;
     --accent-soft: #1d3328;
     --surface-hover: #333;
     --ribbon-hover: #333;
@@ -1764,7 +1764,7 @@ button.check-item:hover {
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--color-border-default);
-  background: var(--color-bg-page);
+  background: var(--gs-panel-bg);
   box-shadow: var(--sheets-shadow-copilot);
   font-family: var(--gs-font-sans);
   color: var(--color-text-primary);
@@ -4572,6 +4572,136 @@ textarea:focus {
     width: 4px;
     height: 4px;
     opacity: 0.45;
+  }
+}
+
+.ai-agent-status,
+.ai-task-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-subtle, rgb(0 0 0 / 8%));
+  border-radius: 8px;
+  background: var(--color-bg-subtle, rgb(0 0 0 / 3%));
+}
+
+.ai-agent-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.ai-agent-status-indicator {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--excel-green, #16864a);
+  animation: ai-summary-pulse 1.5s linear infinite;
+}
+
+.ai-agent-status-label,
+.ai-task-plan-title {
+  font-weight: 600;
+}
+
+.ai-agent-status-elapsed {
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-agent-status-activity {
+  padding-left: 14px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-agent-status-warning {
+  color: var(--sheets-ai-error);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.ai-task-plan-title {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.ai-task-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-task-plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ai-task-plan-item.completed {
+  color: var(--color-text-tertiary);
+}
+
+.ai-task-plan-item.completed > :last-child {
+  text-decoration: line-through;
+}
+
+.ai-task-plan-item.in_progress {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.ai-task-plan-indicator {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  border: 1.5px solid var(--color-border-default);
+  border-radius: 50%;
+  color: var(--sheets-on-accent);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.ai-task-plan-item.completed .ai-task-plan-indicator {
+  border-color: var(--excel-green, #16864a);
+  background: var(--excel-green, #16864a);
+}
+
+.ai-task-plan-item.in_progress .ai-task-plan-indicator {
+  border-color: rgb(22 134 74 / 24%);
+  border-top-color: var(--excel-green, #16864a);
+  background: rgb(22 134 74 / 10%);
+  animation: ai-task-spin 900ms linear infinite;
+}
+
+@keyframes ai-task-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-agent-status-indicator,
+  .ai-task-plan-item.in_progress .ai-task-plan-indicator {
+    animation: none;
   }
 }
 

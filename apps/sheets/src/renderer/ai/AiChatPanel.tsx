@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
-import { GensparkMark } from '../ribbon-icons'
+import { ZanoMark } from '../ribbon-icons'
 import type { ChangePlan } from '../../domain/workbook.types'
 import { ATTACHMENT_IMAGE_EXTS, type AttachmentMeta } from '../../shared/desktop-api'
 import { useI18n, type TFunc } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
+import { runStatusView, type RunStatus } from './agent-run-status'
+import type { TaskPlan } from './task-plan'
 import { SHEET_NAV_SCHEME } from './sheet-nav'
 import sendEnterOn from '../assets/send-enter-on.png'
 import sendEnterOff from '../assets/send-enter-off.png'
@@ -193,13 +195,14 @@ export interface AiChatMessage {
   readonly text: string
   readonly tools: readonly AiToolChip[]
   readonly streaming?: boolean | undefined
+  readonly runStatus?: RunStatus | undefined
+  readonly taskPlan?: TaskPlan | null | undefined
   readonly isError?: boolean | undefined
   /** the run failed and this user message was rolled back out of the model context */
   readonly undelivered?: boolean | undefined
   /** this user message was written to the project-store chat log (Retry re-persists when it wasn't) */
   readonly persisted?: boolean | undefined
   /** the run failed because Genspark is signed out — render an inline sign-in button */
-  readonly loginRequired?: boolean | undefined
   /** Set when this message reflects an auto-applied plan; renders an inline [Undo] button. */
   readonly autoApplied?: { readonly opCount: number; readonly undoSteps: number } | undefined
   /** attachments consumed from the composer by this user message (read-only echo chips) */
@@ -222,6 +225,7 @@ export function AiChatPanel({
   prompt,
   preview,
   aiBusy,
+  aiSaving,
   onPromptChange,
   onSend,
   onStop,
@@ -253,6 +257,7 @@ export function AiChatPanel({
   readonly prompt: string
   readonly preview: ChangePlan | null
   readonly aiBusy: boolean
+  readonly aiSaving: boolean
   readonly onPromptChange: (prompt: string) => void
   /** Send the composer text, or the given instruction when provided (used by the
    *  failed-run Retry, which also resends the message's original attachments;
@@ -344,12 +349,6 @@ export function AiChatPanel({
     window.clearTimeout(attachScrollFadeRef.current)
     attachScrollFadeRef.current = window.setTimeout(() => el.classList.remove('is-scrolling'), 800)
   }
-  /** Wall-clock start of the current run (aiBusy false→true), drives the elapsed badge */
-  const busyStartRef = useRef(0)
-  useEffect(() => {
-    if (aiBusy) busyStartRef.current = Date.now()
-  }, [aiBusy])
-
   // preferred = the user's chosen width (the only value persisted); the CSS var
   // gets the clamped display width. Deriving the display width from the
   // preference means a transiently small window never permanently shrinks the panel.
@@ -444,13 +443,13 @@ export function AiChatPanel({
           data-tip={t('aiOpenAssistant')}
           aria-label={t('aiOpenAssistant')}
         >
-          <GensparkMark size={22} />
+          <ZanoMark size={22} />
         </button>
       </aside>
     )
   }
 
-  const canSend = prompt.trim().length > 0 && !aiBusy
+  const canSend = prompt.trim().length > 0 && !aiBusy && !aiSaving
 
   /** [B12](sheetnav://B12) links in answers jump the grid to the cited range */
   const citationNav = { scheme: SHEET_NAV_SCHEME, onNavigate: onCitation }
@@ -509,12 +508,12 @@ export function AiChatPanel({
         onPointerDown={startResize}
         role="separator"
         aria-orientation="vertical"
-        aria-label="Genspark"
+        aria-label="AI panel"
       />
       <header className="ai-panel-header">
         <span className="ai-panel-title">
-          <GensparkMark size={22} />
-          Genspark
+          <ZanoMark size={22} />
+          Zano AI
         </span>
         <div className="ai-panel-header-actions">
           {(chat.length > 0 || historicChat.length > 0) && (
@@ -548,7 +547,9 @@ export function AiChatPanel({
                 {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
                   <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
                 )}
-                {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
+                {entry.tools.length > 0 && (
+                  <ToolChipList tools={entry.tools} runActive={entry.streaming === true} />
+                )}
                 {entry.text && (
                   <div dir="auto">
                     <Markdown text={entry.text} nav={citationNav} />
@@ -597,7 +598,13 @@ export function AiChatPanel({
               </>
             ) : (
               <>
-                {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
+                {entry.streaming && entry.runStatus && (
+                  <AgentRunStatusCard status={entry.runStatus} />
+                )}
+                {entry.taskPlan && <TaskPlanCard plan={entry.taskPlan} />}
+                {entry.tools.length > 0 && (
+                  <ToolChipList tools={entry.tools} runActive={entry.streaming === true} />
+                )}
                 {entry.text ? (
                   <div dir="auto">
                     <Markdown text={entry.text} nav={citationNav} />
@@ -629,14 +636,6 @@ export function AiChatPanel({
                       </button>
                     )}
                   </div>
-                )}
-                {entry.loginRequired && (
-                  <button
-                    className="ai-login-btn"
-                    onClick={() => void window.desktopApi.aiGskLogin()}
-                  >
-                    {t('aiGskLoginBtn')}
-                  </button>
                 )}
               </>
             )}
@@ -872,6 +871,73 @@ function IconNewChat({ size }: { size: number }): React.JSX.Element {
   )
 }
 
+function AgentRunStatusCard({ status }: { status: RunStatus }): React.JSX.Element {
+  const { t: tr } = useI18n()
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  const view = runStatusView(status, now)
+  const label =
+    status.phase === 'tool-running' && status.toolName
+      ? tr('aiRunToolRunningNamed', { name: status.toolName.replace(/[_-]+/g, ' ') })
+      : tr(view.labelKey)
+  const warning =
+    view.warning === 'connection-active-no-output'
+      ? tr('aiRunWarningConnectionActive')
+      : view.warning === 'no-provider-activity'
+        ? tr('aiRunWarningNoActivity')
+        : null
+  return (
+    <div className="ai-agent-status" role="status" aria-live="polite">
+      <div className="ai-agent-status-row">
+        <span className="ai-agent-status-indicator" aria-hidden />
+        <span className="ai-agent-status-label">{label}</span>
+        <span className="ai-agent-status-elapsed">
+          {tr('aiRunElapsed', { seconds: view.elapsedSec })}
+        </span>
+      </div>
+      <div className="ai-agent-status-activity">
+        {tr('aiRunLastActivity', { seconds: view.lastActivitySec })}
+      </div>
+      {warning && <div className="ai-agent-status-warning">{warning}</div>}
+    </div>
+  )
+}
+
+function TaskPlanCard({ plan }: { plan: TaskPlan }): React.JSX.Element {
+  const { t: tr } = useI18n()
+  return (
+    <section className="ai-task-plan" aria-label={tr('aiTaskPlanAria')}>
+      <div className="ai-task-plan-title">{tr('aiTaskPlanTitle')}</div>
+      <ol className="ai-task-plan-list">
+        {plan.todos.map((item, index) => {
+          const label = item.status === 'in_progress' ? item.activeForm : item.content
+          return (
+            <li
+              key={`${item.content}-${index}`}
+              className={`ai-task-plan-item ${item.status}`}
+              aria-label={`${tr(
+                item.status === 'completed'
+                  ? 'aiTaskCompleted'
+                  : item.status === 'in_progress'
+                    ? 'aiTaskInProgress'
+                    : 'aiTaskPending',
+              )}: ${label}`}
+            >
+              <span className="ai-task-plan-indicator" aria-hidden>
+                {item.status === 'completed' ? '✓' : ''}
+              </span>
+              <span>{label}</span>
+            </li>
+          )
+        })}
+      </ol>
+    </section>
+  )
+}
+
 function IconCollapse({ size }: { size: number }): React.JSX.Element {
   // Mirrored glyph: the AI panel docks on the LEFT, so the divider and arrow point left
   return (
@@ -943,7 +1009,13 @@ function StepIcon({ status }: { status: 'running' | 'done' | 'error' }) {
 /** Tool activity group: a single quiet summary row
  *  that auto-opens while tools run, auto-collapses into "Worked · N steps" when they finish,
  *  and a manual toggle that always wins. Rows inside are step rows with 1px connectors. */
-function ToolChipList({ tools }: { tools: readonly AiToolChip[] }): React.JSX.Element {
+function ToolChipList({
+  tools,
+  runActive = false,
+}: {
+  tools: readonly AiToolChip[]
+  runActive?: boolean
+}): React.JSX.Element {
   const { t: tr } = useI18n()
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [userOpen, setUserOpen] = useState<boolean | null>(null)
@@ -959,7 +1031,11 @@ function ToolChipList({ tools }: { tools: readonly AiToolChip[] }): React.JSX.El
 
   const anyRunning = tools.some((tool) => tool.running)
   const open = userOpen ?? anyRunning
-  const label = anyRunning ? tr('aiGroupWorking') : tr('aiWorkedSteps', { n: tools.length })
+  const label = anyRunning
+    ? tr('aiGroupWorking')
+    : runActive
+      ? tr('aiWorkedStepsWaiting', { n: tools.length })
+      : tr('aiWorkedSteps', { n: tools.length })
 
   return (
     <div className="ai-work-group">

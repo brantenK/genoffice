@@ -24,7 +24,6 @@ import {
   RECALC_MAX_FAILURES,
   queueVisualInstall,
   sheetOutline,
-  syncUniver,
   univerDefinedNames,
   installFindRevealFix,
   installInjectorResolutionGuard,
@@ -49,6 +48,7 @@ import {
   type PlanContext,
 } from './plan-operations'
 import { isNumericIdentifierText } from './cell-warning'
+import { applyCellChangesBatched } from './batch-cell-values'
 import { consumePendingUndoCarry, undoStackDepth } from './undo-carry'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useAutoSavePref, type AiScopeQuoteData } from '@genoffice/ui'
@@ -105,7 +105,9 @@ import {
   AgentLoop,
   COMPLETED_VIA_TOOLS_TEXT,
   composeSkills,
+  type AgentActivity,
   type AgentImage,
+  type AgentPhase,
 } from '@genoffice/agent-core'
 import { imageGenerationAvailable, type AiSettings } from '@genoffice/ai-provider/browser'
 import { type WorkbookOperation } from '../domain/workbook-dsl'
@@ -138,6 +140,13 @@ import {
   type SheetsSkillDeps,
 } from './ai/tools'
 import { scopeLabel, type AiChatMessage } from './ai/AiChatPanel'
+import {
+  applyActivity,
+  applyPhase,
+  applyWorkbookPhase,
+  finishRun,
+  startRun,
+} from './ai/agent-run-status'
 import { pruneFailedExchange } from './ai/retry-prune'
 import { parseSheetNavHref } from './ai/sheet-nav'
 import {
@@ -492,6 +501,12 @@ export function App(): React.JSX.Element {
   // Ref mirror for callbacks captured when an AI run starts
   const autoSaveRef = useRef(autoSave)
   autoSaveRef.current = autoSave
+  // The post-run autosave reopens the sidecar session and reinstalls the
+  // workbook; an edit sent or undone inside that swap window would land in
+  // the old state and be lost, so sends/undo wait for it to finish.
+  const [aiSaving, setAiSaving] = useState(false)
+  const aiSavingRef = useRef(aiSaving)
+  aiSavingRef.current = aiSaving
   // AutoSave tick (docs/slides parity): every 30 s and on window blur, flush
   // pending edits of the open workbook. The journal is read at tick time so
   // the interval stays stable; demo mode has no backing file and is skipped.
@@ -771,25 +786,6 @@ export function App(): React.JSX.Element {
   const aiSettingsRef = useRef<AiSettings | null>(null)
   aiSettingsRef.current = aiSettings
 
-  /** gsk login state for the cloud-tools gate (refreshed on mount and window focus) */
-  const gskLoggedInRef = useRef(false)
-  useEffect(() => {
-    let alive = true
-    const refresh = () => {
-      void window.desktopApi
-        ?.aiGskStatus()
-        .then((s) => {
-          if (alive) gskLoggedInRef.current = !!s?.loggedIn
-        })
-        .catch(() => {})
-    }
-    refresh()
-    window.addEventListener('focus', refresh)
-    return () => {
-      alive = false
-      window.removeEventListener('focus', refresh)
-    }
-  }, [])
   const [aiBusy, setAiBusy] = useState(false)
   // Display history survives restarts via localStorage; the AgentLoop's model
   // context does not, so restored turns are read-only transcript.
@@ -1027,6 +1023,24 @@ export function App(): React.JSX.Element {
     })
   }
 
+  function patchAssistantRunStatus(kind: 'phase', event: AgentPhase): void
+  function patchAssistantRunStatus(kind: 'activity', event: AgentActivity): void
+  function patchAssistantRunStatus(
+    kind: 'phase' | 'activity',
+    event: AgentPhase | AgentActivity,
+  ): void {
+    patchLastAssistant((entry) => {
+      const current = entry.runStatus ?? startRun(Date.now())
+      return {
+        ...entry,
+        runStatus:
+          kind === 'phase'
+            ? applyPhase(current, event as AgentPhase, Date.now())
+            : applyActivity(current, event as AgentActivity),
+      }
+    })
+  }
+
   /** Tool activity for the whole run (args/output included, accumulated across
    * turns) — for full transcript persistence */
   const runToolsRef = useRef<
@@ -1047,7 +1061,11 @@ export function App(): React.JSX.Element {
       transport: createElectronTransport(() => aiSettingsRef.current!),
       systemSuffix: aiLangDirective,
       skill: composeSkills('sheets+files', '', [
-        createWorkbookSkill(sheetsSkillDeps()),
+        createWorkbookSkill(sheetsSkillDeps(), {
+          onTaskPlan: (taskPlan) => {
+            patchLastAssistant((entry) => ({ ...entry, taskPlan }))
+          },
+        }),
         createFilesSkill(availableAttachments),
         createMergeSkill({
           getAttachments: availableAttachments,
@@ -1058,11 +1076,13 @@ export function App(): React.JSX.Element {
           },
         }),
         createSearchSkill(),
-        createImageSkill(() =>
-          imageGenerationAvailable(aiSettingsRef.current, gskLoggedInRef.current),
-        ),
+        // BYOK-only predicate: Genspark is never a sign-in path for image
+        // generation, so the logged-in argument is pinned to false.
+        createImageSkill(() => imageGenerationAvailable(aiSettingsRef.current, false)),
       ]),
       events: {
+        onPhase: (phase) => patchAssistantRunStatus('phase', phase),
+        onActivity: (activity) => patchAssistantRunStatus('activity', activity),
         onText: (text) => {
           if (text) runLastTextRef.current = text
           // Status bar (and the ribbon-row status span) show a short state only;
@@ -1074,6 +1094,8 @@ export function App(): React.JSX.Element {
           patchLastAssistant((entry) => ({ ...entry, text, isError: false }))
         },
         onToolStart: (call) => {
+          // update_task_plan is UI state, not workbook work; never count or render it as a tool step.
+          if (call.name === 'update_task_plan') return
           // Live "running" chip: replaced in place by onToolExecuted
           patchLastAssistant((entry) => ({
             ...entry,
@@ -1089,6 +1111,7 @@ export function App(): React.JSX.Element {
           }))
         },
         onToolExecuted: ({ call, execution }) => {
+          if (call.name === 'update_task_plan') return
           if (execution.mutated) runMutatedRef.current = true
           const input = safeJsonInput(call.input)
           const output = execution.output
@@ -1153,13 +1176,14 @@ export function App(): React.JSX.Element {
             ? [prose, t('appAiTurnLimit')].filter(Boolean).join('\n\n')
             : prose || fallback
           const finalText = truncated
-            ? [baseText, t('appAiTruncatedNote')].filter(Boolean).join('\n\n')
+            ? [baseText, t('aiTruncated')].filter(Boolean).join('\n\n')
             : baseText
           setMessage(cancelled ? t('appAiStopped') : t('appAiDone'))
           patchLastAssistant((entry) => ({
             ...entry,
             text: finalText,
             streaming: false,
+            runStatus: finishRun(),
             isError: false,
             // A stop mid-tool can leave a running placeholder behind — drop it
             tools: entry.tools.filter((tl) => !tl.running),
@@ -1170,7 +1194,8 @@ export function App(): React.JSX.Element {
             persistChatMessage('assistant', finalText, runToolsRef.current)
           }
           setAiRunScope(undefined)
-          void autoSaveCompletedAiRun().finally(() => setAiBusy(false))
+          setAiBusy(false)
+          void autoSaveCompletedAiRun()
         },
         onError: (error) => {
           setMessage(error)
@@ -1191,29 +1216,15 @@ export function App(): React.JSX.Element {
                 text: error,
                 isError: true,
                 streaming: false,
+                runStatus: finishRun(),
                 tools: last.tools.filter((tl) => !tl.running),
               }
             }
             return next
           })
-          // Signed-out failures get an inline sign-in button; detected via
-          // gsk status rather than matching the localized error text
-          void window.desktopApi
-            .aiGskStatus()
-            .then((status) => {
-              if (status.loggedIn) return
-              setChat((previous) => {
-                const next = [...previous]
-                const last = next.at(-1)
-                if (last?.role === 'assistant' && last.isError) {
-                  next[next.length - 1] = { ...last, loginRequired: true }
-                }
-                return next
-              })
-            })
-            .catch(() => {})
           setAiRunScope(undefined)
-          void autoSaveCompletedAiRun().finally(() => setAiBusy(false))
+          setAiBusy(false)
+          void autoSaveCompletedAiRun()
         },
       },
     })
@@ -1257,7 +1268,8 @@ export function App(): React.JSX.Element {
 
   function runAgent(instruction: string, sentAttachments: readonly AttachmentMeta[]): void {
     const loop = agentLoopRef.current
-    if (!instruction.trim() || !loop || loop.busy || runStartingRef.current) return
+    if (!instruction.trim() || !loop || loop.busy || runStartingRef.current || aiSavingRef.current)
+      return
     runStartingRef.current = true
     // Freeze the selection scope for the whole run: users go on clicking around
     // while the AI works, so a live read would retarget "this column" mid-run.
@@ -1268,7 +1280,14 @@ export function App(): React.JSX.Element {
     runMutatedRef.current = false
     setAiBusy(true)
     setMessage(t('appAiThinking'))
-    appendChat({ role: 'assistant', text: '', tools: [], streaming: true })
+    appendChat({
+      role: 'assistant',
+      text: '',
+      tools: [],
+      streaming: true,
+      runStatus: startRun(Date.now()),
+      taskPlan: null,
+    })
     void collectImageAttachments(sentAttachments)
       .then((images) => {
         runStartingRef.current = false
@@ -1385,6 +1404,11 @@ export function App(): React.JSX.Element {
       traceDependents: (sheetId, address) =>
         traceWorkbookDependents(readContext(), sheetId, address),
       proposeOperations,
+      onWorkbookPhase: (phase) =>
+        patchLastAssistant((entry) => ({
+          ...entry,
+          runStatus: applyWorkbookPhase(entry.runStatus ?? startRun(Date.now()), phase),
+        })),
       createDocument: (request) => createAiDocument({ univerRef, lazyWorkbookRef }, request),
     }
   }
@@ -2774,7 +2798,7 @@ export function App(): React.JSX.Element {
     retryIndex?: number,
   ): void {
     const instruction = (overrideInstruction ?? prompt).trim()
-    if (!instruction || aiBusy) return
+    if (!instruction || aiBusy || aiSavingRef.current) return
     runToolsRef.current = []
     // The message consumes the composer attachments: they ride along (echoed on the
     // bubble, images multimodal, files via the files skill) and the composer clears.
@@ -2919,39 +2943,46 @@ export function App(): React.JSX.Element {
    * successful writes in one save. A canceled/failed Save As leaves both the
    * journal and inline undo available. */
   async function autoSaveCompletedAiRun(): Promise<void> {
-    const applies = aiApplyPromisesRef.current
-    aiApplyPromisesRef.current = []
-    if (applies.length === 0) return
-    const results = await Promise.all(applies)
-    if (!results.some(Boolean)) return
-    const state = lazyWorkbookRef.current
-    if (!state || journalSize(state.editJournal) === 0) return
-    // AutoSave off = the user decides when the file is written: the
-    // run's edits stay pending in the journal, so the offered Undo / ⌘Z keeps
-    // working (saving would reopen the session and reset the undo stack).
-    if (!autoSaveRef.current) {
-      setMessage(t('appAiChangesNotSaved'))
-      return
-    }
-    // AutoSave-driven write after an AI run: silent like the interval autosave.
-    await handleSave('save', true)
-    const after = lazyWorkbookRef.current
-    if (after && journalSize(after.editJournal) === 0) {
-      // Saving reopens the sidecar session and resets Univer's undo stack.
-      patchLastAssistant(({ autoApplied: _autoApplied, ...entry }) => entry)
-      // Sheets' analog of slides' deckName: propose the first AI-named sheet as
-      // the file name. The main process no-ops unless the file still carries the
-      // shell's auto-created untitled name, so user-chosen names are never touched.
-      const candidate = after.file.sheets
-        .map((sheet) => sheet.name.trim())
-        .find((name) => name.length > 0 && !DEFAULT_SHEET_NAME_RE.test(name))
-      if (candidate) {
-        try {
-          await window.desktopApi.autoRenameWorkbook(after.file.sessionId, candidate)
-        } catch {
-          // naming is best-effort; the save itself already succeeded
+    aiSavingRef.current = true
+    setAiSaving(true)
+    try {
+      const applies = aiApplyPromisesRef.current
+      aiApplyPromisesRef.current = []
+      if (applies.length === 0) return
+      const results = await Promise.all(applies)
+      if (!results.some(Boolean)) return
+      const state = lazyWorkbookRef.current
+      if (!state || journalSize(state.editJournal) === 0) return
+      // AutoSave off = the user decides when the file is written: the
+      // run's edits stay pending in the journal, so the offered Undo / ⌘Z keeps
+      // working (saving would reopen the session and reset the undo stack).
+      if (!autoSaveRef.current) {
+        setMessage(t('appAiChangesNotSaved'))
+        return
+      }
+      // AutoSave-driven write after an AI run: silent like the interval autosave.
+      await handleSave('save', true)
+      const after = lazyWorkbookRef.current
+      if (after && journalSize(after.editJournal) === 0) {
+        // Saving reopens the sidecar session and resets Univer's undo stack.
+        patchLastAssistant(({ autoApplied: _autoApplied, ...entry }) => entry)
+        // Sheets' analog of slides' deckName: propose the first AI-named sheet as
+        // the file name. The main process no-ops unless the file still carries the
+        // shell's auto-created untitled name, so user-chosen names are never touched.
+        const candidate = after.file.sheets
+          .map((sheet) => sheet.name.trim())
+          .find((name) => name.length > 0 && !DEFAULT_SHEET_NAME_RE.test(name))
+        if (candidate) {
+          try {
+            await window.desktopApi.autoRenameWorkbook(after.file.sessionId, candidate)
+          } catch {
+            // naming is best-effort; the save itself already succeeded
+          }
         }
       }
+    } finally {
+      aiSavingRef.current = false
+      setAiSaving(false)
     }
   }
 
@@ -3023,8 +3054,14 @@ export function App(): React.JSX.Element {
         // full-snapshot syncUniver would then resurrect the undone content.
         journalSuppression.active = true
         try {
-          syncUniver(univerRef.current, adapterRef.current.getSnapshot())
           const workbook = univerRef.current?.univerAPI.getActiveWorkbook()
+          if (workbook && plan.cellChanges.length > 0) {
+            applyCellChangesBatched((sheetId) => {
+              const worksheet = workbook.getSheetBySheetId(sheetId)
+              if (!worksheet) throw new Error(`Unknown sheet: ${sheetId}`)
+              return worksheet
+            }, plan.cellChanges)
+          }
           for (const formatChange of plan.formatChanges) {
             const worksheet = workbook?.getSheetBySheetId(formatChange.sheetId)
             if (worksheet)
@@ -3202,6 +3239,7 @@ export function App(): React.JSX.Element {
   }
 
   function handleUndo(steps?: number): void {
+    if (aiSavingRef.current) return
     const count =
       typeof steps === 'number' && Number.isFinite(steps) ? Math.max(1, Math.floor(steps)) : 1
     const fromAiBatch = typeof steps === 'number'
@@ -4124,6 +4162,7 @@ export function App(): React.JSX.Element {
         selectionFormat={selectionFormat}
         statusMessage={message}
         aiBusy={aiBusy}
+        aiSaving={aiSaving}
         chat={chat}
         historicChat={historicChat}
         attachments={attachments}

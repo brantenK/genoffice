@@ -43,7 +43,7 @@ export function createImageSkill(imageGen: () => boolean = () => true): AgentSki
     {
       name: 'generate_image',
       description:
-        'Generate an image with AI from a text prompt. Returns a URL to insert ' +
+        'Generate an image with AI from a text prompt (requires an AI provider with tool support). Returns a URL to insert ' +
         'with propose_operations add_image. Use for illustrations/decorative art; prefer image_search for real-world subjects.',
       inputSchema: {
         type: 'object',

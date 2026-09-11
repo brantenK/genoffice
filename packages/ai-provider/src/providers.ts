@@ -13,7 +13,7 @@ export const GENSPARK_LLM_BASE_URLS = {
 } as const
 
 /**
- * Splits GenOffice usage out of the proxy's default "Claw" billing bucket
+ * Splits Zanostack usage out of the proxy's default "Claw" billing bucket
  * (the backend attributes gsk-key traffic by X-Agent-Type). Only sent to the
  * Genspark proxy — never to direct vendor APIs.
  */
@@ -26,21 +26,6 @@ export function gensparkAttributionHeaders(baseUrl?: string): Record<string, str
 }
 
 export const AI_PROVIDERS: AiProviderMeta[] = [
-  {
-    id: 'genspark',
-    label: 'Genspark',
-    // must stay within the proxy's served set (GET /api/llm_proxy/v1/models);
-    // bare gpt-5.6 and the gemini family dropped off it (verified 2026-08-31)
-    models: [
-      'claude-opus-4-7',
-      'claude-opus-4-8',
-      'claude-sonnet-4-6',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
-    ],
-    defaultModel: 'claude-opus-4-7',
-    keyPlaceholder: 'Not required - sign in to Genspark',
-  },
   {
     id: 'codex',
     label: 'Codex CLI',
@@ -250,9 +235,9 @@ export function defaultAiSettings(
     }
   }
   return {
-    provider: 'genspark',
+    provider: 'anthropic',
     providers,
-    gskToolsEnabled: true,
+    gskToolsEnabled: false,
     media: defaultAiMediaSettings(),
     search: defaultAiSearchSettings(),
   }
@@ -268,24 +253,23 @@ export function cloudToolsEnabled(settings: Pick<AiSettings, 'gskToolsEnabled'>)
  * (api-key providers need a key and a model id; custom also needs a base URL).
  * Codex can auto-discover its executable. Anything else — including unknown
  * ids from a hand-edited
- * settings file — falls back to genspark, so a half-filled setup degrades
+ * settings file — falls back to anthropic (BYOK default), so a half-filled setup degrades
  * to the signed-in default instead of silently disabling AI.
  */
 export function activeProvider(settings: AiSettings): AiProviderId {
   const provider = settings.provider
-  if (provider === 'genspark') return 'genspark'
   const meta = AI_PROVIDERS.find((m) => m.id === provider)
   const config = settings.providers?.[provider]
-  if (!meta || !config) return 'genspark'
+  if (!meta || !config) return 'anthropic'
   if (meta.needsCliPath) return provider
-  if (!config.model) return 'genspark'
+  if (!config.model) return 'anthropic'
   if (meta.needsBaseUrl) {
     // Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) accept
     // anonymous requests: base URL + model suffice, the key stays optional.
-    if (!config.baseUrl) return 'genspark'
+    if (!config.baseUrl) return 'anthropic'
     return provider
   }
-  if (!config.apiKey) return 'genspark'
+  if (!config.apiKey) return 'anthropic'
   return provider
 }
 

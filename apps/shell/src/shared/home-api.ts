@@ -102,6 +102,12 @@ export interface HomeApi {
   newMarkdown(opts?: { projectId?: string }): Promise<void>
   /** open a blank html editor tab */
   newHtml(opts?: { projectId?: string }): Promise<void>
+  /** open a CRM tab */
+  newCrm(): Promise<void>
+  /** open a Tenders & Bids tab */
+  newTenders(): Promise<void>
+  /** open a Zano Books accounting tab */
+  newBooks(): Promise<void>
   /** create a blank single-page PDF in the default save folder and open it */
   newPdf(opts?: { projectId?: string }): Promise<void>
   /** drop entries from the recent list (does not touch the files) */
@@ -156,13 +162,13 @@ export interface HomeApi {
   getAiPanelPrefs(): Promise<AiPanelPrefs>
   /** merge + persist; broadcasts 'app:ai-panel-prefs-changed' to all web contents */
   setAiPanelPrefs(patch: Partial<AiPanelPrefs>): Promise<AiPanelPrefs>
-  /** effective default save folder for new/untitled files (configured in userData/app-settings.json, falls back to <Documents>/GenOffice) */
+  /** effective default save folder for new/untitled files (configured in userData/app-settings.json, falls back to <Documents>/Zanostack) */
   getDefaultSaveDir(): Promise<string>
   /** directory picker to change the default save folder; resolves to the new folder, or null when canceled or the pick was unusable */
   pickDefaultSaveDir(): Promise<string | null>
   /** theme switched anywhere (broadcast from the main process) */
   onThemeChanged(handler: (theme: UiTheme) => void): () => void
-  /** open the GenTeam community page in the default browser */
+  /** open the Zanostack community page in the default browser */
   openGenTeam(): Promise<void>
   /** open the Genspark credit-usage page in the default browser */
   openCreditUsage(): Promise<void>
@@ -322,6 +328,9 @@ export const HOME_CHANNELS = {
   newSlide: 'home:new-slide',
   newMarkdown: 'home:new-markdown',
   newHtml: 'home:new-html',
+  newCrm: 'home:new-crm',
+  newTenders: 'home:new-tenders',
+  newBooks: 'home:new-books',
   newPdf: 'home:new-pdf',
   removeRecent: 'home:remove-recent',
   revealPath: 'home:reveal-path',

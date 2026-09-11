@@ -130,7 +130,9 @@ describe('AiPanel collapse (slides)', () => {
         'textarea[data-slides-ai-input]',
       )
       expect(textarea).not.toBeNull()
-      expect(textarea!.spellcheck).toBe(false)
+      // jsdom implements no `spellcheck` IDL property, so assert the rendered
+      // attribute react writes for spellCheck={false}.
+      expect(textarea!.getAttribute('spellcheck')).toBe('false')
       cleanup()
     } finally {
       applyAiPanelPrefs({ fontSize: 'default', customFontSize: 14, spellcheck: true })

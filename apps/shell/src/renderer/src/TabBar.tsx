@@ -114,6 +114,55 @@ function HtmlIcon() {
   )
 }
 
+function CrmIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7.5" fill="#6366f1" />
+      <path d="M9 22V17M16 22V10M23 22V14" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function TendersIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7.5" fill="#d97706" />
+      <path
+        d="M16 7l7 3.5v5.5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V10.5L16 7z"
+        stroke="#fff"
+        strokeWidth="2.2"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13 16l2 2 4-4"
+        stroke="#fff"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function BooksIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7.5" fill="#0F766E" />
+      <path
+        d="M8 8v16a2 2 0 002 2h14M8 8a2 2 0 012-2h14v18H10a2 2 0 00-2 2"
+        stroke="#fff"
+        strokeWidth="2.2"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 12h8M12 16h6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 const KIND_ICON: Record<TabSummary['kind'], ReactElement> = {
   home: <HomeIcon />,
   docs: <DocIcon />,
@@ -122,6 +171,9 @@ const KIND_ICON: Record<TabSummary['kind'], ReactElement> = {
   pdf: <PdfIcon />,
   markdown: <MarkdownIcon />,
   html: <HtmlIcon />,
+  crm: <CrmIcon />,
+  tenders: <TendersIcon />,
+  books: <BooksIcon />,
 }
 
 export function TabBar() {

@@ -23,7 +23,8 @@ export const id = {
   aiEmptyBodyLine1: 'Jelaskan perubahan yang diinginkan atau tanyakan tentang datanya.',
   aiThinkingAria: 'Berpikir',
   aiThinking: 'Berpikir…',
-  aiWorkedSteps: 'Selesai · {n} langkah',
+  aiWorkedSteps: 'Dikerjakan · {n} langkah alat',
+  aiWorkedStepsWaiting: '{n} langkah alat selesai · menunggu model',
   aiGroupWorking: 'Sedang bekerja…',
   aiWorking: 'Menjalankan…',
   aiAutoApplied: '{count} perubahan diterapkan',
@@ -72,6 +73,7 @@ export const id = {
   aiToolAggregate: 'Agregasi rentang',
   aiToolAggregateOf: 'Agregasi rentang {range}',
   aiToolLoadGuide: 'Muat panduan',
+  aiToolUpdateTaskPlan: 'Perbarui daftar tugas',
   aiToolLoadGuideOf: 'Muat panduan {names}',
   aiToolReadFormats: 'Baca format',
   aiToolReadFormatsOf: 'Baca format {range}',
@@ -106,4 +108,25 @@ export const id = {
   aiScopeRangeTip:
     'AI membaca "kolom ini / baris ini / bagian yang dipilih" sebagai rentang ini, dan dikunci selama proses berjalan setelah Anda mengirim',
   aiScopeClearTitle: 'Hapus cakupan rentang dan gunakan seluruh lembar',
+  aiRunRequesting: 'Menunggu model',
+  aiRunThinking: 'Model sedang berpikir',
+  aiRunResponding: 'Model sedang merespons',
+  aiRunToolInput: 'Model sedang menyiapkan masukan alat',
+  aiRunToolRunning: 'Menjalankan alat',
+  aiRunToolRunningNamed: 'Menjalankan {name}',
+  aiRunApplying: 'Menerapkan perubahan buku kerja',
+  aiRunVerifying: 'Memeriksa hasil rumus',
+  aiRunElapsed: 'Giliran {seconds} dtk',
+  aiRunLastActivity: 'Aktivitas terakhir {seconds} dtk lalu',
+  aiRunWarningConnectionActive:
+    'Koneksi aktif, tetapi model belum menghasilkan keluaran baru-baru ini.',
+  aiRunWarningNoActivity:
+    'Tidak ada aktivitas penyedia selama lebih dari 30 detik. Periksa koneksi Anda, atau hentikan lalu coba lagi.',
+  aiTaskPlanAria: 'Daftar tugas',
+  aiTaskPlanTitle: 'Daftar tugas',
+  aiTaskPending: 'Tertunda',
+  aiTaskInProgress: 'Sedang berlangsung',
+  aiTaskCompleted: 'Selesai',
+  aiTruncated:
+    'Respons berhenti pada batas keluaran model. Kirim “lanjutkan” untuk menyelesaikan pekerjaan yang tersisa.',
 } satisfies Record<keyof typeof zh, string>

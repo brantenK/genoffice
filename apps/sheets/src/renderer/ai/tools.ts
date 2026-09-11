@@ -7,11 +7,13 @@ import {
 } from '../../domain/workbook-dsl'
 import {
   columnLabel,
+  parseAddress,
   parseRange,
   rangeCellCount,
   formatAddress,
   type RangeBounds,
 } from '../../domain/cell-address'
+import { readAiConventions } from './ai-conventions'
 import type {
   ApplyOutcome,
   CellFormatState,
@@ -81,6 +83,9 @@ export interface ActiveSheetInfo {
   readonly knownAddresses: readonly string[]
   /** lazy mode only: the viewport-backed range currently present in Univer */
   readonly loadedRange?: string | undefined
+  /** lazy mode only: the whole file was loaded up front (small enough for a
+   * full load), so reads outside loadedRange are backed by real data too */
+  readonly preloaded?: boolean | undefined
   /** every sheet in the workbook, active one included */
   readonly sheets: readonly SheetRef[]
   /** the selection to interpret "this column / these rows" against, in A1
@@ -242,6 +247,8 @@ export interface SheetsSkillDeps {
     operations: readonly WorkbookOperation[],
     summary: string,
   ): { ok: true; plan: ChangePlan; applied?: Promise<ApplyOutcome> } | { ok: false; error: string }
+  /** Factual workbook subphase used by the live status card. */
+  onWorkbookPhase?(phase: 'applying' | 'verifying'): void
   /** AI create_document: write a new standalone file (xlsx/csv from a
    * worksheet; docx/pdf/md from content) into the default save folder and
    * open it in a new tab (ai/create-document.ts). */
@@ -266,8 +273,9 @@ export const WORKBOOK_TOOLS: AgentToolDef[] = [
   {
     name: 'get_workbook_context',
     description:
-      'Get a workbook overview: all sheets (id/name/data-extent rows-columns), active sheet, current selection, known non-empty cell addresses. ' +
-      'For data-size questions (how many rows / how much data), answer from the data extent here instead of reading block by block; use read_range or read_cells when concrete values are needed.',
+      'Refresh the workbook overview after structural changes (insert/delete rows/cols, add/delete sheets). ' +
+      'The same overview is already injected on each user message — do not call this first. ' +
+      'For data-size questions, answer from the data extent instead of reading block by block.',
     inputSchema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -322,7 +330,7 @@ export const WORKBOOK_TOOLS: AgentToolDef[] = [
   {
     name: 'load_guide',
     description:
-      'Load operation guide documents into context (field definitions, conventions, common mistakes). Except for the most basic single-cell reads/writes, load the relevant guides before generating propose_operations; several can be loaded at once. ' +
+      'Load operation guide documents into context (field definitions, conventions, common mistakes). Skip for a single set_cell/set_formula or a small set_range/format_range (≤20 cells). Do not reload a guide already returned in this run. ' +
       `Available guides: ${guideCatalogSummary()}`,
     inputSchema: {
       type: 'object',
@@ -642,6 +650,167 @@ function parseAuditAddress(
   }
 }
 
+/** Compact data window attached to every user message so small edits skip read_range. */
+export const CONTEXT_WINDOW_MAX_ROWS = 40
+export const CONTEXT_WINDOW_MAX_COLS = 16
+
+function clampContextWindow(bounds: RangeBounds): RangeBounds {
+  return {
+    startRow: bounds.startRow,
+    startColumn: bounds.startColumn,
+    endRow: Math.min(bounds.endRow, bounds.startRow + CONTEXT_WINDOW_MAX_ROWS - 1),
+    endColumn: Math.min(bounds.endColumn, bounds.startColumn + CONTEXT_WINDOW_MAX_COLS - 1),
+  }
+}
+
+function selectionA1(selection: string): string {
+  const bang = selection.lastIndexOf('!')
+  return bang >= 0 ? selection.slice(bang + 1) : selection
+}
+
+/** A "Sheet!" qualifier names the sheet the selection belongs to; the window
+ * reads the ACTIVE sheet, so it must not be built from another sheet's (or an
+ * unresolvable) coordinates. */
+function selectionTargetsActiveSheet(selection: string, info: ActiveSheetInfo): boolean {
+  const bang = selection.lastIndexOf('!')
+  if (bang < 0) return true
+  const raw = selection.slice(0, bang)
+  const name =
+    raw.length > 1 && raw.startsWith("'") && raw.endsWith("'")
+      ? raw.slice(1, -1).replace(/''/g, "'")
+      : raw
+  const resolved = info.sheets.find((sheet) => sheet.name === name)
+  return resolved !== undefined && resolved.id === info.sheetId
+}
+
+/** Whether the grid really holds the window's cells: demo snapshots and
+ * preloaded imports are fully materialized, but a streamed lazy workbook only
+ * backs the loaded viewport — everywhere else reads as null and the window
+ * would be all-empty yet labeled authoritative. */
+function contextWindowMaterialized(info: ActiveSheetInfo, bounds: RangeBounds): boolean {
+  if (info.mode !== 'lazy' || info.preloaded) return true
+  if (!info.loadedRange) return false
+  try {
+    const loaded = parseRange(info.loadedRange.toUpperCase())
+    return (
+      bounds.startRow >= loaded.startRow &&
+      bounds.endRow <= loaded.endRow &&
+      bounds.startColumn >= loaded.startColumn &&
+      bounds.endColumn <= loaded.endColumn
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Bounding box for the injected TSV slice: frozen selection, else loaded viewport, else used-range origin.
+ * Null when no bounds exist or the slice would not be backed by real data. */
+export function contextWindowBounds(info: ActiveSheetInfo): RangeBounds | null {
+  if (info.selection && !selectionTargetsActiveSheet(info.selection, info)) return null
+  let bounds: RangeBounds | null = null
+  if (info.selection) {
+    try {
+      bounds = clampContextWindow(parseRange(selectionA1(info.selection).toUpperCase()))
+    } catch {
+      // fall through
+    }
+  }
+  if (!bounds && info.loadedRange) {
+    try {
+      bounds = clampContextWindow(parseRange(info.loadedRange.toUpperCase()))
+    } catch {
+      // fall through
+    }
+  }
+  const active = info.sheets.find((sheet) => sheet.id === info.sheetId)
+  if (!bounds && active?.rows && active.columns) {
+    bounds = {
+      startRow: 0,
+      startColumn: 0,
+      endRow: Math.min(active.rows - 1, CONTEXT_WINDOW_MAX_ROWS - 1),
+      endColumn: Math.min(active.columns - 1, CONTEXT_WINDOW_MAX_COLS - 1),
+    }
+  }
+  if (!bounds && info.knownAddresses.length > 0) {
+    let startRow = Infinity
+    let endRow = -1
+    let startColumn = Infinity
+    let endColumn = -1
+    for (const address of info.knownAddresses.slice(0, 200)) {
+      try {
+        const cell = parseAddress(address)
+        if (cell.row < startRow) startRow = cell.row
+        if (cell.row > endRow) endRow = cell.row
+        if (cell.column < startColumn) startColumn = cell.column
+        if (cell.column > endColumn) endColumn = cell.column
+      } catch {
+        // skip malformed
+      }
+    }
+    if (Number.isFinite(startRow)) {
+      bounds = clampContextWindow({ startRow, startColumn, endRow, endColumn })
+    }
+  }
+  if (bounds === null) return null
+  return contextWindowMaterialized(info, bounds) ? bounds : null
+}
+
+/** The context TSV rides along on EVERY user message (never squashed by
+ * compaction), so one notes column must not balloon it — read_range keeps
+ * returning the full text. */
+const CONTEXT_WINDOW_CELL_MAX_CHARS = 120
+
+function truncateContextCell(text: string): string {
+  if (text.length <= CONTEXT_WINDOW_CELL_MAX_CHARS) return text
+  const cut = text.slice(0, CONTEXT_WINDOW_CELL_MAX_CHARS)
+  // escapeCellText only emits '\' as the start of a \\, \t or \n sequence;
+  // back off a char instead of splitting one.
+  return `${cut.endsWith('\\') ? cut.slice(0, -1) : cut}…`
+}
+
+function formatContextTsv(
+  bounds: RangeBounds,
+  cells: Record<string, { value: CellScalar; formula?: string }>,
+): string {
+  const header = [
+    '',
+    ...Array.from({ length: bounds.endColumn - bounds.startColumn + 1 }, (_, offset) =>
+      columnLabel(bounds.startColumn + offset),
+    ),
+  ].join('\t')
+  const rows: string[] = [header]
+  for (let row = bounds.startRow; row <= bounds.endRow; row += 1) {
+    const columns: string[] = [String(row + 1)]
+    for (let column = bounds.startColumn; column <= bounds.endColumn; column += 1) {
+      const cell = cells[formatAddress(row, column)]
+      columns.push(
+        cell
+          ? truncateContextCell(
+              cell.value === null ? escapeCellText(cell.formula ?? '') : formatCellScalar(cell),
+            )
+          : '',
+      )
+    }
+    rows.push(columns.join('\t'))
+  }
+  return rows.join('\n')
+}
+
+/** Whole-value formula error literals. Matched against the trimmed raw value
+ * only: a TEXT cell that merely contains "#N/A" (survey answers, logs) is not
+ * an error. */
+const FORMULA_ERROR_LITERALS = new Set([
+  '#REF!',
+  '#DIV/0!',
+  '#VALUE!',
+  '#NAME?',
+  '#N/A',
+  '#NUM!',
+  '#NULL!',
+  '#SPILL!',
+  '#CALC!',
+])
+
 export function buildWorkbookContext(deps: SheetsSkillDeps): string {
   const info = deps.getActiveSheetInfo()
   if (info.mode === 'none') return 'No workbook is currently open.'
@@ -726,6 +895,39 @@ export function buildWorkbookContext(deps: SheetsSkillDeps): string {
     lines.push(
       'No known non-empty cell information yet; read on demand with read_range/read_cells.',
     )
+  }
+  const conventions = readAiConventions()
+  if (conventions) {
+    lines.push(`User conventions (honor these): ${conventions}`)
+  }
+  const windowBounds = contextWindowBounds(info)
+  if (windowBounds) {
+    const rangeLabel = `${formatAddress(windowBounds.startRow, windowBounds.startColumn)}:${formatAddress(windowBounds.endRow, windowBounds.endColumn)}`
+    try {
+      const addresses: string[] = []
+      for (let row = windowBounds.startRow; row <= windowBounds.endRow; row += 1) {
+        for (let column = windowBounds.startColumn; column <= windowBounds.endColumn; column += 1) {
+          addresses.push(formatAddress(row, column))
+        }
+      }
+      const cells = deps.readCells(addresses, info.sheetId)
+      lines.push(
+        `Compact data window ${rangeLabel} (already loaded — do not re-read this range; use read_range only for cells outside it):`,
+      )
+      const active = info.sheets.find((sheet) => sheet.id === info.sheetId)
+      if (
+        active?.rows &&
+        active.columns &&
+        (active.rows > CONTEXT_WINDOW_MAX_ROWS || active.columns > CONTEXT_WINDOW_MAX_COLS)
+      ) {
+        lines.push(
+          `The sheet is larger than this window (extent A1:${columnLabel(active.columns - 1)}${active.rows}); use aggregate_range for stats over the rest.`,
+        )
+      }
+      lines.push(formatContextTsv(windowBounds, cells))
+    } catch {
+      // A disposing workbook can race the read; skip the window rather than fail the run.
+    }
   }
   return lines.join('\n')
 }
@@ -1285,6 +1487,7 @@ export function executeWorkbookTool(
       }
       const outcome = deps.proposeOperations(operations, summaryInput.trim())
       if (!outcome.ok) return fail(t('aiToolPropose'), outcome.error)
+      deps.onWorkbookPhase?.('applying')
       const summary = summaryInput.trim()
       const finish = (
         appliedNotices: readonly string[] = [],
@@ -1320,6 +1523,7 @@ export function executeWorkbookTool(
         if (formulaCells.length === 0) {
           return { output: base, mutated: true, summary }
         }
+        deps.onWorkbookPhase?.('verifying')
         return (async (): Promise<ToolExecution> => {
           await new Promise((resolve) => setTimeout(resolve, FORMULA_RECALC_DELAY_MS))
           const shown = formulaCells.slice(0, MAX_READBACK_FORMULAS)
@@ -1333,26 +1537,27 @@ export function executeWorkbookTool(
             deps.getActiveSheetInfo().sheets.map((sheet) => [sheet.id, sheet.name]),
           )
           const lines: string[] = []
+          const errorLines: string[] = []
           for (const [cellSheetId, addresses] of bySheet) {
             const cells = deps.readCells(addresses, cellSheetId)
             const prefix = bySheet.size > 1 ? `${sheetNames.get(cellSheetId) ?? cellSheetId}!` : ''
             for (const addr of addresses) {
               const v = cells[addr]?.value
-              lines.push(
-                `${prefix}${addr} = ${v === null || v === undefined ? '(still computing; verify with read_cells)' : String(v)}`,
-              )
+              const line = `${prefix}${addr} = ${v === null || v === undefined ? '(still computing; verify with read_cells)' : String(v)}`
+              lines.push(line)
+              if (typeof v === 'string' && FORMULA_ERROR_LITERALS.has(v.trim()))
+                errorLines.push(line)
             }
           }
           const rest = formulaCells.length - shown.length
-          const hasError = lines.some((l) =>
-            /#(REF!|DIV\/0!|VALUE!|NAME\?|N\/A|NUM!|NULL!)/.test(l),
-          )
+          const errorBlock =
+            errorLines.length > 0
+              ? `\nerrors:\n${errorLines.map((line) => `- ${line}`).join('\n')}\nYou may call propose_operations ONCE more in this run to fix these errors, then explain. Do not keep iterating.`
+              : ''
           return {
             output:
               `${base}\nFormula results: ${lines.join('; ')}${rest > 0 ? `; …${rest} more formula cells` : ''}` +
-              (hasError
-                ? '\n⚠️ Formula error values present — check references/divisors and fix them.'
-                : ''),
+              errorBlock,
             mutated: true,
             summary,
           }

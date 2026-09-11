@@ -1,4 +1,6 @@
 import { execSync, spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import * as inspector from 'node:inspector'
 import {
   copyFileSync,
   cpSync,
@@ -152,6 +154,7 @@ import {
   configurePdfRuntime,
   flushPdfSave,
   markPdfUntitledPath,
+  pdfFileRenamed,
   pdfIsDirty,
   requestPdfClose,
   requestPdfSaveAs,
@@ -188,6 +191,9 @@ import {
   setHtmlPresentHooks,
   setHtmlProvisionalTitleHook,
 } from '../../../html/src/main/html-main'
+import { configureCrmRuntime } from '../../../crm/src/main/crm-main'
+import { configureTendersRuntime } from '../../../tenders/src/main/tenders-main'
+import { configureBooksRuntime } from '../../../books/src/main/books-main'
 import type {
   AccountLoginEvent,
   AutoSaveDefault,
@@ -211,9 +217,12 @@ import { isSameFile, isValidRenameName } from './rename-validation'
 import { TabManager } from './tab-manager'
 import { applyUpdateChannel, initAutoUpdater } from './updater'
 import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
+import { AutomationDispatcher } from './automation-dispatcher'
+import { parseAutomationMode, sanitizeAutomationEnvironment } from './automation-mode'
+import { AutomationServer } from './automation-server'
 
 /**
- * GenOffice unified shell: ONE Electron app, ONE BrowserWindow, hosting the
+ * Zanostack unified shell: ONE Electron app, ONE BrowserWindow, hosting the
  * docs and sheets modules as WebContentsView tabs behind a WPS-style tab
  * strip. The shell owns the lifecycle — single-instance lock, file-
  * association routing by extension, and per-active-tab menu switching.
@@ -221,19 +230,37 @@ import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
  * apps/sheets/out), so build those before running the shell.
  */
 
+const automationMode = parseAutomationMode(process.argv)
+const invalidAutomationLaunch = automationMode.disposition === 'invalid'
+
+if (automationMode.enabled) {
+  // An automation child has no access to renderer/test/debug controls, even
+  // when a developer accidentally forwards a poisoned process environment.
+  process.env = sanitizeAutomationEnvironment(process.env)
+  inspector.close()
+  app.commandLine.removeSwitch('remote-debugging-port')
+}
+
 // ANY unpacked run (`npm run shell`, `npm run dev`, `npx electron .`) must not
 // share the installed app's userData or single-instance lock — otherwise a dev
-// run silently quits and forwards its argv to the running installed GenOffice.
+// run silently quits and forwards its argv to the running installed Zanostack.
 // GENOFFICE_USER_DATA: test drivers point this at a scratch dir so an
 // automated instance can run alongside the dev instance (separate lock).
-if (!app.isPackaged)
+if (automationMode.enabled) {
+  // Automation never inherits GENOFFICE_USER_DATA or the packaged profile.
+  // The path was derived from the consumed, validated launch record.
+  app.setPath('userData', automationMode.userDataPath)
+} else if (invalidAutomationLaunch) {
+  // Never fall back to a normal profile after an explicit automation failure.
+  app.setPath('userData', automationMode.safeUserDataPath)
+} else if (!app.isPackaged)
   app.setPath(
     'userData',
-    process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'GenOffice Dev'),
+    process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'Zanostack Dev'),
   )
 
-// The product rename from "AI Office" to GenOffice changed the userData path; migrate old user data once
-if (app.isPackaged) {
+// The product rename from "AI Office" to Zanostack changed the userData path; migrate old user data once
+if (app.isPackaged && automationMode.disposition === 'normal') {
   const oldDir = join(app.getPath('appData'), 'AI Office')
   const newDir = app.getPath('userData')
   const newEmpty = !existsSync(newDir) || readdirSync(newDir).length === 0
@@ -263,52 +290,87 @@ const MARKDOWN_OUT = app.isPackaged
 const HTML_OUT = app.isPackaged
   ? join(process.resourcesPath, 'modules', 'html')
   : join(APPS_ROOT, 'html', 'out')
+const CRM_OUT = app.isPackaged
+  ? join(process.resourcesPath, 'modules', 'crm')
+  : join(APPS_ROOT, 'crm', 'out')
+const TENDERS_OUT = app.isPackaged
+  ? join(process.resourcesPath, 'modules', 'tenders')
+  : join(APPS_ROOT, 'tenders', 'out')
+const BOOKS_OUT = app.isPackaged
+  ? join(process.resourcesPath, 'modules', 'books')
+  : join(APPS_ROOT, 'books', 'out')
 const SIDECAR_BIN = app.isPackaged
   ? join(process.resourcesPath, 'native', SIDECAR_EXE)
   : join(APPS_ROOT, 'sheets', 'native', 'xlsx-engine', 'target', 'release', SIDECAR_EXE)
 
-configureDocsRuntime({
-  preloadPath: join(DOCS_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.DOCS_RENDERER_URL,
-  rendererFile: join(DOCS_OUT, 'renderer', 'index.html'),
-})
-configureSheetsRuntime({
-  preloadPath: join(SHEETS_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.SHEETS_RENDERER_URL,
-  rendererFile: join(SHEETS_OUT, 'renderer', 'index.html'),
-  sidecarPath: SIDECAR_BIN,
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  // The sheets AI's create_document (docx/pdf/md) funnels into the docs-owned
-  // creation flow, like the pdf app below.
-  createDocument: createAiDocument,
-})
-configureSlidesRuntime({
-  preloadPath: join(SLIDES_OUT, 'preload', 'index.js'),
-  rendererDevUrl: process.env.SLIDES_RENDERER_URL,
-  rendererFilePath: join(SLIDES_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-})
-configurePdfRuntime({
-  preloadPath: join(PDF_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.PDF_RENDERER_URL,
-  rendererFile: join(PDF_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-  createDocument: createAiDocument,
-})
-configureMarkdownRuntime({
-  preloadPath: join(MARKDOWN_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.MARKDOWN_RENDERER_URL,
-  rendererFile: join(MARKDOWN_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-})
-configureHtmlRuntime({
-  preloadPath: join(HTML_OUT, 'preload', 'index.js'),
-  rendererUrl: process.env.HTML_RENDERER_URL,
-  rendererFile: join(HTML_OUT, 'renderer', 'index.html'),
-  openGeneratedPath: (path) => openGeneratedDocument(path),
-})
-// privileged-scheme registration is only legal before app ready
-registerHtmlSchemes()
+if (!invalidAutomationLaunch) {
+  configureDocsRuntime({
+    preloadPath: join(DOCS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.DOCS_RENDERER_URL,
+    rendererFile: join(DOCS_OUT, 'renderer', 'index.html'),
+  })
+  configureSheetsRuntime({
+    preloadPath: join(SHEETS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.SHEETS_RENDERER_URL,
+    rendererFile: join(SHEETS_OUT, 'renderer', 'index.html'),
+    sidecarPath: SIDECAR_BIN,
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    // The sheets AI's create_document (docx/pdf/md) funnels into the docs-owned
+    // creation flow, like the pdf app below.
+    createDocument: createAiDocument,
+  })
+  configureSlidesRuntime({
+    preloadPath: join(SLIDES_OUT, 'preload', 'index.js'),
+    rendererDevUrl: process.env.SLIDES_RENDERER_URL,
+    rendererFilePath: join(SLIDES_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+  })
+  configurePdfRuntime({
+    preloadPath: join(PDF_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.PDF_RENDERER_URL,
+    rendererFile: join(PDF_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    createDocument: createAiDocument,
+  })
+  configureMarkdownRuntime({
+    preloadPath: join(MARKDOWN_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.MARKDOWN_RENDERER_URL,
+    rendererFile: join(MARKDOWN_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+  })
+  configureHtmlRuntime({
+    preloadPath: join(HTML_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.HTML_RENDERER_URL,
+    rendererFile: join(HTML_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+  })
+  // Privileged-scheme registration is only legal before app ready.
+  registerHtmlSchemes()
+  configureCrmRuntime({
+    preloadPath: join(CRM_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.CRM_RENDERER_URL,
+    rendererFile: join(CRM_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    onOpenTenders: () => newTendersTab(),
+    onOpenBooks: () => newBooksTab(),
+  })
+  configureTendersRuntime({
+    preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.TENDERS_RENDERER_URL,
+    rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    onOpenCrm: () => newCrmTab(),
+    onOpenBooks: () => newBooksTab(),
+  })
+  configureBooksRuntime({
+    preloadPath: join(BOOKS_OUT, 'preload', 'index.js'),
+    rendererUrl: process.env.BOOKS_RENDERER_URL,
+    rendererFile: join(BOOKS_OUT, 'renderer', 'index.html'),
+    openGeneratedPath: (path) => openGeneratedDocument(path),
+    onOpenCrm: () => newCrmTab(),
+    onOpenTenders: () => newTendersTab(),
+  })
+}
 
 // ---- UI language ----
 // Persisted in userData/app-settings.json so the editor modules can read the
@@ -450,7 +512,7 @@ function initAnalytics(): void {
 }
 
 // ---- first-run onboarding ----
-// The GenTeam community page opened from the onboarding's second slide.
+// The Zanostack community page opened from the onboarding's second slide.
 // Stable short link served by the genoffice.ai site; it 302s to the tokened
 // invite link, which stays out of this repo and rotates server-side.
 const GENTEAM_URL = 'https://genoffice.ai/join'
@@ -2263,6 +2325,45 @@ const tm = (key: Parameters<typeof tMain>[1], params?: Parameters<typeof tMain>[
 
 let shellWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
+let automationServer: AutomationServer | null = null
+
+async function startAutomationServerWhenReady(): Promise<void> {
+  if (!automationMode.enabled || automationServer || !tabManager) return
+  const manager = tabManager
+  const dispatcher = new AutomationDispatcher(
+    {
+      getStatus: () => ({
+        version: app.getVersion(),
+        automation: true,
+        platform: process.platform,
+      }),
+      listTabs: () => manager.list(),
+      activateTab: (id) => {
+        const found = manager.list().some((tab) => tab.id === id)
+        if (found) manager.activateTab(id)
+        return found
+      },
+      openFile: (path) => openDocumentPath(path),
+      recentFiles: () => readRecentFiles(),
+    },
+    { sessionRoot: automationMode.sessionRoot, inputRoot: automationMode.inputRoot },
+  )
+  const token = randomBytes(32).toString('base64url')
+  const server = new AutomationServer({
+    token,
+    sessionId: automationMode.sessionId,
+    pid: process.pid,
+    metadataPath: automationMode.metadataPath,
+    dispatch: (command) => dispatcher.dispatch(command),
+  })
+  try {
+    await server.start()
+    automationServer = server
+  } catch {
+    await server.abortStartup()
+    app.quit()
+  }
+}
 
 /**
  * When the user creates a file from a specific project view, remember which
@@ -2328,9 +2429,13 @@ function createShellWindow(): void {
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
-    minWidth: 720,
-    minHeight: 550,
-    title: 'GenOffice',
+    minWidth: 980,
+    minHeight: 600,
+    title: 'Zanostack',
+    // unpackaged dev runs carry electron.exe's default icon; point the window
+    // at the Zano logo so the taskbar matches the packaged build (which takes
+    // the exe icon generated from build/icon.png by electron-builder)
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
     // vibrancy: editor modules punch translucent regions (e.g. the slides
     // thumbnail pane) through to the desktop
     ...(process.platform === 'darwin'
@@ -2533,11 +2638,167 @@ function createShellWindow(): void {
     if (tabManager === manager) tabManager = null
   })
 
-  if (process.env.ELECTRON_RENDERER_URL) {
+  if (!automationMode.enabled && process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // idle warm-up: once the shell (Home) has painted, pre-render a hidden docs
+  // module so the first docs tab opens near-instantly (TabManager.prewarmDocs)
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => manager.prewarmDocs(), 800)
+    const ssPath = !automationMode.enabled ? process.env.GENOFFICE_SCREENSHOT_PATH : undefined
+    if (!automationMode.enabled && ssPath) {
+      if (process.env.OPEN_CRM_ON_START) {
+        setTimeout(() => manager.openCrmTab(), 300)
+      }
+      if (process.env.OPEN_TENDERS_ON_START) {
+        setTimeout(() => manager.openTendersTab(), 300)
+      }
+      setTimeout(async () => {
+        try {
+          const act = manager.activeTab()
+          const targetWc = act?.view && act.kind !== 'home' ? act.view.webContents : win.webContents
+          targetWc.on('console-message', (_e, level, message) =>
+            console.log('[view-console]', level, message),
+          )
+          if (process.env.CRM_CLICK_NAV) {
+            await targetWc
+              .executeJavaScript(
+                `
+              const btns = Array.from(document.querySelectorAll('.crm-segmented-btn, .crm-nav-btn'));
+              const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.CRM_CLICK_NAV}'.toLowerCase()));
+              if (target) target.click();
+            `,
+              )
+              .catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
+          if (process.env.CRM_CLICK_ACTION) {
+            await targetWc
+              .executeJavaScript(
+                `
+              const btn = document.querySelector('${process.env.CRM_CLICK_ACTION}');
+              if (btn) btn.click();
+            `,
+              )
+              .catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
+          if (process.env.TENDERS_DISMISS_INTRO) {
+            await targetWc
+              .executeJavaScript(
+                `
+              const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Skip intro'));
+              if (btn) btn.click();
+            `,
+              )
+              .catch(() => {})
+            await new Promise((r) => setTimeout(r, 600))
+          }
+          if (process.env.TENDERS_FLOW === 'demo-readiness') {
+            await targetWc
+              .executeJavaScript(
+                `
+              (async () => {
+                const navBtns = Array.from(document.querySelectorAll('aside nav button'));
+                const tendersNav = navBtns.find(b => b.textContent && b.textContent.includes('Tenders'));
+                if (tendersNav) tendersNav.click();
+
+                for (let i = 0; i < 20; i++) {
+                  await new Promise(r => setTimeout(r, 200));
+                  const demoBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Load demo RFP'));
+                  if (demoBtn) {
+                    demoBtn.click();
+                    break;
+                  }
+                }
+
+                for (let i = 0; i < 30; i++) {
+                  await new Promise(r => setTimeout(r, 300));
+                  const readyBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Bid readiness'));
+                  if (readyBtn) {
+                    readyBtn.click();
+                    break;
+                  }
+                }
+              })()
+            `,
+              )
+              .catch(() => {})
+            await new Promise((r) => setTimeout(r, 2500))
+          }
+          if (process.env.TENDERS_NAV) {
+            await targetWc
+              .executeJavaScript(
+                `
+              const btns = Array.from(document.querySelectorAll('aside nav button'));
+              const target = btns.find(b => b.textContent.toLowerCase().includes('${process.env.TENDERS_NAV}'.toLowerCase()));
+              if (target) target.click();
+            `,
+              )
+              .catch(() => {})
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+          if (process.env.TENDERS_ACTION) {
+            const res = await targetWc
+              .executeJavaScript(
+                `
+              (() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const target = btns.find(b => b.textContent && b.textContent.toLowerCase().includes('${process.env.TENDERS_ACTION}'.toLowerCase()));
+                if (target) {
+                  target.click();
+                  return 'CLICKED: ' + target.textContent;
+                }
+                return 'NOT FOUND. Available buttons: ' + btns.map(b => b.textContent).join(' | ');
+              })()
+            `,
+              )
+              .catch((err) => 'ERR: ' + err)
+            console.log('[screenshot] TENDERS_ACTION:', res)
+            await new Promise((r) => setTimeout(r, 4500))
+          }
+          if (process.env.TENDERS_ACTION2) {
+            const res = await targetWc
+              .executeJavaScript(
+                `
+              (() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const target = btns.find(b => b.textContent && b.textContent.toLowerCase().includes('${process.env.TENDERS_ACTION2}'.toLowerCase()));
+                if (target) {
+                  target.click();
+                  return 'CLICKED 2: ' + target.textContent;
+                }
+                return 'NOT FOUND 2. Available buttons: ' + btns.map(b => b.textContent).join(' | ');
+              })()
+            `,
+              )
+              .catch((err) => 'ERR: ' + err)
+            console.log('[screenshot] TENDERS_ACTION2:', res)
+            await new Promise((r) => setTimeout(r, 1500))
+          }
+          if (process.env.TENDERS_CLICK_SELECTOR) {
+            await targetWc
+              .executeJavaScript(
+                `
+              const el = document.querySelector('${process.env.TENDERS_CLICK_SELECTOR}');
+              if (el) el.click();
+            `,
+              )
+              .catch(() => {})
+            await new Promise((r) => setTimeout(r, 800))
+          }
+          const img = await targetWc.capturePage()
+          writeFileSync(ssPath, img.toPNG())
+          console.log('[screenshot] Saved to ' + ssPath)
+        } catch (e) {
+          console.error('[screenshot] Failed: ' + e)
+        }
+      }, 3000)
+    }
+  })
 }
 
 // ---- routing: one dispatch function for every open path ----
@@ -2789,6 +3050,33 @@ function newHtmlTab(): void {
   }
 }
 
+function newCrmTab(): void {
+  try {
+    tabManager?.openCrmTab()
+    analytics.track('file_new', { kind: 'crm' })
+  } catch (err) {
+    surfaceNewTabError(err)
+  }
+}
+
+function newTendersTab(): void {
+  try {
+    tabManager?.openTendersTab()
+    analytics.track('file_new', { kind: 'tenders' })
+  } catch (err) {
+    surfaceNewTabError(err)
+  }
+}
+
+function newBooksTab(): void {
+  try {
+    tabManager?.openBooksTab()
+    analytics.track('file_new', { kind: 'books' })
+  } catch (err) {
+    surfaceNewTabError(err)
+  }
+}
+
 /**
  * "New PDF" creates a blank single-page .pdf in the default folder up front and
  * opens it as a regular file tab — the PDF module has no in-memory blank mode
@@ -2847,7 +3135,7 @@ function statEntries(paths: string[]): RecentEntry[] {
 }
 
 function registerHomeIpc(): void {
-  // signed-in means GenOffice's own device-code login; the shared gsk CLI key
+  // signed-in means Zanostack's own device-code login; the shared gsk CLI key
   // is only a silent fallback, deliberately not shown here to nudge users onto our key
   ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {
     if (!loadGenofficeAuth()) return { loggedIn: false }
@@ -2980,6 +3268,18 @@ function registerHomeIpc(): void {
     newHtmlTab()
   })
 
+  ipcMain.handle(HOME_CHANNELS.newCrm, () => {
+    newCrmTab()
+  })
+
+  ipcMain.handle(HOME_CHANNELS.newTenders, () => {
+    newTendersTab()
+  })
+
+  ipcMain.handle(HOME_CHANNELS.newBooks, () => {
+    newBooksTab()
+  })
+
   ipcMain.handle(HOME_CHANNELS.newPdf, (_event, opts?: { projectId?: string }) => {
     if (opts?.projectId && opts.projectId !== 'default') {
       pendingNewFileProject.set('pdf', opts.projectId)
@@ -3030,6 +3330,7 @@ function registerHomeIpc(): void {
         if (t.kind === 'slides') slidesFileRenamed(t.webContents, path, target)
         else if (t.kind === 'docs') docsFileRenamed(t.webContents, path, target)
         else if (t.kind === 'sheets') sheetsFileRenamed(t.webContents, path, target)
+        else if (t.kind === 'pdf') pdfFileRenamed(t.webContents, path, target)
         else if (t.kind === 'markdown') markdownFileRenamed(t.webContents, path, target)
         else if (t.kind === 'html') htmlFileRenamed(t.webContents, path, target)
       }
@@ -3301,6 +3602,9 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
   pdf: 'pdf',
   markdown: 'md',
   html: 'html',
+  crm: 'home',
+  tenders: 'pdf',
+  books: 'home',
 }
 
 // tab views see neither DOM events nor a focus change when the user clicks the
@@ -4186,7 +4490,9 @@ async function installMainProcessProxy(): Promise<void> {
 
 // ---- lifecycle (the shell is the only owner) ----
 
-let pendingLaunchPath = supportedFileIn(process.argv) ?? unsupportedFileIn(process.argv)
+let pendingLaunchPath = automationMode.enabled
+  ? null
+  : (supportedFileIn(process.argv) ?? unsupportedFileIn(process.argv))
 
 // show() does not un-minimize, and on macOS ⌘W destroys the shell window while the
 // app keeps running — either way a file opened from Finder would land out of sight.
@@ -4220,25 +4526,33 @@ app.on('second-instance', (_event, argv, _cwd, additionalData) => {
   if (!file || !openDocumentPath(file)) tabManager?.openHomeTab()
 })
 
-installNavigationGuard(app)
-installContextMenu(app, () => contextMenuLabels(currentLang()))
-registerAiIpc()
-registerProjectIpc()
-registerDocsIpc()
-registerHomeIpc()
-registerTabsIpc()
-registerDroppedFilesIpc()
+if (!invalidAutomationLaunch) {
+  installNavigationGuard(app)
+  installContextMenu(app, () => contextMenuLabels(currentLang()))
+  registerAiIpc()
+  registerProjectIpc()
+  registerDocsIpc()
+  registerHomeIpc()
+  registerTabsIpc()
+  registerDroppedFilesIpc()
 
-// sheets' project:resolveChat goes through the handler registered by docs-main; the sessionId reverse lookup hooks in here
-setSessionPathResolver(resolveSheetsSessionPath)
+  // sheets' project:resolveChat goes through the handler registered by docs-main; the sessionId reverse lookup hooks in here
+  setSessionPathResolver(resolveSheetsSessionPath)
+}
 
 /** Dev-only pid marker for the takeover below; scoped to userData like the lock itself. */
 const devPidFile = () => join(app.getPath('userData'), 'dev-instance.pid')
 
 app.whenReady().then(async () => {
+  if (automationMode.disposition === 'invalid') {
+    // Explicit automation with a malformed, stale, or replayed record must
+    // fail closed; it must not silently turn into a normal launch.
+    app.quit()
+    return
+  }
   const lockData = () => (pendingLaunchPath ? { launchPath: pendingLaunchPath } : {})
   let hasLock = app.requestSingleInstanceLock(lockData())
-  if (!hasLock && !app.isPackaged) {
+  if (!hasLock && !app.isPackaged && !automationMode.enabled) {
     // Dev watch restart: electron-vite SIGTERMs the previous instance and spawns this
     // one immediately. Chromium turns that SIGTERM into a graceful quit (Node's
     // process.on('SIGTERM') never fires in the main process), and the quit can wedge
@@ -4273,7 +4587,7 @@ app.whenReady().then(async () => {
     }
   }
 
-  proxyBootstrap = installMainProcessProxy()
+  if (!automationMode.enabled) proxyBootstrap = installMainProcessProxy()
   app.setAccessibilitySupportEnabled(true)
   // Settle the shared uiLang from saved settings BEFORE any tab renderer can
   // ask 'app:get-language': the editor handlers return the i18n module's
@@ -4305,14 +4619,22 @@ app.whenReady().then(async () => {
   } catch {
     // settings write failures must never block startup
   }
-  initAnalytics()
-  analytics.track('app_launch')
-  startSheetsCaptureServer()
+  if (!automationMode.enabled) {
+    initAnalytics()
+    analytics.track('app_launch')
+    startSheetsCaptureServer()
+  }
   createShellWindow()
   // deferred to ready: labels need currentLang(), which reads app.getLocale()
   installBackToHomeItems()
   installDockMenu()
-  initAutoUpdater(() => shellWindow, currentUpdateChannel())
+  if (!automationMode.enabled) initAutoUpdater(() => shellWindow, currentUpdateChannel())
+
+  if (automationMode.enabled) {
+    shellWindow?.webContents.once('did-finish-load', () => {
+      void startAutomationServerWhenReady()
+    })
+  }
 
   if (!pendingLaunchPath || !openDocumentPath(pendingLaunchPath)) tabManager?.openHomeTab()
   pendingLaunchPath = null
@@ -4328,6 +4650,14 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   // No close prompt may fall through to "Save" during shutdown
-  markSheetsShuttingDown()
-  stopSheetsSidecar()
+  if (!automationMode.enabled) {
+    markSheetsShuttingDown()
+    stopSheetsSidecar()
+  }
+})
+
+// before-quit can be canceled by the existing dirty-document close flow. The
+// endpoint remains available until Electron emits its terminal quit event.
+app.on('quit', () => {
+  if (automationServer) void automationServer.closeAtTerminal()
 })

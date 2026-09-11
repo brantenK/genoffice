@@ -1,0 +1,309 @@
+# Handoff Report: R1 — Strict Double-Entry Bookkeeping & Balanced Journal Posting
+
+## 1. Observation
+
+### 1.1 Codebase Structure and Entry Points
+- **Files inspected**:
+  - `apps/books/src/main/books-main.ts` (770 lines)
+  - `apps/books/src/renderer/src/store.ts` (547 lines)
+  - `apps/books/src/shared/types.ts` (168 lines)
+  - `apps/books/src/shared/ipc.ts` (40 lines)
+  - `apps/books/src/preload/index.ts` (31 lines)
+  - `apps/books/src/renderer/src/mock/initialData.ts` (285 lines)
+  - `apps/books/src/renderer/src/components/InvoiceForm.tsx` (335 lines)
+  - `apps/books/src/renderer/src/components/JournalEntryList.tsx` (281 lines)
+  - `apps/books/src/renderer/src/components/ReportsView.tsx` (372 lines)
+  - `apps/tenders/src/main/tenders-main.ts` (lines 909–1098)
+  - `apps/crm/src/main/crm-main.ts` (lines 180–305)
+  - Test suites: `tools/verify-suite-workflows.mjs`, `tools/test-challenger-2-m4-accounting.mjs`, `tools/test-challenger-2-m2-accounting.mjs`, `tools/test-challenger-1-m5-hardening.mjs`.
+
+### 1.2 Sales Invoice Journal Posting
+- In `apps/books/src/renderer/src/store.ts` lines 89–93:
+  ```ts
+  89:     const subtotal = items.reduce((sum, it) => sum + (it.qty * it.rate), 0)
+  90:     const taxTotal = items.reduce((sum, it) => sum + (it.qty * it.rate * (it.taxRate / 100)), 0)
+  91:     const grandTotal = subtotal + taxTotal
+  92:     const outstanding = partial.status === 'Paid' ? 0 : grandTotal
+  ```
+  `subtotal`, `taxTotal`, and `grandTotal` are computed without rounding per item or per total.
+- In `apps/books/src/renderer/src/store.ts` lines 155–163:
+  ```ts
+  155:     if (!partial.id && targetInvoice.status !== 'Draft') {
+  156:       if (targetInvoice.type === 'Sales') {
+  157:         nextAccounts = nextAccounts.map((acc) => {
+  158:           if (acc.id === 'acc-ar') return { ...acc, balance: acc.balance + targetInvoice.grandTotal }
+  159:           if (acc.id === 'acc-vat') return { ...acc, balance: acc.balance + targetInvoice.taxTotal }
+  160:           if (acc.id === 'acc-sales') return { ...acc, balance: acc.balance + targetInvoice.subtotal }
+  161:           return acc
+  162:         })
+  ```
+  - `!partial.id` guard: When an invoice is created initially as `Draft`, and later edited to `Unpaid` (where `partial.id` exists), the condition `!partial.id` is `false`. Thus, the invoice is saved as Unpaid, but **no journal entry is ever created** and **account balances are never updated**.
+  - Account ID hardcoding: Line 160 hardcodes `acc-sales`. If line items specify another income account (e.g. `acc-consult` — Professional Advisory Fees), the amount is still booked to `acc-sales`.
+  - Floating-point addition: `acc.balance + targetInvoice.grandTotal` is unrounded.
+- In `apps/books/src/renderer/src/store.ts` lines 164–204:
+  ```ts
+  164:         nextJournals.unshift({
+  165:           id: `je-${Date.now()}`,
+  166:           entryNumber: `JE-${new Date().getFullYear()}-${String(nextJournals.length + 1).padStart(3, '0')}`,
+  167:           date: targetInvoice.date,
+  168:           items: [
+  169:             {
+  170:               id: `je-i-1`,
+  171:               accountId: 'acc-ar',
+  172:               accountName: 'Accounts Receivable (Debtors)',
+  173:               partyId: targetInvoice.partyId,
+  174:               partyName: targetInvoice.partyName,
+  175:               debit: targetInvoice.grandTotal,
+  176:               credit: 0,
+  177:               remark: `Invoice ${targetInvoice.invoiceNumber}`,
+  178:             },
+  179:             {
+  180:               id: `je-i-2`,
+  181:               accountId: 'acc-sales',
+  182:               accountName: 'Tender & Commercial Contracting Sales',
+  183:               debit: 0,
+  184:               credit: targetInvoice.subtotal,
+  185:               remark: `Sales Revenue`,
+  186:             },
+  187:             ...(targetInvoice.taxTotal > 0
+  188:               ? [
+  189:                   {
+  190:                     id: `je-i-3`,
+  191:                     accountId: 'acc-vat',
+  192:                     accountName: 'SARS VAT Output Payable',
+  193:                     debit: 0,
+  194:                     credit: targetInvoice.taxTotal,
+  195:                     remark: `15% VAT Output`,
+  196:                   },
+  197:                 ]
+  198:               : []),
+  199:           ],
+  200:           totalDebit: targetInvoice.grandTotal,
+  201:           totalCredit: targetInvoice.grandTotal,
+  202:           remarks: `System invoice posting for ${targetInvoice.invoiceNumber}`,
+  203:           posted: true,
+  204:         })
+  ```
+  While `totalDebit` and `totalCredit` both store `targetInvoice.grandTotal`, if `grandTotal` has floating-point noise from unrounded item calculations, the journal entry items have fractional precision issues.
+- In `apps/tenders/src/main/tenders-main.ts` (lines 1011–1096) and `apps/crm/src/main/crm-main.ts` (lines 219–303):
+  Sales invoices generated by cross-app actions use:
+  ```ts
+  const grandTotal = Math.round(billAmount * 100) / 100
+  const subtotal = Math.round((grandTotal / 1.15) * 100) / 100
+  const taxTotal = Math.round((grandTotal - subtotal) * 100) / 100
+  ```
+  These generate balanced entries (Debit `acc-ar`, Credit `acc-sales`, Credit `acc-vat`).
+
+### 1.3 Purchase Bills Journal Posting
+- In `apps/books/src/renderer/src/store.ts` lines 205–212:
+  ```ts
+  205:       } else {
+  206:         // Purchase Bill
+  207:         nextAccounts = nextAccounts.map((acc) => {
+  208:           if (acc.id === 'acc-ap') return { ...acc, balance: acc.balance + targetInvoice.grandTotal }
+  209:           if (acc.id === 'acc-materials') return { ...acc, balance: acc.balance + targetInvoice.subtotal }
+  210:           return acc
+  211:         })
+  212:       }
+  ```
+  **Defects directly observed**:
+  1. **Zero Journal Entries**: No Journal Entry is generated or added to `nextJournals` for Purchase Bills.
+  2. **Unbalanced Account Balances**: `acc-ap` (Credit/Liability) is incremented by `grandTotal` (e.g. 42,000), but `acc-materials` (Debit/Expense) is incremented only by `subtotal` (e.g. 36,521.74). `taxTotal` (5,478.26) is completely dropped! The double-entry equality of accounts is corrupted.
+  3. **Hardcoded Expense Account**: Line 209 hardcodes `acc-materials`. If bill items are assigned to other expense accounts (such as `acc-rent`, `acc-salaries`, `acc-travel`, `acc-equip`), they are ignored and booked to `acc-materials`.
+  4. **No VAT Input Account Updating**: Neither `acc-vat-in` nor `acc-vat` is debited.
+
+### 1.4 Invoice Payments, Settlements, and Reversals
+- In `apps/books/src/renderer/src/store.ts` lines 229–272 (`markInvoicePaid`):
+  ```ts
+  229:   markInvoicePaid: async (invoiceId) => {
+  ...
+  247:     // Auto-record double-entry payment in Bank
+  248:     const nextAccounts = data.accounts.map((acc) => {
+  249:       if (acc.id === 'acc-bank') {
+  250:         const adjustment = target.type === 'Sales' ? target.grandTotal : -target.grandTotal
+  251:         return { ...acc, balance: acc.balance + adjustment }
+  252:       }
+  253:       if (acc.id === 'acc-ar' && target.type === 'Sales') {
+  254:         return { ...acc, balance: Math.max(0, acc.balance - target.grandTotal) }
+  255:       }
+  256:       if (acc.id === 'acc-ap' && target.type === 'Purchase') {
+  257:         return { ...acc, balance: Math.max(0, acc.balance - target.grandTotal) }
+  258:       }
+  259:       return acc
+  260:     })
+  ```
+  **Defects directly observed**:
+  1. **Zero Journal Entries**: `markInvoicePaid` does not append any JournalEntry to `data.journalEntries`.
+  2. **Subtracted Amount Overwrite**: Lines 250, 254, 257 subtract `target.grandTotal` rather than `target.outstandingAmount` or settled amount. For a partially paid invoice, this over-credits `acc-ar` or over-debits `acc-ap`.
+  3. **Unrounded arithmetic**: `acc.balance + adjustment` lacks 2-decimal rounding.
+- In `apps/books/src/main/books-main.ts` lines 606–642 (`executeReconciliation`):
+  ```ts
+  606:   const settledAmount = inv.outstandingAmount
+  607:   inv.status = 'Paid'
+  608:   inv.outstandingAmount = 0
+  ...
+  618:   for (const acc of booksData.accounts) {
+  619:     if (inv.type === 'Sales' && acc.id === 'acc-ar') {
+  620:       acc.balance = Math.max(0, Math.round((acc.balance - settledAmount) * 100) / 100)
+  621:     }
+  622:     if (inv.type === 'Purchase' && acc.id === 'acc-ap') {
+  623:       acc.balance = Math.max(0, Math.round((acc.balance - settledAmount) * 100) / 100)
+  624:     }
+  625:   }
+  ```
+  - It assumes full payment (`settledAmount = inv.outstandingAmount`), ignoring partial transaction amounts (`tx.amount`).
+  - It creates a balanced journal entry (`totalDebit: settledAmount, totalCredit: settledAmount`).
+- In `apps/books/src/renderer/src/store.ts` lines 274–297 (`deleteInvoice`):
+  - When an invoice is deleted, `parties` is updated, but `accounts` are NOT reverted and `journalEntries` are NOT removed or reversed, leaving phantom ledger balances.
+
+### 1.5 Party Balances
+- In `apps/books/src/renderer/src/store.ts` lines 140–149:
+  ```ts
+  const prevInvoice = partial.id ? data.invoices.find((i) => i.id === partial.id) : null
+  const prevOutstanding = prevInvoice ? prevInvoice.outstandingAmount : 0
+  const balanceDiff = targetInvoice.outstandingAmount - prevOutstanding
+  const nextParties = data.parties.map((p) => {
+    if (p.id === targetInvoice.partyId) {
+      return { ...p, outstandingBalance: Math.max(0, p.outstandingBalance + balanceDiff) }
+    }
+    return p
+  })
+  ```
+  If an invoice's `partyId` is changed, the old party's balance is not decremented.
+  There is currently no invariant check verifying that $\text{party.outstandingBalance} = \sum \text{openInvoice.outstandingAmount}$.
+
+### 1.6 Precision and Decimal Rounding
+- `InvoiceForm.tsx` lines 52, 85–87:
+  `next.amount = (Number(next.qty) || 0) * (Number(next.rate) || 0)`
+  `const subtotal = items.reduce((sum, it) => sum + it.amount, 0)`
+  `const taxTotal = items.reduce((sum, it) => sum + (it.amount * it.taxRate) / 100, 0)`
+  `const grandTotal = subtotal + taxTotal`
+  None of these use `Math.round(... * 100) / 100`.
+- In `books-main.ts` `migrateAndValidateBooks(raw)` lines 63–81:
+  Account balances, party balances, and journal entries loaded from raw JSON are not validated or rounded to 2 decimal places.
+
+---
+
+## 2. Logic Chain
+
+1. **Double-entry bookkeeping fundamental invariant**: Every transaction must satisfy:
+   $$\sum \text{Debits} = \sum \text{Credits}$$
+   and for every account root type:
+   $$\Delta \text{Assets} + \Delta \text{Expenses} = \Delta \text{Liabilities} + \Delta \text{Equity} + \Delta \text{Income}$$
+2. In `store.ts` (lines 205–212), when a Purchase Bill is created:
+   - $\Delta \text{Liabilities} (\text{acc-ap}) = +\text{grandTotal}$
+   - $\Delta \text{Expenses} (\text{acc-materials}) = +\text{subtotal}$
+   - $\Delta \text{Tax Account} = 0$
+   - Difference: $\text{grandTotal} - \text{subtotal} = \text{taxTotal} \ne 0$.
+   - **Result**: The accounting equation is broken on every purchase bill. Additionally, no journal entry is recorded.
+3. For Sales Invoices in `store.ts`:
+   - Debits: `acc-ar` ($\text{grandTotal}$)
+   - Credits: `acc-sales` ($\text{subtotal}$), `acc-vat` ($\text{taxTotal}$)
+   - Invariant: $\text{grandTotal} = \text{subtotal} + \text{taxTotal}$ holds only if strict 2-decimal rounding is enforced at each step. In JavaScript floating-point arithmetic ($0.1 + 0.2 \ne 0.3$), unrounded multiplication and division causes trailing decimals ($18913.044000000003$).
+4. For Payment Settlements:
+   - `markInvoicePaid` alters account balances (`acc-bank`, `acc-ar`, `acc-ap`) but fails to create a `JournalEntry`. In an audit or General Ledger report, those balance adjustments have no corresponding journal voucher.
+   - `markInvoicePaid` offsets `target.grandTotal` instead of `target.outstandingAmount`, corrupting accounts for any invoice that was previously partially settled.
+5. For Chart of Accounts naming:
+   - Existing codebase and verification tests universally expect `acc-vat` for SARS VAT Output Payable (`verify-suite-workflows.mjs` line 1209: `assert(validated.accounts.some((a) => a.id === 'acc-vat'))`).
+   - For VAT Input, either `acc-vat-in` (Asset / Tax) or `acc-vat` (debit on Liability account offsetting SARS Output) can be used. Supporting `acc-vat-in` if present in accounts with graceful fallback to `acc-vat` (and `acc-vat-out` fallback to `acc-vat`) satisfies both the R1 specification and preserves 100% backward compatibility with all test suites.
+
+---
+
+## 3. Caveats
+
+1. **Read-Only Investigation**: No source code was modified during this exploration.
+2. **Account ID Variations**:
+   - Some tests and requirements mention `acc-vat-out` and `acc-vat-in`, while existing monorepo code uses `acc-vat`. The resolution logic must support both identifiers seamlessly.
+   - Some requirements mention `acc-cogs`, while the existing Chart of Accounts uses `acc-materials` ("Direct Project Materials & Subcontractors"). The resolution must check item `accountId`, then `acc-cogs` or `acc-materials`, then fallback to the first active Expense account.
+3. **Cross-App Milestone Billing and CRM Invoicing**:
+   `apps/tenders/src/main/tenders-main.ts` and `apps/crm/src/main/crm-main.ts` already implement balanced journal posting for Sales invoices. They should not be disrupted.
+
+---
+
+## 4. Conclusion & Concrete Fix Plan
+
+### Root Causes Identified
+1. `store.ts` `saveInvoice` has an incomplete branch for `Purchase` bills: missing `JournalEntry` generation and missing VAT debit.
+2. `store.ts` `saveInvoice` skips posting when `partial.id` is present, breaking Draft $\to$ Posted transitions.
+3. `store.ts` `markInvoicePaid` mutates account balances without generating a balanced settlement `JournalEntry` and uses `grandTotal` instead of `outstandingAmount`.
+4. `store.ts` `deleteInvoice` leaves orphaned journal entries and unreversed accounts.
+5. Lack of a shared calculation and bookkeeping utility module (`apps/books/src/shared/accounting.ts`) leads to fragmented, unrounded, duplicate math logic across files.
+
+### Recommended Architectural Solution
+
+Create a single dedicated module: `apps/books/src/shared/accounting.ts` exporting:
+1. `round2(n: number): number`:
+   ```ts
+   export function round2(n: number): number {
+     return Math.round((Number(n) || 0) * 100) / 100
+   }
+   ```
+2. `calculateInvoiceTotals(items: InvoiceItem[]): { subtotal: number; taxTotal: number; grandTotal: number }`:
+   - Calculates per-item amount: `round2(qty * rate)`
+   - Computes subtotal: `round2(items.reduce((s, it) => s + it.amount, 0))`
+   - Computes taxTotal: `round2(items.reduce((s, it) => s + round2(it.amount * (it.taxRate / 100)), 0))`
+   - Computes grandTotal: `round2(subtotal + taxTotal)`
+   - Strictly guarantees: `subtotal + taxTotal === grandTotal`.
+3. `createSalesInvoiceJournal(invoice: Invoice, accounts: Account[], party?: Party, jeNumber?: string): { journalEntry: JournalEntry; accountUpdates: Map<string, number> }`:
+   - Debit: `acc-ar` (`invoice.grandTotal`)
+   - Credit: Line-item income accounts (grouped by `it.accountId`, default `acc-sales`) for `subtotal`
+   - Credit: VAT Output (`acc-vat-out` or `acc-vat`) for `taxTotal`
+   - Total Debit == Total Credit == `invoice.grandTotal`
+4. `createPurchaseBillJournal(bill: Invoice, accounts: Account[], party?: Party, jeNumber?: string): { journalEntry: JournalEntry; accountUpdates: Map<string, number> }`:
+   - Debit: Line-item expense accounts (grouped by `it.accountId`, default `acc-materials` or `acc-cogs`) for `subtotal`
+   - Debit: VAT Input (`acc-vat-in` or `acc-vat`) for `taxTotal` (if `taxTotal > 0`)
+   - Credit: `acc-ap` for `bill.grandTotal`
+   - Total Debit == Total Credit == `bill.grandTotal`
+5. `createSettlementJournal(params: { invoice: Invoice; settledAmount: number; txDescription?: string; party?: Party; jeNumber?: string }): { journalEntry: JournalEntry; accountUpdates: Map<string, number> }`:
+   - If Sales:
+     Debit: `acc-bank` (`settledAmount`)
+     Credit: `acc-ar` (`settledAmount`)
+   - If Purchase:
+     Debit: `acc-ap` (`settledAmount`)
+     Credit: `acc-bank` (`settledAmount`)
+   - Total Debit == Total Credit == `settledAmount`
+6. `recomputePartyBalances(invoices: Invoice[], parties: Party[]): Party[]`:
+   - Enforces invariant: $\text{party.outstandingBalance} = \sum_{\text{open invoices}} \text{inv.outstandingAmount}$.
+7. Refactor `store.ts`:
+   - In `saveInvoice`: Use `calculateInvoiceTotals`, generate balanced journal entry for BOTH Sales and Purchase, update accounts for both including VAT, handle Draft $\to$ Unpaid transitions.
+   - In `markInvoicePaid`: Use `createSettlementJournal` to generate settlement `JournalEntry`, update `acc-bank` and `acc-ar`/`acc-ap` by actual settled amount, round with `round2`.
+   - In `deleteInvoice`: Revert account balances and remove/reverse journal entries.
+8. Update `books-main.ts`:
+   - In `migrateAndValidateBooks`: Validate that all journal entries have `totalDebit === totalCredit` and sanitize rounding across accounts and parties.
+
+---
+
+## 5. Verification Method
+
+### 5.1 Commands to Run
+1. Typecheck:
+   ```powershell
+   npm run typecheck -w @genoffice/books
+   ```
+2. Suite E2E tests:
+   ```powershell
+   node tools/verify-suite-workflows.mjs
+   ```
+3. Existing Challenger accounting tests:
+   ```powershell
+   node tools/test-challenger-2-m4-accounting.mjs
+   node tools/test-challenger-2-m2-accounting.mjs
+   ```
+4. New Vitest suite (Requirement R5):
+   ```powershell
+   npm run test -w @genoffice/books
+   ```
+   Testing:
+   - `saveInvoice` for Sales (balanced journal: AR = Sales + VAT).
+   - `saveInvoice` for Purchase (balanced journal: AP = Expense + VAT).
+   - `markInvoicePaid` (creates balanced Bank vs AR/AP journal).
+   - Fractional cents precision ($115,000.75$, $18,913.04$ VAT).
+   - Party balance calculation consistency.
+
+### 5.2 Invalidation Conditions
+The fix is invalid if:
+- Any JournalEntry has `totalDebit !== totalCredit` (even by $0.01$).
+- A Purchase Bill fails to create a Journal Entry or fails to debit an expense/tax account.
+- `markInvoicePaid` fails to create a Journal Entry.
+- Party balance diverges from the sum of open invoices' `outstandingAmount`.
+- `npm run typecheck` or `tools/verify-suite-workflows.mjs` fails.

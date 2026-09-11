@@ -56,6 +56,17 @@ export default defineConfig({
   renderer: {
     resolve: { alias: workspaceAlias },
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          // split the Konva canvas stack out of the entry chunk
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (id.includes('konva')) return 'konva'
+          },
+        },
+      },
+    },
     server: {
       port: Number(process.env.SLIDES_DEV_PORT) || 5175,
       strictPort: Boolean(process.env.SLIDES_DEV_PORT),

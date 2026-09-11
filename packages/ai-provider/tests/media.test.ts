@@ -123,7 +123,9 @@ describe('media settings', () => {
 
   it('gates the tools on gsk login + toggle without BYOK, and on the BYOK model with it', () => {
     const genspark = defaultAiSettings()
-    expect(imageGenerationAvailable(genspark, true)).toBe(true)
+    // Zanostack policy: the Genspark media chain is opt-in, off by default.
+    expect(imageGenerationAvailable(genspark, true)).toBe(false)
+    expect(imageGenerationAvailable({ ...genspark, gskToolsEnabled: true }, true)).toBe(true)
     expect(imageGenerationAvailable(genspark, false)).toBe(false)
     expect(imageGenerationAvailable({ ...genspark, gskToolsEnabled: false }, true)).toBe(false)
     expect(mediaAnalysisAvailable({ ...genspark, gskToolsEnabled: false }, true)).toBe(false)

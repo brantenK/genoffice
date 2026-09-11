@@ -25,7 +25,8 @@ export const de = {
   aiEmptyBodyLine1: 'Beschreiben Sie eine Änderung oder stellen Sie eine Frage zu den Daten.',
   aiThinkingAria: 'Denkt nach',
   aiThinking: 'Denkt nach…',
-  aiWorkedSteps: 'Erledigt · {n} Schritte',
+  aiWorkedSteps: 'Ausgeführt · {n} Tool-Schritte',
+  aiWorkedStepsWaiting: '{n} Tool-Schritte ausgeführt · Warten auf das Modell',
   aiGroupWorking: 'In Arbeit…',
   aiWorking: 'Wird ausgeführt…',
   aiAutoApplied: '{count} Änderungen angewendet',
@@ -74,6 +75,7 @@ export const de = {
   aiToolAggregate: 'Bereich aggregieren',
   aiToolAggregateOf: 'Bereich {range} aggregieren',
   aiToolLoadGuide: 'Leitfaden laden',
+  aiToolUpdateTaskPlan: 'Aufgaben-Checkliste aktualisieren',
   aiToolLoadGuideOf: 'Leitfäden {names} laden',
   aiToolReadFormats: 'Formate lesen',
   aiToolReadFormatsOf: 'Formate {range} lesen',
@@ -108,4 +110,25 @@ export const de = {
   aiScopeRangeTip:
     'Die KI versteht „diese Spalte / diese Zeilen / die Auswahl“ als diesen Bereich; beim Senden wird er für den Lauf fixiert',
   aiScopeClearTitle: 'Bereichsvorgabe aufheben und das ganze Blatt verwenden',
+  aiRunRequesting: 'Warten auf das Modell',
+  aiRunThinking: 'Modell denkt nach',
+  aiRunResponding: 'Modell antwortet',
+  aiRunToolInput: 'Modell bereitet Tool-Eingabe vor',
+  aiRunToolRunning: 'Tool wird ausgeführt',
+  aiRunToolRunningNamed: '{name} wird ausgeführt',
+  aiRunApplying: 'Änderungen an der Arbeitsmappe werden angewendet',
+  aiRunVerifying: 'Formelergebnisse werden geprüft',
+  aiRunElapsed: 'Durchlauf: {seconds} s',
+  aiRunLastActivity: 'Letzte Aktivität vor {seconds} s',
+  aiRunWarningConnectionActive:
+    'Die Verbindung ist aktiv, aber das Modell hat in letzter Zeit keine Ausgabe erzeugt.',
+  aiRunWarningNoActivity:
+    'Seit über 30 Sekunden keine Anbieteraktivität. Prüfe deine Verbindung oder stoppe und versuche es erneut.',
+  aiTaskPlanAria: 'Aufgaben-Checkliste',
+  aiTaskPlanTitle: 'Aufgaben-Checkliste',
+  aiTaskPending: 'Ausstehend',
+  aiTaskInProgress: 'In Bearbeitung',
+  aiTaskCompleted: 'Abgeschlossen',
+  aiTruncated:
+    'Die Antwort wurde am Ausgabelimit des Modells abgebrochen. Sende „weiter“, um die verbleibende Arbeit abzuschließen.',
 } satisfies Record<keyof typeof zh, string>

@@ -543,6 +543,19 @@ describe('executeWorkbookTool: read_range', () => {
   })
 })
 
+describe('executeWorkbookTool: update_task_plan', () => {
+  it('stays owned by createWorkbookSkill instead of the workbook data dispatcher', () => {
+    const result = execSync(
+      call('update_task_plan', {
+        todos: [{ content: 'Inspect', activeForm: 'Inspecting', status: 'in_progress' }],
+      }),
+      fakeDeps(),
+    )
+    expect(result.isError).toBe(true)
+    expect(result.output).toContain('Unknown tool')
+  })
+})
+
 describe('executeWorkbookTool: get_workbook_context', () => {
   it('never mutates', () => {
     const result = execSync(call('get_workbook_context', {}), fakeDeps())
@@ -814,6 +827,61 @@ describe('executeWorkbookTool: propose_operations', () => {
     expect(result.output).toContain('Note: copy_range A1:B2')
   })
 
+  it('reports applying after validation and verifying only for formula read-back', async () => {
+    const phases: string[] = []
+    const formulaPlan: ChangePlan = {
+      ...EMPTY_PLAN,
+      cellChanges: [
+        {
+          sheetId: 'sheet-1',
+          address: 'B4',
+          before: { value: null },
+          after: { value: null, formula: '=SUM(B1:B3)' },
+        },
+      ],
+    }
+    await executeWorkbookTool(
+      call('propose_operations', {
+        operations: [
+          { op: 'set_formula', sheetId: 'sheet-1', address: 'B4', formula: '=SUM(B1:B3)' },
+        ],
+        summary: 'Sum B',
+      }),
+      fakeDeps({
+        proposeOperations: () => ({ ok: true, plan: formulaPlan }),
+        readCells: () => ({ B4: { value: 60, formula: '=SUM(B1:B3)' } }),
+        onWorkbookPhase: (phase) => phases.push(phase),
+      }),
+    )
+    expect(phases).toEqual(['applying', 'verifying'])
+
+    phases.length = 0
+    await executeWorkbookTool(
+      call('propose_operations', {
+        operations: [{ op: 'set_cell', sheetId: 'sheet-1', address: 'A1', value: 'new' }],
+        summary: 'Update A1',
+      }),
+      fakeDeps({
+        proposeOperations: () => ({ ok: true, plan: EMPTY_PLAN }),
+        onWorkbookPhase: (phase) => phases.push(phase),
+      }),
+    )
+    expect(phases).toEqual(['applying'])
+  })
+
+  it('does not report applying when operation validation fails', () => {
+    const phases: string[] = []
+    const result = execSync(
+      call('propose_operations', {
+        operations: [{ op: 'set_cell', sheetId: '', address: 'A1', value: 'new' }],
+        summary: 'Invalid',
+      }),
+      fakeDeps({ onWorkbookPhase: (phase) => phases.push(phase) }),
+    )
+    expect(result.isError).toBe(true)
+    expect(phases).toEqual([])
+  })
+
   it('after writing a formula, reads back the computed value asynchronously (write → verify)', async () => {
     const plan: ChangePlan = {
       ...EMPTY_PLAN,
@@ -904,7 +972,9 @@ describe('executeWorkbookTool: propose_operations', () => {
       fakeDeps({ proposeOperations, readCells }),
     )
     expect(result.output).toContain('#DIV/0!')
-    expect(result.output).toContain('⚠️ Formula error values present')
+    expect(result.output).toContain('errors:')
+    expect(result.output).toContain('- C1 = #DIV/0!')
+    expect(result.output).toContain('ONCE more in this run')
   })
 
   it('waits for the async apply and reports success only after it lands', async () => {

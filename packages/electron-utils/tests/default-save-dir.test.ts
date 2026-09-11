@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  DEFAULT_SAVE_FOLDER,
   configuredDefaultSaveDir,
   readDefaultSaveDirSetting,
   resolveDefaultSaveDir,
@@ -53,12 +54,16 @@ describe('resolveDefaultSaveDir', () => {
   })
 
   it('creates and returns the fallback when nothing is configured', () => {
-    const fallback = join(root, 'Documents', 'GenOffice')
+    const fallback = join(root, 'Documents', DEFAULT_SAVE_FOLDER)
     expect(resolveDefaultSaveDir(null, fallback)).toBe(fallback)
     expect(existsSync(fallback)).toBe(true)
   })
 
-  it('degrades to the fallback when the configured folder is not writable', () => {
+  // POSIX chmod cannot revoke write access from a directory on NTFS/Windows,
+  // so the degradation scenario can only be simulated on unix-like systems.
+  it.skipIf(process.platform === 'win32')(
+    'degrades to the fallback when the configured folder is not writable',
+    () => {
     const readOnly = join(root, 'read-only')
     mkdirSync(readOnly)
     chmodSync(readOnly, 0o500)
@@ -84,14 +89,14 @@ describe('configuredDefaultSaveDir', () => {
     expect(configuredDefaultSaveDir(app)).toBe(custom)
   })
 
-  it('falls back to <Documents>/GenOffice without a setting', () => {
+  it(`falls back to <Documents>/${DEFAULT_SAVE_FOLDER} without a setting`, () => {
     const userData = join(root, 'userData')
     const documents = join(root, 'Documents')
     mkdirSync(userData, { recursive: true })
     const app = {
       getPath: (name: 'userData' | 'documents') => (name === 'userData' ? userData : documents),
     }
-    expect(configuredDefaultSaveDir(app)).toBe(join(documents, 'GenOffice'))
-    expect(existsSync(join(documents, 'GenOffice'))).toBe(true)
+    expect(configuredDefaultSaveDir(app)).toBe(join(documents, DEFAULT_SAVE_FOLDER))
+    expect(existsSync(join(documents, DEFAULT_SAVE_FOLDER))).toBe(true)
   })
 })

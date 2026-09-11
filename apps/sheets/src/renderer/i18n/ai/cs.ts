@@ -107,4 +107,26 @@ export const cs = {
   aiScopeRangeTip:
     'AI chápe „tento sloupec / tyto řádky / vybranou část“ jako tuto oblast, která po odeslání zůstává pro celý běh pevná',
   aiScopeClearTitle: 'Zrušit omezení na oblast a pracovat s celým listem',
+  aiWorkedStepsWaiting: 'Provedeno {n} kroků nástrojů · čekání na model',
+  aiToolUpdateTaskPlan: 'Aktualizovat kontrolní seznam úloh',
+  aiRunRequesting: 'Čekání na model',
+  aiRunThinking: 'Model přemýšlí',
+  aiRunResponding: 'Model odpovídá',
+  aiRunToolInput: 'Model připravuje vstup nástroje',
+  aiRunToolRunning: 'Spouštění nástroje',
+  aiRunToolRunningNamed: 'Spouští se {name}',
+  aiRunApplying: 'Aplikace změn sešitu',
+  aiRunVerifying: 'Kontrola výsledků vzorců',
+  aiRunElapsed: 'Kolo {seconds} s',
+  aiRunLastActivity: 'Poslední aktivita před {seconds} s',
+  aiRunWarningConnectionActive: 'Připojení je aktivní, ale model v poslední době nic nevrací.',
+  aiRunWarningNoActivity:
+    'Od poskytovatele více než 30 sekund žádná aktivita. Zkontrolujte připojení nebo zastavte a zkuste to znovu.',
+  aiTaskPlanAria: 'Kontrolní seznam úloh',
+  aiTaskPlanTitle: 'Kontrolní seznam úloh',
+  aiTaskPending: 'Čeká',
+  aiTaskInProgress: 'Probíhá',
+  aiTaskCompleted: 'Dokončeno',
+  aiTruncated:
+    'Odpověď se zastavila na limitu výstupu modelu. Pro dokončení zbývající práce pošlete „pokračovat“.',
 } satisfies Record<keyof typeof zh, string>

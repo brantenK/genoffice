@@ -115,6 +115,7 @@ import { EXCEL_DIGIT_PER_PT, fontAvailable } from './numfmt-fix'
 import { t } from './i18n/locale'
 import { mapProtectedRanges } from './protected-ranges'
 import { INDENT_STEP_PX } from './selection-format'
+import { applySparseCellValues, type SparseCellMatrix } from './batch-cell-values'
 import {
   fileRangeToScreenRange,
   fileRangeToScreenRanges,
@@ -3536,6 +3537,7 @@ function applyPinnedOverlay(
     row <= candidate.endRow &&
     column >= candidate.startColumn &&
     column <= candidate.endColumn
+  const matrix: SparseCellMatrix = {}
   for (const [key, cell] of pinned) {
     const [rowText, columnText] = key.split(':')
     const row = Number(rowText)
@@ -3543,18 +3545,15 @@ function applyPinnedOverlay(
     if (!covers(range, row, column) && !(previousRange && covers(previousRange, row, column))) {
       continue
     }
-    worksheet
-      .getRange(row, column, 1, 1)
-      .setValues([
-        [
-          cell.f !== undefined
-            ? cachedFormulaCellData(cell.f, cell.v)
-            : typeof cell.v === 'string' && cell.v !== ''
-              ? { v: cell.v, t: CellValueType.STRING }
-              : { v: cell.v ?? null },
-        ],
-      ])
+    const rowCells = (matrix[row] ??= {})
+    rowCells[column] =
+      cell.f !== undefined
+        ? cachedFormulaCellData(cell.f, cell.v)
+        : typeof cell.v === 'string' && cell.v !== ''
+          ? { v: cell.v, t: CellValueType.STRING }
+          : { v: cell.v ?? null }
   }
+  applySparseCellValues(worksheet, matrix)
 }
 
 export function applyJournalOverlay(
@@ -3585,30 +3584,41 @@ export function applyJournalOverlay(
     )
     worksheet.getRange(startRow, startColumn, rows, columns).setValues(matrix)
   }
+  // Content, style-reset, and style deltas each become one sparse setValues
+  // instead of up to three commands per journaled cell.
+  const content: SparseCellMatrix = {}
+  const styleResets: SparseCellMatrix = {}
+  const styles: SparseCellMatrix = {}
   for (const entry of journalEntriesInRange(journal, sheetId, range)) {
-    const cellRange = worksheet.getRange(entry.row, entry.column, 1, 1)
     if (entry.hasValue) {
-      // Replayed rich/multiline docs need the same cell-font base as the
-      // load path; the cell's composed style is already installed here.
       const baseFont = (): IStyleData =>
         fontTextStyleOf(worksheet.getSheet().getComposedCellStyle(entry.row, entry.column))
-      if (entry.formula) cellRange.setValues([[{ f: entry.formula }]])
-      else if (entry.value === null) cellRange.clearContent()
-      else if (entry.rich && typeof entry.value === 'string') {
-        cellRange.setValues([[{ p: toRichTextDocument(entry.value, [...entry.rich], baseFont()) }]])
+      const rowCells = (content[entry.row] ??= {})
+      if (entry.formula) rowCells[entry.column] = { f: entry.formula }
+      else if (entry.value === null) {
+        rowCells[entry.column] = { v: null, f: null, si: null, p: null }
+      } else if (entry.rich && typeof entry.value === 'string') {
+        rowCells[entry.column] = {
+          p: toRichTextDocument(entry.value, [...entry.rich], baseFont()),
+        }
       } else if (typeof entry.value === 'string' && entry.value.includes('\n')) {
-        cellRange.setValues([[{ p: toRichTextDocument(entry.value, [], baseFont()) }]])
-      } else cellRange.setValues([[{ v: entry.value }]])
+        rowCells[entry.column] = {
+          p: toRichTextDocument(entry.value, [], baseFont()),
+        }
+      } else rowCells[entry.column] = { v: entry.value }
     }
-    // The set-range-values mutation merges style patches, so re-applying the
-    // delta over the just-installed original reproduces the edited look.
     if (entry.styleReset) {
-      cellRange.setValues([[{ s: null } as unknown as ICellData]])
+      const rowCells = (styleResets[entry.row] ??= {})
+      rowCells[entry.column] = { s: null } as unknown as ICellData
     }
     if (entry.style) {
-      cellRange.setValues([[{ s: fromNeutralStyle(entry.style) as IStyleData }]])
+      const rowCells = (styles[entry.row] ??= {})
+      rowCells[entry.column] = { s: fromNeutralStyle(entry.style) as IStyleData }
     }
   }
+  applySparseCellValues(worksheet, content)
+  applySparseCellValues(worksheet, styleResets)
+  applySparseCellValues(worksheet, styles)
 }
 
 /// Formulas that use defined names (or external refs) recalculate as #NAME?

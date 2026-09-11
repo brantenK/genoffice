@@ -11,6 +11,14 @@ const api: PdfApi = {
   readFile: (path) => ipcRenderer.invoke(PDF_CHANNELS.readFile, path),
   save: (request) => ipcRenderer.invoke(PDF_CHANNELS.save, request),
   autoRename: (path, baseName) => ipcRenderer.invoke(PDF_CHANNELS.autoRename, path, baseName),
+  onFileRenamed: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { oldPath: string; newPath: string },
+    ) => handler(payload)
+    ipcRenderer.on(PDF_CHANNELS.fileRenamed, listener)
+    return () => ipcRenderer.removeListener(PDF_CHANNELS.fileRenamed, listener)
+  },
   isUntitled: (path) => ipcRenderer.invoke(PDF_CHANNELS.isUntitled, path),
   validateTextEdits: (request) => ipcRenderer.invoke(PDF_CHANNELS.validateTextEdits, request),
   listEditFonts: () => ipcRenderer.invoke(PDF_CHANNELS.listEditFonts),

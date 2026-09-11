@@ -223,7 +223,7 @@ function blankFontFaceSrc(): string | null {
         const ff = rule as CSSFontFaceRule
         if (
           rule.type === CSSRule.FONT_FACE_RULE &&
-          ff.style.getPropertyValue('font-family').includes('GenOffice PUA Blank')
+          ff.style.getPropertyValue('font-family').includes('Zanostack PUA Blank')
         ) {
           blankSrcCache = ff.style.getPropertyValue('src') || null
         }
@@ -236,7 +236,7 @@ function blankFontFaceSrc(): string | null {
     // jsdom drops @font-face rules from the CSSOM: scan raw <style> text
     try {
       for (const el of Array.from(document.querySelectorAll('style'))) {
-        const m = /@font-face\s*{[^}]*GenOffice PUA Blank[^}]*?src:\s*([^;}]+)/.exec(
+        const m = /@font-face\s*{[^}]*Zanostack PUA Blank[^}]*?src:\s*([^;}]+)/.exec(
           el.textContent ?? '',
         )
         if (m) blankSrcCache = m[1].trim()
@@ -413,7 +413,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       if (metrics && blankSrc) {
         gridStrut = true
         rules.push(
-          `@font-face { font-family:'GenOffice Grid Strut'; src:${blankSrc}; ` +
+          `@font-face { font-family:'Zanostack Grid Strut'; src:${blankSrc}; ` +
             `ascent-override:${metrics.ascentPct}%; descent-override:${metrics.descentPct}%; ` +
             `line-gap-override:0% }`,
         )
@@ -854,7 +854,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // after every [data-style] family rule so the strut face wins the cascade;
     // the tail keeps each context's own inherited chain rendering the glyphs
     rules.push(
-      `.doc-page .doc-grid-strut { font-family:'GenOffice Grid Strut',var(--doc-grid-strut-tail,serif) }`,
+      `.doc-page .doc-grid-strut { font-family:'Zanostack Grid Strut',var(--doc-grid-strut-tail,serif) }`,
     )
   }
   if (darkRules.length > 0) rules.push(`@media screen {\n${darkRules.join('\n')}\n}`)

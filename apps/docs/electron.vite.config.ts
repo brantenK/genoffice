@@ -29,6 +29,19 @@ export default defineConfig({
   renderer: {
     plugins: [react()],
     resolve: { alias: localAlias },
+    build: {
+      rollupOptions: {
+        output: {
+          // split the tiptap/prosemirror and pdf-lib trees out of the entry so
+          // the first paint of a docs tab doesn't parse the whole editor stack
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (id.includes('@tiptap') || id.includes('prosemirror')) return 'tiptap'
+            if (id.includes('pdf-lib')) return 'pdf-lib'
+          },
+        },
+      },
+    },
     server: {
       // Overridable so multiple genoffice dev instances can coexist (default 5173).
       port: Number(process.env.DOCS_DEV_PORT) || 5173,

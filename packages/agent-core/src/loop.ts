@@ -1,7 +1,9 @@
 import type { AgentSkill, ExecutedToolCall } from './skill'
 import type {
+  AgentActivity,
   AgentImage,
   AgentMessage,
+  AgentPhase,
   AgentStreamHandle,
   AgentToolCall,
   AgentToolResult,
@@ -30,6 +32,10 @@ export interface AgentRunResult {
 }
 
 export interface AgentLoopEvents<TSnapshot> {
+  /** current run phase; requesting is emitted by the loop before each model turn */
+  onPhase?(phase: AgentPhase): void
+  /** semantic stream activity forwarded without raw reasoning content */
+  onActivity?(activity: AgentActivity): void
   /** cumulative assistant text of the current turn (call per delta) */
   onText?(text: string): void
   /** a tool is about to execute (UI shows a live "running" indicator; onToolExecuted always follows) */
@@ -524,6 +530,7 @@ export class AgentLoop<TSnapshot = unknown> {
     this.turnStopReason = null
     // Some transports emit an extra onDone after cancel — this turn may finalize only once
     let settled = false
+    this.options.events?.onPhase?.({ kind: 'requesting' })
     this.handle = this.options.transport.stream(
       {
         system:
@@ -546,6 +553,14 @@ export class AgentLoop<TSnapshot = unknown> {
         onToolCall: (call) => {
           if (generation !== this.generation || settled) return
           this.toolCalls.push(call)
+        },
+        onPhase: (phase) => {
+          if (generation !== this.generation || settled) return
+          this.options.events?.onPhase?.(phase)
+        },
+        onActivity: (activity) => {
+          if (generation !== this.generation || settled) return
+          this.options.events?.onActivity?.(activity)
         },
         onStopReason: (reason) => {
           if (generation !== this.generation || settled) return
@@ -699,6 +714,7 @@ export class AgentLoop<TSnapshot = unknown> {
         continue
       }
       this.inputParseFails = 0
+      events?.onPhase?.({ kind: 'tool-running', toolName: call.name })
       events?.onToolStart?.(call)
       const snapshot = !this.mutationSeen ? captureSnapshot?.() : undefined
       let execution: ToolExecution

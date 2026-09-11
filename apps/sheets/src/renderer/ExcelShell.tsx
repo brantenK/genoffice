@@ -19,7 +19,7 @@ import {
   BorderThickOuterIcon,
   BorderTopIcon,
   CaretIcon,
-  GensparkMark,
+  ZanoMark,
   RIBBON_GLYPH_ICONS,
   RedoIcon,
   SaveAsIcon,
@@ -227,6 +227,8 @@ interface ExcelShellProps {
   readonly canRedo: boolean
   /// AutoSave toggle in the tab row (docs/slides parity).
   readonly autoSave: boolean
+  /// true while the post-run autosave reopens the workbook session (composer disabled meanwhile).
+  readonly aiSaving: boolean
   readonly onAutoSaveChange: (on: boolean) => void
   /// Non-null while a floating chart is selected in the grid.
   readonly selectedChart: SelectedChartRibbon | null
@@ -372,6 +374,7 @@ export function ExcelShell({
   canUndo,
   canRedo,
   autoSave,
+  aiSaving,
   onAutoSaveChange,
   selectedChart,
   pageLayout,
@@ -664,6 +667,7 @@ export function ExcelShell({
           prompt={prompt}
           preview={preview}
           aiBusy={aiBusy}
+          aiSaving={aiSaving}
           onPromptChange={onPromptChange}
           onSend={onSend}
           onStop={onStop}
@@ -2541,10 +2545,10 @@ function Ribbon({
           onClick={onAiToggle}
         >
           <span className="tool-icon-row">
-            <GensparkMark size={26} />
+            <ZanoMark size={26} />
           </span>
           <span>
-            <strong>Genspark AI</strong>
+            <strong>AI</strong>
           </span>
         </button>
         <button

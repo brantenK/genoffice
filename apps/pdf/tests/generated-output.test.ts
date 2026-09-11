@@ -17,6 +17,8 @@ describe('uniqueGeneratedPdfPath', () => {
   })
 
   it('sanitizes characters that are invalid in file names', () => {
-    expect(uniqueGeneratedPdfPath('/save', 'a:b?.pdf', () => false)).toBe(join('/save', 'a_b_.pdf'))
+    // no ':' in the input — on win32 it is a drive separator and basename
+    // would legitimately strip it before sanitization runs
+    expect(uniqueGeneratedPdfPath('/save', 'a*b?.pdf', () => false)).toBe(join('/save', 'a_b_.pdf'))
   })
 })
