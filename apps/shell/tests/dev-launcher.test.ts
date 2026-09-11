@@ -9,6 +9,8 @@ type RootPackage = {
 
 const rootPackagePath = join(__dirname, '../../../package.json')
 const booksViteConfigPath = join(__dirname, '../../books/vite.renderer.config.ts')
+const htmlViteConfigPath = join(__dirname, '../../html/vite.renderer.config.ts')
+const htmlElectronViteConfigPath = join(__dirname, '../../html/electron.vite.config.ts')
 
 function readRootPackage(): RootPackage {
   return JSON.parse(readFileSync(rootPackagePath, 'utf8')) as RootPackage
@@ -51,5 +53,17 @@ describe('root development launcher', () => {
     expect(booksViteConfig).toMatch(
       /server:\s*\{[\s\S]*?port:\s*5180\b[\s\S]*?strictPort:\s*true\b[\s\S]*?\}/,
     )
+  })
+
+  it('keeps the HTML renderer on its own port, clear of CRM on 5178', () => {
+    // The HTML app arrived from upstream on 5178; CRM already owned that port,
+    // so a bare `npm run dev` collided and took the whole suite down with it.
+    const rendererConfig = readFileSync(htmlViteConfigPath, 'utf8')
+    const electronViteConfig = readFileSync(htmlElectronViteConfigPath, 'utf8')
+
+    expect(rendererConfig).toMatch(/\|\|\s*5181\b/)
+    expect(electronViteConfig).toMatch(/\|\|\s*5181\b/)
+    expect(rendererConfig).not.toMatch(/\|\|\s*5178\b/)
+    expect(electronViteConfig).not.toMatch(/\|\|\s*5178\b/)
   })
 })
