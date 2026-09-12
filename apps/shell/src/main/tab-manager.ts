@@ -17,6 +17,9 @@ import {
   markdownIsDirty,
   requestMarkdownClose,
 } from '../../../markdown/src/main/markdown-main'
+import { createCrmView } from '../../../crm/src/main/crm-main'
+import { createTendersView } from '../../../tenders/src/main/tenders-main'
+import { createBooksView } from '../../../books/src/main/books-main'
 import {
   createHtmlPresentView,
   createHtmlView,
@@ -59,6 +62,9 @@ interface TabRecord {
 /** must match the tab strip's rendered height (apps/shell/src/renderer/src/TabBar.tsx) */
 const TAB_STRIP_HEIGHT = 40
 const HOME_ID = 'home'
+/** user-visible tab titles — brand strings kept as constants so tests and the rebrand sweep stay in sync (see fork/brand.json) */
+export const HOME_TAB_TITLE = 'Zanostack'
+export const UNTITLED_DOCS_TAB_TITLE = 'Zanostack Docs'
 
 /**
  * Owns every open tab (Home + docs + sheets) inside the shell's single
@@ -68,10 +74,14 @@ const HOME_ID = 'home'
  */
 export class TabManager {
   private readonly tabs: TabRecord[] = [
-    { id: HOME_ID, kind: 'home', view: null, title: 'GenOffice' },
+    { id: HOME_ID, kind: 'home', view: null, title: HOME_TAB_TITLE },
   ]
   private activeId: string = HOME_ID
   private nextId = 1
+  /** a hidden docs renderer warmed during idle so the first docs tab opens
+   *  without paying the module cold-start (created detached, never focused;
+   *  the active-docs IPC resolver only ever points at a real tab) */
+  private prewarmedDocsView: WebContentsView | null = null
   /** tab whose page entered HTML fullscreen (e.g. slides slideshow) — its view covers the tab strip */
   private htmlFullScreenId: string | null = null
   /** webContents ids whose view must cover the tab strip without HTML fullscreen
@@ -160,11 +170,28 @@ export class TabManager {
     this.activateTab(HOME_ID)
   }
 
+  /** Warm a hidden docs renderer during idle (called once, after the shell
+   *  window is up) so the first docs tab opens near-instantly. The view stays
+   *  detached and unfocused; only the next openDocsTab() without a path adopts
+   *  it, and a crashed/closed warm view falls back to a fresh create. */
+  prewarmDocs(): void {
+    if (this.prewarmedDocsView || this.shellWindow.isDestroyed()) return
+    const view = createDocsView()
+    this.prewarmedDocsView = view
+    view.webContents.once('destroyed', () => {
+      if (this.prewarmedDocsView === view) this.prewarmedDocsView = null
+    })
+  }
+
   openDocsTab(
     openPath?: string,
     options?: { newBlank?: boolean; aiContent?: AiDocContent },
   ): string {
-    const view = createDocsView(openPath)
+    const view =
+      openPath === undefined && this.prewarmedDocsView
+        ? this.prewarmedDocsView
+        : createDocsView(openPath)
+    this.prewarmedDocsView = null
     const id = `t${this.nextId++}`
     if (options?.newBlank) markDocsNewBlank(view.webContents.id)
     if (options?.aiContent) queueDocsAiContent(view.webContents.id, options.aiContent)
@@ -175,7 +202,7 @@ export class TabManager {
       id,
       kind: 'docs',
       view,
-      title: openPath ? basename(openPath) : this.untitled('docs', 'GenOffice Docs'),
+      title: openPath ? basename(openPath) : this.untitled('docs', UNTITLED_DOCS_TAB_TITLE),
       filePath: openPath,
     })
     this.activateTab(id)
@@ -289,6 +316,54 @@ export class TabManager {
       title: title || this.untitled('html', 'AI HTML'),
       present: true,
     })
+    this.activateTab(id)
+    return id
+  }
+
+  openCrmTab(): string {
+    const existing = this.tabs.find((t) => t.kind === 'crm')
+    if (existing) {
+      this.activateTab(existing.id)
+      return existing.id
+    }
+    const view = createCrmView()
+    const id = `t${this.nextId++}`
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(id, view)
+    this.tabs.push({ id, kind: 'crm', view, title: 'Zanostack CRM' })
+    this.activateTab(id)
+    return id
+  }
+
+  openTendersTab(): string {
+    const existing = this.tabs.find((t) => t.kind === 'tenders')
+    if (existing) {
+      this.activateTab(existing.id)
+      return existing.id
+    }
+    const view = createTendersView()
+    const id = `t${this.nextId++}`
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(id, view)
+    this.tabs.push({ id, kind: 'tenders', view, title: 'Zanostack Tenders' })
+    this.activateTab(id)
+    return id
+  }
+
+  openBooksTab(): string {
+    const existing = this.tabs.find((t) => t.kind === 'books')
+    if (existing) {
+      this.activateTab(existing.id)
+      return existing.id
+    }
+    const view = createBooksView()
+    const id = `t${this.nextId++}`
+    this.shellWindow.contentView.addChildView(view)
+    view.setVisible(false)
+    this.trackHtmlFullScreen(id, view)
+    this.tabs.push({ id, kind: 'books', view, title: 'Zano Books' })
     this.activateTab(id)
     return id
   }
@@ -512,6 +587,11 @@ export class TabManager {
     return tab?.kind === 'html' && tab.view && !tab.present
       ? { id: tab.id, webContents: tab.view.webContents, filePath: tab.filePath }
       : undefined
+  }
+
+  activeTab(): { id: string; kind: TabKind; view?: WebContentsView } | undefined {
+    const tab = this.tabs.find((t) => t.id === this.activeId)
+    return tab ? { id: tab.id, kind: tab.kind, view: tab.view ?? undefined } : undefined
   }
 
   /** the active tab's markdown view, if the active tab is markdown (markdown menu target) */

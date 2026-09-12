@@ -103,6 +103,8 @@ describe('parseCsv', () => {
     // The "" escape keeps the field quoted: all five inner ; must not count,
     // or they outvote the two true commas and the columns mis-split.
     expect(sniffDelimiter('a,"; ""; ""; ""; """,d')).toBe(',')
+    // Sniffing picks the comma, so the one quoted field is not split; its
+    // doubled quotes decode to single ones (see the escaped-quote case above).
     expect(parseCsv('a,"; ""; ""; ""; """,d')).toEqual([['a', '; "; "; "; "', 'd']])
   })
 

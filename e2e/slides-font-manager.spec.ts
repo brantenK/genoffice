@@ -1,23 +1,32 @@
 import { test, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import JSZip from 'jszip'
 import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
 
 /**
  * The fixture deck (one slide whose only run uses the catalog font Rubik) is
  * kept as plain-text OOXML parts under assets/font-manager-rubik/ so no binary
- * lives in the repo; zip them into a real .pptx at test time.
+ * lives in the repo; zip them into a real .pptx at test time. jszip replaces
+ * the `zip` CLI, which is absent on stock Windows.
  */
 async function buildRubikFixture(): Promise<string> {
   const out = join(
     await mkdtemp(join(tmpdir(), 'genoffice-font-manager-')),
     'font-manager-rubik.pptx',
   )
-  execFileSync('zip', ['-X', '-q', '-r', out, '.'], {
-    cwd: resolve(__dirname, 'assets/font-manager-rubik'),
-  })
+  const srcDir = resolve(__dirname, 'assets/font-manager-rubik')
+  const zip = new JSZip()
+  const addTree = async (dir: string, base: string): Promise<void> => {
+    for (const item of await readdir(dir, { withFileTypes: true })) {
+      const rel = base ? `${base}/${item.name}` : item.name
+      if (item.isDirectory()) await addTree(join(dir, item.name), rel)
+      else zip.file(rel, await readFile(join(dir, item.name)))
+    }
+  }
+  await addTree(srcDir, '')
+  await writeFile(out, await zip.generateAsync({ type: 'nodebuffer' }))
   return out
 }
 

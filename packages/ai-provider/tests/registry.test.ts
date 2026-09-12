@@ -17,7 +17,9 @@ describe('provider registry', () => {
     for (const meta of AI_PROVIDERS) {
       expect(AI_PROVIDER_ADAPTERS[meta.id].meta).toBe(meta)
     }
-    expect(Object.keys(AI_PROVIDER_ADAPTERS).sort()).toEqual(AI_PROVIDERS.map((m) => m.id).sort())
+    expect(Object.keys(AI_PROVIDER_ADAPTERS).sort()).toEqual(
+      [...AI_PROVIDERS.map((m) => m.id), 'genspark'].sort(),
+    )
   })
 
   it('routes genspark by model id prefix onto the two proxy endpoints', () => {

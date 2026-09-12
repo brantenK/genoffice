@@ -99,6 +99,15 @@ const homeApi: HomeApi = {
   async newHtml(opts) {
     await ipcRenderer.invoke(HOME_CHANNELS.newHtml, opts)
   },
+  async newCrm() {
+    await ipcRenderer.invoke(HOME_CHANNELS.newCrm)
+  },
+  async newTenders() {
+    await ipcRenderer.invoke(HOME_CHANNELS.newTenders)
+  },
+  async newBooks() {
+    await ipcRenderer.invoke(HOME_CHANNELS.newBooks)
+  },
   async newPdf(opts) {
     await ipcRenderer.invoke(HOME_CHANNELS.newPdf, opts)
   },
@@ -279,8 +288,8 @@ const homeApi: HomeApi = {
   getAiProviders() {
     return AI_PROVIDERS.map((meta) => {
       let defaultBaseUrl = ''
-      // genspark routes by model and custom has no default — both stay ''
-      if (meta.id !== 'genspark' && !meta.needsBaseUrl && !meta.needsCliPath) {
+      // Custom has no default and Codex discovers a local CLI rather than an HTTP endpoint.
+      if (!meta.needsBaseUrl && !meta.needsCliPath) {
         defaultBaseUrl = getProviderAdapter(meta.id).resolveEndpoint({
           apiKey: '',
           model: meta.defaultModel,
@@ -304,10 +313,10 @@ const homeApi: HomeApi = {
       : { ok: false, error: typeof raw.error === 'string' ? raw.error : 'Connection failed' }
   },
   getAiMediaProviders() {
-    return AI_MEDIA_PROVIDERS
+    return AI_MEDIA_PROVIDERS.filter((provider) => provider.id !== 'genspark')
   },
   getAiSearchProviders() {
-    return AI_SEARCH_PROVIDERS
+    return AI_SEARCH_PROVIDERS.filter((provider) => provider.id !== 'genspark')
   },
   async testAiSearchSettings(input) {
     const raw = ((await ipcRenderer.invoke('ai:search-test', input)) ?? {}) as {

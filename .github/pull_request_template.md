@@ -20,6 +20,13 @@ List any checks not run and explain why:
 
 Include before/after evidence for visible changes, or write "Not applicable."
 
+## Branch target (Zanostack fork)
+
+- [ ] I confirmed this pull request has the intended base branch.
+- [ ] Zanostack feature work targets `product`, not mirror-only `main`.
+- [ ] A generic fix intended for the original project is deliberately opened
+      against the upstream repository, not accidentally pushed from this fork.
+
 ## Contributor checklist
 
 - [ ] The change is focused and does not include unrelated reformatting or refactoring.

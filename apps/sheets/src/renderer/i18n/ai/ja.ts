@@ -23,7 +23,8 @@ export const ja = {
   aiEmptyBodyLine1: '行いたい変更を説明するか、データについて質問してください。',
   aiThinkingAria: '思考中',
   aiThinking: '思考中…',
-  aiWorkedSteps: '完了 · {n} ステップ',
+  aiWorkedSteps: '処理済み · ツール {n} ステップ',
+  aiWorkedStepsWaiting: 'ツール {n} ステップを実行 · モデルを待機中',
   aiGroupWorking: '処理中…',
   aiWorking: '実行中…',
   aiAutoApplied: '{count} 件の変更を適用しました',
@@ -72,6 +73,7 @@ export const ja = {
   aiToolAggregate: '範囲を集計',
   aiToolAggregateOf: '範囲 {range} を集計',
   aiToolLoadGuide: 'ガイドを読み込み',
+  aiToolUpdateTaskPlan: 'タスク チェックリストを更新',
   aiToolLoadGuideOf: 'ガイド {names} を読み込み',
   aiToolReadFormats: '書式を読み取り',
   aiToolReadFormatsOf: '書式 {range} を読み取り',
@@ -106,4 +108,25 @@ export const ja = {
   aiScopeRangeTip:
     'AI は「この列 / これらの行 / 選択部分」をこの範囲として解釈します。送信すると今回の実行中は固定されます',
   aiScopeClearTitle: '範囲指定を解除してシート全体を対象にする',
+  aiRunRequesting: 'モデルを待機中',
+  aiRunThinking: 'モデルが思考中',
+  aiRunResponding: 'モデルが応答中',
+  aiRunToolInput: 'モデルがツール入力を準備中',
+  aiRunToolRunning: 'ツールを実行中',
+  aiRunToolRunningNamed: '{name} を実行中',
+  aiRunApplying: 'ブックの変更を適用中',
+  aiRunVerifying: '数式の結果を確認中',
+  aiRunElapsed: 'ターン {seconds} 秒',
+  aiRunLastActivity: '最終アクティビティ: {seconds} 秒前',
+  aiRunWarningConnectionActive:
+    '接続は有効ですが、モデルから最近出力がありません。',
+  aiRunWarningNoActivity:
+    'プロバイダーからのアクティビティが 30 秒以上ありません。接続を確認するか、停止して再試行してください。',
+  aiTaskPlanAria: 'タスク チェックリスト',
+  aiTaskPlanTitle: 'タスク チェックリスト',
+  aiTaskPending: '保留中',
+  aiTaskInProgress: '進行中',
+  aiTaskCompleted: '完了',
+  aiTruncated:
+    'モデルの出力上限に達したため、応答が停止しました。残りの作業を完了するには「続けて」と送信してください。',
 } satisfies Record<keyof typeof zh, string>

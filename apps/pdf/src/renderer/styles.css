@@ -1,15 +1,15 @@
 /* Shared chrome/AI-panel tokens come from @genoffice/ui/tokens.css (imported
  * before this file in main.tsx); only pdf-specific values live here. */
 :root {
-  --accent: #c43e1c;
-  --accent-dark: #a33517;
-  --accent-soft: #fbeae5;
+  --accent: #16864a;
+  --accent-dark: #0f5c34;
+  --accent-soft: #e7f2ec;
 
   /* pdf-local chrome shades */
   --pdf-error: #c0392b;
   --pdf-error-border: rgb(192 57 43 / 45%);
   --pdf-error-bg-hover: rgb(192 57 43 / 8%);
-  --pdf-ok: #217346;
+  --pdf-ok: #16864a;
   --pdf-thumb-border-hover: #a8a6a4;
   --pdf-prop-bg: rgb(0 0 0 / 3%);
   --pdf-focus-ring: rgb(35 36 37 / 20%);
@@ -25,7 +25,7 @@
    * these never follow the theme */
   --pdf-paper: #fff;
   --pdf-on-accent: #fff;
-  --pdf-select: #c43e1c;
+  --pdf-select: #16864a;
   --pdf-select-glow: rgb(196 62 28 / 90%);
   --pdf-ink-highlight: #ffde59;
   /* annotation ink previews match MARKUP_COLORS in annotations.ts */
@@ -80,13 +80,13 @@
 }
 
 [data-theme='dark'] {
-  --accent: #e8663f;
-  --accent-dark: #d4552f;
-  --accent-soft: #43261d;
+  --accent: #2fbd74;
+  --accent-dark: #8fe3b3;
+  --accent-soft: #1d3328;
   --pdf-error: #e57373;
   --pdf-error-border: rgb(229 115 115 / 50%);
   --pdf-error-bg-hover: rgb(229 115 115 / 12%);
-  --pdf-ok: #58b380;
+  --pdf-ok: #8fe3b3;
   --pdf-thumb-border-hover: #777;
   --pdf-prop-bg: rgb(255 255 255 / 5%);
   --pdf-focus-ring: rgb(255 255 255 / 30%);
@@ -98,20 +98,20 @@
   --pdf-swatch-ring: rgb(255 255 255 / 30%);
   --pdf-scroll-thumb: rgb(255 255 255 / 28%);
   --pdf-shadow-modal-gs: 0 20px 50px rgb(0 0 0 / 65%);
-  --pdf-input-focus: #4a9eff;
+  --pdf-input-focus: #2fbd74;
   --pdf-input-ring: rgb(74 158 255 / 20%);
   --pdf-error-ring: rgb(242 139 130 / 20%);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --accent: #e8663f;
-    --accent-dark: #d4552f;
-    --accent-soft: #43261d;
+    --accent: #2fbd74;
+    --accent-dark: #8fe3b3;
+    --accent-soft: #1d3328;
     --pdf-error: #e57373;
     --pdf-error-border: rgb(229 115 115 / 50%);
     --pdf-error-bg-hover: rgb(229 115 115 / 12%);
-    --pdf-ok: #58b380;
+    --pdf-ok: #8fe3b3;
     --pdf-thumb-border-hover: #777;
     --pdf-prop-bg: rgb(255 255 255 / 5%);
     --pdf-focus-ring: rgb(255 255 255 / 30%);
@@ -123,7 +123,7 @@
     --pdf-swatch-ring: rgb(255 255 255 / 30%);
     --pdf-scroll-thumb: rgb(255 255 255 / 28%);
     --pdf-shadow-modal-gs: 0 20px 50px rgb(0 0 0 / 65%);
-    --pdf-input-focus: #4a9eff;
+    --pdf-input-focus: #2fbd74;
     --pdf-input-ring: rgb(74 158 255 / 20%);
     --pdf-error-ring: rgb(242 139 130 / 20%);
   }

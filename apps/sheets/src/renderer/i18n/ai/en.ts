@@ -24,7 +24,8 @@ export const en = {
   aiEmptyBodyLine1: 'Describe a change or ask about the data.',
   aiThinkingAria: 'Thinking',
   aiThinking: 'Thinking…',
-  aiWorkedSteps: 'Worked · {n} steps',
+  aiWorkedSteps: 'Worked · {n} tool steps',
+  aiWorkedStepsWaiting: 'Worked {n} tool steps · waiting for model',
   aiGroupWorking: 'Working…',
   aiWorking: 'Working…',
   aiAutoApplied: 'Applied {count} changes',
@@ -73,6 +74,7 @@ export const en = {
   aiToolAggregate: 'Aggregate range',
   aiToolAggregateOf: 'Aggregate range {range}',
   aiToolLoadGuide: 'Load guide',
+  aiToolUpdateTaskPlan: 'Update task checklist',
   aiToolLoadGuideOf: 'Load guides {names}',
   aiToolReadFormats: 'Read formats',
   aiToolReadFormatsOf: 'Read formats {range}',
@@ -107,4 +109,25 @@ export const en = {
   aiScopeRangeTip:
     'AI reads "this column / these rows / the selected part" as this range, and it stays fixed for the run once you send',
   aiScopeClearTitle: 'Drop the range scope and target the whole sheet',
+  aiRunRequesting: 'Waiting for the model',
+  aiRunThinking: 'Model is thinking',
+  aiRunResponding: 'Model is responding',
+  aiRunToolInput: 'Model is preparing tool input',
+  aiRunToolRunning: 'Running tool',
+  aiRunToolRunningNamed: 'Running {name}',
+  aiRunApplying: 'Applying workbook changes',
+  aiRunVerifying: 'Checking formula results',
+  aiRunElapsed: 'Turn {seconds}s',
+  aiRunLastActivity: 'Last activity {seconds}s ago',
+  aiRunWarningConnectionActive:
+    'The connection is active, but the model has not produced output recently.',
+  aiRunWarningNoActivity:
+    'No provider activity for over 30 seconds. Check your connection, or stop and retry.',
+  aiTaskPlanAria: 'Task checklist',
+  aiTaskPlanTitle: 'Task checklist',
+  aiTaskPending: 'Pending',
+  aiTaskInProgress: 'In progress',
+  aiTaskCompleted: 'Completed',
+  aiTruncated:
+    'The response stopped at the model output limit. Send “continue” to finish the remaining work.',
 } satisfies Record<keyof typeof zh, string>

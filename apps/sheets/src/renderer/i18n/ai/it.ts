@@ -24,7 +24,8 @@ export const it = {
   aiEmptyBodyLine1: 'Descrivi una modifica o fai una domanda sui dati.',
   aiThinkingAria: 'In elaborazione',
   aiThinking: 'In elaborazione…',
-  aiWorkedSteps: 'Completato · {n} passaggi',
+  aiWorkedSteps: 'Elaborato · {n} passaggi con strumenti',
+  aiWorkedStepsWaiting: '{n} passaggi con strumenti eseguiti · in attesa del modello',
   aiGroupWorking: 'In corso…',
   aiWorking: 'In esecuzione…',
   aiAutoApplied: '{count} modifiche applicate',
@@ -73,6 +74,7 @@ export const it = {
   aiToolAggregate: "Aggregazione dell'intervallo",
   aiToolAggregateOf: "Aggregazione dell'intervallo {range}",
   aiToolLoadGuide: 'Caricamento della guida',
+  aiToolUpdateTaskPlan: 'Aggiorna elenco attività',
   aiToolLoadGuideOf: 'Caricamento delle guide {names}',
   aiToolReadFormats: 'Lettura dei formati',
   aiToolReadFormatsOf: 'Lettura dei formati {range}',
@@ -107,4 +109,25 @@ export const it = {
   aiScopeRangeTip:
     "L'IA interpreta «questa colonna / queste righe / la parte selezionata» come questo intervallo, che all'invio resta fisso per tutta l'esecuzione",
   aiScopeClearTitle: "Rimuovi l'ambito dell'intervallo e usa tutto il foglio",
+  aiRunRequesting: 'In attesa del modello',
+  aiRunThinking: 'Il modello sta elaborando',
+  aiRunResponding: 'Il modello sta rispondendo',
+  aiRunToolInput: 'Il modello prepara l’input dello strumento',
+  aiRunToolRunning: 'Esecuzione dello strumento',
+  aiRunToolRunningNamed: 'Esecuzione di {name}',
+  aiRunApplying: 'Applicazione delle modifiche alla cartella di lavoro',
+  aiRunVerifying: 'Verifica dei risultati delle formule',
+  aiRunElapsed: 'Turno: {seconds} s',
+  aiRunLastActivity: 'Ultima attività {seconds} s fa',
+  aiRunWarningConnectionActive:
+    'La connessione è attiva, ma il modello non ha prodotto output di recente.',
+  aiRunWarningNoActivity:
+    'Nessuna attività del provider da oltre 30 secondi. Controlla la connessione oppure interrompi e riprova.',
+  aiTaskPlanAria: 'Elenco attività',
+  aiTaskPlanTitle: 'Elenco attività',
+  aiTaskPending: 'In attesa',
+  aiTaskInProgress: 'In corso',
+  aiTaskCompleted: 'Completata',
+  aiTruncated:
+    'La risposta si è interrotta al limite di output del modello. Invia “continua” per completare il lavoro rimanente.',
 } satisfies Record<keyof typeof zh, string>

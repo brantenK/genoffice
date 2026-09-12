@@ -45,6 +45,9 @@ export interface IpcStreamStart<S> {
  */
 export const IPC_STREAM_SILENCE_TIMEOUT_MS = 240_000
 
+/** Absolute wall-clock cap for one model turn; wire activity never extends it. */
+export const IPC_STREAM_ABSOLUTE_TIMEOUT_MS = 15 * 60_000
+
 export interface IpcTransportOptions<S> {
   /** subscribe to stream chunks; returns the unsubscribe function */
   onStream(listener: (chunk: IpcStreamChunk) => void): () => void
@@ -78,36 +81,69 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
       const requestId = crypto.randomUUID()
       let settled = false
       let silenceTimer: ReturnType<typeof setTimeout> | undefined
+      let absoluteTimer: ReturnType<typeof setTimeout> | undefined
+      let unsubscribe: (() => void) | undefined
+      let unsubscribePending = false
+      let lastPhase: string | undefined
+      const clearTimers = () => {
+        clearTimeout(silenceTimer)
+        clearTimeout(absoluteTimer)
+      }
+      const disposeSubscription = () => {
+        if (!unsubscribe) {
+          unsubscribePending = true
+          return
+        }
+        const dispose = unsubscribe
+        unsubscribe = undefined
+        dispose()
+      }
       const settle = () => {
         settled = true
-        clearTimeout(silenceTimer)
-        unsubscribe()
+        clearTimers()
+        disposeSubscription()
+      }
+      const emitPhase = (kind: 'thinking' | 'responding' | 'tool-input') => {
+        if (lastPhase === kind) return
+        lastPhase = kind
+        cb.onPhase?.({ kind })
       }
       const fail = (error: string) => {
         if (settled) return
         settle()
         cb.onError(error)
       }
+      const timeout = () => {
+        if (settled) return
+        fail(timeoutText())
+        options.cancel(requestId)
+      }
       const armSilence = () => {
         clearTimeout(silenceTimer)
-        silenceTimer = setTimeout(() => {
-          options.cancel(requestId)
-          fail(timeoutText())
-        }, IPC_STREAM_SILENCE_TIMEOUT_MS)
+        silenceTimer = setTimeout(timeout, IPC_STREAM_SILENCE_TIMEOUT_MS)
       }
-      const unsubscribe = options.onStream((chunk) => {
+      unsubscribe = options.onStream((chunk) => {
         if (chunk.requestId !== requestId || settled) return
         if (chunk.type === 'ping') {
           armSilence()
+          cb.onActivity?.({ kind: 'wire', at: Date.now() })
         } else if (chunk.type === 'delta') {
           armSilence()
+          emitPhase('responding')
+          cb.onActivity?.({ kind: 'text', at: Date.now() })
           cb.onDelta(chunk.text ?? '')
         } else if (chunk.type === 'reasoning') {
           armSilence()
+          emitPhase('thinking')
+          cb.onActivity?.({ kind: 'reasoning', at: Date.now() })
           if (chunk.text) cb.onReasoning?.(chunk.text)
         } else if (chunk.type === 'tool-call') {
           armSilence()
-          if (chunk.toolCall) cb.onToolCall(chunk.toolCall)
+          if (chunk.toolCall) {
+            emitPhase('tool-input')
+            cb.onActivity?.({ kind: 'tool-input', at: Date.now() })
+            cb.onToolCall(chunk.toolCall)
+          }
         } else if (chunk.type === 'done') {
           settle()
           if (chunk.stopReason) cb.onStopReason?.(chunk.stopReason)
@@ -127,7 +163,14 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
           )
         }
       })
+      if (unsubscribePending) {
+        disposeSubscription()
+      }
+      if (settled) {
+        return { cancel: () => undefined }
+      }
       armSilence()
+      absoluteTimer = setTimeout(timeout, IPC_STREAM_ABSOLUTE_TIMEOUT_MS)
       try {
         // a rejected/thrown start would otherwise leave the run pending until the watchdog
         Promise.resolve(
@@ -145,7 +188,12 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
       } catch (err) {
         fail(err instanceof Error ? err.message : options.unknownErrorText())
       }
-      return { cancel: () => options.cancel(requestId) }
+      return {
+        cancel: () => {
+          clearTimers()
+          options.cancel(requestId)
+        },
+      }
     },
   }
 }

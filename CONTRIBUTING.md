@@ -4,31 +4,46 @@ Thanks for your interest in contributing. This document covers the local
 setup, the checks a change must pass, and the conventions used in this
 repository.
 
-## How changes land here
+## How upstream changes land
 
-This GitHub repository is a mirror: development happens in a private tree,
-and `main` here advances through single squashed snapshot commits
-(`Sync snapshot (<date>)`). That is why every file in a sync shows the same
-last-commit message, and why nobody — maintainers included — pushes to
-`main` directly.
+The original GenOffice project publishes `main` as a mirror: development happens
+in its private tree, and its `main` advances through single squashed snapshot
+commits (`Sync snapshot (<date>)`). That is why every file in an upstream sync
+shows the same last-commit message, and why upstream maintainers do not push
+individual changes to its `main` directly.
 
-External pull requests are welcome and are reviewed here. Once a change is
-accepted, a maintainer imports it into the private tree with your authorship
-preserved as a `Co-authored-by:` trailer, and it ships to `main` in the next
-snapshot; your PR is then closed with a note pointing at the snapshot that
-carried it. GitHub will show the PR as "closed" rather than "merged" — the
-code and the attribution still land. Issues and feature requests are handled
-directly on this repository as usual.
+External upstream pull requests are welcome and are reviewed there. Once a
+change is accepted, an upstream maintainer imports it into the private tree
+with authorship preserved as a `Co-authored-by:` trailer, and it ships in the
+next snapshot; the upstream PR is then closed with a note pointing at the
+snapshot that carried it. GitHub will show that PR as "closed" rather than
+"merged" — the code and attribution still land. Issues and feature requests are
+handled directly on the upstream repository as usual.
+
+### Zanostack fork maintainers and AI agents
+
+This checkout also maintains the Zanostack product fork. Here, `main` is a
+mirror of the original upstream project and Zanostack work targets `product`.
+Do not put fork work into `main`. The required branch, push, upstream-sync, and
+recovery procedures are in [`fork/RUNBOOK.md`](fork/RUNBOOK.md); AI agents must
+also follow the mandatory summary in [`CLAUDE.md`](CLAUDE.md).
 
 ## Repository layout
 
-- `apps/*` — the six Electron apps (docs, sheets, slides, pdf, markdown, shell).
+- `apps/*` — the nine Electron apps:
+  - **Office apps**: docs, sheets, slides, pdf, markdown, shell.
+  - **Business apps (Zanostack)**: crm (`Zanostack CRM`), tenders (`Zanostack Tenders`), books (`Zano Books`).
+
   Each app is an npm workspace with its own `src/main` (Electron main
-  process), `src/renderer` (React UI), and `tests/`.
+  process), `src/renderer` (React UI), and optional `tests/`.
+
 - `packages/*` — pure TypeScript engine and shared packages (no Electron
   dependency, unit-tested): docx/pptx engines, AI agent core, providers,
   i18n, UI kit.
 - `apps/sheets/native/xlsx-engine` — Rust xlsx engine (runs as a sidecar process) for xlsx import/export.
+- `tools/` — E2E and adversarial test harnesses (`verify-suite-workflows.mjs`,
+  `test-challenger-1-m5-hardening.mjs`, `test-challenger-2-m5-resilience.mjs`).
+- `fork/` — branding and upstream sync tooling (`check-brand.mjs`, `sync-upstream.mjs`).
 
 ## Getting started
 
@@ -38,8 +53,11 @@ needed only for the sheets xlsx sidecar).
 ```bash
 npm install
 npm run fixtures     # generate test .docx fixtures (one-time, and after docx-engine changes)
-npm run dev          # all editors + shell against Vite dev servers
-npm run dev:docs     # or run a single app
+npm run dev          # all 9 apps + shell against Vite dev servers
+npm run dev:docs     # or run a single office app
+npm run dev -w @genoffice/crm      # run the CRM app
+npm run dev -w @genoffice/tenders  # run the Tenders app
+npm run dev -w @genoffice/books    # run the Books app
 ```
 
 ## Checks every change must pass
@@ -49,9 +67,17 @@ CI runs these on every PR; please run them locally first:
 ```bash
 npm run format:check # Prettier check for uncommitted changed/new files
 npm run lint         # ESLint across the repo (0 errors required; warnings allowed)
-npm run typecheck    # tsc --noEmit across every workspace
+npm run typecheck    # tsc --noEmit across every workspace (9 apps + 13 packages)
+npm run check:brand  # verify no unauthorized upstream brand occurrences
 npm test             # engine + app unit tests (also runs the Rust sidecar tests)
 npm run licenses     # production dependency licenses within the permissive allowlist
+```
+
+For changes touching the business apps (CRM, Tenders, Books) or the cross-app
+integration layer, also run the workflow E2E suite:
+
+```bash
+npx tsx tools/verify-suite-workflows.mjs   # 56 tests, must exit 0
 ```
 
 Formatting is intentionally incremental: existing files are not reformatted

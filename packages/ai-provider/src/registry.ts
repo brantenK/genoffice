@@ -31,8 +31,26 @@ export interface ProviderAdapter {
   resolveEndpoint(config: AiProviderConfig): ResolvedEndpoint
 }
 
+const GENSPARK_FALLBACK_META: AiProviderMeta = {
+  id: 'genspark',
+  label: 'Genspark',
+  models: [
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-sonnet-4-6',
+    'gpt-5.6',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gemini-3.1-pro-preview',
+    'gemini-3-flash-preview',
+    'gemini-3.7-flash',
+  ],
+  defaultModel: 'claude-opus-4-7',
+  keyPlaceholder: 'Not required',
+}
+
 function metaOf(id: AiProviderId): AiProviderMeta {
-  return AI_PROVIDERS.find((m) => m.id === id)!
+  return AI_PROVIDERS.find((m) => m.id === id) ?? GENSPARK_FALLBACK_META
 }
 
 /**

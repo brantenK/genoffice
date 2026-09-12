@@ -39,8 +39,20 @@ const stale = APPS.filter((app) => {
 
 if (stale.length) {
   console.log(`Rebuilding stale preloads: ${stale.join(', ')}`)
+  // Windows ships npm as npm.cmd: spawning the bare name fails with ENOENT, and
+  // spawning the .cmd without a shell fails with EINVAL. When this runs under
+  // npm, npm_execpath points at npm-cli.js, so run that through node directly —
+  // no shell, no argument-escaping risk, and identical on every platform.
+  const npmCli = process.env.npm_execpath
   for (const app of stale) {
-    const r = spawnSync('npm', ['run', 'build', '-w', `@genoffice/${app}`], { stdio: 'inherit' })
+    const args = ['run', 'build', '-w', `@genoffice/${app}`]
+    const r = npmCli
+      ? spawnSync(process.execPath, [npmCli, ...args], { stdio: 'inherit' })
+      : spawnSync('npm', args, { stdio: 'inherit', shell: true })
+    if (r.error) {
+      console.error(`Failed to start the ${app} preload build: ${r.error.message}`)
+      process.exit(1)
+    }
     if (r.status !== 0) process.exit(r.status ?? 1)
   }
 }

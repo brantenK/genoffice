@@ -25,7 +25,8 @@ export const es = {
   aiEmptyBodyLine1: 'Describe un cambio o pregunta sobre los datos.',
   aiThinkingAria: 'Pensando',
   aiThinking: 'Pensando…',
-  aiWorkedSteps: 'Completado · {n} pasos',
+  aiWorkedSteps: 'Trabajo realizado · {n} pasos con herramientas',
+  aiWorkedStepsWaiting: '{n} pasos con herramientas realizados · esperando al modelo',
   aiGroupWorking: 'En curso…',
   aiWorking: 'Ejecutando…',
   aiAutoApplied: 'Se aplicaron {count} cambios',
@@ -75,6 +76,7 @@ export const es = {
   aiToolAggregate: 'Agregar rango',
   aiToolAggregateOf: 'Agregar rango {range}',
   aiToolLoadGuide: 'Cargar guía',
+  aiToolUpdateTaskPlan: 'Actualizar lista de tareas',
   aiToolLoadGuideOf: 'Cargar guías {names}',
   aiToolReadFormats: 'Leer formatos',
   aiToolReadFormatsOf: 'Leer formatos {range}',
@@ -109,4 +111,25 @@ export const es = {
   aiScopeRangeTip:
     'La IA interpreta «esta columna / estas filas / la parte seleccionada» como este rango, y al enviar queda fijo durante toda la ejecución',
   aiScopeClearTitle: 'Quitar el ámbito del rango y usar toda la hoja',
+  aiRunRequesting: 'Esperando al modelo',
+  aiRunThinking: 'El modelo está pensando',
+  aiRunResponding: 'El modelo está respondiendo',
+  aiRunToolInput: 'El modelo está preparando los datos de entrada de la herramienta',
+  aiRunToolRunning: 'Ejecutando herramienta',
+  aiRunToolRunningNamed: 'Ejecutando {name}',
+  aiRunApplying: 'Aplicando cambios al libro',
+  aiRunVerifying: 'Comprobando resultados de fórmulas',
+  aiRunElapsed: 'Turno: {seconds} s',
+  aiRunLastActivity: 'Última actividad hace {seconds} s',
+  aiRunWarningConnectionActive:
+    'La conexión está activa, pero el modelo no ha generado contenido recientemente.',
+  aiRunWarningNoActivity:
+    'No hay actividad del proveedor desde hace más de 30 segundos. Comprueba tu conexión o detén el proceso y vuelve a intentarlo.',
+  aiTaskPlanAria: 'Lista de tareas',
+  aiTaskPlanTitle: 'Lista de tareas',
+  aiTaskPending: 'Pendiente',
+  aiTaskInProgress: 'En curso',
+  aiTaskCompleted: 'Completada',
+  aiTruncated:
+    'La respuesta se detuvo al alcanzar el límite de salida del modelo. Envía «continuar» para completar el trabajo restante.',
 } satisfies Record<keyof typeof zh, string>

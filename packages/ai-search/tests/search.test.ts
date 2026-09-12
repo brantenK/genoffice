@@ -216,7 +216,11 @@ describe('webSearch (SearchOptions)', () => {
 describe('search-tools', () => {
   it('maps the settings block onto SearchOptions', () => {
     const base = defaultAiSettings()
-    expect(searchOptionsFromSettings(base)).toEqual({ useGsk: true })
+    // Zanostack policy: the Genspark search chain is opt-in, off by default.
+    expect(searchOptionsFromSettings(base)).toEqual({ useGsk: false })
+    expect(searchOptionsFromSettings({ ...base, gskToolsEnabled: true })).toEqual({
+      useGsk: true,
+    })
     expect(searchOptionsFromSettings({ ...base, gskToolsEnabled: false })).toEqual({
       useGsk: false,
     })
@@ -240,7 +244,7 @@ describe('search-tools', () => {
       tavilyKey: 't',
       prefer: 'tavily',
     })
-    // no key → genspark chain
+    // no key, cloud tools off → no backend to call
     const empty = {
       ...base,
       search: {
@@ -248,7 +252,7 @@ describe('search-tools', () => {
         providers: { serper: { apiKey: '' }, tavily: { apiKey: '' } },
       },
     }
-    expect(searchOptionsFromSettings(empty)).toEqual({ useGsk: true })
+    expect(searchOptionsFromSettings(empty)).toEqual({ useGsk: false })
   })
 
   it('reports a rejected key as a failure instead of the silent free fallback', async () => {

@@ -24,7 +24,8 @@ export const ms = {
   aiEmptyBodyLine1: 'Terangkan perubahan yang diingini atau tanya tentang data.',
   aiThinkingAria: 'Sedang berfikir',
   aiThinking: 'Sedang berfikir…',
-  aiWorkedSteps: 'Selesai · {n} langkah',
+  aiWorkedSteps: 'Dilaksanakan · {n} langkah alat',
+  aiWorkedStepsWaiting: '{n} langkah alat dilaksanakan · menunggu model',
   aiGroupWorking: 'Sedang berjalan…',
   aiWorking: 'Sedang melaksanakan…',
   aiAutoApplied: '{count} perubahan digunakan',
@@ -73,6 +74,7 @@ export const ms = {
   aiToolAggregate: 'Agregat julat',
   aiToolAggregateOf: 'Agregat julat {range}',
   aiToolLoadGuide: 'Muatkan panduan',
+  aiToolUpdateTaskPlan: 'Kemas kini senarai semak tugas',
   aiToolLoadGuideOf: 'Muatkan panduan {names}',
   aiToolReadFormats: 'Baca format',
   aiToolReadFormatsOf: 'Baca format {range}',
@@ -107,4 +109,25 @@ export const ms = {
   aiScopeRangeTip:
     'AI membaca "lajur ini / baris ini / bahagian yang dipilih" sebagai julat ini, dan ia dikunci sepanjang larian selepas anda hantar',
   aiScopeClearTitle: 'Buang skop julat dan gunakan seluruh helaian',
+  aiRunRequesting: 'Menunggu model',
+  aiRunThinking: 'Model sedang berfikir',
+  aiRunResponding: 'Model sedang memberi respons',
+  aiRunToolInput: 'Model sedang menyediakan input alat',
+  aiRunToolRunning: 'Menjalankan alat',
+  aiRunToolRunningNamed: 'Menjalankan {name}',
+  aiRunApplying: 'Menggunakan perubahan buku kerja',
+  aiRunVerifying: 'Menyemak hasil formula',
+  aiRunElapsed: 'Giliran {seconds} saat',
+  aiRunLastActivity: 'Aktiviti terakhir {seconds} saat lalu',
+  aiRunWarningConnectionActive:
+    'Sambungan aktif, tetapi model tidak menghasilkan output baru-baru ini.',
+  aiRunWarningNoActivity:
+    'Tiada aktiviti penyedia selama lebih 30 saat. Semak sambungan anda, atau hentikan dan cuba lagi.',
+  aiTaskPlanAria: 'Senarai semak tugas',
+  aiTaskPlanTitle: 'Senarai semak tugas',
+  aiTaskPending: 'Belum selesai',
+  aiTaskInProgress: 'Sedang dijalankan',
+  aiTaskCompleted: 'Selesai',
+  aiTruncated:
+    'Respons berhenti pada had output model. Hantar “teruskan” untuk menyelesaikan baki kerja.',
 } satisfies Record<keyof typeof zh, string>

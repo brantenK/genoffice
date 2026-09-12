@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -29,7 +29,10 @@ describe('showOpenDialogWithMemory', () => {
     const dialog = fakeDialog({ showOpenDialog: pickedOpen([join('/work', 'report.docx')]) })
     await showOpenDialogWithMemory(dialog, undefined, {})
     await showOpenDialogWithMemory(dialog, undefined, {})
-    expect(dialog.showOpenDialog).toHaveBeenLastCalledWith({ defaultPath: '/work' })
+    // derive the expectation through node:path so it holds on every platform
+    expect(dialog.showOpenDialog).toHaveBeenLastCalledWith({
+      defaultPath: dirname(join('/work', 'report.docx')),
+    })
   })
 
   it('forwards the parent window when given', async () => {
@@ -75,7 +78,9 @@ describe('showSaveDialogWithMemory', () => {
     const dialog = fakeDialog({ showSaveDialog: pickedSave(join('/work', 'deck.pptx')) })
     await showSaveDialogWithMemory(dialog, undefined, { defaultPath: 'deck.pptx' })
     await showOpenDialogWithMemory(dialog, undefined, {})
-    expect(dialog.showOpenDialog).toHaveBeenCalledWith({ defaultPath: '/work' })
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith({
+      defaultPath: dirname(join('/work', 'deck.pptx')),
+    })
   })
 
   it('keeps an explicit absolute defaultPath untouched', async () => {

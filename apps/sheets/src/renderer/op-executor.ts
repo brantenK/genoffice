@@ -24,6 +24,7 @@ import {
 } from '../domain/workbook-dsl'
 import type { ApplyOutcome, ChangePlan, StructuralChange } from '../domain/workbook.types'
 import { pushBulkFillUndo } from './bulk-fill-undo'
+import { applyCellChangesBatched } from './batch-cell-values'
 import {
   journalCellContentAt,
   plainCellValue,
@@ -447,22 +448,14 @@ async function applyChangePlanNow(
         )
       }
     }
-    for (const change of plan.cellChanges) {
-      const range = sheetById(change.sheetId).getRange(change.address)
-      if (change.after.formula) range.setFormula(change.after.formula)
-      else if (change.after.value === null) range.clearContent()
-      else {
-        // Explicit f/si null mirrors the cell editor: overwriting a formula
-        // cell with a value must clear the formula (in Univer and journal).
-        // A rich-text target also needs p cleared, or setValues merges and
-        // the old document keeps rendering over the new value.
-        const wasRich = range.getCellDatas()[0]?.[0]?.p != null
-        range.setValues([
-          wasRich
-            ? [{ v: change.after.value, f: null, si: null, p: null }]
-            : [{ v: change.after.value, f: null, si: null }],
-        ])
-      }
+    // One setValues command per sheet, not one per cell: an AI set_range plan
+    // expands into thousands of single-cell changes, and a per-cell facade
+    // call fires the journal + formula engine + canvas each time. The sparse
+    // writer keeps the former per-cell loop's f/si/p clearing semantics (a
+    // value write drops a stale formula or rich-text document) — see
+    // batch-cell-values.ts.
+    if (plan.cellChanges.length > 0) {
+      applyCellChangesBatched(sheetById, plan.cellChanges)
       run.markApplied()
     }
     // Same facade setters as the ribbon, so the edit journal records them

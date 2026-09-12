@@ -24,7 +24,10 @@ const violations = []
 for (const file of git.stdout.trim().split('\n')) {
   const isCode = /\.(ts|tsx|mjs|cjs|js)$/.test(file)
   const isDoc =
-    /\.(md|html?)$/.test(file) && !file.includes('/ai/prompts/') && !file.includes('/i18n/')
+    /\.(md|html?)$/.test(file) &&
+    !file.includes('/ai/prompts/') &&
+    !file.includes('/i18n/') &&
+    !file.startsWith('.agents/')
   if (!isCode && !isDoc) continue
   const lines = readFileSync(join(root, file), 'utf8').split('\n')
   lines.forEach((line, index) => {

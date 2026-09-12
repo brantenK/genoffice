@@ -88,6 +88,12 @@ export interface AgentPhase {
   toolName?: string | undefined
 }
 
+/** Semantic stream activity used by UIs/watchdogs without exposing raw reasoning text. */
+export interface AgentActivity {
+  kind: 'wire' | 'reasoning' | 'text' | 'tool-input'
+  at: number
+}
+
 // ---- LLM transport (how one model turn is streamed; app supplies the impl) ----
 
 export interface AgentStreamRequest {
@@ -104,6 +110,8 @@ export interface AgentStreamCallbacks {
   onToolCall(call: AgentToolCall): void
   /** Phase changes within the model stream (thinking / responding / tool-input); older transports may omit this */
   onPhase?(phase: AgentPhase): void
+  /** Semantic activity signal; contains no model reasoning content. */
+  onActivity?(activity: AgentActivity): void
   /** normalized stop reason of the turn ('max_tokens' = cut off by the token limit); transports may omit this */
   onStopReason?(reason: string): void
   onDone(): void

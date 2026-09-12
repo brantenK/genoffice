@@ -28,6 +28,8 @@ interface FakeWebContents {
   setWindowOpenHandler: ReturnType<typeof vi.fn>
   loadURL: ReturnType<typeof vi.fn>
   loadFile: ReturnType<typeof vi.fn>
+  send: ReturnType<typeof vi.fn>
+  isDestroyed: ReturnType<typeof vi.fn>
   listeners: Map<string, () => void>
 }
 
@@ -48,6 +50,8 @@ function makeFakeWebContents(): FakeWebContents {
     setWindowOpenHandler: vi.fn(),
     loadURL: vi.fn(),
     loadFile: vi.fn(),
+    send: vi.fn(),
+    isDestroyed: vi.fn(() => false),
   }
   lastWebContents = wc
   return wc
@@ -78,6 +82,7 @@ import {
   createPdfView,
   markPdfUntitledPath,
   movePdfFileNoClobber,
+  pdfFileRenamed,
   setPdfRenamedHook,
 } from '../src/main/pdf-main'
 
@@ -138,6 +143,22 @@ describe('pdf auto-rename', () => {
     expect(rename(wcId, result.path!, 'Other Name').renamed).toBe(false)
     // the view keeps working on the new path (readFile grant follows the rename)
     expect(handlers.get(PDF_CHANNELS.consumePending)?.({ sender: { id: wcId } })).toBe(result.path)
+  })
+
+  it('rebinds a shell-renamed open file and notifies the renderer', async () => {
+    const path = makePdfFile('opened.pdf')
+    createPdfView(path)
+    const wcId = lastWebContents.id
+    const target = join(path, '..', 'renamed.pdf')
+
+    pdfFileRenamed(lastWebContents as never, path, target)
+
+    expect(handlers.get(PDF_CHANNELS.consumePending)?.({ sender: { id: wcId } })).toBe(target)
+    await expect(readGranted(wcId, path)).rejects.toThrow('path not granted')
+    expect(lastWebContents.send).toHaveBeenCalledWith(PDF_CHANNELS.fileRenamed, {
+      oldPath: path,
+      newPath: target,
+    })
   })
 
   it('sanitizes illegal filename characters and caps the length', () => {

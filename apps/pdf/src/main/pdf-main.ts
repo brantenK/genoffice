@@ -447,7 +447,7 @@ interface RuntimePaths {
   preloadPath: string
   rendererUrl?: string
   rendererFile?: string
-  /** Shell router used to open generated PDFs in a new GenOffice tab. */
+  /** Shell router used to open generated PDFs in a new Zanostack tab. */
   openGeneratedPath?: (path: string) => boolean
   /** Host-owned cross-app document creator (the shell routes DOCX into Docs). */
   createDocument?: (request: CreateDocumentRequest) => Promise<CreateDocumentResult>
@@ -504,7 +504,7 @@ async function createStandaloneDocument(
   if (request.type === 'docx') {
     return {
       ok: false,
-      error: 'Creating DOCX files requires the GenOffice shell or Docs app.',
+      error: 'Creating DOCX files requires the Zanostack shell or Docs app.',
     }
   }
   const title = sanitizeGeneratedDocumentTitle(request.title)
@@ -582,6 +582,17 @@ export function setPdfRenamedHook(
   hook: (wc: WebContents, oldPath: string, newPath: string) => void,
 ): void {
   pdfRenamedHook = hook
+}
+
+/** Shell/Home notification: rebind an open view after its file is renamed on disk. */
+export function pdfFileRenamed(wc: WebContents, oldPath: string, newPath: string): void {
+  const allowed = allowedByWc.get(wc.id)
+  if (!allowed?.has(oldPath)) return
+  allowed.delete(oldPath)
+  allowed.add(newPath)
+  if (openPathByWc.get(wc.id) === oldPath) openPathByWc.set(wc.id, newPath)
+  untitledPdfPaths.delete(oldPath)
+  if (!wc.isDestroyed()) wc.send(PDF_CHANNELS.fileRenamed, { oldPath, newPath })
 }
 
 /** Sanitize a proposed base name into a safe filename: strip illegal path chars, collapse whitespace, cap length; null if nothing survives. (Mirrors docs' deriveAutoFileName.) */

@@ -1,0 +1,32 @@
+{
+  "name": "@genoffice/crm",
+  "productName": "Zanostack CRM",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "description": "Local-first CRM module: pipelines, deals, contacts & companies hosted by Zanostack shell tabs",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:renderer": "vite --config vite.renderer.config.ts",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@genoffice/docx-engine": "*",
+    "@genoffice/electron-utils": "*",
+    "@genoffice/i18n": "*",
+    "@genoffice/project-store": "*",
+    "@genoffice/ui": "*",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^43.3.0",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "author": "Zanostack"
+}

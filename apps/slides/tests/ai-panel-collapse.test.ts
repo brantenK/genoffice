@@ -130,8 +130,8 @@ describe('AiPanel collapse (slides)', () => {
         'textarea[data-slides-ai-input]',
       )
       expect(textarea).not.toBeNull()
-      // jsdom does not implement the spellcheck IDL attribute (it always reads
-      // back undefined), so assert on the rendered content attribute instead.
+      // jsdom implements no `spellcheck` IDL property, so assert the rendered
+      // attribute react writes for spellCheck={false}.
       expect(textarea!.getAttribute('spellcheck')).toBe('false')
       cleanup()
     } finally {

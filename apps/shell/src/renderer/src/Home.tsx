@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
-import logoLockup from './assets/genoffice-logo.svg'
+import zanoLogo from './assets/zano-logo.png'
 import iconDocx from './assets/file-docx.svg'
 import iconXlsx from './assets/file-xlsx.svg'
 import iconPptx from './assets/file-pptx.svg'
@@ -8,7 +8,6 @@ import iconPdf from './assets/file-pdf.svg'
 import iconMd from './assets/file-md.svg'
 import iconHtml from './assets/file-html.svg'
 import type {
-  AccountStatus,
   CloudProjectKind,
   CloudProjectsSnapshot,
   HomeApi,
@@ -60,6 +59,57 @@ const FILE_ICONS: Record<string, string> = {
 const OPEN_LOCAL_EXTENSIONS = '.docx / .xlsx / .xlsm / .xls / .csv / .pptx / .pdf / .md / .html'
 
 function FileBadge({ ext, size }: { ext: string; size: number }) {
+  if (ext === 'crm') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#6366f1" />
+        <path
+          d="M9 22V17M16 22V10M23 22V14"
+          stroke="#fff"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
+  if (ext === 'tenders') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#d97706" />
+        <path
+          d="M16 7l7 3.5v5.5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V10.5L16 7z"
+          stroke="#fff"
+          strokeWidth="2.2"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M13 16l2 2 4-4"
+          stroke="#fff"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  if (ext === 'books') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#0F766E" />
+        <path
+          d="M8 8v16a2 2 0 002 2h14M8 8a2 2 0 012-2h14v18H10a2 2 0 00-2 2"
+          stroke="#fff"
+          strokeWidth="2.2"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M12 12h8M12 16h6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    )
+  }
   const icon = FILE_ICONS[ext]
   if (icon) {
     return <img src={icon} width={size} height={size} alt="" aria-hidden="true" />
@@ -146,7 +196,7 @@ function SortCheck({ visible }: { visible: boolean }): ReactElement {
       <path
         d="M3 8.5L6.5 12L13 4.5"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -267,7 +317,7 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
             <path
               d="M7 1v12M1 7h12"
               stroke="currentColor"
-              strokeWidth="1.7"
+              strokeWidth="1.4"
               strokeLinecap="round"
             />
           </svg>
@@ -317,7 +367,7 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
                     <path
                       d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3.1c.44 0 .85.19 1.13.52L8.4 4.4H13A1.5 1.5 0 0 1 14.5 5.9v5.6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z"
                       stroke="currentColor"
-                      strokeWidth="1.2"
+                      strokeWidth="1.4"
                       strokeLinejoin="round"
                     />
                   </svg>
@@ -453,269 +503,34 @@ function ProjectPanel({ projects, selectedId, onSelect, onRefresh }: ProjectPane
 // Clicking it opens the settings modal directly (SettingsModal.tsx), which hosts
 // login/logout plus preferences (language, theme, save location, update channel).
 
-const LOGIN_POLL_MS = 2500
-/** fallback deadline when the CLI does not report expires_in (device codes live ~300s) */
-const LOGIN_MAX_WAIT_MS = 300_000
-
-function AccountEntry({
-  onStatusChange,
-}: {
-  onStatusChange?: (status: AccountStatus | null) => void
-}) {
+function AccountEntry() {
   const { t } = useI18n()
-  const [status, setStatus] = useState<AccountStatus | null>(null)
-
-  useEffect(() => {
-    onStatusChange?.(status)
-  }, [status, onStatusChange])
-  const [waiting, setWaiting] = useState(false)
-  // incremented on login retry, resetting the polling timer
-  const [loginNonce, setLoginNonce] = useState(0)
-  const [loginError, setLoginError] = useState<
-    'timeout' | 'launch' | 'network' | 'expired' | 'failed' | null
-  >(null)
-  // auth URL reported by the login CLI — rescue entry when the browser did not open
-  const [authUrl, setAuthUrl] = useState<string | null>(null)
-  const [urlCopied, setUrlCopied] = useState(false)
-  const loginDeadline = useRef(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [loggingOut, setLoggingOut] = useState(false)
-  // bumped on logout so an in-flight status refresh (which can still
-  // report logged-in) is discarded instead of resurrecting the UI
-  const statusSeq = useRef(0)
-
-  // query login state once on mount
-  useEffect(() => {
-    let alive = true
-    void window.aiOffice.accountStatus?.().then((s) => {
-      if (alive) setStatus(s)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  // login progress pushed from main (gsk login CLI output)
-  useEffect(() => {
-    const off = window.aiOffice.onAccountLogin?.((ev) => {
-      if (ev.phase === 'url') {
-        if (ev.url) setAuthUrl(ev.url)
-        if (ev.expiresInSec) loginDeadline.current = Date.now() + ev.expiresInSec * 1000
-      } else if (ev.phase === 'success') {
-        void window.aiOffice.accountStatus().then((s) => {
-          if (s.loggedIn) {
-            setStatus(s)
-            setWaiting(false)
-            setAuthUrl(null)
-          }
-        })
-      } else if (ev.phase === 'error') {
-        setWaiting(false)
-        setAuthUrl(null)
-        setLoginError(
-          ev.error === 'network' ? 'network' : ev.error === 'expired' ? 'expired' : 'failed',
-        )
-      }
-    })
-    return off
-  }, [])
-
-  // config-file polling stays as the fallback success path (works even if progress events are lost)
-  useEffect(() => {
-    if (!waiting) return
-    const timer = setInterval(() => {
-      void window.aiOffice.accountStatus().then((s) => {
-        if (s.loggedIn) {
-          setStatus(s)
-          setWaiting(false)
-          setAuthUrl(null)
-        } else if (Date.now() > loginDeadline.current) {
-          setWaiting(false)
-          setAuthUrl(null)
-          setLoginError('timeout')
-        }
-      })
-    }, LOGIN_POLL_MS)
-    return () => clearInterval(timer)
-  }, [waiting, loginNonce])
-
-  const loggedIn = status?.loggedIn ?? false
-  const email = status?.email ?? ''
-  const initial = email ? email[0].toUpperCase() : loggedIn ? 'G' : '?'
-  const errorText = loginError
-    ? {
-        timeout: t('loginTimeout'),
-        launch: t('loginLaunchFailed'),
-        network: t('loginNetworkError'),
-        expired: t('loginExpired'),
-        failed: t('loginFailed'),
-      }[loginError]
-    : null
-
-  const doLogout = () => {
-    setLoggingOut(true)
-    statusSeq.current++
-    void window.aiOffice.accountLogout().then(() => {
-      setLoggingOut(false)
-      setStatus({ loggedIn: false })
-    })
-  }
-
-  const startLogin = () => {
-    // clicking again while waiting = relaunch the login (main kills the stale CLI, so the new device code is the live one)
-    setLoginError(null)
-    setWaiting(true)
-    setAuthUrl(null)
-    setUrlCopied(false)
-    loginDeadline.current = Date.now() + LOGIN_MAX_WAIT_MS
-    setLoginNonce((n) => n + 1)
-    void window.aiOffice.accountLogin().then((launched) => {
-      if (!launched) {
-        setWaiting(false)
-        setLoginError('launch')
-      }
-    })
-  }
-
-  const openLoginUrl = () => void window.aiOffice.openLoginUrl?.()
-
-  const copyLoginUrl = () => {
-    if (!authUrl) return
-    void navigator.clipboard.writeText(authUrl).then(() => {
-      setUrlCopied(true)
-      window.setTimeout(() => setUrlCopied(false), 2000)
-    })
-  }
-
-  const handleClick = () => {
-    // refresh the login state / credit balance; drop the response
-    // when a logout happened while it was in flight
-    const seq = statusSeq.current
-    void window.aiOffice.accountStatus?.().then((s) => {
-      if (seq === statusSeq.current) setStatus(s)
-    })
-    setSettingsOpen(true)
-  }
 
   return (
     <div className="account-entry">
-      {settingsOpen && (
-        <SettingsModal
-          status={status}
-          loggingOut={loggingOut}
-          loginWaiting={waiting}
-          loginUrl={authUrl}
-          urlCopied={urlCopied}
-          onOpenLoginUrl={openLoginUrl}
-          onCopyLoginUrl={copyLoginUrl}
-          onClose={() => setSettingsOpen(false)}
-          onLogin={() => {
-            setSettingsOpen(false)
-            startLogin()
-          }}
-          onLogout={doLogout}
-        />
-      )}
-      {!settingsOpen && waiting && authUrl && (
-        <div className="login-hint" role="status">
-          <button className="login-hint-open" onClick={openLoginUrl}>
-            {t('loginOpenShort')}
-          </button>
-          <button
-            className={`login-hint-copy${urlCopied ? ' copied' : ''}`}
-            onClick={copyLoginUrl}
-            // static tip: screentips are suppressed from pointerdown until the pointer
-            // leaves the control, so a swapped-in "copied" tip would never show — the
-            // check-mark icon is the visible feedback
-            data-tip={t('loginCopyUrl')}
-            aria-label={urlCopied ? t('loginCopied') : t('loginCopyUrl')}
-          >
-            {urlCopied ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="m3.5 8.5 3 3 6-7"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect
-                  x="5.5"
-                  y="5.5"
-                  width="7"
-                  height="7"
-                  rx="1.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                />
-                <path
-                  d="M3.5 10.5V5a1.5 1.5 0 0 1 1.5-1.5h5.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-      )}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <button
         className="account-btn"
-        onClick={handleClick}
+        onClick={() => setSettingsOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={settingsOpen}
-        data-tip={
-          loggedIn
-            ? email || t('loggedInGenspark')
-            : waiting
-              ? t('waitingLogin')
-              : (errorText ?? t('loginGenspark'))
-        }
         aria-label={t('settings')}
+        data-tip={t('settings')}
       >
-        <span
-          className={`account-avatar${loggedIn ? ' logged-in' : ''}${waiting ? ' waiting' : ''}`}
-        >
-          {waiting ? (
-            <svg
-              className="account-spinner"
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              aria-hidden="true"
-            >
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                fill="none"
-                strokeDasharray="26"
-                strokeDashoffset="18"
-                strokeLinecap="round"
-              />
-            </svg>
-          ) : (
-            initial
-          )}
+        <span className="account-avatar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
+            <path
+              d="M8 4.6v3M8 10.4h.01"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
         </span>
         <span className="account-text">
-          <span className="account-name">
-            {loggedIn
-              ? email
-                ? email.split('@')[0]
-                : t('loggedIn')
-              : waiting
-                ? t('waitingShort')
-                : t('login')}
-          </span>
-          {!loggedIn && !waiting && errorText && (
-            <span className="account-sub error">{errorText}</span>
-          )}
+          <span className="account-name">{t('settings')}</span>
         </span>
         <svg
           className="account-chevron"
@@ -750,6 +565,8 @@ const CLOUD_FILTERS = [
 
 /** module kind → file icon extension */
 const CLOUD_KIND_EXT: Record<string, string> = { docs: 'docx', sheets: 'xlsx', slides: 'pptx' }
+
+/** rows revealed per "load more" step; purely client-side over the local snapshot */
 
 /** rows revealed per "load more" step; purely client-side over the local snapshot */
 const CLOUD_REVEAL_STEP = 100
@@ -863,7 +680,7 @@ function CloudProjectsView() {
                 <path
                   d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7A1.5 1.5 0 0 0 12.5 12V9.5M9.5 2.5h4v4M13 3l-5.5 5.5"
                   stroke="currentColor"
-                  strokeWidth="1.3"
+                  strokeWidth="1.4"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -1107,14 +924,14 @@ function DropToOpenOverlay(): ReactElement | null {
           <path
             d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.4"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
           <path
             d="M4 16.5v2A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-2"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.4"
             strokeLinecap="round"
           />
         </svg>
@@ -1153,19 +970,6 @@ export function Home() {
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
   // unavailable recent entry (missing flag) the user clicked — offer list removal
   const [confirmMissing, setConfirmMissing] = useState<RecentEntry | null>(null)
-  // name in the greeting; omitted when logged out
-  const [accountName, setAccountName] = useState('')
-  // Genspark Projects is web-account data, so its nav entry only shows when logged in
-  const [loggedIn, setLoggedIn] = useState(false)
-  // single source of account state: AccountEntry reports every change (initial
-  // load, login, logout), keeping the greeting name and the nav entry in sync
-  const handleAccountStatus = useCallback((s: AccountStatus | null) => {
-    const on = s?.loggedIn ?? false
-    setLoggedIn(on)
-    if (!on) setCloudMode(false)
-    const name = on ? (s?.email ?? '').split('@')[0] : ''
-    setAccountName(name ? name[0].toUpperCase() + name.slice(1) : '')
-  }, [])
   const [greetAskKey] = useState(
     () => GREET_ASK_KEYS[Math.floor(Math.random() * GREET_ASK_KEYS.length)]!,
   )
@@ -1575,56 +1379,94 @@ export function Home() {
     void window.aiOffice.newHtml(selectedProjectId ? { projectId: selectedProjectId } : undefined)
   }
 
+  const handleNewCrm = () => {
+    void window.aiOffice.newCrm()
+  }
+
+  const handleNewTenders = () => {
+    void window.aiOffice.newTenders()
+  }
+
+  const handleNewBooks = () => {
+    void window.aiOffice.newBooks()
+  }
+
   const handleNewPdf = () => {
     void window.aiOffice.newPdf(selectedProjectId ? { projectId: selectedProjectId } : undefined)
   }
 
-  const NEW_ITEMS = [
-    { ext: 'docx', title: t('newDoc'), sub: '.docx', action: handleNewDoc },
-    { ext: 'xlsx', title: t('newSheet'), sub: '.xlsx', action: handleNewSheet },
-    { ext: 'pptx', title: t('newSlide'), sub: '.pptx', action: handleNewSlide },
-    { ext: 'md', title: t('newMarkdown'), sub: '.md', action: handleNewMarkdown },
-    { ext: 'html', title: t('newHtml'), sub: '.html', action: handleNewHtml },
-    { ext: 'pdf', title: t('newPdf'), sub: '.pdf', action: handleNewPdf },
+  // ── App navigation (sidebar) ──────────────────────────
+  // The durable app launcher lives in the sidebar so the Home canvas stays
+  // calm. Each entry runs the same handler the old quick-create cards did, so
+  // project-aware office creation (selectedProjectId) is unchanged.
+  interface AppNavItem {
+    ext: string
+    label: string
+    hint?: string
+    action: () => void
+  }
+
+  const OFFICE_APP_ITEMS: AppNavItem[] = [
+    { ext: 'docx', label: t('appNavNewDoc'), action: handleNewDoc },
+    { ext: 'xlsx', label: t('appNavNewSheet'), action: handleNewSheet },
+    { ext: 'pptx', label: t('appNavNewSlide'), action: handleNewSlide },
+    { ext: 'pdf', label: t('appNavNewPdf'), action: handleNewPdf },
+    { ext: 'md', label: t('appNavNewMd'), action: handleNewMarkdown },
+    { ext: 'html', label: t('appNavNewHtml'), action: handleNewHtml },
   ]
 
-  function renderQuickCards() {
+  const BUSINESS_APP_ITEMS: AppNavItem[] = [
+    { ext: 'crm', label: t('bizCrm'), hint: t('bizCrmHint'), action: handleNewCrm },
+    { ext: 'tenders', label: t('bizTenders'), hint: t('bizTendersHint'), action: handleNewTenders },
+    { ext: 'books', label: t('bizBooks'), hint: t('bizBooksHint'), action: handleNewBooks },
+  ]
+
+  function renderAppNavGroup(heading: StringKey, items: AppNavItem[]) {
     return (
-      <div className="quick-cards">
-        {NEW_ITEMS.map((item) => (
-          <button key={item.ext} className="quick-card" onClick={() => void item.action()}>
-            <FileBadge ext={item.ext} size={30} />
-            <span className="quick-text">
-              <span className="quick-title-row">
-                <span className="quick-title">{item.title}</span>
-                <span className="ai-chip">AI</span>
-              </span>
-              <span className="quick-sub">{item.sub}</span>
-            </span>
+      <div className="app-nav">
+        <div className="app-nav-heading">{t(heading)}</div>
+        {items.map((item) => (
+          <button
+            key={item.ext}
+            className="nav-item app-nav-item"
+            onClick={() => void item.action()}
+            {...(item.hint ? { 'data-tip': item.hint } : {})}
+          >
+            <FileBadge ext={item.ext} size={16} />
+            <span className="nav-label">{item.label}</span>
           </button>
         ))}
-        <button
-          className="quick-card"
-          onClick={() => void window.aiOffice.browse()}
-          data-tip={OPEN_LOCAL_EXTENSIONS}
-        >
-          <span className="quick-folder">
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3.1c.44 0 .85.19 1.13.52L8.4 4.4H13A1.5 1.5 0 0 1 14.5 5.9v5.6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span className="quick-text">
-            <span className="quick-title-row">
-              <span className="quick-title">{t('openLocal')}</span>
-            </span>
-            <span className="quick-sub">{OPEN_LOCAL_EXTENSIONS}</span>
-          </span>
+      </div>
+    )
+  }
+
+  /** The one primary action left on the canvas: create a doc (+ open local globally). */
+  function renderCanvasActions(scope: 'global' | 'project') {
+    return (
+      <div className="canvas-actions">
+        <button className="canvas-primary" onClick={handleNewDoc}>
+          {t('appNavNewDoc')}
         </button>
+        {scope === 'global' && (
+          <button className="quick-card" onClick={() => void window.aiOffice.browse()}>
+            <span className="quick-folder">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3.1c.44 0 .85.19 1.13.52L8.4 4.4H13A1.5 1.5 0 0 1 14.5 5.9v5.6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5V4z"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span className="quick-text">
+              <span className="quick-title-row">
+                <span className="quick-title">{t('openLocal')}</span>
+              </span>
+              <span className="quick-sub">{OPEN_LOCAL_EXTENSIONS}</span>
+            </span>
+          </button>
+        )}
       </div>
     )
   }
@@ -1703,7 +1545,7 @@ export function Home() {
                 d="M8 1.9l1.9 3.85 4.25.62-3.07 3 .72 4.23L8 11.6l-3.8 2 .72-4.23-3.07-3 4.25-.62z"
                 fill={entry.starred ? '#f5a623' : 'none'}
                 stroke={entry.starred ? '#f5a623' : 'currentColor'}
-                strokeWidth="1.2"
+                strokeWidth="1.4"
                 strokeLinejoin="round"
               />
             </svg>
@@ -1800,7 +1642,7 @@ export function Home() {
                           <path
                             d="M4.5 2.5l4 3.5-4 3.5"
                             stroke="currentColor"
-                            strokeWidth="1.3"
+                            strokeWidth="1.4"
                             strokeLinecap="round"
                             fill="none"
                           />
@@ -1869,7 +1711,7 @@ export function Home() {
           <div className="section-head">
             <span className="section-label">{t('secQuickStart')}</span>
           </div>
-          {renderQuickCards()}
+          {renderCanvasActions('project')}
         </section>
 
         <section className="recents" aria-label={t('secProjectFiles')}>
@@ -1935,12 +1777,12 @@ export function Home() {
                 <path
                   d="M6.29297 3.75H14.1729C14.4927 3.75 14.7979 3.88392 15.0146 4.11914L18.5566 7.96387C18.7512 8.17512 18.8593 8.45208 18.8594 8.73926V19.1055C18.8593 19.7376 18.346 20.25 17.7139 20.25H6.29297C5.66091 20.2499 5.14855 19.7375 5.14844 19.1055V4.89453C5.14855 4.26247 5.66091 3.75011 6.29297 3.75Z"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
                 <path
                   d="M13.8984 4V7.11C13.8984 8.15382 14.7446 9 15.7884 9H18.8984"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
               </svg>
               <span className="empty-hint">{t('projEmptyHint')}</span>
@@ -1990,7 +1832,7 @@ export function Home() {
             ? 'greetAfternoon'
             : 'greetEvening'
     const cjk = lang === 'zh' || lang === 'zh-TW' || lang === 'ja'
-    const greeting = `${t(greetKey)}${accountName ? (cjk ? '，' : ', ') + accountName : ''}${cjk ? '。' : '. '}`
+    const greeting = `${t(greetKey)}${cjk ? '。' : '. '}`
     return (
       <main className="content">
         <section className="quick-start" aria-label={t('secQuickStart')}>
@@ -2000,7 +1842,7 @@ export function Home() {
               <span className="hero-ask">{t(greetAskKey)}</span>
             </h1>
           </div>
-          {renderQuickCards()}
+          {renderCanvasActions('global')}
         </section>
 
         <section
@@ -2060,12 +1902,12 @@ export function Home() {
                 <path
                   d="M6.29297 3.75H14.1729C14.4927 3.75 14.7979 3.88392 15.0146 4.11914L18.5566 7.96387C18.7512 8.17512 18.8593 8.45208 18.8594 8.73926V19.1055C18.8593 19.7376 18.346 20.25 17.7139 20.25H6.29297C5.66091 20.2499 5.14855 19.7375 5.14844 19.1055V4.89453C5.14855 4.26247 5.66091 3.75011 6.29297 3.75Z"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
                 <path
                   d="M13.8984 4V7.11C13.8984 8.15382 14.7446 9 15.7884 9H18.8984"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="1.4"
                 />
               </svg>
               <span className="empty-hint">
@@ -2115,7 +1957,10 @@ export function Home() {
     <div className="home">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <img className="logo-lockup" src={logoLockup} alt="GenOffice" />
+          <div className="logo-lockup">
+            <img src={zanoLogo} alt="" />
+            <span>Zanostack</span>
+          </div>
         </div>
 
         <nav className="sidebar-nav">
@@ -2128,11 +1973,11 @@ export function Home() {
             }}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
               <path
                 d="M8 4.8V8l2.2 1.6"
                 stroke="currentColor"
-                strokeWidth="1.3"
+                strokeWidth="1.4"
                 strokeLinecap="round"
               />
             </svg>
@@ -2151,51 +1996,19 @@ export function Home() {
               <path
                 d="M8 1.9l1.9 3.85 4.25.62-3.07 3 .72 4.23L8 11.6l-3.8 2 .72-4.23-3.07-3 4.25-.62z"
                 stroke="currentColor"
-                strokeWidth="1.3"
+                strokeWidth="1.4"
                 strokeLinejoin="round"
               />
             </svg>
             <span className="nav-label">{t('navStarred')}</span>
             <span className="nav-count">{navCounts.starred}</span>
           </button>
-          {loggedIn && (
-            <button
-              className={`nav-item${cloudMode && !selectedProjectId ? ' active' : ''}`}
-              onClick={() => {
-                setCloudMode(true)
-                setSelectedProjectId(null)
-                setSelected(new Set())
-                setRowMenu(null)
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path
-                  d="M8 1.8l1.55 4.65L14.2 8l-4.65 1.55L8 14.2 6.45 9.55 1.8 8l4.65-1.55z"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span className="nav-label">{t('navCloud')}</span>
-              <svg
-                className="nav-external"
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M6.5 3.5H4a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 4 13.5h7A1.5 1.5 0 0 0 12.5 12V9.5M9.5 2.5h4v4M13 3l-5.5 5.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
         </nav>
+
+        {/* app launcher: office suite vs the separate business apps */}
+        <div className="sidebar-divider" />
+        {renderAppNavGroup('navCreate', OFFICE_APP_ITEMS)}
+        {renderAppNavGroup('navBusinessApps', BUSINESS_APP_ITEMS)}
 
         {/* project sidebar */}
         {projectMode && (
@@ -2216,7 +2029,7 @@ export function Home() {
           </>
         )}
 
-        <AccountEntry onStatusChange={handleAccountStatus} />
+        <AccountEntry />
       </aside>
 
       {selectedProjectId ? (
