@@ -233,6 +233,41 @@ request to “sync” or “clean up branches.”
 - **Commercial differentiators**: keep them in separate, additive modules —
   not woven into upstream engine code.
 
+## Prune temporary branches after acceptance
+
+A sync is not finished when `product` is pushed. Every sync creates temporary
+branches, and leaving them behind makes the branch list unreadable and hides
+which branches actually matter.
+
+**Steady state is two branches plus at most one safety net:**
+
+| Branch                 | Role                                                                        |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `main`                 | upstream mirror                                                             |
+| `product`              | Zanostack development and release                                           |
+| at most one `backup/*` | short-lived undo point, deleted once the app has been used without problems |
+
+After an accepted sync, delete the temporary branches — locally **and** on
+`origin`:
+
+```bash
+# first prove nothing unique would be lost
+git rev-list --count product..<temp-branch>   # must be 0
+git merge-base --is-ancestor <temp-branch> product && echo "safe to delete"
+
+# remove the worktree that pins an integration branch, then the branch
+git worktree remove --force ../genoffice-sync-<date>
+git worktree prune
+git branch -d integration/<name> checkpoint/<name> backup/<old-name>
+git push origin --delete integration/<name> checkpoint/<name> backup/<old-name>
+```
+
+Delete a branch only when `git rev-list --count product..<branch>` is `0` (it
+is fully contained in `product`) or you have confirmed its commits are wanted.
+Do not keep integration or checkpoint branches "just in case" once the merged
+result has been validated — `product` already contains every commit, so any
+branch can be recreated from its SHA if it is ever needed again.
+
 ## Recovery rule
 
 When Git says non-fast-forward, reports unexpected divergence, or produces a

@@ -52,6 +52,10 @@ of the product architecture, not as a suggestion:
 - Do not run `npm run sync:upstream` or `fork/tools/sync-upstream.mjs` casually.
   Read `fork/RUNBOOK.md`, ensure the worktree is clean, and follow its sync
   procedure.
+- After a sync is accepted, prune its temporary branches: keep `main`,
+  `product`, and at most one short-lived `backup/*`. Delete a branch only after
+  confirming it is contained in `product` (`git rev-list --count product..<branch>`
+  is `0`). See "Prune temporary branches after acceptance" in the runbook.
 - If branch tracking, the push destination, divergence, merge conflicts, or the
   intended target is unclear, stop. Report `git status --short --branch`,
   `git branch -vv`, and `git remote -v`; do not try to repair Git state by
