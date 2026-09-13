@@ -9,6 +9,7 @@ Python transport harness for a real GenOffice Electron shell. Install from
 app start|status
 tabs list|activate TAB_ID
 files open PATH|recent
+screenshots capture [--tab TAB_ID] [--name NAME]
 ```
 
 `files open` accepts only a regular canonical `.docx` inside the private
@@ -37,6 +38,18 @@ The pending E2E test accepts either `GENOFFICE_PACKAGED_APP`, or the pair
 `GENOFFICE_ELECTRON_PATH` and `GENOFFICE_SHELL_APP_DIR`. A test-owned supervisor
 retains and verifies the production Launcher child handle for teardown; this is
 not exposed as a CLI shutdown operation.
+
+## Screenshots
+
+Capture a PNG from an open shell page. The optional tab ID and output name are
+validated before transport; names must end in `.png` and contain only safe ASCII
+filename characters.
+
+```powershell
+cli-anything-genoffice --json screenshots capture --tab crm --name crm-page.png
+```
+
+The result contains `path`, `tabId`, `name`, `width`, and `height`.
 
 ## Agent contract
 

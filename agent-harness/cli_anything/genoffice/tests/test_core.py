@@ -10,6 +10,7 @@ from cli_anything.genoffice.core.errors import HarnessError, ProtocolError
 from cli_anything.genoffice.core.launcher import Launcher, build_launch_record
 from cli_anything.genoffice.core.protocol import Endpoint, ProtocolClient
 from cli_anything.genoffice.core.session import SessionStore
+from cli_anything.genoffice.genoffice_cli import _validate_screenshot_name, _validate_screenshot_tab_id
 
 
 def test_launch_record_is_explicit_and_secret_free(tmp_path):
@@ -67,10 +68,11 @@ def test_protocol_client_sends_bearer_and_command(tmp_path):
     thread.start()
     try:
         client = ProtocolClient(Endpoint("127.0.0.1", server.server_port, "t" * 43, "0123456789abcdef0123456789abcdef", os.getpid()))
-        result = client.command("app.status", {})
+        result = client.command("screenshots.capture", {"tabId": "crm_1", "name": "capture.png"})
         assert result == {}
         assert seen["authorization"] == "Bearer " + "t" * 43
-        assert seen["body"]["command"] == "app.status"
+        assert seen["body"]["command"] == "screenshots.capture"
+        assert seen["body"]["payload"] == {"tabId": "crm_1", "name": "capture.png"}
         assert "t" * 43 not in repr(client)
     finally:
         server.shutdown()
@@ -98,3 +100,16 @@ def test_stale_pid_is_detected(tmp_path):
     store = SessionStore(tmp_path / "session.json")
     store.save({"pid": 99999999, "state": "running"})
     assert store.is_stale() is True
+
+
+def test_screenshot_options_are_validated_client_side():
+    _validate_screenshot_tab_id("crm_1")
+    _validate_screenshot_name("capture.PNG")
+
+    with pytest.raises(HarnessError) as tab_error:
+        _validate_screenshot_tab_id("crm/tab")
+    assert tab_error.value.code == "SCREENSHOT_TAB_INVALID"
+
+    with pytest.raises(HarnessError) as name_error:
+        _validate_screenshot_name("capture.jpg")
+    assert name_error.value.code == "SCREENSHOT_NAME_INVALID"

@@ -12,6 +12,7 @@ Supported commands are only:
 - `app start`, `app status`
 - `tabs list`, `tabs activate`
 - `files open`, `files recent`
+- `screenshots capture [--tab TAB_ID] [--name NAME]`
 
 `files open` accepts only a canonical regular `.docx` fixture below the private
 session `input/` directory. Tab close and protocol shutdown are not exposed.
@@ -75,3 +76,7 @@ diagnostics go to stderr. Inspect `ok`, `error.code`, `error.message`, and
 No-argument invocation starts the ReplSkin-backed stateful REPL. A selected
 `--session` is carried into every REPL command. The vendored ReplSkin source is
 Apache-2.0 licensed; see `THIRD_PARTY_NOTICES.md` and the package license file.
+
+Screenshot coverage is limited to the typed `screenshots.capture` operation:
+the client validates tab IDs and PNG names, omits absent payload keys, and
+returns the shell's safe `{path, tabId, name, width, height}` result.

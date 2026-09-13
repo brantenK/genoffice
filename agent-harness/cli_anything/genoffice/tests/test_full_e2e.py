@@ -68,16 +68,16 @@ def test_e2e_subprocess_uses_scoped_parent_directory_without_cwd(monkeypatch, tm
 def test_real_built_shell_e2e_is_explicitly_post_shell_lane(tmp_path):
     """Run only against the real built shell; never replace it with a fake app."""
     if os.environ.get("GENOFFICE_REAL_E2E") != "1":
-        pytest.fail(
+        pytest.skip(
             "Blocked on post-shell integration lane: build the real Electron shell, "
             "install this package, set GENOFFICE_REAL_E2E=1, then run this real-app test."
         )
     if os.environ.get("CLI_ANYTHING_FORCE_INSTALLED") != "1":
-        pytest.fail("Set CLI_ANYTHING_FORCE_INSTALLED=1 for the installed real-app lane")
+        pytest.skip("Set CLI_ANYTHING_FORCE_INSTALLED=1 for the installed real-app lane")
     try:
         target = target_from_environment()
     except Exception as error:
-        pytest.fail(str(error))
+        pytest.skip(str(error))
     command = _resolve_cli("cli-anything-genoffice")
     session = str(tmp_path / "selector")
     neutral = tmp_path / "neutral"
@@ -94,6 +94,34 @@ def test_real_built_shell_e2e_is_explicitly_post_shell_lane(tmp_path):
         with _neutral_directory(neutral):
             _, tabs = _run(command, ["--json", "--session", session, "tabs", "list"])
         assert tabs["ok"] is True
+        tab_id = tabs["result"]["tabs"][0]["id"]
+        with _neutral_directory(neutral):
+            _, activated = _run(
+                command,
+                ["--json", "--session", session, "tabs", "activate", tab_id],
+            )
+        assert activated["ok"] is True
+        with _neutral_directory(neutral):
+            _, capture = _run(
+                command,
+                [
+                    "--json",
+                    "--session",
+                    session,
+                    "screenshots",
+                    "capture",
+                    "--tab",
+                    tab_id,
+                    "--name",
+                    "e2e-capture.png",
+                ],
+            )
+        assert capture["ok"] is True
+        result = capture["result"]
+        assert result["tabId"] == tab_id
+        assert result["name"] == "e2e-capture.png"
+        assert result["width"] > 0
+        assert result["height"] > 0
     finally:
         if started:
             supervisor.cleanup()

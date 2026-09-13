@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import time
 from pathlib import Path
@@ -86,6 +87,16 @@ def _request(ctx, command: str, payload=None):
         return _success(ctx, _launcher(ctx).request(command, payload or {}))
     except (HarnessError, OSError) as error:
         return _failure(ctx, error)
+
+
+def _validate_screenshot_tab_id(tab_id: str) -> None:
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", tab_id) is None:
+        raise HarnessError("screenshot tab ID is invalid", "SCREENSHOT_TAB_INVALID")
+
+
+def _validate_screenshot_name(name: str) -> None:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,59}\.png", name, re.IGNORECASE) is None:
+        raise HarnessError("screenshot name is invalid", "SCREENSHOT_NAME_INVALID")
 
 
 @click.group(cls=JsonGroup, invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
@@ -173,6 +184,32 @@ def files_recent(ctx, local_json):
     _request(ctx, "files.recent")
 
 
+@cli.group(cls=JsonGroup)
+def screenshots():
+    """Capture PNG screenshots from an open GenOffice page."""
+
+
+@screenshots.command("capture")
+@click.option("--tab", "tab_id", default=None, help="Open tab ID to capture.")
+@click.option("--name", "name", default=None, help="PNG filename for the capture.")
+@click.option("--json", "local_json", is_flag=True, hidden=True)
+@click.pass_context
+def screenshots_capture(ctx, tab_id, name, local_json):
+    try:
+        if tab_id is not None:
+            _validate_screenshot_tab_id(tab_id)
+        if name is not None:
+            _validate_screenshot_name(name)
+        payload = {}
+        if tab_id is not None:
+            payload["tabId"] = tab_id
+        if name is not None:
+            payload["name"] = name
+        _request(ctx, "screenshots.capture", payload)
+    except HarnessError as error:
+        _failure(ctx, error)
+
+
 def _repl(ctx):
     selected_session = str(ctx.find_root().params["session_path"])
     skin = ReplSkin("genoffice", version=__version__)
@@ -182,6 +219,7 @@ def _repl(ctx):
         "app start|status": "Manage the real Electron shell",
         "tabs list|activate": "Inspect or navigate existing tabs",
         "files open|recent": "Open a session DOCX fixture or inspect recents",
+        "screenshots capture": "Capture a PNG from an open page",
         "quit": "Exit the REPL",
     }
     while True:

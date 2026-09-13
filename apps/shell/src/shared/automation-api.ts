@@ -6,7 +6,20 @@ export const AUTOMATION_MAX_BODY_BYTES = 64 * 1024
 export const AUTOMATION_REQUEST_TIMEOUT_MS = 5_000
 
 export type AutomationCommandName =
-  'app.status' | 'tabs.list' | 'tabs.activate' | 'files.open' | 'files.recent'
+  | 'app.status'
+  | 'tabs.list'
+  | 'tabs.activate'
+  | 'files.open'
+  | 'files.recent'
+  | 'screenshots.capture'
+
+export interface ScreenshotCaptureResult {
+  path: string
+  tabId: string
+  name: string
+  width: number
+  height: number
+}
 
 export interface AutomationCommand {
   version: typeof AUTOMATION_PROTOCOL_VERSION
@@ -78,4 +91,8 @@ export interface AutomationAdapters {
   activateTab(id: string): boolean | Promise<boolean>
   openFile(path: string): boolean | Promise<boolean>
   recentFiles(): string[]
+  captureScreenshot(options: {
+    tabId?: string
+    name?: string
+  }): Promise<ScreenshotCaptureResult | null>
 }

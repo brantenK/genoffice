@@ -11,21 +11,38 @@ function request(command: string, payload: Record<string, unknown> = {}) {
 function fixture() {
   const sessionRoot = mkdtempSync(join(tmpdir(), 'genoffice-dispatch-'))
   const inputRoot = join(sessionRoot, 'input')
+  const outputRoot = join(sessionRoot, 'output')
   mkdirSync(inputRoot)
+  mkdirSync(outputRoot)
   const docx = join(inputRoot, 'input.docx')
   writeFileSync(docx, 'not a real docx, dispatcher only checks the real router boundary')
-  return { sessionRoot, inputRoot, docx }
+  return { sessionRoot, inputRoot, outputRoot, docx }
 }
 
 function adapters(f: ReturnType<typeof fixture>) {
   return {
-    getStatus: vi.fn(() => ({ version: '1.0.0', automation: true, platform: process.platform })),
+    getStatus: vi.fn(async () => ({
+      version: '1.0.0',
+      automation: true as const,
+      platform: process.platform,
+    })),
     listTabs: vi.fn(() => [
-      { id: 'home', kind: 'home', title: 'Zanostack', closable: false, active: true },
+      { id: 'home', kind: 'home' as const, title: 'Zanostack', closable: false, active: true },
     ]),
     activateTab: vi.fn(async () => true),
     openFile: vi.fn(async () => true),
     recentFiles: vi.fn(() => ['/normal/recent.docx', join(f.sessionRoot, 'input', 'input.docx')]),
+    captureScreenshot: vi.fn(async (options: { tabId?: string; name?: string }) =>
+      options.tabId === 'missing'
+        ? null
+        : {
+            path: join(f.outputRoot, options.name ?? 'screenshot-home-20260912-101112.png'),
+            tabId: options.tabId ?? 'home',
+            name: options.name ?? 'screenshot-home-20260912-101112.png',
+            width: 1280,
+            height: 720,
+          },
+    ),
   }
 }
 
@@ -36,6 +53,7 @@ describe('reduced automation dispatcher', () => {
     const dispatcher = new AutomationDispatcher(a, {
       sessionRoot: f.sessionRoot,
       inputRoot: f.inputRoot,
+      outputRoot: f.outputRoot,
     })
     for (const command of [
       'app.status',
@@ -68,6 +86,7 @@ describe('reduced automation dispatcher', () => {
     const dispatcher = new AutomationDispatcher(a, {
       sessionRoot: f.sessionRoot,
       inputRoot: f.inputRoot,
+      outputRoot: f.outputRoot,
     })
     await expect(
       dispatcher.dispatch(request('files.open', { path: f.docx })),
@@ -92,6 +111,7 @@ describe('reduced automation dispatcher', () => {
     const dispatcher = new AutomationDispatcher(a, {
       sessionRoot: f.sessionRoot,
       inputRoot: f.inputRoot,
+      outputRoot: f.outputRoot,
     })
     let release!: () => void
     const gate = new Promise<void>((resolve) => (release = resolve))
@@ -106,5 +126,41 @@ describe('reduced automation dispatcher', () => {
     release()
     await Promise.all([one, two])
     expect(a.listTabs).toHaveBeenCalledTimes(1)
+  })
+
+  it('captures screenshots with strict payload validation and maps missing tabs', async () => {
+    const f = fixture()
+    const a = adapters(f)
+    const dispatcher = new AutomationDispatcher(a, {
+      sessionRoot: f.sessionRoot,
+      inputRoot: f.inputRoot,
+      outputRoot: f.outputRoot,
+    })
+
+    await expect(
+      dispatcher.dispatch(request('screenshots.capture', { tabId: 'home', name: 'page.png' })),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { tabId: 'home', name: 'page.png', width: 1280, height: 720 },
+    })
+    for (const payload of [
+      { tabId: 'home', extra: true },
+      { tabId: 'bad/id' },
+      { name: '../page.png' },
+      { name: 'page.jpg' },
+    ]) {
+      await expect(
+        dispatcher.dispatch(request('screenshots.capture', payload)),
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'INVALID_REQUEST', message: 'invalid screenshot payload' },
+      })
+    }
+    await expect(
+      dispatcher.dispatch(request('screenshots.capture', { tabId: 'missing' })),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'NOT_FOUND', message: 'tab not found' },
+    })
   })
 })

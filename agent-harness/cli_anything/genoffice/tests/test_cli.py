@@ -6,6 +6,7 @@ import sys
 
 from click.testing import CliRunner
 
+import cli_anything.genoffice.genoffice_cli as cli_module
 from cli_anything.genoffice.genoffice_cli import cli
 
 
@@ -120,3 +121,68 @@ def test_installed_subprocess_json_status():
     result = subprocess.run(command + ["--json", "app", "status"], capture_output=True, text=True, check=False)
     assert result.returncode != 0
     assert json.loads(result.stdout)["ok"] is False
+
+
+def test_screenshots_capture_json_contract_and_payload(monkeypatch):
+    seen = []
+
+    class FakeLauncher:
+        def __init__(self, **_kwargs):
+            pass
+
+        def request(self, command, payload):
+            seen.append((command, payload))
+            return {
+                "path": "C:/session/output/capture.png",
+                "tabId": payload.get("tabId", "home"),
+                "name": payload.get("name", "capture.png"),
+                "width": 1280,
+                "height": 720,
+            }
+
+    monkeypatch.setattr(cli_module, "Launcher", FakeLauncher)
+    result = CliRunner().invoke(
+        cli,
+        ["--json", "screenshots", "capture", "--tab", "crm_1", "--name", "CRM-shot.PNG"],
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data == {
+        "ok": True,
+        "result": {
+            "path": "C:/session/output/capture.png",
+            "tabId": "crm_1",
+            "name": "CRM-shot.PNG",
+            "width": 1280,
+            "height": 720,
+        },
+    }
+    assert seen == [("screenshots.capture", {"tabId": "crm_1", "name": "CRM-shot.PNG"})]
+
+    result = CliRunner().invoke(cli, ["--json", "screenshots", "capture"])
+    assert result.exit_code == 0, result.output
+    assert seen[-1] == ("screenshots.capture", {})
+
+
+def test_screenshots_capture_rejects_invalid_name_and_tab_before_transport(monkeypatch):
+    calls = []
+
+    class FakeLauncher:
+        def __init__(self, **_kwargs):
+            pass
+
+        def request(self, command, payload):
+            calls.append((command, payload))
+            return {}
+
+    monkeypatch.setattr(cli_module, "Launcher", FakeLauncher)
+    for args, code in [
+        (["--name", "capture.jpg"], "SCREENSHOT_NAME_INVALID"),
+        (["--tab", "bad/tab"], "SCREENSHOT_TAB_INVALID"),
+    ]:
+        result = CliRunner().invoke(cli, ["--json", "screenshots", "capture", *args])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["ok"] is False
+        assert data["error"]["code"] == code
+    assert calls == []

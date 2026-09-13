@@ -5,12 +5,14 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  lstatSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, extname, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   BrowserWindow,
   Menu,
@@ -220,6 +222,34 @@ import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
 import { AutomationDispatcher } from './automation-dispatcher'
 import { parseAutomationMode, sanitizeAutomationEnvironment } from './automation-mode'
 import { AutomationServer } from './automation-server'
+
+function isPathUnder(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+function safeScreenshotPath(outputRoot: string, name: string): string {
+  const root = resolve(outputRoot)
+  const destination = resolve(root, name)
+  if (destination.includes('\u0000') || !isPathUnder(root, destination)) {
+    throw new Error('screenshot destination is outside the automation output root')
+  }
+  const rootStat = lstatSync(root)
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error('automation output root is not a safe directory')
+  }
+  const realRoot = resolve(realpathSync.native(root))
+  if (!isPathUnder(realRoot, resolve(realRoot, name))) {
+    throw new Error('screenshot destination escapes the automation output root')
+  }
+  if (existsSync(destination)) {
+    const destinationStat = lstatSync(destination)
+    if (destinationStat.isSymbolicLink() || !destinationStat.isFile()) {
+      throw new Error('screenshot destination is not a safe file')
+    }
+  }
+  return destination
+}
 
 /**
  * Zanostack unified shell: ONE Electron app, ONE BrowserWindow, hosting the
@@ -2345,8 +2375,43 @@ async function startAutomationServerWhenReady(): Promise<void> {
       },
       openFile: (path) => openDocumentPath(path),
       recentFiles: () => readRecentFiles(),
+      captureScreenshot: async (options) => {
+        const shell = shellWindow
+        if (!shell) return null
+        const tabs = manager.list()
+        const requestedId = options.tabId ?? tabs.find((tab) => tab.active)?.id
+        if (!requestedId || !tabs.some((tab) => tab.id === requestedId)) return null
+        const active = tabs.find((tab) => tab.active)?.id
+        if (requestedId !== active) manager.activateTab(requestedId)
+        const target = manager.activeTab()
+        const targetWebContents =
+          requestedId === 'home' ? shell.webContents : target?.view?.webContents
+        if (
+          !target ||
+          target.id !== requestedId ||
+          !targetWebContents ||
+          targetWebContents.isDestroyed()
+        ) {
+          return null
+        }
+        const image = await targetWebContents.capturePage()
+        const size = image.getSize()
+        const timestamp = new Date()
+          .toISOString()
+          .replace(/[-:]/g, '')
+          .slice(0, 15)
+          .replace('T', '-')
+        const name = options.name ?? `screenshot-${requestedId}-${timestamp}.png`
+        const path = safeScreenshotPath(automationMode.outputRoot, name)
+        writeFileSync(path, image.toPNG())
+        return { path, tabId: requestedId, name, width: size.width, height: size.height }
+      },
     },
-    { sessionRoot: automationMode.sessionRoot, inputRoot: automationMode.inputRoot },
+    {
+      sessionRoot: automationMode.sessionRoot,
+      inputRoot: automationMode.inputRoot,
+      outputRoot: automationMode.outputRoot,
+    },
   )
   const token = randomBytes(32).toString('base64url')
   const server = new AutomationServer({

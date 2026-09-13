@@ -12,15 +12,16 @@ tabs list
 tabs activate TAB_ID
 files open DOCX_PATH
 files recent
+screenshots capture [--tab TAB_ID] [--name NAME]
 ```
 
 There is no protocol shutdown, tab close, editor/document mutation, Markdown,
 Docs creation, export, business operation, force/discard action, CDP, or Node
 inspector capability. Markdown/Tiptap automation remains deferred.
 
-`test_full_e2e.py` exists as the approved isolated real-Electron test. Its two
-cases have now executed under the explicitly configured source-runtime lane;
-broader release and coverage claims remain out of scope.
+`test_full_e2e.py` exists as the approved isolated real-Electron test. Its
+real-shell case is explicitly gated and skips when the configured target lane
+is absent; broader release and coverage claims remain out of scope.
 
 ## Current test inventory
 
@@ -35,8 +36,8 @@ The current non-Electron inventory contains exactly these files:
 | `test_protocol_integration.py`     | Executed; request IDs, structured failures, and unauthorized responses.                                    |
 | `test_cross_language_bootstrap.py` | Executed; real Python-to-TypeScript no-Electron bootstrap matrix.                                          |
 
-The current full suite contains 50 executed tests: 48 maintained non-Electron
-cases plus the two supervised `test_full_e2e.py` cases.
+The latest local run contains 52 passed tests and 1 skipped real-shell test;
+the skip is the explicitly gated `test_full_e2e.py` target lane.
 
 ## TDD history
 
@@ -171,6 +172,24 @@ The test-owned supervisor retained the production Launcher child, revalidated
 identity, verified terminal child exit, and removed endpoint, session, selector,
 and session-root artifacts. After completion, only the global idle
 `lifecycle.lock` remained under `%LOCALAPPDATA%\GenOffice\agent-sessions`.
+
+## Screenshots capture validation
+
+Executed from `agent-harness/cli_anything/genoffice`:
+
+```text
+python -m pytest tests/ -q
+```
+
+Result: **52 passed, 1 skipped in 4.40s**. The run covered the JSON success
+payload, omission of absent `tabId`/`name`, exact client-side name and tab-ID
+validation, and authenticated transport forwarding for `screenshots.capture`.
+
+The real-shell capture-after-activate workflow was **blocked/skipped** because
+`GENOFFICE_REAL_E2E=1` and `CLI_ANYTHING_FORCE_INSTALLED=1` were not configured,
+and no explicit packaged or source shell target was present. It was not run
+against a fake replacement app. To execute it, use the existing explicit target
+environment and installed CLI requirements documented above.
 
 ## Remaining limitations
 

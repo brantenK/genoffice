@@ -6,6 +6,7 @@ import type {
   AutomationCommandName,
   AutomationFailure,
   AutomationResponse,
+  ScreenshotCaptureResult,
   AutomationSuccess,
 } from '../shared/automation-api'
 import { AUTOMATION_PROTOCOL_VERSION } from '../shared/automation-api'
@@ -16,13 +17,16 @@ const COMMANDS = new Set<AutomationCommandName>([
   'tabs.activate',
   'files.open',
   'files.recent',
+  'screenshots.capture',
 ])
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/
 const TAB_ID = /^[A-Za-z0-9_-]{1,64}$/
+const SCREENSHOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}\.png$/i
 
 export interface AutomationDispatcherOptions {
   sessionRoot: string
   inputRoot: string
+  outputRoot: string
 }
 
 function failure(
@@ -103,6 +107,17 @@ function validate(
   }
   if (command === 'files.open' && (!exact(payload, ['path']) || !safeDocx(payload.path, inputRoot)))
     return { error: failure('INVALID_REQUEST', 'invalid input document path', requestId) }
+  if (command === 'screenshots.capture') {
+    const keys = Object.keys(payload)
+    if (
+      keys.some((key) => key !== 'tabId' && key !== 'name') ||
+      (payload.tabId !== undefined &&
+        (typeof payload.tabId !== 'string' || !TAB_ID.test(payload.tabId))) ||
+      (payload.name !== undefined &&
+        (typeof payload.name !== 'string' || !SCREENSHOT_NAME.test(payload.name)))
+    )
+      return { error: failure('INVALID_REQUEST', 'invalid screenshot payload', requestId) }
+  }
   return { command: raw as unknown as AutomationCommand }
 }
 
@@ -160,6 +175,15 @@ export class AutomationDispatcher {
             }
           })
           return success(requestId, { files })
+        }
+        case 'screenshots.capture': {
+          const result = await this.adapters.captureScreenshot({
+            ...(payload.tabId !== undefined ? { tabId: payload.tabId as string } : {}),
+            ...(payload.name !== undefined ? { name: payload.name as string } : {}),
+          })
+          return result === null
+            ? failure('NOT_FOUND', 'tab not found', requestId)
+            : success(requestId, result as ScreenshotCaptureResult)
         }
       }
     } catch {
