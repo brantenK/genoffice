@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { EmptyState } from './EmptyState'
 import type { Contact } from '../../../shared/types'
 import { SearchIcon, EditIcon, TrashIcon } from './Icons'
 
@@ -64,6 +65,29 @@ export function ContactsView({ contacts, onEditContact, onDeleteContact }: Conta
             </tr>
           </thead>
           <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={7}>
+                  <EmptyState
+                    title="No contacts found"
+                    message={
+                      contacts.length
+                        ? 'Try a different search or status.'
+                        : 'Add a contact to start building your network.'
+                    }
+                    actionLabel={contacts.length ? 'Clear filters' : undefined}
+                    onAction={
+                      contacts.length
+                        ? () => {
+                            setSearch('')
+                            setStatusFilter('all')
+                          }
+                        : undefined
+                    }
+                  />
+                </td>
+              </tr>
+            )}
             {filtered.map((c) => {
               const initials = c.name
                 .split(' ')
@@ -89,7 +113,11 @@ export function ContactsView({ contacts, onEditContact, onDeleteContact }: Conta
                   <td>{c.companyName || '—'}</td>
                   <td>
                     <div style={{ color: 'var(--crm-text)' }}>{c.email}</div>
-                    {c.phone && <div style={{ fontSize: '11px', color: 'var(--crm-text-dim)' }}>{c.phone}</div>}
+                    {c.phone && (
+                      <div style={{ fontSize: '11px', color: 'var(--crm-text-dim)' }}>
+                        {c.phone}
+                      </div>
+                    )}
                   </td>
                   <td>
                     {c.tags.map((t) => (
@@ -105,7 +133,12 @@ export function ContactsView({ contacts, onEditContact, onDeleteContact }: Conta
                           width: 5,
                           height: 5,
                           borderRadius: '50%',
-                          backgroundColor: c.status === 'active' ? '#059669' : c.status === 'lead' ? '#2563eb' : '#dc2626',
+                          backgroundColor:
+                            c.status === 'active'
+                              ? '#059669'
+                              : c.status === 'lead'
+                                ? '#2563eb'
+                                : '#dc2626',
                         }}
                       />
                       {c.status}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { EmptyState } from './EmptyState'
 import type { Company } from '../../../shared/types'
 import { BuildingIcon, SearchIcon, EditIcon, TrashIcon } from './Icons'
 
@@ -51,6 +52,22 @@ export function CompaniesView({ companies, onEditCompany, onDeleteCompany }: Com
             </tr>
           </thead>
           <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6}>
+                  <EmptyState
+                    title="No accounts found"
+                    message={
+                      companies.length
+                        ? 'Try a different search.'
+                        : 'Add an account to keep company details together.'
+                    }
+                    actionLabel={search ? 'Clear search' : undefined}
+                    onAction={search ? () => setSearch('') : undefined}
+                  />
+                </td>
+              </tr>
+            )}
             {filtered.map((c) => {
               return (
                 <tr key={c.id}>

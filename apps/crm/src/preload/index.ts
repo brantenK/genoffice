@@ -1,9 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CRM_CHANNELS, type CrmApi } from '../shared/ipc'
-import type { Company, Contact, Deal, DealStage } from '../shared/types'
+import type { ActivityPatch, Company, Contact, Deal, DealStage } from '../shared/types'
 
 const crmApi: CrmApi = {
   getStats: () => ipcRenderer.invoke(CRM_CHANNELS.getStats),
+  getRecoveryState: () => ipcRenderer.invoke(CRM_CHANNELS.getRecoveryState),
+  acknowledgeRecovery: () => ipcRenderer.invoke(CRM_CHANNELS.acknowledgeRecovery),
+  listAudit: (filter) => ipcRenderer.invoke(CRM_CHANNELS.listAudit, filter),
+  findContactDuplicate: (email: string, excludeId?: string) =>
+    ipcRenderer.invoke(CRM_CHANNELS.findContactDuplicate, email, excludeId),
+  findCompanyDuplicate: (name: string, domain?: string, excludeId?: string) =>
+    ipcRenderer.invoke(CRM_CHANNELS.findCompanyDuplicate, name, domain, excludeId),
 
   listDeals: () => ipcRenderer.invoke(CRM_CHANNELS.listDeals),
   getDeal: (id: string) => ipcRenderer.invoke(CRM_CHANNELS.getDeal, id),
@@ -22,6 +29,9 @@ const crmApi: CrmApi = {
 
   listActivities: (filter) => ipcRenderer.invoke(CRM_CHANNELS.listActivities, filter),
   addActivity: (act) => ipcRenderer.invoke(CRM_CHANNELS.addActivity, act),
+  updateActivity: (id: string, patch: ActivityPatch) =>
+    ipcRenderer.invoke(CRM_CHANNELS.updateActivity, id, patch),
+  deleteActivity: (id: string) => ipcRenderer.invoke(CRM_CHANNELS.deleteActivity, id),
   toggleActivity: (id) => ipcRenderer.invoke(CRM_CHANNELS.toggleActivity, id),
 
   exportToSheets: () => ipcRenderer.invoke(CRM_CHANNELS.exportToSheets),

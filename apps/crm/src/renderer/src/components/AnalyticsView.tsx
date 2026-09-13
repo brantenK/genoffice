@@ -7,7 +7,7 @@ interface AnalyticsViewProps {
 }
 
 export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
-  const avgDealSize = stats.totalDeals > 0 ? Math.round(stats.totalPipelineValue / stats.totalDeals) : 0
+  const totalValue = deals.reduce((sum, deal) => sum + (deal.amount || 0), 0)
 
   const stageBreakdown = [
     { stage: 'lead', label: 'Lead Generation', color: '#64748b' },
@@ -19,7 +19,7 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
   ].map((item) => {
     const list = deals.filter((d) => d.stage === item.stage)
     const val = list.reduce((sum, d) => sum + (d.amount || 0), 0)
-    const pct = stats.totalPipelineValue > 0 ? Math.round((val / stats.totalPipelineValue) * 100) : 0
+    const pct = totalValue > 0 ? Math.round((val / totalValue) * 100) : 0
     return { ...item, count: list.length, value: val, pct }
   })
 
@@ -30,7 +30,10 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
         <div className="crm-stat-card">
           <div className="crm-stat-title">Total Pipeline Value</div>
           <div className="crm-stat-number">${stats.totalPipelineValue.toLocaleString()}</div>
-          <div className="crm-stat-sub">Across {stats.totalDeals} active opportunities</div>
+          <div className="crm-stat-sub">Across {stats.openDeals} open opportunities</div>
+          <div className="crm-stat-sub">
+            Weighted forecast: ${stats.weightedForecastValue.toLocaleString()}
+          </div>
         </div>
 
         <div className="crm-stat-card">
@@ -51,17 +54,17 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
 
         <div className="crm-stat-card">
           <div className="crm-stat-title">Average Deal Size</div>
-          <div className="crm-stat-number">${avgDealSize.toLocaleString()}</div>
-          <div className="crm-stat-sub">Per registered opportunity</div>
+          <div className="crm-stat-number">${stats.avgOpenDealSize.toLocaleString()}</div>
+          <div className="crm-stat-sub">Per open opportunity</div>
         </div>
       </div>
 
       {/* Stage Breakdown Progress Bars */}
       <div className="crm-chart-card">
         <div className="crm-chart-header">
-          <div className="crm-chart-title">Pipeline Stage Distribution</div>
+          <div className="crm-chart-title">Value by Stage</div>
           <div style={{ fontSize: '12px', color: 'var(--crm-text-muted)' }}>
-            Total Value: ${stats.totalPipelineValue.toLocaleString()}
+            Total Value: ${totalValue.toLocaleString()}
           </div>
         </div>
 

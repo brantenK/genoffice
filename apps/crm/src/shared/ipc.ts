@@ -1,7 +1,33 @@
-import type { Activity, Company, Contact, CrmStats, Deal, DealStage } from './types'
+import type {
+  Activity,
+  ActivityPatch,
+  Company,
+  Contact,
+  CrmAuditEntry,
+  CrmStats,
+  Deal,
+  DealStage,
+} from './types'
+
+export interface CrmRecoveryItem {
+  entity: 'deals' | 'contacts' | 'companies' | 'activities'
+  file: string
+  quarantinePath: string
+  reason: string
+}
+
+export interface CrmRecoveryState {
+  items: Array<CrmRecoveryItem & { acknowledged: boolean }>
+  pending: boolean
+}
 
 export const CRM_CHANNELS = {
   getStats: 'crm:get-stats',
+  getRecoveryState: 'crm:getRecoveryState',
+  acknowledgeRecovery: 'crm:acknowledgeRecovery',
+  listAudit: 'crm:list-audit',
+  findContactDuplicate: 'crm:find-contact-duplicate',
+  findCompanyDuplicate: 'crm:find-company-duplicate',
   // Deals
   listDeals: 'crm:list-deals',
   getDeal: 'crm:get-deal',
@@ -19,6 +45,8 @@ export const CRM_CHANNELS = {
   // Activities
   listActivities: 'crm:list-activities',
   addActivity: 'crm:add-activity',
+  updateActivity: 'crm:update-activity',
+  deleteActivity: 'crm:delete-activity',
   toggleActivity: 'crm:toggle-activity',
   // Cross-App Integrations
   exportToSheets: 'crm:export-to-sheets',
@@ -30,6 +58,18 @@ export const CRM_CHANNELS = {
 
 export interface CrmApi {
   getStats(): Promise<CrmStats>
+  getRecoveryState(): Promise<CrmRecoveryState>
+  acknowledgeRecovery(): Promise<void>
+  listAudit(filter?: { dealId?: string; limit?: number }): Promise<CrmAuditEntry[]>
+  findContactDuplicate(
+    email: string,
+    excludeId?: string,
+  ): Promise<{ id: string; name: string } | null>
+  findCompanyDuplicate(
+    name: string,
+    domain?: string,
+    excludeId?: string,
+  ): Promise<{ id: string; name: string } | null>
   openTenders(): Promise<boolean>
   openBooks(): Promise<boolean>
   createInvoiceInBooks(
@@ -52,6 +92,8 @@ export interface CrmApi {
   // Activities
   listActivities(filter?: { dealId?: string; contactId?: string }): Promise<Activity[]>
   addActivity(activity: Omit<Activity, 'id' | 'createdAt'>): Promise<Activity>
+  updateActivity(id: string, patch: ActivityPatch): Promise<Activity>
+  deleteActivity(id: string): Promise<boolean>
   toggleActivity(id: string): Promise<boolean>
   // Cross-App
   exportToSheets(): Promise<{ ok: boolean; path?: string; error?: string }>

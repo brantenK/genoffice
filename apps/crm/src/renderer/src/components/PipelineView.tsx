@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type { Deal, DealStage } from '../../../shared/types'
+import { DealDetail } from './DealDetail'
 import {
   BuildingIcon,
   FileTextIcon,
@@ -7,6 +8,8 @@ import {
   EditIcon,
   TrashIcon,
   TenderIcon,
+  UsersIcon,
+  CalendarIcon,
 } from './Icons'
 
 interface PipelineViewProps {
@@ -36,6 +39,12 @@ export function PipelineView({
   const [activeMenuDealId, setActiveMenuDealId] = useState<string | null>(null)
   const [draggedDealId, setDraggedDealId] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<DealStage | null>(null)
+  const [detailDealId, setDetailDealId] = useState<string | null>(null)
+  const detailDeal = detailDealId ? deals.find((deal) => deal.id === detailDealId) : undefined
+
+  useEffect(() => {
+    if (detailDealId && !detailDeal) setDetailDealId(null)
+  }, [detailDeal, detailDealId])
 
   return (
     <div
@@ -127,7 +136,14 @@ export function PipelineView({
                       {/* Popover Menu */}
                       {isMenuOpen && (
                         <div className="crm-popover-menu" onClick={(e) => e.stopPropagation()}>
-                          <div style={{ padding: '4px 8px', fontSize: '10.5px', color: 'var(--crm-text-dim)', fontWeight: 600 }}>
+                          <div
+                            style={{
+                              padding: '4px 8px',
+                              fontSize: '10.5px',
+                              color: 'var(--crm-text-dim)',
+                              fontWeight: 600,
+                            }}
+                          >
                             MOVE STAGE
                           </div>
                           {STAGES.filter((s) => s.key !== deal.stage).map((s) => (
@@ -139,7 +155,15 @@ export function PipelineView({
                                 setActiveMenuDealId(null)
                               }}
                             >
-                              <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: s.color, display: 'inline-block' }} />
+                              <span
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: '50%',
+                                  backgroundColor: s.color,
+                                  display: 'inline-block',
+                                }}
+                              />
                               <span>{s.label}</span>
                             </button>
                           ))}
@@ -189,10 +213,31 @@ export function PipelineView({
                     </div>
 
                     {/* Main Deal Information */}
-                    <div className="crm-deal-main" onClick={() => onEditDeal(deal)}>
+                    <div className="crm-deal-main" onClick={() => setDetailDealId(deal.id)}>
                       <div className="crm-deal-title">{deal.name}</div>
                       <div className="crm-deal-amount">${(deal.amount || 0).toLocaleString()}</div>
                       {deal.notes && <p className="crm-deal-notes">{deal.notes}</p>}
+                      {(deal.owner || deal.nextStep) && (
+                        <div className="crm-deal-context">
+                          {deal.owner && (
+                            <span className="crm-deal-context-item" title={`Owner: ${deal.owner}`}>
+                              <UsersIcon size={12} />
+                              <span className="crm-deal-context-label">Owner</span>
+                              <span className="crm-deal-context-value">{deal.owner}</span>
+                            </span>
+                          )}
+                          {deal.nextStep && (
+                            <span
+                              className="crm-deal-context-item"
+                              title={`Next step: ${deal.nextStep}`}
+                            >
+                              <CalendarIcon size={12} />
+                              <span className="crm-deal-context-label">Next step</span>
+                              <span className="crm-deal-context-value">{deal.nextStep}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Bottom Row: Contact info & Quick actions */}
@@ -227,6 +272,21 @@ export function PipelineView({
           </div>
         )
       })}
+      {detailDeal && (
+        <DealDetail
+          deal={detailDeal}
+          onClose={() => setDetailDealId(null)}
+          onEditDeal={(selectedDeal) => {
+            setDetailDealId(null)
+            onEditDeal(selectedDeal)
+          }}
+          onDeleteDeal={(id) => {
+            setDetailDealId(null)
+            onDeleteDeal(id)
+          }}
+          onGenerateProposal={onGenerateProposal}
+        />
+      )}
     </div>
   )
 }
