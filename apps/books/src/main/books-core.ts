@@ -476,12 +476,18 @@ export interface IssueSalesInvoiceResult {
 export function issueSalesInvoiceInBooks(input: IssueSalesInvoiceInput): IssueSalesInvoiceResult {
   try {
     if (!input || !input.booksDataPath) return { ok: false, error: 'booksDataPath is required' }
+
+    const crmDealId = typeof input.crmDealId === 'string' ? input.crmDealId.trim() : ''
     const amount = round2(Number(input.amount) || 0)
     if (amount <= 0) return { ok: false, error: 'Invoice amount must be greater than 0' }
     const partyName = String(input.partyName || '').trim()
     if (!partyName) return { ok: false, error: 'Party name is required' }
 
     const booksData = readBooksStore(input.booksDataPath)
+    if (crmDealId) {
+      const existingInvoice = booksData.invoices.find((invoice) => invoice.crmDealId === crmDealId)
+      if (existingInvoice) return { ok: true, invoice: existingInvoice }
+    }
 
     let party = booksData.parties.find((p) => p.name.toLowerCase() === partyName.toLowerCase())
     if (!party) {
@@ -553,7 +559,7 @@ export function issueSalesInvoiceInBooks(input: IssueSalesInvoiceInput): IssueSa
       status: 'Unpaid',
       notes: input.notes || 'Payment terms: Net 30 days upon invoice receipt.',
       tenderReference: input.tenderReference,
-      crmDealId: input.crmDealId,
+      crmDealId: crmDealId || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
