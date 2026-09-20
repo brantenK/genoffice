@@ -1,0 +1,88 @@
+{
+  "id": "civ-mun-ocr-019",
+  "synthetic": true,
+  "sector": "construction-civil",
+  "issuerType": "municipal",
+  "tags": ["construction", "municipal", "ocr-variants", "ligature-gap", "nbsp", "en-dash"],
+  "title": "Construction of Sanitation Infrastructure in Welkom",
+  "titleAlternatives": [],
+  "referenceNumber": "MAT-CIV-2026-0533",
+  "issuingBody": "MATJHABENG LOCAL MUNICIPALITY",
+  "closingDateTime": "26 January 2027 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "tender box at the Matjhabeng Civic Centre, Welkom",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "police_certification",
+    "sbd_forms",
+    "key_personnel",
+    "financials",
+    "subcontracting",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "police_certification",
+    "sbd_forms"
+  ],
+  "disqualifiers": [
+    "tax_pin",
+    "coida",
+    "cipc",
+    "director_ids",
+    "csd",
+    "police_certification",
+    "sbd_forms"
+  ],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 3,
+  "clearable": true,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Construction of Sanitation Infrastructure in Welkom" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: MAT-CIV-2026-0533"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "MATJHABENG LOCAL MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 26 January 2027 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "tender box at the Matjhabeng Civic Centre, Welkom"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "tender box at the Matjhabeng Civic Centre, Welkom"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "director_ids": { "page": 2 },
+      "csd": { "page": 2 },
+      "police_certification": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "key_personnel": { "page": 2 },
+      "financials": { "page": 2 },
+      "subcontracting": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "6b9a04b5f55a466cfdc54f846fe3b73304fe2c65a6856b80aa4e2a7c851b382e",
+  "pdfBytes": 2705
+}

@@ -1,0 +1,87 @@
+{
+  "id": "ofc-prov-two-col-004",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "provincial-government",
+  "tags": ["office-equipment", "provincial", "two-column", "native"],
+  "title": "Supply of Office Furniture for Regional Hospitals",
+  "titleAlternatives": [],
+  "referenceNumber": "GT-DOH-2026-0233",
+  "issuingBody": "GAUTENG DEPARTMENT OF HEALTH",
+  "closingDateTime": "22 January 2027 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the Bank of Lisbon Building, Johannesburg",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "non_compliance",
+    "closing_time",
+    "contact_person",
+    "bill_of_quantities",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "non_compliance",
+    "pricing_schedule"
+  ],
+  "disqualifiers": [
+    "tax_pin",
+    "coida",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "non_compliance",
+    "pricing_schedule"
+  ],
+  "pricingRequirements": ["bill_of_quantities", "pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 5,
+  "clearable": true,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Supply of Office Furniture for Regional Hospitals" },
+    "referenceNumber": { "page": 1, "clauseContains": "Tender Reference Number: GT-DOH-2026-0233" },
+    "issuingBody": { "page": 1, "clauseContains": "GAUTENG DEPARTMENT OF HEALTH" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 22 January 2027 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "bid box at the Bank of Lisbon Building, Johannesburg"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the Bank of Lisbon Building, Johannesburg"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "director_ids": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "non_compliance": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "bill_of_quantities": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "6b2dc59c7a0d2499af1d56845f6d7e7ce233e6026caf8fcfddcc3217fdcb8e1e",
+  "pdfBytes": 3470
+}

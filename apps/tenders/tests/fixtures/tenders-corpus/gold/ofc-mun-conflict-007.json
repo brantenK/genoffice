@@ -1,0 +1,56 @@
+{
+  "id": "ofc-mun-conflict-007",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "municipal",
+  "tags": ["office-equipment", "municipal", "conflict", "amended-deadline"],
+  "title": "Supply of Office Equipment and Consumables",
+  "titleAlternatives": [],
+  "referenceNumber": "COT-OFC-2026-0155",
+  "issuingBody": "CITY OF TSHWANE METROPOLITAN MUNICIPALITY",
+  "closingDateTime": "20 November 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the Tshwane House, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "cipc",
+    "csd",
+    "sbd_forms",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "bbbee", "cipc", "csd", "sbd_forms"],
+  "disqualifiers": ["tax_pin", "cipc", "csd", "sbd_forms"],
+  "pricingRequirements": [],
+  "conflicts": { "closingDateTime": true },
+  "unconfirmedFields": ["closingDateTime"],
+  "scannedPages": [],
+  "pageCount": 3,
+  "clearable": false,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Supply of Office Equipment and Consumables" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: COT-OFC-2026-0155"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "CITY OF TSHWANE METROPOLITAN MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 20 November 2026 at 11:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "bid box at the Tshwane House, Pretoria" },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the Tshwane House, Pretoria"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "d89d23f1b2a00e50f2531b8c8239ea3f6c62aac4e769552c88e19cdfdd05fe66",
+  "pdfBytes": 2449
+}

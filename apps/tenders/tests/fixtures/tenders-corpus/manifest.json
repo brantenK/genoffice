@@ -1,0 +1,282 @@
+{
+  "corpusKind": "synthetic",
+  "fixtureCount": 30,
+  "fixtures": [
+    {
+      "id": "ofc-gov-clean-001",
+      "sector": "office-equipment",
+      "issuerType": "government",
+      "tags": ["office-equipment", "government", "native", "clean", "pricing-schedule"],
+      "pageCount": 5,
+      "scannedPages": [],
+      "pdfSha256": "aca78838dbf925cec301a1ad78317605c9e16857b6b3901c8dea3f93cea7a9c9"
+    },
+    {
+      "id": "ofc-mun-boq-002",
+      "sector": "office-equipment",
+      "issuerType": "municipal",
+      "tags": ["office-equipment", "municipal", "pricing-schedule", "boq", "table"],
+      "pageCount": 5,
+      "scannedPages": [],
+      "pdfSha256": "40a1b04d715e31b50b774cd69ec686bff2296f74e2c40e63581ce81bd334a508"
+    },
+    {
+      "id": "ofc-mun-email-003",
+      "sector": "office-equipment",
+      "issuerType": "municipal",
+      "tags": ["office-equipment", "municipal", "email", "pricing-schedule"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "9d20bbbadec74f2493cba06e28cd4a52a625cf15dfd1b625035d5f231dc2ad98"
+    },
+    {
+      "id": "ofc-prov-two-col-004",
+      "sector": "office-equipment",
+      "issuerType": "provincial-government",
+      "tags": ["office-equipment", "provincial", "two-column", "native"],
+      "pageCount": 5,
+      "scannedPages": [],
+      "pdfSha256": "6b2dc59c7a0d2499af1d56845f6d7e7ce233e6026caf8fcfddcc3217fdcb8e1e"
+    },
+    {
+      "id": "ofc-gov-scan-005",
+      "sector": "office-equipment",
+      "issuerType": "government",
+      "tags": ["office-equipment", "government", "scanned-only", "ocr-required"],
+      "pageCount": 2,
+      "scannedPages": [1, 2],
+      "pdfSha256": "b21b9a5fb1f7cab84cf6445a2457322c7bbe820d75d746bc8f46f94fc63bdae2"
+    },
+    {
+      "id": "ofc-gov-mixed-006",
+      "sector": "office-equipment",
+      "issuerType": "government",
+      "tags": ["office-equipment", "government", "mixed", "ocr-required"],
+      "pageCount": 5,
+      "scannedPages": [2, 5],
+      "pdfSha256": "5b4afb5c09382bc1bcd9936ffd07db815b457c3e1bc744dc49a8a549546a4e94"
+    },
+    {
+      "id": "ofc-mun-conflict-007",
+      "sector": "office-equipment",
+      "issuerType": "municipal",
+      "tags": ["office-equipment", "municipal", "conflict", "amended-deadline"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "d89d23f1b2a00e50f2531b8c8239ea3f6c62aac4e769552c88e19cdfdd05fe66"
+    },
+    {
+      "id": "ofc-gov-tz-008",
+      "sector": "office-equipment",
+      "issuerType": "government",
+      "tags": ["office-equipment", "government", "timezone", "rfc3339"],
+      "pageCount": 2,
+      "scannedPages": [],
+      "pdfSha256": "8db21cf20907f90e93c979f9c44d37c249a270fa86b2c76c461bffe731959e5c"
+    },
+    {
+      "id": "ofc-gov-tz-sast-009",
+      "sector": "office-equipment",
+      "issuerType": "government",
+      "tags": ["office-equipment", "government", "timezone", "unsupported-abbreviation"],
+      "pageCount": 2,
+      "scannedPages": [],
+      "pdfSha256": "7502d8f0ee9bdc277a9e107c5a2b1393ee5f3ab5aedf29039eedac78324b9644"
+    },
+    {
+      "id": "ofc-corp-table-010",
+      "sector": "office-equipment",
+      "issuerType": "corporate",
+      "tags": ["office-equipment", "corporate", "table", "incidental-false-positive"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "cbc0d6bf3119c178923f46e9a93dfff4ef43bd51f55145e6dcf140ffbee09911"
+    },
+    {
+      "id": "civ-mun-clean-011",
+      "sector": "construction-civil",
+      "issuerType": "municipal",
+      "tags": ["construction", "municipal", "native", "clean"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "72a4b1d7776cc0d82b74ccb73863676c0db8a9fcebaddeaed94cad472d9737ad"
+    },
+    {
+      "id": "civ-prov-boq-012",
+      "sector": "construction-civil",
+      "issuerType": "provincial-government",
+      "tags": ["construction", "provincial", "boq", "bid-security"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "169547542e8f0451e5d5ae324c3a32b20acc1077714125aed2a8cc8bf13dfc2c"
+    },
+    {
+      "id": "civ-mun-two-col-013",
+      "sector": "construction-civil",
+      "issuerType": "municipal",
+      "tags": ["construction", "municipal", "two-column"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "dcfd53ace5ac3be85f415ecff08527b0e78bf121816c4b640904fe4216398cab"
+    },
+    {
+      "id": "civ-gov-scan-014",
+      "sector": "construction-civil",
+      "issuerType": "government",
+      "tags": ["construction", "government", "scanned-only", "ocr-required"],
+      "pageCount": 3,
+      "scannedPages": [1, 2, 3],
+      "pdfSha256": "962d1f55071f441fc14ae3be6ff5d7287215f7e06316016e34c2fde522d23628"
+    },
+    {
+      "id": "civ-gov-mixed-015",
+      "sector": "construction-civil",
+      "issuerType": "government",
+      "tags": ["construction", "government", "mixed", "ocr-required"],
+      "pageCount": 4,
+      "scannedPages": [2, 4],
+      "pdfSha256": "93dbabf2d498c96dbb6f248d4142e395a512937e7c89d02773b94b6ebb929330"
+    },
+    {
+      "id": "civ-mun-conflict-016",
+      "sector": "construction-civil",
+      "issuerType": "municipal",
+      "tags": [
+        "construction",
+        "municipal",
+        "conflict",
+        "amended-deadline",
+        "conflicting-destination"
+      ],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "db9fb0fb2f763d9e39ab7ca96286e12475e3189dfe8900486ffd75cf103771f1"
+    },
+    {
+      "id": "civ-gov-tz-017",
+      "sector": "construction-civil",
+      "issuerType": "government",
+      "tags": ["construction", "government", "timezone", "rfc3339"],
+      "pageCount": 2,
+      "scannedPages": [],
+      "pdfSha256": "f0e81c750aed86c3a09359fe8f5351b161c6760a3a30701ac5d1db75b022256b"
+    },
+    {
+      "id": "civ-corp-table-018",
+      "sector": "construction-civil",
+      "issuerType": "corporate",
+      "tags": ["construction", "corporate", "table", "boq"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "8f0a85637bfaf1a34ceb5204c3570616a6169dadcb8da3efed0618d438396c5c"
+    },
+    {
+      "id": "civ-mun-ocr-019",
+      "sector": "construction-civil",
+      "issuerType": "municipal",
+      "tags": ["construction", "municipal", "ocr-variants", "ligature-gap", "nbsp", "en-dash"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "6b9a04b5f55a466cfdc54f846fe3b73304fe2c65a6856b80aa4e2a7c851b382e"
+    },
+    {
+      "id": "civ-gov-annex-020",
+      "sector": "construction-civil",
+      "issuerType": "government",
+      "tags": ["construction", "government", "annexures", "forms", "sbd"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "84c9b4c54ce4b4fe51692783701dedd71241cae7455b741f4836ffd9e9671f7b"
+    },
+    {
+      "id": "pro-gov-clean-021",
+      "sector": "professional-services",
+      "issuerType": "government",
+      "tags": ["professional-services", "government", "native", "clean"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "6e1f6a2cfc319beba90cc9eaf1043c058818934f50bea9bf060faa9ec0b96d1b"
+    },
+    {
+      "id": "pro-mun-rfq-022",
+      "sector": "professional-services",
+      "issuerType": "municipal",
+      "tags": ["professional-services", "municipal", "rfq", "pricing-schedule"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "cb84ec6e223aab923c0c8b42f3ae4682000ecb93a3eb124753efc762998ec3d8"
+    },
+    {
+      "id": "pro-prov-two-col-023",
+      "sector": "professional-services",
+      "issuerType": "provincial-government",
+      "tags": ["professional-services", "provincial", "two-column"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "beace69274cbb39b7490730b7bbc0e7af5b6db765ff858a8cd52d7134f32393c"
+    },
+    {
+      "id": "pro-gov-scan-024",
+      "sector": "professional-services",
+      "issuerType": "government",
+      "tags": ["professional-services", "government", "scanned-only", "ocr-required"],
+      "pageCount": 2,
+      "scannedPages": [1, 2],
+      "pdfSha256": "b21b9a5fb1f7cab84cf6445a2457322c7bbe820d75d746bc8f46f94fc63bdae2"
+    },
+    {
+      "id": "pro-gov-mixed-025",
+      "sector": "professional-services",
+      "issuerType": "government",
+      "tags": ["professional-services", "government", "mixed", "ocr-required"],
+      "pageCount": 4,
+      "scannedPages": [2, 4],
+      "pdfSha256": "417d9cdb05171e2f7eccc78c943e8aa0b5d22ed5a1077dcc2a4d2a3ee615b9b1"
+    },
+    {
+      "id": "pro-mun-conflict-026",
+      "sector": "professional-services",
+      "issuerType": "municipal",
+      "tags": ["professional-services", "municipal", "conflict", "amended-deadline"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "dcc6f98eb191c83ddb424b0492200905655a46411e1ed741da98d78e0f423ac0"
+    },
+    {
+      "id": "pro-gov-tz-027",
+      "sector": "professional-services",
+      "issuerType": "government",
+      "tags": ["professional-services", "government", "timezone", "rfc3339"],
+      "pageCount": 2,
+      "scannedPages": [],
+      "pdfSha256": "4bfd5adc5cb7a799ff37b46975ce44148b8ca2996c1340a71892d7eebefc1415"
+    },
+    {
+      "id": "pro-corp-table-028",
+      "sector": "professional-services",
+      "issuerType": "corporate",
+      "tags": ["professional-services", "corporate", "table", "pricing-schedule"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "f8759d31110ff54a3f6a42142259e1d65429f5e8466df2e4332f67b17674963b"
+    },
+    {
+      "id": "pro-gov-ocr-029",
+      "sector": "professional-services",
+      "issuerType": "government",
+      "tags": ["professional-services", "government", "ocr-variants", "curly-quotes", "em-dash"],
+      "pageCount": 3,
+      "scannedPages": [],
+      "pdfSha256": "8f9ce029b21b07abce2271566483bc5844c3bd97c82f581852b7ca54c8d5a6bb"
+    },
+    {
+      "id": "pro-mun-annex-030",
+      "sector": "professional-services",
+      "issuerType": "municipal",
+      "tags": ["professional-services", "municipal", "annexures", "b-bbee-variants"],
+      "pageCount": 4,
+      "scannedPages": [],
+      "pdfSha256": "c0aa5ef9788869d8f3b313009e36e24bcb492179dbf8b6eb0ae4bf9dfe7d361f"
+    }
+  ]
+}

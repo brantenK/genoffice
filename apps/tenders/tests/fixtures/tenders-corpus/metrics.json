@@ -1,0 +1,1580 @@
+{
+  "corpusKind": "synthetic",
+  "fixtureCount": 30,
+  "metrics": {
+    "criticalMetadataAccuracy": {
+      "overall": 1,
+      "perField": {
+        "title": { "correct": 30, "total": 30 },
+        "referenceNumber": { "correct": 30, "total": 30 },
+        "issuingBody": { "correct": 30, "total": 30 },
+        "closingDateTime": { "correct": 30, "total": 30 },
+        "submissionMethod": { "correct": 30, "total": 30 },
+        "submissionDestination": { "correct": 30, "total": 30 }
+      }
+    },
+    "criticalRequirementRecall": {
+      "overall": 1,
+      "mandatory": 1,
+      "disqualifiers": 1,
+      "expected": 23,
+      "found": 23,
+      "missed": []
+    },
+    "falsePositiveRate": {
+      "overall": 0.0032,
+      "falsePositives": 1,
+      "extracted": 313,
+      "detail": ["vat"]
+    },
+    "conflictDetectionAccuracy": { "overall": 1, "correct": 3, "total": 3 },
+    "unconfirmedClassificationAccuracy": { "overall": 1, "correct": 21, "total": 21 },
+    "nativeVsScannedPageAccuracy": { "overall": 1, "correct": 101, "total": 101, "mismatches": [] },
+    "pricingRequirementRecall": {
+      "overall": 1,
+      "expected": 22,
+      "detected": 22,
+      "note": "Recall of gold pricing/BOQ requirements (pricing_schedule, bill_of_quantities)."
+    },
+    "falseReadinessCount": {
+      "count": 0,
+      "target": 0,
+      "fixtures": [],
+      "blockedByOcr": [
+        "ofc-gov-scan-005",
+        "ofc-gov-mixed-006",
+        "civ-gov-scan-014",
+        "civ-gov-mixed-015",
+        "pro-gov-scan-024",
+        "pro-gov-mixed-025"
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "id": "ofc-gov-clean-001",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "government", "native", "clean", "pricing-schedule"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "declaration",
+          "experience",
+          "methodology",
+          "financials",
+          "non_compliance",
+          "closing_time",
+          "contact_person",
+          "pricing_schedule",
+          "bill_of_quantities"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "non_compliance",
+          "experience",
+          "methodology",
+          "financials",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "declaration",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-mun-boq-002",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "municipal", "pricing-schedule", "boq", "table"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "financials",
+          "turnover",
+          "pppfa",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "financials",
+          "turnover",
+          "pppfa",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-mun-email-003",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "municipal", "email", "pricing-schedule"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "financials",
+          "closing_time",
+          "contact_person",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "financials",
+          "pricing_schedule",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-prov-two-col-004",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "provincial", "two-column", "native"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "non_compliance",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "non_compliance",
+          "experience",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-gov-scan-005",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "government", "scanned-only", "ocr-required"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": { "expected": [], "found": [], "missed": [], "extra": [] },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [1, 2],
+      "actualOcrPages": [1, 2]
+    },
+    {
+      "id": "ofc-gov-mixed-006",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "government", "mixed", "ocr-required"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [2, 5],
+      "actualOcrPages": [2, 5]
+    },
+    {
+      "id": "ofc-mun-conflict-007",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "municipal", "conflict", "amended-deadline"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": ["tax_pin", "bbbee", "cipc", "csd", "sbd_forms", "closing_time", "contact_person"],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 1, "detected": 1 },
+      "conflictedFields": ["closingDateTime"],
+      "parserConflictNotes": [
+        "Multiple closing dates found: 20 November 2026 at 11:00 | 27 November 2026 at 11:00"
+      ],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-gov-tz-008",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "government", "timezone", "rfc3339"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-gov-tz-sast-009",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "government", "timezone", "unsupported-abbreviation"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": ["tax_pin", "bbbee", "csd", "sbd_forms", "closing_time", "contact_person"],
+        "found": ["tax_pin", "bbbee", "csd", "sbd_forms", "closing_time", "contact_person"],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "ofc-corp-table-010",
+      "sector": "office-equipment",
+      "tags": ["office-equipment", "corporate", "table", "incidental-false-positive"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "bbbee",
+          "cipc",
+          "sbd_forms",
+          "financials",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "bbbee",
+          "cipc",
+          "sbd_forms",
+          "financials",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": ["vat"]
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-mun-clean-011",
+      "sector": "construction-civil",
+      "tags": ["construction", "municipal", "native", "clean"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "non_compliance",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "bid_security",
+          "pppfa",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "non_compliance",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "bid_security",
+          "pppfa",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-prov-boq-012",
+      "sector": "construction-civil",
+      "tags": ["construction", "provincial", "boq", "bid-security"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "financials",
+          "turnover",
+          "bid_security",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "financials",
+          "turnover",
+          "bid_security",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-mun-two-col-013",
+      "sector": "construction-civil",
+      "tags": ["construction", "municipal", "two-column"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "methodology",
+          "non_compliance",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "non_compliance",
+          "experience",
+          "methodology",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-gov-scan-014",
+      "sector": "construction-civil",
+      "tags": ["construction", "government", "scanned-only", "ocr-required"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": { "expected": [], "found": [], "missed": [], "extra": [] },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [1, 2, 3],
+      "actualOcrPages": [1, 2, 3]
+    },
+    {
+      "id": "civ-gov-mixed-015",
+      "sector": "construction-civil",
+      "tags": ["construction", "government", "mixed", "ocr-required"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "methodology",
+          "bid_security",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "methodology",
+          "bid_security",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [2, 4],
+      "actualOcrPages": [2, 4]
+    },
+    {
+      "id": "civ-mun-conflict-016",
+      "sector": "construction-civil",
+      "tags": [
+        "construction",
+        "municipal",
+        "conflict",
+        "amended-deadline",
+        "conflicting-destination"
+      ],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "bid_security",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "bid_security",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 1, "detected": 1 },
+      "conflictedFields": ["closingDateTime", "submissionMethod", "submissionDestination"],
+      "parserConflictNotes": [
+        "Multiple closing dates found: 23 January 2027 at 11:00 | 30 January 2027 at 11:00",
+        "Multiple submission methods found: PHYSICAL | ELECTRONIC",
+        "Multiple submission destinations found: tender box at Bram Fischer Building, Bloemfontein. | Bids must instead be submitted electronically via the municipal e-tender portal."
+      ],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-gov-tz-017",
+      "sector": "construction-civil",
+      "tags": ["construction", "government", "timezone", "rfc3339"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-corp-table-018",
+      "sector": "construction-civil",
+      "tags": ["construction", "corporate", "table", "boq"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "sbd_forms",
+          "experience",
+          "financials",
+          "bid_security",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "sbd_forms",
+          "experience",
+          "financials",
+          "bid_security",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-mun-ocr-019",
+      "sector": "construction-civil",
+      "tags": ["construction", "municipal", "ocr-variants", "ligature-gap", "nbsp", "en-dash"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "police_certification",
+          "sbd_forms",
+          "key_personnel",
+          "financials",
+          "subcontracting",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "police_certification",
+          "csd",
+          "sbd_forms",
+          "key_personnel",
+          "financials",
+          "subcontracting",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "civ-gov-annex-020",
+      "sector": "construction-civil",
+      "tags": ["construction", "government", "annexures", "forms", "sbd"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "declaration",
+          "non_compliance",
+          "pppfa",
+          "closing_time",
+          "contact_person",
+          "bill_of_quantities",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "non_compliance",
+          "pppfa",
+          "pricing_schedule",
+          "bill_of_quantities",
+          "declaration",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-gov-clean-021",
+      "sector": "professional-services",
+      "tags": ["professional-services", "government", "native", "clean"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "declaration",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "financials",
+          "pppfa",
+          "closing_time",
+          "contact_person",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "financials",
+          "pppfa",
+          "pricing_schedule",
+          "declaration",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-mun-rfq-022",
+      "sector": "professional-services",
+      "tags": ["professional-services", "municipal", "rfq", "pricing-schedule"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "financials",
+          "closing_time",
+          "contact_person",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "financials",
+          "pricing_schedule",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-prov-two-col-023",
+      "sector": "professional-services",
+      "tags": ["professional-services", "provincial", "two-column"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "financials",
+          "non_compliance",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "non_compliance",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-gov-scan-024",
+      "sector": "professional-services",
+      "tags": ["professional-services", "government", "scanned-only", "ocr-required"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": { "expected": [], "found": [], "missed": [], "extra": [] },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [1, 2],
+      "actualOcrPages": [1, 2]
+    },
+    {
+      "id": "pro-gov-mixed-025",
+      "sector": "professional-services",
+      "tags": ["professional-services", "government", "mixed", "ocr-required"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [2, 4],
+      "actualOcrPages": [2, 4]
+    },
+    {
+      "id": "pro-mun-conflict-026",
+      "sector": "professional-services",
+      "tags": ["professional-services", "municipal", "conflict", "amended-deadline"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 1, "detected": 1 },
+      "conflictedFields": ["closingDateTime"],
+      "parserConflictNotes": [
+        "Multiple closing dates found: 14 December 2026 at 11:00 | 21 December 2026 at 11:00"
+      ],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-gov-tz-027",
+      "sector": "professional-services",
+      "tags": ["professional-services", "government", "timezone", "rfc3339"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "methodology",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "methodology",
+          "financials",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-corp-table-028",
+      "sector": "professional-services",
+      "tags": ["professional-services", "corporate", "table", "pricing-schedule"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "financials",
+          "turnover",
+          "closing_time",
+          "contact_person",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "financials",
+          "turnover",
+          "pricing_schedule",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-gov-ocr-029",
+      "sector": "professional-services",
+      "tags": ["professional-services", "government", "ocr-variants", "curly-quotes", "em-dash"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "non_compliance",
+          "closing_time",
+          "contact_person"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "csd",
+          "sbd_forms",
+          "non_compliance",
+          "experience",
+          "key_personnel",
+          "methodology",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    },
+    {
+      "id": "pro-mun-annex-030",
+      "sector": "professional-services",
+      "tags": ["professional-services", "municipal", "annexures", "b-bbee-variants"],
+      "metadata": {
+        "correct": 6,
+        "total": 6,
+        "fields": {
+          "title": true,
+          "referenceNumber": true,
+          "issuingBody": true,
+          "closingDateTime": true,
+          "submissionMethod": true,
+          "submissionDestination": true
+        }
+      },
+      "requirements": {
+        "expected": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "declaration",
+          "experience",
+          "key_personnel",
+          "financials",
+          "pppfa",
+          "subcontracting",
+          "closing_time",
+          "contact_person",
+          "pricing_schedule"
+        ],
+        "found": [
+          "tax_pin",
+          "coida",
+          "bbbee",
+          "cipc",
+          "director_ids",
+          "csd",
+          "sbd_forms",
+          "signed_initialled",
+          "experience",
+          "key_personnel",
+          "financials",
+          "pppfa",
+          "subcontracting",
+          "pricing_schedule",
+          "declaration",
+          "closing_time",
+          "contact_person"
+        ],
+        "missed": [],
+        "extra": []
+      },
+      "conflicts": { "total": 0, "detected": 0 },
+      "conflictedFields": [],
+      "parserConflictNotes": [],
+      "falseReadiness": false,
+      "scannedPages": [],
+      "actualOcrPages": []
+    }
+  ]
+}

@@ -194,7 +194,9 @@ import {
   setHtmlProvisionalTitleHook,
 } from '../../../html/src/main/html-main'
 import { configureCrmRuntime } from '../../../crm/src/main/crm-main'
+import { createCrmTenderPort } from '../../../crm/src/main/tender-port'
 import { configureTendersRuntime } from '../../../tenders/src/main/tenders-main'
+import { createBooksTenderPort } from '../../../books/src/main/tender-port'
 import { configureBooksRuntime } from '../../../books/src/main/books-main'
 import type {
   AccountLoginEvent,
@@ -206,6 +208,12 @@ import type {
   UiTheme,
 } from '../shared/home-api'
 import { HOME_CHANNELS } from '../shared/home-api'
+import {
+  createThemeBroadcastController,
+  resolveEffectiveTheme,
+  type ResolvedTheme,
+  type ThemeBroadcastController,
+} from './theme'
 import {
   normalizeAiPanelPrefs,
   sameAiPanelPrefs,
@@ -384,6 +392,11 @@ if (!invalidAutomationLaunch) {
     onOpenTenders: () => newTendersTab(),
     onOpenBooks: () => newBooksTab(),
   })
+  // Composition root for the Tenders cross-app ports (WP-10). Tenders never
+  // touches the CRM/Books stores; the shell supplies the concrete adapters.
+  const tendersUserDataDir = app.getPath('userData')
+  const crmTenderPort = createCrmTenderPort({ userDataDir: tendersUserDataDir })
+  const booksTenderPort = createBooksTenderPort({ userDataDir: tendersUserDataDir })
   configureTendersRuntime({
     preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
     rendererUrl: process.env.TENDERS_RENDERER_URL,
@@ -391,6 +404,15 @@ if (!invalidAutomationLaunch) {
     openGeneratedPath: (path) => openGeneratedDocument(path),
     onOpenCrm: () => newCrmTab(),
     onOpenBooks: () => newBooksTab(),
+    integrations: {
+      upsertTenderOpportunity: (input) => crmTenderPort.upsertTenderOpportunity(input),
+      updateTenderOutcome: (input) => crmTenderPort.updateTenderOutcome(input),
+      issueMilestoneInvoice: (input) => booksTenderPort.issueMilestoneInvoice(input),
+      openAppAt: (target) => {
+        if (target.app === 'crm') newCrmTab()
+        else newBooksTab()
+      },
+    },
   })
   configureBooksRuntime({
     preloadPath: join(BOOKS_OUT, 'preload', 'index.js'),
@@ -446,6 +468,41 @@ function currentTheme(): UiTheme {
   const saved = readAppSettings(APP_SETTINGS_PATH()).theme
   cachedTheme = saved === 'light' || saved === 'dark' ? saved : 'system'
   return cachedTheme
+}
+
+/**
+ * The concrete theme renderers must apply. `system` is resolved here (in main)
+ * because Electron 43 does not propagate `nativeTheme.themeSource` to
+ * `prefers-color-scheme`, so a renderer can never resolve it correctly itself.
+ */
+function effectiveTheme(): ResolvedTheme {
+  return resolveEffectiveTheme(currentTheme(), nativeTheme.shouldUseDarkColors)
+}
+
+let themeBroadcast: ThemeBroadcastController | null = null
+
+/**
+ * Register the OS-appearance listener once and (re)broadcast the resolved theme
+ * to every open renderer. Called at startup (to wire `nativeTheme.on('updated')`)
+ * and whenever the user changes the preference.
+ */
+function initThemeBroadcast(): void {
+  if (!themeBroadcast) {
+    themeBroadcast = createThemeBroadcastController({
+      nativeTheme,
+      getPreference: () => currentTheme(),
+      send: (theme) => {
+        for (const wc of webContents.getAllWebContents()) {
+          try {
+            wc.send('app:theme-changed', theme)
+          } catch {
+            // a destroyed webContents must not break the others
+          }
+        }
+      },
+    })
+  }
+  themeBroadcast.broadcast()
 }
 
 let cachedAutoSaveDefault: AutoSaveDefault | null = null
@@ -2494,7 +2551,10 @@ function createShellWindow(): void {
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
-    minWidth: 980,
+    // 760 keeps the documented 800×600 Tenders target reachable by a real
+    // window (the workspace compact tier engages below 900px container width;
+    // 980 previously made that tier unreachable outside the E2E harness).
+    minWidth: 760,
     minHeight: 600,
     title: 'Zanostack',
     // unpackaged dev runs carry electron.exe's default icon; point the window
@@ -3476,9 +3536,12 @@ function registerHomeIpc(): void {
     }
   })
 
+  // Preference channel (shell Settings uses this to show light/dark/system).
   ipcMain.handle(HOME_CHANNELS.getTheme, (): UiTheme => currentTheme())
-  // editor tabs ask via the app-wide channel (symmetric with app:get-language)
-  ipcMain.handle('app:get-theme', (): UiTheme => currentTheme())
+  // Editor/renderer channel: the RESOLVED light|dark value. Renderers stamp it
+  // onto <html data-theme> directly; they must never resolve 'system' from
+  // prefers-color-scheme (broken in Electron 43).
+  ipcMain.handle('app:get-theme', (): ResolvedTheme => effectiveTheme())
 
   ipcMain.handle(HOME_CHANNELS.setTheme, (_event, theme: unknown) => {
     if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return
@@ -3486,7 +3549,9 @@ function registerHomeIpc(): void {
     cachedTheme = theme
     writeAppSetting(APP_SETTINGS_PATH(), 'theme', theme)
     nativeTheme.themeSource = theme
-    for (const wc of webContents.getAllWebContents()) wc.send('app:theme-changed', theme)
+    // Publish the resolved theme (deduplicated); the nativeTheme 'updated'
+    // listener is the live OS-change path.
+    initThemeBroadcast()
   })
 
   ipcMain.handle(HOME_CHANNELS.getAutoSaveDefault, (): AutoSaveDefault => currentAutoSaveDefault())
@@ -4661,6 +4726,9 @@ app.whenReady().then(async () => {
   currentLang()
   // native menus/dialogs/scrollbars follow the persisted theme from first paint
   nativeTheme.themeSource = currentTheme()
+  // Register the OS-appearance listener once; `app:get-theme` gives every new
+  // window the resolved theme, and system-mode OS flips are republished live.
+  initThemeBroadcast()
   // stamp the star-prompt install-age clock on the first launch carrying the feature,
   // and detect upgrade launches (version changed since the previous run)
   try {

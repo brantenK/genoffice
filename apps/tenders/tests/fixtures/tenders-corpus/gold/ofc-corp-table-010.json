@@ -1,0 +1,57 @@
+{
+  "id": "ofc-corp-table-010",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "corporate",
+  "tags": ["office-equipment", "corporate", "table", "incidental-false-positive"],
+  "title": "Supply of Office Equipment to Sasol Head Office",
+  "titleAlternatives": [],
+  "referenceNumber": "SASOL-OFC-2026-0071",
+  "issuingBody": "SASOL SOUTH AFRICA LIMITED",
+  "closingDateTime": "08 December 2026 at 12:00",
+  "submissionMethod": "ELECTRONIC",
+  "submissionDestination": "Sasol supplier portal",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "cipc",
+    "sbd_forms",
+    "financials",
+    "closing_time",
+    "contact_person",
+    "bill_of_quantities",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": ["tax_pin", "bbbee", "cipc", "sbd_forms", "pricing_schedule"],
+  "disqualifiers": ["tax_pin", "cipc", "sbd_forms", "pricing_schedule"],
+  "pricingRequirements": ["bill_of_quantities", "pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 3,
+  "clearable": true,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Supply of Office Equipment to Sasol Head Office" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: SASOL-OFC-2026-0071"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "SASOL SOUTH AFRICA LIMITED" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 08 December 2026 at 12:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "Sasol supplier portal" },
+    "submissionDestination": { "page": 1, "clauseContains": "Sasol supplier portal" },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "financials": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "bill_of_quantities": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "cbc0d6bf3119c178923f46e9a93dfff4ef43bd51f55145e6dcf140ffbee09911",
+  "pdfBytes": 2592
+}

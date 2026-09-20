@@ -1,0 +1,82 @@
+{
+  "id": "ofc-mun-boq-002",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "municipal",
+  "tags": ["office-equipment", "municipal", "pricing-schedule", "boq", "table"],
+  "title": "Framework Contract for Office Equipment and Consumables",
+  "titleAlternatives": [],
+  "referenceNumber": "RFP-OFC-2026-0087",
+  "issuingBody": "CITY OF EKURHULENI METROPOLITAN MUNICIPALITY",
+  "closingDateTime": "15 December 2026 at 10:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "tender box at the Civic Centre, Kempton Park",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "csd",
+    "sbd_forms",
+    "financials",
+    "turnover",
+    "pppfa",
+    "closing_time",
+    "contact_person",
+    "bill_of_quantities",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "csd",
+    "sbd_forms",
+    "pricing_schedule"
+  ],
+  "disqualifiers": ["tax_pin", "coida", "cipc", "csd", "sbd_forms", "pricing_schedule"],
+  "pricingRequirements": ["bill_of_quantities", "pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 5,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Framework Contract for Office Equipment and Consumables"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: RFP-OFC-2026-0087"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "CITY OF EKURHULENI METROPOLITAN MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 15 December 2026 at 10:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "tender box at the Civic Centre, Kempton Park"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "tender box at the Civic Centre, Kempton Park"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "financials": { "page": 2 },
+      "turnover": { "page": 2 },
+      "pppfa": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "bill_of_quantities": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "40a1b04d715e31b50b774cd69ec686bff2296f74e2c40e63581ce81bd334a508",
+  "pdfBytes": 3514
+}

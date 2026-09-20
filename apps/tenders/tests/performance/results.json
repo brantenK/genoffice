@@ -1,0 +1,3569 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-19T16:43:53.568Z",
+  "gate": "TENDERS_BENCH=1",
+  "synthetic": true,
+  "env": {
+    "node": "v24.14.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpuCount": 16,
+    "cpuModel": "13th Gen Intel(R) Core(TM) i5-13500H",
+    "totalMemGB": 7.7,
+    "pdfjs": "6.2.108",
+    "fixture": "pdf-lib synthetic pages (fixed creation date): native text + image-heavy scanned"
+  },
+  "preflight": { "maxBytes": 104857600, "maxPages": 500 },
+  "runs": 3,
+  "measurements": {
+    "nativeParseSweep": [
+      {
+        "pages": 500,
+        "linesPerPage": 20,
+        "bytes": 385060,
+        "bytesLabel": "376 KB",
+        "buildMs": 1256,
+        "warmupMs": 699,
+        "parseMs": { "runs": [522, 501, 497], "minMs": 497, "medianMs": 501, "maxMs": 522 },
+        "lines": 10000,
+        "textPages": 500,
+        "ocrPages": 0,
+        "memory": {
+          "peakHeapUsedMB": 199.05,
+          "peakRssMB": 392.03,
+          "heapDeltaMB": 3,
+          "rssDeltaMB": 19.28,
+          "sampleCount": 26,
+          "trace": [
+            {
+              "tMs": 0,
+              "heapUsedMB": 168.03,
+              "rssMB": 372.75,
+              "externalMB": 33.25,
+              "arrayBuffersMB": 23.02
+            },
+            {
+              "tMs": 20,
+              "heapUsedMB": 185.35,
+              "rssMB": 374.3,
+              "externalMB": 36,
+              "arrayBuffersMB": 25.76
+            },
+            {
+              "tMs": 40,
+              "heapUsedMB": 161.55,
+              "rssMB": 372.18,
+              "externalMB": 33.41,
+              "arrayBuffersMB": 23.17
+            },
+            {
+              "tMs": 59,
+              "heapUsedMB": 187.93,
+              "rssMB": 372.8,
+              "externalMB": 34.09,
+              "arrayBuffersMB": 23.86
+            },
+            {
+              "tMs": 80,
+              "heapUsedMB": 164.11,
+              "rssMB": 375.36,
+              "externalMB": 33.44,
+              "arrayBuffersMB": 23.21
+            },
+            {
+              "tMs": 100,
+              "heapUsedMB": 192.98,
+              "rssMB": 375.43,
+              "externalMB": 34.19,
+              "arrayBuffersMB": 23.95
+            },
+            {
+              "tMs": 120,
+              "heapUsedMB": 169.32,
+              "rssMB": 376.57,
+              "externalMB": 33.54,
+              "arrayBuffersMB": 23.3
+            },
+            {
+              "tMs": 140,
+              "heapUsedMB": 197.25,
+              "rssMB": 376.98,
+              "externalMB": 34.26,
+              "arrayBuffersMB": 24.02
+            },
+            {
+              "tMs": 160,
+              "heapUsedMB": 173.15,
+              "rssMB": 378.64,
+              "externalMB": 33.6,
+              "arrayBuffersMB": 23.37
+            },
+            {
+              "tMs": 180,
+              "heapUsedMB": 149.03,
+              "rssMB": 379.95,
+              "externalMB": 34.26,
+              "arrayBuffersMB": 22.76
+            },
+            {
+              "tMs": 199,
+              "heapUsedMB": 175.67,
+              "rssMB": 380.25,
+              "externalMB": 33.64,
+              "arrayBuffersMB": 23.4
+            },
+            {
+              "tMs": 219,
+              "heapUsedMB": 151.81,
+              "rssMB": 381.72,
+              "externalMB": 32.98,
+              "arrayBuffersMB": 22.75
+            },
+            {
+              "tMs": 239,
+              "heapUsedMB": 179.7,
+              "rssMB": 381.72,
+              "externalMB": 33.7,
+              "arrayBuffersMB": 23.47
+            },
+            {
+              "tMs": 259,
+              "heapUsedMB": 154.28,
+              "rssMB": 382.94,
+              "externalMB": 33.02,
+              "arrayBuffersMB": 22.78
+            },
+            {
+              "tMs": 280,
+              "heapUsedMB": 182.21,
+              "rssMB": 383,
+              "externalMB": 33.73,
+              "arrayBuffersMB": 23.5
+            },
+            {
+              "tMs": 300,
+              "heapUsedMB": 158.09,
+              "rssMB": 385.88,
+              "externalMB": 33.08,
+              "arrayBuffersMB": 22.85
+            },
+            {
+              "tMs": 320,
+              "heapUsedMB": 184.76,
+              "rssMB": 384.86,
+              "externalMB": 33.77,
+              "arrayBuffersMB": 23.53
+            },
+            {
+              "tMs": 339,
+              "heapUsedMB": 160.67,
+              "rssMB": 386.36,
+              "externalMB": 33.11,
+              "arrayBuffersMB": 22.88
+            },
+            {
+              "tMs": 360,
+              "heapUsedMB": 188.6,
+              "rssMB": 386.56,
+              "externalMB": 33.83,
+              "arrayBuffersMB": 23.6
+            },
+            {
+              "tMs": 380,
+              "heapUsedMB": 164.44,
+              "rssMB": 387.73,
+              "externalMB": 33.18,
+              "arrayBuffersMB": 22.95
+            },
+            {
+              "tMs": 400,
+              "heapUsedMB": 193.61,
+              "rssMB": 387.82,
+              "externalMB": 33.93,
+              "arrayBuffersMB": 23.7
+            },
+            {
+              "tMs": 419,
+              "heapUsedMB": 168.67,
+              "rssMB": 389.46,
+              "externalMB": 33.25,
+              "arrayBuffersMB": 23.01
+            },
+            {
+              "tMs": 440,
+              "heapUsedMB": 196.58,
+              "rssMB": 389.55,
+              "externalMB": 33.96,
+              "arrayBuffersMB": 23.73
+            },
+            {
+              "tMs": 460,
+              "heapUsedMB": 172.41,
+              "rssMB": 390.83,
+              "externalMB": 33.31,
+              "arrayBuffersMB": 23.08
+            },
+            {
+              "tMs": 480,
+              "heapUsedMB": 199.05,
+              "rssMB": 390.9,
+              "externalMB": 34,
+              "arrayBuffersMB": 23.76
+            },
+            {
+              "tMs": 497,
+              "heapUsedMB": 171.03,
+              "rssMB": 392.03,
+              "externalMB": 33.23,
+              "arrayBuffersMB": 22.99
+            }
+          ]
+        }
+      },
+      {
+        "pages": 1000,
+        "linesPerPage": 20,
+        "bytes": 770410,
+        "bytesLabel": "752 KB",
+        "buildMs": 1448,
+        "warmupMs": 1043,
+        "parseMs": { "runs": [1007, 1009, 1073], "minMs": 1007, "medianMs": 1009, "maxMs": 1073 },
+        "lines": 20000,
+        "textPages": 1000,
+        "ocrPages": 0,
+        "memory": {
+          "peakHeapUsedMB": 312.61,
+          "peakRssMB": 515.2,
+          "heapDeltaMB": 5.81,
+          "rssDeltaMB": 37.4,
+          "sampleCount": 54,
+          "trace": [
+            {
+              "tMs": 0,
+              "heapUsedMB": 262.05,
+              "rssMB": 477.8,
+              "externalMB": 33.73,
+              "arrayBuffersMB": 23.5
+            },
+            {
+              "tMs": 29,
+              "heapUsedMB": 283.97,
+              "rssMB": 480.56,
+              "externalMB": 38.85,
+              "arrayBuffersMB": 28.62
+            },
+            {
+              "tMs": 49,
+              "heapUsedMB": 257.81,
+              "rssMB": 476.98,
+              "externalMB": 34.28,
+              "arrayBuffersMB": 24.05
+            },
+            {
+              "tMs": 70,
+              "heapUsedMB": 235.14,
+              "rssMB": 480.52,
+              "externalMB": 33.67,
+              "arrayBuffersMB": 23.44
+            },
+            {
+              "tMs": 90,
+              "heapUsedMB": 264.2,
+              "rssMB": 480.66,
+              "externalMB": 34.41,
+              "arrayBuffersMB": 24.18
+            },
+            {
+              "tMs": 109,
+              "heapUsedMB": 240.22,
+              "rssMB": 482.14,
+              "externalMB": 33.76,
+              "arrayBuffersMB": 23.53
+            },
+            {
+              "tMs": 129,
+              "heapUsedMB": 266.85,
+              "rssMB": 482.3,
+              "externalMB": 34.45,
+              "arrayBuffersMB": 24.22
+            },
+            {
+              "tMs": 149,
+              "heapUsedMB": 242.84,
+              "rssMB": 483.49,
+              "externalMB": 33.79,
+              "arrayBuffersMB": 23.57
+            },
+            {
+              "tMs": 170,
+              "heapUsedMB": 272.15,
+              "rssMB": 483.55,
+              "externalMB": 34.54,
+              "arrayBuffersMB": 24.32
+            },
+            {
+              "tMs": 189,
+              "heapUsedMB": 247.87,
+              "rssMB": 485.04,
+              "externalMB": 33.89,
+              "arrayBuffersMB": 23.66
+            },
+            {
+              "tMs": 210,
+              "heapUsedMB": 275.88,
+              "rssMB": 485.17,
+              "externalMB": 34.61,
+              "arrayBuffersMB": 24.38
+            },
+            {
+              "tMs": 230,
+              "heapUsedMB": 251.9,
+              "rssMB": 486.99,
+              "externalMB": 33.96,
+              "arrayBuffersMB": 23.73
+            },
+            {
+              "tMs": 250,
+              "heapUsedMB": 278.64,
+              "rssMB": 487.14,
+              "externalMB": 34.64,
+              "arrayBuffersMB": 24.41
+            },
+            {
+              "tMs": 270,
+              "heapUsedMB": 255.74,
+              "rssMB": 488.4,
+              "externalMB": 34.02,
+              "arrayBuffersMB": 23.79
+            },
+            {
+              "tMs": 289,
+              "heapUsedMB": 282.59,
+              "rssMB": 489.59,
+              "externalMB": 34.71,
+              "arrayBuffersMB": 24.48
+            },
+            {
+              "tMs": 310,
+              "heapUsedMB": 258.32,
+              "rssMB": 490.91,
+              "externalMB": 34.05,
+              "arrayBuffersMB": 23.83
+            },
+            {
+              "tMs": 330,
+              "heapUsedMB": 285.03,
+              "rssMB": 491,
+              "externalMB": 34.74,
+              "arrayBuffersMB": 24.51
+            },
+            {
+              "tMs": 349,
+              "heapUsedMB": 259.56,
+              "rssMB": 492.12,
+              "externalMB": 34.05,
+              "arrayBuffersMB": 23.83
+            },
+            {
+              "tMs": 370,
+              "heapUsedMB": 282.45,
+              "rssMB": 492.18,
+              "externalMB": 34.64,
+              "arrayBuffersMB": 24.41
+            },
+            {
+              "tMs": 389,
+              "heapUsedMB": 250.67,
+              "rssMB": 493.25,
+              "externalMB": 33.79,
+              "arrayBuffersMB": 23.57
+            },
+            {
+              "tMs": 413,
+              "heapUsedMB": 269.74,
+              "rssMB": 493.31,
+              "externalMB": 34.28,
+              "arrayBuffersMB": 24.05
+            },
+            {
+              "tMs": 433,
+              "heapUsedMB": 285.01,
+              "rssMB": 493.38,
+              "externalMB": 34.67,
+              "arrayBuffersMB": 24.45
+            },
+            {
+              "tMs": 454,
+              "heapUsedMB": 255.67,
+              "rssMB": 494.56,
+              "externalMB": 33.89,
+              "arrayBuffersMB": 23.66
+            },
+            {
+              "tMs": 473,
+              "heapUsedMB": 277.73,
+              "rssMB": 495.13,
+              "externalMB": 34.45,
+              "arrayBuffersMB": 24.22
+            },
+            {
+              "tMs": 494,
+              "heapUsedMB": 253.54,
+              "rssMB": 496.37,
+              "externalMB": 33.79,
+              "arrayBuffersMB": 23.57
+            },
+            {
+              "tMs": 514,
+              "heapUsedMB": 280.25,
+              "rssMB": 496.44,
+              "externalMB": 34.48,
+              "arrayBuffersMB": 24.25
+            },
+            {
+              "tMs": 534,
+              "heapUsedMB": 254.77,
+              "rssMB": 497.5,
+              "externalMB": 33.79,
+              "arrayBuffersMB": 23.57
+            },
+            {
+              "tMs": 554,
+              "heapUsedMB": 282.75,
+              "rssMB": 497.61,
+              "externalMB": 34.51,
+              "arrayBuffersMB": 24.28
+            },
+            {
+              "tMs": 573,
+              "heapUsedMB": 258.62,
+              "rssMB": 498.82,
+              "externalMB": 33.86,
+              "arrayBuffersMB": 23.64
+            },
+            {
+              "tMs": 593,
+              "heapUsedMB": 285.33,
+              "rssMB": 498.86,
+              "externalMB": 34.54,
+              "arrayBuffersMB": 24.32
+            },
+            {
+              "tMs": 614,
+              "heapUsedMB": 257.36,
+              "rssMB": 500.08,
+              "externalMB": 33.79,
+              "arrayBuffersMB": 23.57
+            },
+            {
+              "tMs": 634,
+              "heapUsedMB": 271.35,
+              "rssMB": 500.14,
+              "externalMB": 34.15,
+              "arrayBuffersMB": 23.92
+            },
+            {
+              "tMs": 654,
+              "heapUsedMB": 285.33,
+              "rssMB": 500.14,
+              "externalMB": 34.51,
+              "arrayBuffersMB": 24.28
+            },
+            {
+              "tMs": 674,
+              "heapUsedMB": 253.46,
+              "rssMB": 501.34,
+              "externalMB": 34.97,
+              "arrayBuffersMB": 23.44
+            },
+            {
+              "tMs": 695,
+              "heapUsedMB": 273.79,
+              "rssMB": 501.4,
+              "externalMB": 34.19,
+              "arrayBuffersMB": 23.96
+            },
+            {
+              "tMs": 714,
+              "heapUsedMB": 295.4,
+              "rssMB": 501.46,
+              "externalMB": 34.74,
+              "arrayBuffersMB": 24.51
+            },
+            {
+              "tMs": 734,
+              "heapUsedMB": 269.97,
+              "rssMB": 502.64,
+              "externalMB": 34.05,
+              "arrayBuffersMB": 23.83
+            },
+            {
+              "tMs": 755,
+              "heapUsedMB": 297.94,
+              "rssMB": 502.79,
+              "externalMB": 34.77,
+              "arrayBuffersMB": 24.54
+            },
+            {
+              "tMs": 775,
+              "heapUsedMB": 273.74,
+              "rssMB": 504.13,
+              "externalMB": 34.12,
+              "arrayBuffersMB": 23.89
+            },
+            {
+              "tMs": 795,
+              "heapUsedMB": 300.45,
+              "rssMB": 504.28,
+              "externalMB": 34.8,
+              "arrayBuffersMB": 24.58
+            },
+            {
+              "tMs": 814,
+              "heapUsedMB": 274.96,
+              "rssMB": 505.73,
+              "externalMB": 34.12,
+              "arrayBuffersMB": 23.89
+            },
+            {
+              "tMs": 835,
+              "heapUsedMB": 302.93,
+              "rssMB": 505.86,
+              "externalMB": 34.84,
+              "arrayBuffersMB": 24.61
+            },
+            {
+              "tMs": 855,
+              "heapUsedMB": 278.74,
+              "rssMB": 506.81,
+              "externalMB": 34.19,
+              "arrayBuffersMB": 23.96
+            },
+            {
+              "tMs": 875,
+              "heapUsedMB": 306.7,
+              "rssMB": 506.89,
+              "externalMB": 34.9,
+              "arrayBuffersMB": 24.67
+            },
+            {
+              "tMs": 895,
+              "heapUsedMB": 281.24,
+              "rssMB": 508.05,
+              "externalMB": 34.22,
+              "arrayBuffersMB": 23.99
+            },
+            {
+              "tMs": 915,
+              "heapUsedMB": 308.81,
+              "rssMB": 509.05,
+              "externalMB": 34.9,
+              "arrayBuffersMB": 24.67
+            },
+            {
+              "tMs": 935,
+              "heapUsedMB": 284.64,
+              "rssMB": 510.31,
+              "externalMB": 34.25,
+              "arrayBuffersMB": 24.02
+            },
+            {
+              "tMs": 954,
+              "heapUsedMB": 312.61,
+              "rssMB": 510.34,
+              "externalMB": 34.97,
+              "arrayBuffersMB": 24.74
+            },
+            {
+              "tMs": 974,
+              "heapUsedMB": 288.35,
+              "rssMB": 511.46,
+              "externalMB": 34.32,
+              "arrayBuffersMB": 24.09
+            },
+            {
+              "tMs": 995,
+              "heapUsedMB": 265.47,
+              "rssMB": 512.75,
+              "externalMB": 33.7,
+              "arrayBuffersMB": 23.47
+            },
+            {
+              "tMs": 1014,
+              "heapUsedMB": 290.89,
+              "rssMB": 512.75,
+              "externalMB": 34.35,
+              "arrayBuffersMB": 24.12
+            },
+            {
+              "tMs": 1035,
+              "heapUsedMB": 266.74,
+              "rssMB": 513.98,
+              "externalMB": 33.7,
+              "arrayBuffersMB": 23.47
+            },
+            {
+              "tMs": 1055,
+              "heapUsedMB": 294.71,
+              "rssMB": 513.98,
+              "externalMB": 34.41,
+              "arrayBuffersMB": 24.19
+            },
+            {
+              "tMs": 1073,
+              "heapUsedMB": 267.86,
+              "rssMB": 515.2,
+              "externalMB": 33.68,
+              "arrayBuffersMB": 23.45
+            }
+          ]
+        }
+      },
+      {
+        "pages": 2000,
+        "linesPerPage": 20,
+        "bytes": 1541476,
+        "bytesLabel": "1.5 MB",
+        "buildMs": 2858,
+        "warmupMs": 2764,
+        "parseMs": { "runs": [2953, 2881, 2717], "minMs": 2717, "medianMs": 2881, "maxMs": 2953 },
+        "lines": 40000,
+        "textPages": 2000,
+        "ocrPages": 0,
+        "memory": {
+          "peakHeapUsedMB": 405.31,
+          "peakRssMB": 447.14,
+          "heapDeltaMB": 39.27,
+          "rssDeltaMB": -100.55,
+          "sampleCount": 133,
+          "trace": [
+            {
+              "tMs": 0,
+              "heapUsedMB": 330.8,
+              "rssMB": 427.33,
+              "externalMB": 23.01,
+              "arrayBuffersMB": 12.78
+            },
+            {
+              "tMs": 79,
+              "heapUsedMB": 315.13,
+              "rssMB": 440.47,
+              "externalMB": 26.23,
+              "arrayBuffersMB": 16
+            },
+            {
+              "tMs": 99,
+              "heapUsedMB": 336.73,
+              "rssMB": 440.54,
+              "externalMB": 26.78,
+              "arrayBuffersMB": 16.56
+            },
+            {
+              "tMs": 120,
+              "heapUsedMB": 310.76,
+              "rssMB": 438.58,
+              "externalMB": 23.8,
+              "arrayBuffersMB": 13.58
+            },
+            {
+              "tMs": 139,
+              "heapUsedMB": 332.39,
+              "rssMB": 438.64,
+              "externalMB": 24.36,
+              "arrayBuffersMB": 14.13
+            },
+            {
+              "tMs": 160,
+              "heapUsedMB": 304.19,
+              "rssMB": 441.64,
+              "externalMB": 23.61,
+              "arrayBuffersMB": 13.38
+            },
+            {
+              "tMs": 180,
+              "heapUsedMB": 325.81,
+              "rssMB": 442.13,
+              "externalMB": 24.16,
+              "arrayBuffersMB": 13.93
+            },
+            {
+              "tMs": 199,
+              "heapUsedMB": 299.07,
+              "rssMB": 443.11,
+              "externalMB": 24.75,
+              "arrayBuffersMB": 13.22
+            },
+            {
+              "tMs": 219,
+              "heapUsedMB": 322.32,
+              "rssMB": 443.34,
+              "externalMB": 24.04,
+              "arrayBuffersMB": 13.81
+            },
+            {
+              "tMs": 240,
+              "heapUsedMB": 341.62,
+              "rssMB": 443.39,
+              "externalMB": 24.52,
+              "arrayBuffersMB": 14.29
+            },
+            {
+              "tMs": 260,
+              "heapUsedMB": 311.99,
+              "rssMB": 444.55,
+              "externalMB": 23.74,
+              "arrayBuffersMB": 13.51
+            },
+            {
+              "tMs": 279,
+              "heapUsedMB": 335.12,
+              "rssMB": 444.63,
+              "externalMB": 24.33,
+              "arrayBuffersMB": 14.1
+            },
+            {
+              "tMs": 299,
+              "heapUsedMB": 305.5,
+              "rssMB": 445.84,
+              "externalMB": 23.54,
+              "arrayBuffersMB": 13.32
+            },
+            {
+              "tMs": 320,
+              "heapUsedMB": 327.35,
+              "rssMB": 445.92,
+              "externalMB": 24.1,
+              "arrayBuffersMB": 13.87
+            },
+            {
+              "tMs": 340,
+              "heapUsedMB": 349.43,
+              "rssMB": 446.24,
+              "externalMB": 24.65,
+              "arrayBuffersMB": 14.43
+            },
+            {
+              "tMs": 360,
+              "heapUsedMB": 318.55,
+              "rssMB": 447.14,
+              "externalMB": 23.84,
+              "arrayBuffersMB": 13.61
+            },
+            {
+              "tMs": 380,
+              "heapUsedMB": 336.53,
+              "rssMB": 405.99,
+              "externalMB": 24.29,
+              "arrayBuffersMB": 14.07
+            },
+            {
+              "tMs": 400,
+              "heapUsedMB": 352.01,
+              "rssMB": 403.49,
+              "externalMB": 24.69,
+              "arrayBuffersMB": 14.46
+            },
+            {
+              "tMs": 420,
+              "heapUsedMB": 314.65,
+              "rssMB": 404.62,
+              "externalMB": 23.71,
+              "arrayBuffersMB": 13.48
+            },
+            {
+              "tMs": 439,
+              "heapUsedMB": 332.65,
+              "rssMB": 404.67,
+              "externalMB": 24.16,
+              "arrayBuffersMB": 13.94
+            },
+            {
+              "tMs": 462,
+              "heapUsedMB": 305.59,
+              "rssMB": 405.84,
+              "externalMB": 24.76,
+              "arrayBuffersMB": 14.53
+            },
+            {
+              "tMs": 482,
+              "heapUsedMB": 319.72,
+              "rssMB": 405.88,
+              "externalMB": 23.81,
+              "arrayBuffersMB": 13.58
+            },
+            {
+              "tMs": 504,
+              "heapUsedMB": 335.14,
+              "rssMB": 405.93,
+              "externalMB": 24.2,
+              "arrayBuffersMB": 13.97
+            },
+            {
+              "tMs": 524,
+              "heapUsedMB": 350.55,
+              "rssMB": 405.97,
+              "externalMB": 24.59,
+              "arrayBuffersMB": 14.36
+            },
+            {
+              "tMs": 545,
+              "heapUsedMB": 313.29,
+              "rssMB": 407.09,
+              "externalMB": 23.61,
+              "arrayBuffersMB": 13.38
+            },
+            {
+              "tMs": 566,
+              "heapUsedMB": 333.85,
+              "rssMB": 407.15,
+              "externalMB": 24.13,
+              "arrayBuffersMB": 13.9
+            },
+            {
+              "tMs": 587,
+              "heapUsedMB": 356.98,
+              "rssMB": 407.21,
+              "externalMB": 24.72,
+              "arrayBuffersMB": 14.49
+            },
+            {
+              "tMs": 607,
+              "heapUsedMB": 326.08,
+              "rssMB": 408.39,
+              "externalMB": 23.9,
+              "arrayBuffersMB": 13.68
+            },
+            {
+              "tMs": 627,
+              "heapUsedMB": 348.37,
+              "rssMB": 408.96,
+              "externalMB": 24.46,
+              "arrayBuffersMB": 14.23
+            },
+            {
+              "tMs": 647,
+              "heapUsedMB": 317.43,
+              "rssMB": 410.11,
+              "externalMB": 23.64,
+              "arrayBuffersMB": 13.41
+            },
+            {
+              "tMs": 667,
+              "heapUsedMB": 340.54,
+              "rssMB": 410.18,
+              "externalMB": 24.23,
+              "arrayBuffersMB": 14
+            },
+            {
+              "tMs": 688,
+              "heapUsedMB": 312.24,
+              "rssMB": 411.34,
+              "externalMB": 23.48,
+              "arrayBuffersMB": 13.25
+            },
+            {
+              "tMs": 709,
+              "heapUsedMB": 336.65,
+              "rssMB": 411.41,
+              "externalMB": 24.1,
+              "arrayBuffersMB": 13.87
+            },
+            {
+              "tMs": 730,
+              "heapUsedMB": 352.08,
+              "rssMB": 411.46,
+              "externalMB": 24.49,
+              "arrayBuffersMB": 14.26
+            },
+            {
+              "tMs": 750,
+              "heapUsedMB": 317.31,
+              "rssMB": 412.59,
+              "externalMB": 23.58,
+              "arrayBuffersMB": 13.35
+            },
+            {
+              "tMs": 769,
+              "heapUsedMB": 336.71,
+              "rssMB": 412.86,
+              "externalMB": 24.07,
+              "arrayBuffersMB": 13.84
+            },
+            {
+              "tMs": 790,
+              "heapUsedMB": 348.27,
+              "rssMB": 412.89,
+              "externalMB": 24.36,
+              "arrayBuffersMB": 14.13
+            },
+            {
+              "tMs": 810,
+              "heapUsedMB": 314.8,
+              "rssMB": 414.05,
+              "externalMB": 23.48,
+              "arrayBuffersMB": 13.25
+            },
+            {
+              "tMs": 830,
+              "heapUsedMB": 335.35,
+              "rssMB": 414.11,
+              "externalMB": 24,
+              "arrayBuffersMB": 13.77
+            },
+            {
+              "tMs": 849,
+              "heapUsedMB": 353.33,
+              "rssMB": 414.16,
+              "externalMB": 24.46,
+              "arrayBuffersMB": 14.23
+            },
+            {
+              "tMs": 869,
+              "heapUsedMB": 323.75,
+              "rssMB": 415.32,
+              "externalMB": 23.68,
+              "arrayBuffersMB": 13.45
+            },
+            {
+              "tMs": 889,
+              "heapUsedMB": 343.03,
+              "rssMB": 415.38,
+              "externalMB": 24.16,
+              "arrayBuffersMB": 13.94
+            },
+            {
+              "tMs": 910,
+              "heapUsedMB": 364.87,
+              "rssMB": 415.45,
+              "externalMB": 24.72,
+              "arrayBuffersMB": 14.49
+            },
+            {
+              "tMs": 930,
+              "heapUsedMB": 335.24,
+              "rssMB": 416.6,
+              "externalMB": 23.94,
+              "arrayBuffersMB": 13.71
+            },
+            {
+              "tMs": 949,
+              "heapUsedMB": 357.08,
+              "rssMB": 416.66,
+              "externalMB": 24.49,
+              "arrayBuffersMB": 14.26
+            },
+            {
+              "tMs": 969,
+              "heapUsedMB": 330.06,
+              "rssMB": 417.82,
+              "externalMB": 23.77,
+              "arrayBuffersMB": 13.54
+            },
+            {
+              "tMs": 990,
+              "heapUsedMB": 353.19,
+              "rssMB": 417.91,
+              "externalMB": 24.36,
+              "arrayBuffersMB": 14.13
+            },
+            {
+              "tMs": 1011,
+              "heapUsedMB": 324.87,
+              "rssMB": 419.07,
+              "externalMB": 23.61,
+              "arrayBuffersMB": 13.38
+            },
+            {
+              "tMs": 1031,
+              "heapUsedMB": 348,
+              "rssMB": 419.12,
+              "externalMB": 24.2,
+              "arrayBuffersMB": 13.97
+            },
+            {
+              "tMs": 1051,
+              "heapUsedMB": 320.94,
+              "rssMB": 420.15,
+              "externalMB": 23.48,
+              "arrayBuffersMB": 13.25
+            },
+            {
+              "tMs": 1072,
+              "heapUsedMB": 344.06,
+              "rssMB": 420.22,
+              "externalMB": 24.07,
+              "arrayBuffersMB": 13.84
+            },
+            {
+              "tMs": 1092,
+              "heapUsedMB": 367.18,
+              "rssMB": 420.29,
+              "externalMB": 24.65,
+              "arrayBuffersMB": 14.43
+            },
+            {
+              "tMs": 1112,
+              "heapUsedMB": 337.55,
+              "rssMB": 421.44,
+              "externalMB": 23.87,
+              "arrayBuffersMB": 13.64
+            },
+            {
+              "tMs": 1132,
+              "heapUsedMB": 360.68,
+              "rssMB": 421.5,
+              "externalMB": 24.46,
+              "arrayBuffersMB": 14.23
+            },
+            {
+              "tMs": 1153,
+              "heapUsedMB": 333.29,
+              "rssMB": 423.59,
+              "externalMB": 23.71,
+              "arrayBuffersMB": 13.48
+            },
+            {
+              "tMs": 1173,
+              "heapUsedMB": 352.56,
+              "rssMB": 423.65,
+              "externalMB": 24.2,
+              "arrayBuffersMB": 13.97
+            },
+            {
+              "tMs": 1193,
+              "heapUsedMB": 324.26,
+              "rssMB": 424.82,
+              "externalMB": 24.75,
+              "arrayBuffersMB": 13.48
+            },
+            {
+              "tMs": 1214,
+              "heapUsedMB": 348.67,
+              "rssMB": 424.89,
+              "externalMB": 24.07,
+              "arrayBuffersMB": 13.84
+            },
+            {
+              "tMs": 1234,
+              "heapUsedMB": 369.23,
+              "rssMB": 424.96,
+              "externalMB": 24.59,
+              "arrayBuffersMB": 14.36
+            },
+            {
+              "tMs": 1254,
+              "heapUsedMB": 335.78,
+              "rssMB": 426.12,
+              "externalMB": 23.71,
+              "arrayBuffersMB": 13.48
+            },
+            {
+              "tMs": 1274,
+              "heapUsedMB": 355.05,
+              "rssMB": 426.18,
+              "externalMB": 24.2,
+              "arrayBuffersMB": 13.97
+            },
+            {
+              "tMs": 1294,
+              "heapUsedMB": 376.9,
+              "rssMB": 426.24,
+              "externalMB": 24.75,
+              "arrayBuffersMB": 14.52
+            },
+            {
+              "tMs": 1314,
+              "heapUsedMB": 347.23,
+              "rssMB": 427.43,
+              "externalMB": 23.97,
+              "arrayBuffersMB": 13.74
+            },
+            {
+              "tMs": 1334,
+              "heapUsedMB": 369.07,
+              "rssMB": 427.5,
+              "externalMB": 24.52,
+              "arrayBuffersMB": 14.29
+            },
+            {
+              "tMs": 1353,
+              "heapUsedMB": 339.45,
+              "rssMB": 428.67,
+              "externalMB": 23.74,
+              "arrayBuffersMB": 13.51
+            },
+            {
+              "tMs": 1373,
+              "heapUsedMB": 360.07,
+              "rssMB": 428.73,
+              "externalMB": 24.26,
+              "arrayBuffersMB": 14.03
+            },
+            {
+              "tMs": 1394,
+              "heapUsedMB": 375.64,
+              "rssMB": 398.15,
+              "externalMB": 24.65,
+              "arrayBuffersMB": 14.43
+            },
+            {
+              "tMs": 1414,
+              "heapUsedMB": 337.13,
+              "rssMB": 399.5,
+              "externalMB": 23.64,
+              "arrayBuffersMB": 13.41
+            },
+            {
+              "tMs": 1435,
+              "heapUsedMB": 355.29,
+              "rssMB": 399.55,
+              "externalMB": 24.1,
+              "arrayBuffersMB": 13.87
+            },
+            {
+              "tMs": 1455,
+              "heapUsedMB": 379.94,
+              "rssMB": 399.62,
+              "externalMB": 24.72,
+              "arrayBuffersMB": 14.49
+            },
+            {
+              "tMs": 1475,
+              "heapUsedMB": 347.35,
+              "rssMB": 400.73,
+              "externalMB": 23.87,
+              "arrayBuffersMB": 13.64
+            },
+            {
+              "tMs": 1494,
+              "heapUsedMB": 368.1,
+              "rssMB": 400.79,
+              "externalMB": 24.39,
+              "arrayBuffersMB": 14.17
+            },
+            {
+              "tMs": 1515,
+              "heapUsedMB": 339.52,
+              "rssMB": 401.93,
+              "externalMB": 23.64,
+              "arrayBuffersMB": 13.41
+            },
+            {
+              "tMs": 1535,
+              "heapUsedMB": 361.57,
+              "rssMB": 402,
+              "externalMB": 24.2,
+              "arrayBuffersMB": 13.97
+            },
+            {
+              "tMs": 1555,
+              "heapUsedMB": 378.44,
+              "rssMB": 402.05,
+              "externalMB": 24.62,
+              "arrayBuffersMB": 14.4
+            },
+            {
+              "tMs": 1575,
+              "heapUsedMB": 349.79,
+              "rssMB": 403.18,
+              "externalMB": 23.87,
+              "arrayBuffersMB": 13.64
+            },
+            {
+              "tMs": 1596,
+              "heapUsedMB": 369.24,
+              "rssMB": 343.5,
+              "externalMB": 24.36,
+              "arrayBuffersMB": 14.13
+            },
+            {
+              "tMs": 1616,
+              "heapUsedMB": 336.71,
+              "rssMB": 344.62,
+              "externalMB": 23.51,
+              "arrayBuffersMB": 13.28
+            },
+            {
+              "tMs": 1636,
+              "heapUsedMB": 354.88,
+              "rssMB": 344.68,
+              "externalMB": 23.97,
+              "arrayBuffersMB": 13.74
+            },
+            {
+              "tMs": 1656,
+              "heapUsedMB": 371.74,
+              "rssMB": 344.72,
+              "externalMB": 24.39,
+              "arrayBuffersMB": 14.17
+            },
+            {
+              "tMs": 1675,
+              "heapUsedMB": 339.24,
+              "rssMB": 345.84,
+              "externalMB": 23.54,
+              "arrayBuffersMB": 13.32
+            },
+            {
+              "tMs": 1696,
+              "heapUsedMB": 362.59,
+              "rssMB": 345.91,
+              "externalMB": 24.13,
+              "arrayBuffersMB": 13.9
+            },
+            {
+              "tMs": 1715,
+              "heapUsedMB": 385.93,
+              "rssMB": 345.98,
+              "externalMB": 24.72,
+              "arrayBuffersMB": 14.49
+            },
+            {
+              "tMs": 1736,
+              "heapUsedMB": 355.98,
+              "rssMB": 347.12,
+              "externalMB": 23.94,
+              "arrayBuffersMB": 13.71
+            },
+            {
+              "tMs": 1756,
+              "heapUsedMB": 376.73,
+              "rssMB": 347.18,
+              "externalMB": 24.46,
+              "arrayBuffersMB": 14.23
+            },
+            {
+              "tMs": 1776,
+              "heapUsedMB": 344.22,
+              "rssMB": 348.28,
+              "externalMB": 23.61,
+              "arrayBuffersMB": 13.38
+            },
+            {
+              "tMs": 1796,
+              "heapUsedMB": 355.89,
+              "rssMB": 348.32,
+              "externalMB": 23.9,
+              "arrayBuffersMB": 13.68
+            },
+            {
+              "tMs": 1816,
+              "heapUsedMB": 374.06,
+              "rssMB": 348.37,
+              "externalMB": 24.36,
+              "arrayBuffersMB": 14.13
+            },
+            {
+              "tMs": 1835,
+              "heapUsedMB": 341.53,
+              "rssMB": 349.55,
+              "externalMB": 23.51,
+              "arrayBuffersMB": 13.28
+            },
+            {
+              "tMs": 1856,
+              "heapUsedMB": 362.29,
+              "rssMB": 349.61,
+              "externalMB": 24.04,
+              "arrayBuffersMB": 13.81
+            },
+            {
+              "tMs": 1876,
+              "heapUsedMB": 381.75,
+              "rssMB": 349.67,
+              "externalMB": 24.53,
+              "arrayBuffersMB": 14.3
+            },
+            {
+              "tMs": 1896,
+              "heapUsedMB": 353.09,
+              "rssMB": 350.82,
+              "externalMB": 23.77,
+              "arrayBuffersMB": 13.55
+            },
+            {
+              "tMs": 1916,
+              "heapUsedMB": 376.44,
+              "rssMB": 350.89,
+              "externalMB": 24.36,
+              "arrayBuffersMB": 14.13
+            },
+            {
+              "tMs": 1936,
+              "heapUsedMB": 351.7,
+              "rssMB": 352.03,
+              "externalMB": 23.71,
+              "arrayBuffersMB": 13.48
+            },
+            {
+              "tMs": 1957,
+              "heapUsedMB": 378.94,
+              "rssMB": 352.11,
+              "externalMB": 24.39,
+              "arrayBuffersMB": 14.17
+            },
+            {
+              "tMs": 1977,
+              "heapUsedMB": 351.57,
+              "rssMB": 353.25,
+              "externalMB": 23.68,
+              "arrayBuffersMB": 13.45
+            },
+            {
+              "tMs": 1997,
+              "heapUsedMB": 376.21,
+              "rssMB": 353.32,
+              "externalMB": 24.3,
+              "arrayBuffersMB": 14.07
+            },
+            {
+              "tMs": 2017,
+              "heapUsedMB": 346.33,
+              "rssMB": 354.44,
+              "externalMB": 23.51,
+              "arrayBuffersMB": 13.28
+            },
+            {
+              "tMs": 2037,
+              "heapUsedMB": 367.08,
+              "rssMB": 354.5,
+              "externalMB": 24.04,
+              "arrayBuffersMB": 13.81
+            },
+            {
+              "tMs": 2058,
+              "heapUsedMB": 386.55,
+              "rssMB": 354.56,
+              "externalMB": 24.53,
+              "arrayBuffersMB": 14.3
+            },
+            {
+              "tMs": 2078,
+              "heapUsedMB": 355.42,
+              "rssMB": 355.69,
+              "externalMB": 23.71,
+              "arrayBuffersMB": 13.48
+            },
+            {
+              "tMs": 2097,
+              "heapUsedMB": 373.58,
+              "rssMB": 355.74,
+              "externalMB": 24.17,
+              "arrayBuffersMB": 13.94
+            },
+            {
+              "tMs": 2118,
+              "heapUsedMB": 394.33,
+              "rssMB": 355.8,
+              "externalMB": 24.69,
+              "arrayBuffersMB": 14.46
+            },
+            {
+              "tMs": 2138,
+              "heapUsedMB": 361.72,
+              "rssMB": 356.94,
+              "externalMB": 23.84,
+              "arrayBuffersMB": 13.61
+            },
+            {
+              "tMs": 2157,
+              "heapUsedMB": 381.18,
+              "rssMB": 357,
+              "externalMB": 24.33,
+              "arrayBuffersMB": 14.1
+            },
+            {
+              "tMs": 2178,
+              "heapUsedMB": 348.69,
+              "rssMB": 358.2,
+              "externalMB": 23.48,
+              "arrayBuffersMB": 13.25
+            },
+            {
+              "tMs": 2198,
+              "heapUsedMB": 372.04,
+              "rssMB": 358.27,
+              "externalMB": 24.07,
+              "arrayBuffersMB": 13.84
+            },
+            {
+              "tMs": 2218,
+              "heapUsedMB": 397.14,
+              "rssMB": 360.16,
+              "externalMB": 24.66,
+              "arrayBuffersMB": 14.43
+            },
+            {
+              "tMs": 2239,
+              "heapUsedMB": 369.8,
+              "rssMB": 361.29,
+              "externalMB": 23.94,
+              "arrayBuffersMB": 13.71
+            },
+            {
+              "tMs": 2258,
+              "heapUsedMB": 393.15,
+              "rssMB": 361.36,
+              "externalMB": 24.53,
+              "arrayBuffersMB": 14.3
+            },
+            {
+              "tMs": 2278,
+              "heapUsedMB": 364.52,
+              "rssMB": 362.49,
+              "externalMB": 23.77,
+              "arrayBuffersMB": 13.55
+            },
+            {
+              "tMs": 2299,
+              "heapUsedMB": 389.18,
+              "rssMB": 362.57,
+              "externalMB": 24.39,
+              "arrayBuffersMB": 14.17
+            },
+            {
+              "tMs": 2318,
+              "heapUsedMB": 361.79,
+              "rssMB": 363.7,
+              "externalMB": 23.68,
+              "arrayBuffersMB": 13.45
+            },
+            {
+              "tMs": 2339,
+              "heapUsedMB": 386.44,
+              "rssMB": 363.77,
+              "externalMB": 24.3,
+              "arrayBuffersMB": 14.07
+            },
+            {
+              "tMs": 2358,
+              "heapUsedMB": 359.09,
+              "rssMB": 364.9,
+              "externalMB": 23.58,
+              "arrayBuffersMB": 13.35
+            },
+            {
+              "tMs": 2379,
+              "heapUsedMB": 381.15,
+              "rssMB": 364.97,
+              "externalMB": 24.13,
+              "arrayBuffersMB": 13.9
+            },
+            {
+              "tMs": 2400,
+              "heapUsedMB": 396.71,
+              "rssMB": 365.02,
+              "externalMB": 24.53,
+              "arrayBuffersMB": 14.3
+            },
+            {
+              "tMs": 2420,
+              "heapUsedMB": 362.89,
+              "rssMB": 366.14,
+              "externalMB": 23.64,
+              "arrayBuffersMB": 13.41
+            },
+            {
+              "tMs": 2439,
+              "heapUsedMB": 378.46,
+              "rssMB": 366.2,
+              "externalMB": 24.04,
+              "arrayBuffersMB": 13.81
+            },
+            {
+              "tMs": 2459,
+              "heapUsedMB": 395.32,
+              "rssMB": 366.24,
+              "externalMB": 24.46,
+              "arrayBuffersMB": 14.23
+            },
+            {
+              "tMs": 2480,
+              "heapUsedMB": 362.81,
+              "rssMB": 367.39,
+              "externalMB": 23.61,
+              "arrayBuffersMB": 13.38
+            },
+            {
+              "tMs": 2501,
+              "heapUsedMB": 380.97,
+              "rssMB": 367.45,
+              "externalMB": 24.07,
+              "arrayBuffersMB": 13.84
+            },
+            {
+              "tMs": 2521,
+              "heapUsedMB": 395.24,
+              "rssMB": 367.49,
+              "externalMB": 24.43,
+              "arrayBuffersMB": 14.2
+            },
+            {
+              "tMs": 2541,
+              "heapUsedMB": 362.72,
+              "rssMB": 368.77,
+              "externalMB": 23.58,
+              "arrayBuffersMB": 13.35
+            },
+            {
+              "tMs": 2561,
+              "heapUsedMB": 380.88,
+              "rssMB": 323.08,
+              "externalMB": 24.04,
+              "arrayBuffersMB": 13.81
+            },
+            {
+              "tMs": 2582,
+              "heapUsedMB": 396.45,
+              "rssMB": 323.14,
+              "externalMB": 24.43,
+              "arrayBuffersMB": 14.2
+            },
+            {
+              "tMs": 2601,
+              "heapUsedMB": 358.72,
+              "rssMB": 324.3,
+              "externalMB": 23.45,
+              "arrayBuffersMB": 13.22
+            },
+            {
+              "tMs": 2622,
+              "heapUsedMB": 375.58,
+              "rssMB": 324.3,
+              "externalMB": 23.87,
+              "arrayBuffersMB": 13.64
+            },
+            {
+              "tMs": 2642,
+              "heapUsedMB": 393.75,
+              "rssMB": 324.3,
+              "externalMB": 24.33,
+              "arrayBuffersMB": 14.1
+            },
+            {
+              "tMs": 2661,
+              "heapUsedMB": 359.9,
+              "rssMB": 325.47,
+              "externalMB": 23.45,
+              "arrayBuffersMB": 13.22
+            },
+            {
+              "tMs": 2681,
+              "heapUsedMB": 381.96,
+              "rssMB": 325.54,
+              "externalMB": 24,
+              "arrayBuffersMB": 13.77
+            },
+            {
+              "tMs": 2702,
+              "heapUsedMB": 405.31,
+              "rssMB": 325.61,
+              "externalMB": 24.59,
+              "arrayBuffersMB": 14.36
+            },
+            {
+              "tMs": 2716,
+              "heapUsedMB": 370.07,
+              "rssMB": 326.78,
+              "externalMB": 23.66,
+              "arrayBuffersMB": 13.43
+            }
+          ]
+        }
+      }
+    ],
+    "byteStress": {
+      "pages": 500,
+      "linesPerPage": 500,
+      "bytes": 5443283,
+      "bytesLabel": "5.2 MB",
+      "buildMs": 15744,
+      "warmupMs": 17151,
+      "parseMs": { "runs": [10676, 6030, 7232], "minMs": 6030, "medianMs": 7232, "maxMs": 10676 },
+      "lines": 22000,
+      "bytesPerLine": 247,
+      "memory": {
+        "peakHeapUsedMB": 916.46,
+        "peakRssMB": 776.14,
+        "heapDeltaMB": -485.25,
+        "rssDeltaMB": -159.52,
+        "sampleCount": 262,
+        "trace": [
+          {
+            "tMs": 0,
+            "heapUsedMB": 898.68,
+            "rssMB": 486.21,
+            "externalMB": 49.71,
+            "arrayBuffersMB": 39.48
+          },
+          {
+            "tMs": 368,
+            "heapUsedMB": 916.46,
+            "rssMB": 512.5,
+            "externalMB": 59.52,
+            "arrayBuffersMB": 49.29
+          },
+          {
+            "tMs": 423,
+            "heapUsedMB": 916.46,
+            "rssMB": 528.9,
+            "externalMB": 59.55,
+            "arrayBuffersMB": 49.32
+          },
+          {
+            "tMs": 545,
+            "heapUsedMB": 147.83,
+            "rssMB": 723.38,
+            "externalMB": 59.55,
+            "arrayBuffersMB": 16.79
+          },
+          {
+            "tMs": 629,
+            "heapUsedMB": 168.45,
+            "rssMB": 725.36,
+            "externalMB": 27.46,
+            "arrayBuffersMB": 17.23
+          },
+          {
+            "tMs": 652,
+            "heapUsedMB": 187.58,
+            "rssMB": 727.39,
+            "externalMB": 27.94,
+            "arrayBuffersMB": 17.71
+          },
+          {
+            "tMs": 673,
+            "heapUsedMB": 149.55,
+            "rssMB": 722.15,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 694,
+            "heapUsedMB": 184.33,
+            "rssMB": 722.62,
+            "externalMB": 28.34,
+            "arrayBuffersMB": 18.11
+          },
+          {
+            "tMs": 715,
+            "heapUsedMB": 167.22,
+            "rssMB": 724.56,
+            "externalMB": 27.99,
+            "arrayBuffersMB": 17.76
+          },
+          {
+            "tMs": 747,
+            "heapUsedMB": 154.44,
+            "rssMB": 725.94,
+            "externalMB": 27.52,
+            "arrayBuffersMB": 17.3
+          },
+          {
+            "tMs": 767,
+            "heapUsedMB": 185.16,
+            "rssMB": 726.04,
+            "externalMB": 28.49,
+            "arrayBuffersMB": 18.26
+          },
+          {
+            "tMs": 788,
+            "heapUsedMB": 155.43,
+            "rssMB": 726.81,
+            "externalMB": 27.52,
+            "arrayBuffersMB": 17.3
+          },
+          {
+            "tMs": 810,
+            "heapUsedMB": 186.16,
+            "rssMB": 726.81,
+            "externalMB": 28.49,
+            "arrayBuffersMB": 18.26
+          },
+          {
+            "tMs": 838,
+            "heapUsedMB": 156.98,
+            "rssMB": 728.07,
+            "externalMB": 27.4,
+            "arrayBuffersMB": 17.17
+          },
+          {
+            "tMs": 858,
+            "heapUsedMB": 187.69,
+            "rssMB": 728.07,
+            "externalMB": 28.36,
+            "arrayBuffersMB": 18.13
+          },
+          {
+            "tMs": 878,
+            "heapUsedMB": 218.41,
+            "rssMB": 728.07,
+            "externalMB": 29.33,
+            "arrayBuffersMB": 19.1
+          },
+          {
+            "tMs": 899,
+            "heapUsedMB": 189.3,
+            "rssMB": 728.79,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 918,
+            "heapUsedMB": 220.02,
+            "rssMB": 728.8,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 939,
+            "heapUsedMB": 191.09,
+            "rssMB": 729.64,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 959,
+            "heapUsedMB": 162.15,
+            "rssMB": 730.38,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 17.16
+          },
+          {
+            "tMs": 979,
+            "heapUsedMB": 192.87,
+            "rssMB": 730.39,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1000,
+            "heapUsedMB": 164.82,
+            "rssMB": 732.17,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 17.16
+          },
+          {
+            "tMs": 1027,
+            "heapUsedMB": 210.9,
+            "rssMB": 732.17,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.6
+          },
+          {
+            "tMs": 1048,
+            "heapUsedMB": 181.92,
+            "rssMB": 733.14,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 1076,
+            "heapUsedMB": 228.01,
+            "rssMB": 733.16,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1097,
+            "heapUsedMB": 199.11,
+            "rssMB": 733.96,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1117,
+            "heapUsedMB": 170.09,
+            "rssMB": 734.92,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 1137,
+            "heapUsedMB": 200.82,
+            "rssMB": 734.92,
+            "externalMB": 28.47,
+            "arrayBuffersMB": 18.24
+          },
+          {
+            "tMs": 1157,
+            "heapUsedMB": 171.9,
+            "rssMB": 735.61,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 1185,
+            "heapUsedMB": 217.98,
+            "rssMB": 735.61,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.6
+          },
+          {
+            "tMs": 1205,
+            "heapUsedMB": 188.99,
+            "rssMB": 736.24,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 1232,
+            "heapUsedMB": 235.07,
+            "rssMB": 736.24,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1252,
+            "heapUsedMB": 206.11,
+            "rssMB": 736.96,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1273,
+            "heapUsedMB": 177.18,
+            "rssMB": 737.93,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 17.16
+          },
+          {
+            "tMs": 1299,
+            "heapUsedMB": 223.28,
+            "rssMB": 737.94,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.6
+          },
+          {
+            "tMs": 1321,
+            "heapUsedMB": 196.09,
+            "rssMB": 740.43,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 1348,
+            "heapUsedMB": 242.18,
+            "rssMB": 740.43,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1368,
+            "heapUsedMB": 213.22,
+            "rssMB": 741.62,
+            "externalMB": 28.5,
+            "arrayBuffersMB": 18.27
+          },
+          {
+            "tMs": 1396,
+            "heapUsedMB": 199.63,
+            "rssMB": 742.49,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 1423,
+            "heapUsedMB": 245.7,
+            "rssMB": 742.49,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1446,
+            "heapUsedMB": 216.72,
+            "rssMB": 743.73,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1477,
+            "heapUsedMB": 247.44,
+            "rssMB": 743.73,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1516,
+            "heapUsedMB": 218.51,
+            "rssMB": 743.99,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1540,
+            "heapUsedMB": 233.87,
+            "rssMB": 743.99,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.6
+          },
+          {
+            "tMs": 1560,
+            "heapUsedMB": 189.59,
+            "rssMB": 744.36,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 1593,
+            "heapUsedMB": 220.31,
+            "rssMB": 744.36,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1624,
+            "heapUsedMB": 251.03,
+            "rssMB": 744.36,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1655,
+            "heapUsedMB": 222.05,
+            "rssMB": 745.25,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1679,
+            "heapUsedMB": 252.78,
+            "rssMB": 745.26,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1702,
+            "heapUsedMB": 223.86,
+            "rssMB": 745.86,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1724,
+            "heapUsedMB": 254.58,
+            "rssMB": 745.86,
+            "externalMB": 29.31,
+            "arrayBuffersMB": 19.08
+          },
+          {
+            "tMs": 1746,
+            "heapUsedMB": 225.81,
+            "rssMB": 746.24,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1769,
+            "heapUsedMB": 256.85,
+            "rssMB": 746.24,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 1795,
+            "heapUsedMB": 227.73,
+            "rssMB": 746.97,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1820,
+            "heapUsedMB": 258.78,
+            "rssMB": 746.97,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 1844,
+            "heapUsedMB": 229.48,
+            "rssMB": 747.3,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1865,
+            "heapUsedMB": 260.53,
+            "rssMB": 747.3,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 1890,
+            "heapUsedMB": 231.26,
+            "rssMB": 747.81,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1917,
+            "heapUsedMB": 262.31,
+            "rssMB": 747.81,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 1940,
+            "heapUsedMB": 233.05,
+            "rssMB": 748.3,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 1962,
+            "heapUsedMB": 264.1,
+            "rssMB": 748.3,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 1984,
+            "heapUsedMB": 234.82,
+            "rssMB": 749.19,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2017,
+            "heapUsedMB": 265.87,
+            "rssMB": 749.19,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2040,
+            "heapUsedMB": 236.61,
+            "rssMB": 749.93,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2061,
+            "heapUsedMB": 267.65,
+            "rssMB": 749.93,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2086,
+            "heapUsedMB": 238.37,
+            "rssMB": 750.63,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2110,
+            "heapUsedMB": 269.41,
+            "rssMB": 750.63,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2140,
+            "heapUsedMB": 243.64,
+            "rssMB": 755,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2168,
+            "heapUsedMB": 274.68,
+            "rssMB": 755,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2194,
+            "heapUsedMB": 245.41,
+            "rssMB": 756.04,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2217,
+            "heapUsedMB": 276.46,
+            "rssMB": 756.04,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2238,
+            "heapUsedMB": 247.19,
+            "rssMB": 756.62,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2261,
+            "heapUsedMB": 278.24,
+            "rssMB": 756.62,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2286,
+            "heapUsedMB": 248.96,
+            "rssMB": 757.03,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2312,
+            "heapUsedMB": 280.01,
+            "rssMB": 757.03,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2335,
+            "heapUsedMB": 250.72,
+            "rssMB": 757.72,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2359,
+            "heapUsedMB": 281.77,
+            "rssMB": 757.72,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2389,
+            "heapUsedMB": 252.47,
+            "rssMB": 758.38,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2414,
+            "heapUsedMB": 283.52,
+            "rssMB": 758.38,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2438,
+            "heapUsedMB": 254.27,
+            "rssMB": 759.2,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2462,
+            "heapUsedMB": 285.32,
+            "rssMB": 759.2,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2484,
+            "heapUsedMB": 256.03,
+            "rssMB": 760.17,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2507,
+            "heapUsedMB": 287.08,
+            "rssMB": 760.17,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2534,
+            "heapUsedMB": 257.82,
+            "rssMB": 760.67,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2559,
+            "heapUsedMB": 288.87,
+            "rssMB": 760.67,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2583,
+            "heapUsedMB": 259.57,
+            "rssMB": 761.43,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2609,
+            "heapUsedMB": 290.62,
+            "rssMB": 761.43,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2638,
+            "heapUsedMB": 261.34,
+            "rssMB": 762.29,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2666,
+            "heapUsedMB": 292.39,
+            "rssMB": 762.29,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2691,
+            "heapUsedMB": 263.15,
+            "rssMB": 762.95,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2718,
+            "heapUsedMB": 294.19,
+            "rssMB": 762.95,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2739,
+            "heapUsedMB": 264.9,
+            "rssMB": 763.58,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2766,
+            "heapUsedMB": 280.43,
+            "rssMB": 763.58,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 2787,
+            "heapUsedMB": 295.95,
+            "rssMB": 763.58,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2810,
+            "heapUsedMB": 266.65,
+            "rssMB": 764.06,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2841,
+            "heapUsedMB": 297.7,
+            "rssMB": 764.06,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2872,
+            "heapUsedMB": 268.42,
+            "rssMB": 764.38,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2898,
+            "heapUsedMB": 299.47,
+            "rssMB": 764.38,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2922,
+            "heapUsedMB": 270.19,
+            "rssMB": 765.24,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2946,
+            "heapUsedMB": 301.24,
+            "rssMB": 765.24,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 2972,
+            "heapUsedMB": 272.02,
+            "rssMB": 766.46,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 2994,
+            "heapUsedMB": 242.67,
+            "rssMB": 767.44,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 17.16
+          },
+          {
+            "tMs": 3017,
+            "heapUsedMB": 273.72,
+            "rssMB": 767.44,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3042,
+            "heapUsedMB": 304.77,
+            "rssMB": 767.44,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3065,
+            "heapUsedMB": 275.56,
+            "rssMB": 768.52,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3088,
+            "heapUsedMB": 306.6,
+            "rssMB": 768.52,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3114,
+            "heapUsedMB": 277.29,
+            "rssMB": 769.83,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3140,
+            "heapUsedMB": 308.34,
+            "rssMB": 769.83,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3167,
+            "heapUsedMB": 279.03,
+            "rssMB": 771.11,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3194,
+            "heapUsedMB": 310.08,
+            "rssMB": 771.11,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3228,
+            "heapUsedMB": 280.84,
+            "rssMB": 772.48,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3264,
+            "heapUsedMB": 311.88,
+            "rssMB": 772.48,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3294,
+            "heapUsedMB": 282.62,
+            "rssMB": 773.86,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3318,
+            "heapUsedMB": 313.66,
+            "rssMB": 773.86,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3344,
+            "heapUsedMB": 284.4,
+            "rssMB": 775.03,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3367,
+            "heapUsedMB": 315.45,
+            "rssMB": 775.03,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3390,
+            "heapUsedMB": 286.12,
+            "rssMB": 776.14,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3418,
+            "heapUsedMB": 317.17,
+            "rssMB": 776.14,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3442,
+            "heapUsedMB": 287.9,
+            "rssMB": 771.8,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3466,
+            "heapUsedMB": 318.94,
+            "rssMB": 771.8,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3488,
+            "heapUsedMB": 289.67,
+            "rssMB": 773.3,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3515,
+            "heapUsedMB": 320.72,
+            "rssMB": 773.3,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3539,
+            "heapUsedMB": 291.46,
+            "rssMB": 774.63,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3563,
+            "heapUsedMB": 322.5,
+            "rssMB": 693.29,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3587,
+            "heapUsedMB": 293.22,
+            "rssMB": 676.68,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3613,
+            "heapUsedMB": 324.27,
+            "rssMB": 676.69,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3640,
+            "heapUsedMB": 294.99,
+            "rssMB": 678.26,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3667,
+            "heapUsedMB": 326.03,
+            "rssMB": 678.26,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3693,
+            "heapUsedMB": 296.77,
+            "rssMB": 670.69,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3717,
+            "heapUsedMB": 327.82,
+            "rssMB": 670.71,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3740,
+            "heapUsedMB": 298.58,
+            "rssMB": 664.89,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3775,
+            "heapUsedMB": 329.63,
+            "rssMB": 664.91,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3805,
+            "heapUsedMB": 300.34,
+            "rssMB": 659.76,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 3830,
+            "heapUsedMB": 331.39,
+            "rssMB": 659.8,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 3853,
+            "heapUsedMB": 293.6,
+            "rssMB": 638.87,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 3877,
+            "heapUsedMB": 324.65,
+            "rssMB": 638.94,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 3903,
+            "heapUsedMB": 295.39,
+            "rssMB": 633.31,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 3925,
+            "heapUsedMB": 326.44,
+            "rssMB": 633.36,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 3950,
+            "heapUsedMB": 297.12,
+            "rssMB": 629.3,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 3975,
+            "heapUsedMB": 328.17,
+            "rssMB": 629.32,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4019,
+            "heapUsedMB": 298.89,
+            "rssMB": 625.44,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4052,
+            "heapUsedMB": 329.94,
+            "rssMB": 625.44,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4086,
+            "heapUsedMB": 300.69,
+            "rssMB": 620.68,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4110,
+            "heapUsedMB": 331.74,
+            "rssMB": 620.7,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4139,
+            "heapUsedMB": 302.43,
+            "rssMB": 616.72,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4165,
+            "heapUsedMB": 333.48,
+            "rssMB": 616.72,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4192,
+            "heapUsedMB": 304.21,
+            "rssMB": 610.71,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4218,
+            "heapUsedMB": 335.26,
+            "rssMB": 610.71,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4241,
+            "heapUsedMB": 306.01,
+            "rssMB": 602.99,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4263,
+            "heapUsedMB": 337.05,
+            "rssMB": 603.03,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4284,
+            "heapUsedMB": 292.26,
+            "rssMB": 600.22,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 4321,
+            "heapUsedMB": 323.3,
+            "rssMB": 600.24,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 4356,
+            "heapUsedMB": 354.35,
+            "rssMB": 600.3,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 4388,
+            "heapUsedMB": 325.06,
+            "rssMB": 595.16,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 4417,
+            "heapUsedMB": 356.11,
+            "rssMB": 595.25,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 4443,
+            "heapUsedMB": 326.82,
+            "rssMB": 587.13,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 4468,
+            "heapUsedMB": 357.87,
+            "rssMB": 587.18,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 4490,
+            "heapUsedMB": 328.64,
+            "rssMB": 579.64,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 4511,
+            "heapUsedMB": 344.16,
+            "rssMB": 579.66,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4543,
+            "heapUsedMB": 314.85,
+            "rssMB": 447.96,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4573,
+            "heapUsedMB": 345.89,
+            "rssMB": 432.88,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4601,
+            "heapUsedMB": 316.67,
+            "rssMB": 435.51,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4633,
+            "heapUsedMB": 347.72,
+            "rssMB": 435.66,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4667,
+            "heapUsedMB": 318.38,
+            "rssMB": 438.18,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4693,
+            "heapUsedMB": 349.43,
+            "rssMB": 438.25,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4718,
+            "heapUsedMB": 320.19,
+            "rssMB": 440.13,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4738,
+            "heapUsedMB": 351.23,
+            "rssMB": 440.68,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4763,
+            "heapUsedMB": 321.95,
+            "rssMB": 446.18,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4785,
+            "heapUsedMB": 353,
+            "rssMB": 446.26,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4809,
+            "heapUsedMB": 323.72,
+            "rssMB": 448.34,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4832,
+            "heapUsedMB": 354.77,
+            "rssMB": 448.39,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4857,
+            "heapUsedMB": 325.48,
+            "rssMB": 450.9,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4878,
+            "heapUsedMB": 356.52,
+            "rssMB": 450.98,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4903,
+            "heapUsedMB": 327.25,
+            "rssMB": 452.61,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4929,
+            "heapUsedMB": 358.3,
+            "rssMB": 452.66,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4951,
+            "heapUsedMB": 329.01,
+            "rssMB": 454.47,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 4973,
+            "heapUsedMB": 360.06,
+            "rssMB": 454.54,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 4998,
+            "heapUsedMB": 330.79,
+            "rssMB": 456.5,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5024,
+            "heapUsedMB": 346.32,
+            "rssMB": 456.55,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5053,
+            "heapUsedMB": 377.36,
+            "rssMB": 456.63,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5083,
+            "heapUsedMB": 348.06,
+            "rssMB": 458.62,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5109,
+            "heapUsedMB": 379.11,
+            "rssMB": 458.68,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5136,
+            "heapUsedMB": 349.86,
+            "rssMB": 460.57,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5162,
+            "heapUsedMB": 380.91,
+            "rssMB": 460.64,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5191,
+            "heapUsedMB": 351.64,
+            "rssMB": 462.64,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5219,
+            "heapUsedMB": 382.69,
+            "rssMB": 462.72,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5242,
+            "heapUsedMB": 353.4,
+            "rssMB": 464.33,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5274,
+            "heapUsedMB": 384.45,
+            "rssMB": 463.38,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5299,
+            "heapUsedMB": 339.6,
+            "rssMB": 463.26,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5320,
+            "heapUsedMB": 355.12,
+            "rssMB": 463.28,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5340,
+            "heapUsedMB": 370.66,
+            "rssMB": 463.31,
+            "externalMB": 28.96,
+            "arrayBuffersMB": 18.73
+          },
+          {
+            "tMs": 5374,
+            "heapUsedMB": 341.37,
+            "rssMB": 464.02,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5394,
+            "heapUsedMB": 356.9,
+            "rssMB": 464.03,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5431,
+            "heapUsedMB": 387.94,
+            "rssMB": 464.06,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5466,
+            "heapUsedMB": 358.69,
+            "rssMB": 462.81,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5487,
+            "heapUsedMB": 389.74,
+            "rssMB": 462.85,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5510,
+            "heapUsedMB": 360.5,
+            "rssMB": 373.7,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5530,
+            "heapUsedMB": 376.02,
+            "rssMB": 373.73,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 5563,
+            "heapUsedMB": 346.72,
+            "rssMB": 375.6,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5598,
+            "heapUsedMB": 377.77,
+            "rssMB": 375.67,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 5618,
+            "heapUsedMB": 332.94,
+            "rssMB": 378,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 17.16
+          },
+          {
+            "tMs": 5641,
+            "heapUsedMB": 363.99,
+            "rssMB": 378.06,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5662,
+            "heapUsedMB": 395.03,
+            "rssMB": 378.13,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5688,
+            "heapUsedMB": 365.77,
+            "rssMB": 380.24,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5709,
+            "heapUsedMB": 396.82,
+            "rssMB": 380.3,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5732,
+            "heapUsedMB": 367.53,
+            "rssMB": 382.27,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 5753,
+            "heapUsedMB": 383.05,
+            "rssMB": 383.63,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 5773,
+            "heapUsedMB": 398.57,
+            "rssMB": 384.81,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 5794,
+            "heapUsedMB": 353.77,
+            "rssMB": 388.27,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5824,
+            "heapUsedMB": 384.82,
+            "rssMB": 390.07,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 5855,
+            "heapUsedMB": 355.56,
+            "rssMB": 393.39,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5884,
+            "heapUsedMB": 386.61,
+            "rssMB": 394.83,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 5916,
+            "heapUsedMB": 357.35,
+            "rssMB": 397.84,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5946,
+            "heapUsedMB": 388.4,
+            "rssMB": 398.86,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 5971,
+            "heapUsedMB": 359.11,
+            "rssMB": 401.53,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 5992,
+            "heapUsedMB": 390.16,
+            "rssMB": 402.2,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 6024,
+            "heapUsedMB": 360.82,
+            "rssMB": 404.52,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 6052,
+            "heapUsedMB": 391.87,
+            "rssMB": 405,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 6079,
+            "heapUsedMB": 362.62,
+            "rssMB": 407.5,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 6101,
+            "heapUsedMB": 393.67,
+            "rssMB": 408.01,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 6128,
+            "heapUsedMB": 364.42,
+            "rssMB": 410.17,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 6161,
+            "heapUsedMB": 395.47,
+            "rssMB": 410.32,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 6191,
+            "heapUsedMB": 366.17,
+            "rssMB": 412.58,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 6222,
+            "heapUsedMB": 397.22,
+            "rssMB": 412.66,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 6243,
+            "heapUsedMB": 367.93,
+            "rssMB": 414.72,
+            "externalMB": 27.87,
+            "arrayBuffersMB": 17.64
+          },
+          {
+            "tMs": 6268,
+            "heapUsedMB": 398.97,
+            "rssMB": 414.8,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 6290,
+            "heapUsedMB": 354.2,
+            "rssMB": 416.7,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 6322,
+            "heapUsedMB": 385.25,
+            "rssMB": 416.78,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6350,
+            "heapUsedMB": 416.3,
+            "rssMB": 403.67,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6382,
+            "heapUsedMB": 387,
+            "rssMB": 405.62,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6402,
+            "heapUsedMB": 402.53,
+            "rssMB": 405.65,
+            "externalMB": 28.96,
+            "arrayBuffersMB": 18.73
+          },
+          {
+            "tMs": 6422,
+            "heapUsedMB": 357.73,
+            "rssMB": 407.51,
+            "externalMB": 27.42,
+            "arrayBuffersMB": 17.19
+          },
+          {
+            "tMs": 6446,
+            "heapUsedMB": 388.77,
+            "rssMB": 407.59,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6471,
+            "heapUsedMB": 419.82,
+            "rssMB": 407.63,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6501,
+            "heapUsedMB": 390.53,
+            "rssMB": 294.84,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6533,
+            "heapUsedMB": 421.58,
+            "rssMB": 295.31,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6560,
+            "heapUsedMB": 392.33,
+            "rssMB": 297.93,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6588,
+            "heapUsedMB": 423.38,
+            "rssMB": 298.36,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6619,
+            "heapUsedMB": 394.04,
+            "rssMB": 300.71,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6645,
+            "heapUsedMB": 425.09,
+            "rssMB": 301.08,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6670,
+            "heapUsedMB": 395.85,
+            "rssMB": 303.69,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6695,
+            "heapUsedMB": 426.9,
+            "rssMB": 303.96,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6722,
+            "heapUsedMB": 397.63,
+            "rssMB": 306.15,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6743,
+            "heapUsedMB": 428.67,
+            "rssMB": 306.46,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6766,
+            "heapUsedMB": 399.38,
+            "rssMB": 308.83,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6792,
+            "heapUsedMB": 430.43,
+            "rssMB": 309.07,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6820,
+            "heapUsedMB": 401.16,
+            "rssMB": 311.25,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6846,
+            "heapUsedMB": 432.2,
+            "rssMB": 311.45,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6872,
+            "heapUsedMB": 402.88,
+            "rssMB": 313.51,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6898,
+            "heapUsedMB": 433.93,
+            "rssMB": 313.66,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6925,
+            "heapUsedMB": 404.72,
+            "rssMB": 315.67,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6951,
+            "heapUsedMB": 435.77,
+            "rssMB": 315.86,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 6975,
+            "heapUsedMB": 406.48,
+            "rssMB": 317.91,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 6997,
+            "heapUsedMB": 437.53,
+            "rssMB": 318.05,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 7043,
+            "heapUsedMB": 408.25,
+            "rssMB": 320.08,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 7074,
+            "heapUsedMB": 439.3,
+            "rssMB": 320.24,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 7103,
+            "heapUsedMB": 409.99,
+            "rssMB": 322.32,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 7129,
+            "heapUsedMB": 441.04,
+            "rssMB": 322.45,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 19.09
+          },
+          {
+            "tMs": 7163,
+            "heapUsedMB": 411.77,
+            "rssMB": 324.45,
+            "externalMB": 28.35,
+            "arrayBuffersMB": 18.12
+          },
+          {
+            "tMs": 7188,
+            "heapUsedMB": 427.29,
+            "rssMB": 324.61,
+            "externalMB": 28.83,
+            "arrayBuffersMB": 18.61
+          },
+          {
+            "tMs": 7209,
+            "heapUsedMB": 382.47,
+            "rssMB": 326.51,
+            "externalMB": 29.32,
+            "arrayBuffersMB": 17.16
+          },
+          {
+            "tMs": 7232,
+            "heapUsedMB": 413.43,
+            "rssMB": 326.69,
+            "externalMB": 28.34,
+            "arrayBuffersMB": 18.11
+          }
+        ]
+      },
+      "note": "Text-dense byte-stress point: shows peak heap scales with text lines, not bytes."
+    },
+    "byteCeiling": {
+      "images": 8,
+      "pages": 9,
+      "bytes": 96033078,
+      "bytesLabel": "91.6 MB",
+      "buildMs": 12832,
+      "warmupMs": 2892,
+      "parseMs": { "runs": [659, 908, 352], "minMs": 352, "medianMs": 659, "maxMs": 908 },
+      "lines": 2,
+      "bytesPerLine": 48016539,
+      "memory": {
+        "peakHeapUsedMB": 132.79,
+        "peakRssMB": 437.07,
+        "heapDeltaMB": -0.18,
+        "rssDeltaMB": 421.39,
+        "sampleCount": 3,
+        "trace": [
+          {
+            "tMs": 0,
+            "heapUsedMB": 132.79,
+            "rssMB": 15.68,
+            "externalMB": 652.95,
+            "arrayBuffersMB": 642.72
+          },
+          {
+            "tMs": 340,
+            "heapUsedMB": 132.31,
+            "rssMB": 429.51,
+            "externalMB": 561.29,
+            "arrayBuffersMB": 551.07
+          },
+          {
+            "tMs": 350,
+            "heapUsedMB": 132.61,
+            "rssMB": 437.07,
+            "externalMB": 561.43,
+            "arrayBuffersMB": 551.2
+          }
+        ]
+      },
+      "composition": "1 native cover + 8 image-only scanned pages (distinct noise PNGs)",
+      "note": "Byte ceiling measured on the common image-heavy (scanned) composition: large bytes, few text items."
+    },
+    "byteGuard": {
+      "maxBytes": 104857600,
+      "maxBytesLabel": "100.0 MB",
+      "allocMs": 2,
+      "arrayBuffersDeltaMB": 100,
+      "rssDeltaMB": -8.29,
+      "fullParseMeasured": false,
+      "parseMeasuredIn": "byteCeiling",
+      "note": "This test verifies the pre-read guard and the 100 MB buffer-hold cost. The near-ceiling full parse is measured separately in `byteCeiling`."
+    },
+    "canvasWindow": {
+      "totalPages": 500,
+      "overscan": 3,
+      "maxRetainedCanvases": 7,
+      "windowAtMidpoint": { "from": 247, "to": 253 },
+      "canvasBytes": 2003960,
+      "windowCanvasMB": 13.38,
+      "projectedFullDocCanvasMB": 955.56,
+      "measuredWindowAllocDeltaMB": 13.38,
+      "savingFactor": 71.43,
+      "note": "Window allocation is measured; the full-document figure is a projection (pages × canvas bytes)."
+    },
+    "vaultIndexSweep": [
+      {
+        "vaultSize": 10000,
+        "requirementCount": 2000,
+        "baselineMs": {
+          "runs": [1946, 2033, 2031],
+          "minMs": 1946,
+          "medianMs": 2031,
+          "maxMs": 2033
+        },
+        "indexBuildMs": { "runs": [14, 12, 13], "minMs": 12, "medianMs": 13, "maxMs": 14 },
+        "indexedMs": { "runs": [132, 143, 103], "minMs": 103, "medianMs": 132, "maxMs": 143 },
+        "speedup": 14.01,
+        "note": "Indexed path includes one index build per run; the index is reused across requirements."
+      },
+      {
+        "vaultSize": 10000,
+        "requirementCount": 5000,
+        "baselineMs": {
+          "runs": [6934, 3863, 4059],
+          "minMs": 3863,
+          "medianMs": 4059,
+          "maxMs": 6934
+        },
+        "indexBuildMs": { "runs": [17, 11, 13], "minMs": 11, "medianMs": 13, "maxMs": 17 },
+        "indexedMs": { "runs": [277, 203, 272], "minMs": 203, "medianMs": 272, "maxMs": 277 },
+        "speedup": 14.24,
+        "note": "Indexed path includes one index build per run; the index is reused across requirements."
+      }
+    ]
+  },
+  "largestPageCountExercised": 2000,
+  "notes": [
+    "Parse timings include pdfjs document load + full text/coordinate extraction, not PDF file read.",
+    "heapUsed/rss come from process.memoryUsage() sampled during the run; GC timing makes peaks noisy.",
+    "The byte ceiling is measured on an image-heavy composition (native text has negligible byte weight but dominates memory).",
+    "TEXT DENSITY, not file bytes, drives peak memory: see limitAssessment.textDensity; a line-count guard is recommended alongside the byte guard."
+  ],
+  "largestBytesParsed": 96033078,
+  "largestBytesParsedLabel": "91.6 MB",
+  "textDensity": {
+    "measured": true,
+    "source": "byteStress",
+    "bytes": 5443283,
+    "bytesLabel": "5.2 MB",
+    "lines": 22000,
+    "bytesPerLine": 247,
+    "peakHeapUsedMB": 916.46,
+    "peakHeapMbPerLine": 0.0417,
+    "recommendedMaxTextLinesAt1GBHeap": 24581,
+    "note": "Peak heap scales with extracted text lines, not file bytes. A line-count guard is recommended alongside the byte guard."
+  },
+  "limitAssessment": {
+    "maxPages": {
+      "limit": 500,
+      "largestPageCountParsed": 2000,
+      "met": true,
+      "headroomPages": 1500,
+      "note": "Covered: parsed 2000 pages, at/above the 500-page limit."
+    },
+    "maxBytes": {
+      "limit": 104857600,
+      "limitLabel": "100.0 MB",
+      "largestBytesParsed": 96033078,
+      "largestBytesParsedLabel": "91.6 MB",
+      "met": true,
+      "parseMeasured": true,
+      "composition": "1 native cover + 8 image-only scanned pages (distinct noise PNGs)",
+      "measuredPeakRssMB": 437.07,
+      "measuredPeakHeapMB": 132.79,
+      "measuredParseMs": 659,
+      "note": "Covered: parsed a 91.6 MB 1 native cover + 8 image-only scanned pages (distinct noise PNGs) within the 100.0 MB guard. Byte count remains a poor memory proxy for TEXT-DENSE PDFs (see textDensity); the byte guard and a line-count guard are complementary."
+    }
+  }
+}

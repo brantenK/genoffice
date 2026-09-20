@@ -35,8 +35,15 @@ export type UiLanguage =
   | 'hi'
   | 'zh-TW'
 
-/** UI theme preference */
+/** UI theme preference (as chosen by the user) */
 export type UiTheme = 'light' | 'dark' | 'system'
+
+/**
+ * Effective (resolved) theme published to renderers. Electron 43 does not
+ * propagate `nativeTheme.themeSource` to `prefers-color-scheme`, so the shell
+ * resolves `system` in the main process and renderers apply this value directly.
+ */
+export type EffectiveTheme = 'light' | 'dark'
 
 /** shell-wide AutoSave default for every editor; updatedAt is 0 until first set */
 export interface AutoSaveDefault {
@@ -148,7 +155,12 @@ export interface HomeApi {
   setOnboardingSeen(): Promise<boolean>
   /** current UI theme preference (persisted in userData/app-settings.json) */
   getTheme(): Promise<UiTheme>
-  /** switch + persist the UI theme; broadcasts 'app:theme-changed' to all web contents */
+  /**
+   * Resolved effective theme (`light` | `dark`) for stamping `<html data-theme>`.
+   * Always an explicit value; `system` is resolved in the main process.
+   */
+  getEffectiveTheme?(): Promise<EffectiveTheme>
+  /** switch + persist the UI theme; broadcasts the resolved theme to all web contents */
   setTheme(theme: UiTheme): Promise<void>
   /** AutoSave default applied by every editor window (persisted in userData/app-settings.json) */
   getAutoSaveDefault(): Promise<AutoSaveDefault>
@@ -166,8 +178,11 @@ export interface HomeApi {
   getDefaultSaveDir(): Promise<string>
   /** directory picker to change the default save folder; resolves to the new folder, or null when canceled or the pick was unusable */
   pickDefaultSaveDir(): Promise<string | null>
-  /** theme switched anywhere (broadcast from the main process) */
-  onThemeChanged(handler: (theme: UiTheme) => void): () => void
+  /**
+   * Resolved theme changed (broadcast from the main process). Delivers
+   * `light` | `dark` (never `system`); callers apply it to `<html data-theme>`.
+   */
+  onThemeChanged(handler: (theme: EffectiveTheme) => void): () => void
   /** open the Zanostack community page in the default browser */
   openGenTeam(): Promise<void>
   /** open the Genspark credit-usage page in the default browser */

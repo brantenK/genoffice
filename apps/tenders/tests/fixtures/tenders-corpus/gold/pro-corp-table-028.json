@@ -1,0 +1,63 @@
+{
+  "id": "pro-corp-table-028",
+  "synthetic": true,
+  "sector": "professional-services",
+  "issuerType": "corporate",
+  "tags": ["professional-services", "corporate", "table", "pricing-schedule"],
+  "title": "Provision of Engineering Consultancy Services",
+  "titleAlternatives": [],
+  "referenceNumber": "ESKOM-PRO-2026-0955",
+  "issuingBody": "ESKOM HOLDINGS SOC LIMITED",
+  "closingDateTime": "08 January 2027 at 12:00",
+  "submissionMethod": "ELECTRONIC",
+  "submissionDestination": "Eskom tender portal",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "sbd_forms",
+    "experience",
+    "key_personnel",
+    "financials",
+    "turnover",
+    "closing_time",
+    "contact_person",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "cipc", "sbd_forms", "pricing_schedule"],
+  "disqualifiers": ["tax_pin", "coida", "cipc", "sbd_forms", "pricing_schedule"],
+  "pricingRequirements": ["pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 3,
+  "clearable": true,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Provision of Engineering Consultancy Services" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: ESKOM-PRO-2026-0955"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "ESKOM HOLDINGS SOC LIMITED" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 08 January 2027 at 12:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "Eskom tender portal" },
+    "submissionDestination": { "page": 1, "clauseContains": "Eskom tender portal" },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "key_personnel": { "page": 2 },
+      "financials": { "page": 2 },
+      "turnover": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "f8759d31110ff54a3f6a42142259e1d65429f5e8466df2e4332f67b17674963b",
+  "pdfBytes": 2720
+}

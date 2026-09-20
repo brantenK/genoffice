@@ -1,48 +1,63 @@
 // Zanostack Tenders global state (Zustand): multi-company workspace with
-// localStorage persistence. Each company owns its own vault, customers
-// and tenders; the active company's data is exposed via derived slices
-// (company / customers / vault / tenders) so existing selector call
-// sites need no changes. Transient state (shred progress, pending
-// viewer focus) is excluded from persistence, and blob-URL file
-// references are blanked on rehydrate because object URLs die with
-// the page session.
+// authoritative v2 store synchronization via typed IPC (loadStoreV2, saveStoreV2,
+// onStoreChangedV2). Domain records (workspaces, tenders, customers, vault) are
+// authoritative on disk in userData/tenders/tenders-data.json and are never
+// persisted to localStorage. UI preferences (active page, view, zoom, onboarding)
+// are persisted to localStorage under key 'zanostack-tenders-ui'.
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
   AppPage,
   CompanyProfile,
   Customer,
+  FieldReview,
+  IntakeVerification,
   PageExtraction,
+  PageExtractionState,
   RequirementRecord,
+  RequirementReview,
+  ReviewFieldKey,
   SubmissionMethod,
+  TenderOutcomeRecord,
+  TenderOutcomeStatus,
+  TenderReadinessSnapshot,
   TenderRecord,
+  TenderStatus,
+  TenderSubmissionEvidence,
+  TenderSubmissionRecord,
   TendersData,
-  VaultDoc
-} from '../shared/types'
+  TendersDataV2,
+  TendersWorkspaceV2,
+  VaultDoc,
+} from '../../shared/types'
+import { validateTendersDataV2 } from '../../shared/tenders-schema'
+import type { TendersRecoveryCandidate } from '../../shared/tenders-persistence'
+import {
+  appendLifecycleEvent,
+  evaluateTransition,
+  makeLifecycleEvent,
+  outcomeStatusToTenderStatus,
+} from '../../shared/lifecycle'
+import { RULE_BY_KEY } from '../../shared/rules'
+import { applyGapToRequirement } from './gap'
 import { findIssuerTemplate } from './issuer'
-import { MOCK_COMPANY } from './mock/company'
-import { MOCK_CUSTOMERS } from './mock/customers'
-import { MOCK_VAULT } from './mock/vault'
 
-export type View = 'list' | 'workspace'  // within the Tenders page
-export type ShredStage = 'idle' | 'loading' | 'extracting' | 'shredding' | 'analysing' | 'done' | 'error'
+export type View = 'list' | 'workspace' // within the Tenders page
+export type ShredStage =
+  'idle' | 'loading' | 'extracting' | 'shredding' | 'analysing' | 'done' | 'error'
 
-interface ShredProgress {
+export interface ShredProgress {
   stage: ShredStage
   message: string
   page: number
   total: number
 }
 
-/** Everything a company owns, under a stable explicit id. */
-export interface CompanyWorkspace {
-  id: string
-  name?: string
-  company: CompanyProfile
-  customers: Customer[]
-  vault: VaultDoc[]
-  tenders: TenderRecord[]
-}
+export type HydrationStatus = 'loading' | 'ready' | 'error'
+export type SaveStatus = 'loading' | 'saving' | 'saved' | 'error' | 'conflict'
+
+/** Backwards-compatible workspace alias. */
+export type CompanyWorkspace = TendersWorkspaceV2
 
 /** Letterhead analysis result — a recognized issuing-authority template. */
 export interface IssuerTemplate {
@@ -66,17 +81,434 @@ export interface IssuerTemplate {
   lastSeen: string
 }
 
-interface TendersState {
+// ── WP-6 extraction review ──────────────────────────────────────────────────
+// Review annotations (field confirmations + provenance + competing candidates)
+// and per-page OCR extraction state are part of the AUTHORITATIVE v2 document:
+// they live on `TenderRecord.intakeVerification` and persist through
+// `saveStoreV2` with the same CAS revision tracking as every other domain
+// record. `tenderReviews` is only an in-memory projection of those records for
+// the UI; nothing review-related is written to localStorage. Losing the cache
+// is safe — it is rebuilt from the committed snapshot after every load/save.
+export type {
+  FieldReview,
+  IntakeVerification,
+  PageExtractionState,
+  PageExtractionStatus,
+  RequirementReview,
+  RequirementReviewState,
+  ReviewCandidate,
+  ReviewFieldKey,
+  ReviewFieldState,
+} from '../../shared/types'
+
+/** Backwards-compatible alias: the persisted intake-verification slice. */
+export type TenderReview = IntakeVerification
+
+export const EMPTY_COMPANY: CompanyProfile = {
+  name: '',
+  tradingName: '',
+  registrationNumber: '',
+  vatNumber: '',
+  taxPin: '',
+  bbbeeLevel: '',
+  bbbeeBlackOwnership: '',
+  csdSupplierNumber: '',
+  founded: '',
+  employees: '',
+  industry: '',
+  description: '',
+  address: '',
+  phone: '',
+  email: '',
+  website: '',
+  directors: [],
+  projects: [],
+}
+
+// ── Lifecycle (WP-11) store contracts ────────────────────────────────────────
+// Every lifecycle mutation is validated by the pure `shared/lifecycle` state
+// machine before it touches the authoritative document, and appends one
+// lifecycle history entry (when the status actually changes).
+
+export interface LifecycleActionResult {
+  ok: boolean
+  error?: string
+}
+
+/**
+ * Non-lifecycle tender fields a generic caller may patch. `status`,
+ * `submission`, `outcome` and `lifecycle` are intentionally excluded so
+ * `updateTender` can never bypass `evaluateTransition`/`recordSubmission`/
+ * `recordOutcome` or skip the append-only history. Use the lifecycle actions
+ * for those.
+ */
+export type TenderRecordPatch = Partial<
+  Omit<TenderRecord, 'id' | 'status' | 'lifecycle' | 'submission' | 'outcome'>
+>
+
+export interface RecordSubmissionInput {
+  /** RFC3339 instant the bid was submitted. */
+  submittedAt: string
+  timeZone?: string | null
+  method: SubmissionMethod
+  destination?: string | null
+  confirmationReference?: string | null
+  evidence?: { kind: string; reference?: string | null; note?: string | null } | null
+  person?: string | null
+  notes?: string | null
+  /** Current readiness checkpoint (build with `readinessSnapshotFromReport`). */
+  readiness?: TenderReadinessSnapshot | null
+  /** True only when `readiness` reflects the tender's current revision. */
+  readinessIsCurrent?: boolean
+  /** Supplying this allows submitting with blockers; it is audited, never "cleared". */
+  blockerOverrideReason?: string | null
+}
+
+export interface RecordOutcomeInput {
+  status: Exclude<TenderOutcomeStatus, 'pending'>
+  noticeDate?: string | null
+  reason?: string | null
+  awardedValue?: number | null
+  evidenceReference?: string | null
+  at?: string
+}
+
+export interface TransitionTenderOptions {
+  readiness?: TenderReadinessSnapshot | null
+  readinessIsCurrent?: boolean
+  blockerOverrideReason?: string | null
+  reason?: string | null
+  submission?: TenderSubmissionRecord | null
+  outcome?: TenderOutcomeRecord | null
+  at?: string
+}
+
+function findTender(state: TendersState, tenderId: string): TenderRecord | undefined {
+  for (const workspace of state.workspaces) {
+    const tender = workspace.tenders.find((candidate) => candidate.id === tenderId)
+    if (tender) return tender
+  }
+  return undefined
+}
+
+function normalizeSubmissionEvidence(
+  evidence: RecordSubmissionInput['evidence'],
+): TenderSubmissionEvidence | null {
+  if (!evidence) return null
+  const kind = evidence.kind?.trim()
+  if (!kind) return null
+  return {
+    kind,
+    reference: evidence.reference?.trim() ? evidence.reference.trim() : null,
+    note: evidence.note?.trim() ? evidence.note.trim() : null,
+  }
+}
+
+let focusToken = 0
+let companySeq = 0
+let templateSeq = 0
+let vaultSeq = 0
+
+let committedRevision = 0
+let isSyncingFromMain = false
+let isMigrating = false
+let migrationCommitted = false
+let isHydrating = false
+let isSaveInFlight = false
+let isSavePending = false
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let storeChangedUnsub: (() => void) | null = null
+
+/** Legacy v1 localStorage key that used to hold the full domain payload. */
+const LEGACY_LOCAL_STORAGE_KEY = 'zanostack-tenders-v1'
+
+/**
+ * Superseded key that briefly held review annotations outside the authoritative
+ * document. Intake verification now lives on `TenderRecord.intakeVerification`,
+ * so this key is purged and never written again.
+ */
+const LEGACY_REVIEW_STORAGE_KEY = 'zanostack-tenders-review-v1'
+
+/**
+ * One-time best-effort purge of legacy localStorage payloads. The v2 renderer
+ * keeps only UI preferences in localStorage; stale v1 domain data and the
+ * superseded review key must not survive the cutover. Guarded so a non-browser
+ * or storage-disabled environment cannot throw during module init.
+ */
+function purgeLegacyLocalStorage(): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(LEGACY_LOCAL_STORAGE_KEY)
+      window.localStorage.removeItem(LEGACY_REVIEW_STORAGE_KEY)
+    }
+  } catch {
+    // localStorage unavailable (e.g. disabled/private mode); non-fatal.
+  }
+}
+
+purgeLegacyLocalStorage()
+
+/**
+ * Project the authoritative `TenderRecord.intakeVerification` slices into the
+ * UI-facing map. This cache is rebuilt from the committed document on every
+ * load/save/broadcast — it is never a source of truth and is never persisted.
+ */
+function reviewsFromWorkspaces(workspaces: TendersWorkspaceV2[]): Record<string, TenderReview> {
+  const out: Record<string, TenderReview> = {}
+  for (const workspace of workspaces) {
+    for (const tender of workspace.tenders) {
+      if (tender.intakeVerification) out[tender.id] = tender.intakeVerification
+    }
+  }
+  return out
+}
+
+/** Empty authoritative intake-verification record (all fields unconfirmed). */
+function emptyIntakeReview(now: string = new Date().toISOString()): TenderReview {
+  return {
+    fields: {},
+    requirements: {},
+    pages: [],
+    contactEmail: null,
+    conflicts: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+/** Mint a fresh vault doc id (used by the upload flow in DocumentsPage). */
+export function newVaultDocId(): string {
+  return `vd-${Date.now()}-${vaultSeq++}`
+}
+
+// ── Vault keyword index (WP-15) ─────────────────────────────────────────────
+// `applyGapToRequirement` scans the whole vault per requirement. Build the
+// keyword → document index ONCE per analysis pass and hand the matcher only the
+// candidate documents for the requirement's rule. Because the matcher ignores
+// any document whose title has no hint-keyword hit, the prefiltered run is
+// byte-for-byte equivalent to the full scan (see the equivalence test).
+export interface VaultKeywordIndex {
+  /** Documents carrying at least one vault-hint keyword for `ruleKey`, vault order. */
+  candidatesFor: (ruleKey: string) => VaultDoc[]
+}
+
+export function buildVaultKeywordIndex(vault: VaultDoc[]): VaultKeywordIndex {
+  const titles = vault.map((doc) => doc.title.toLowerCase())
+  const keywords = new Set<string>()
+  for (const rule of Object.values(RULE_BY_KEY)) {
+    for (const keyword of rule.vaultHints.keywords) keywords.add(keyword.toLowerCase())
+  }
+  const byKeyword = new Map<string, number[]>()
+  for (const keyword of keywords) {
+    const indices: number[] = []
+    for (let index = 0; index < titles.length; index += 1) {
+      if (titles[index].includes(keyword)) indices.push(index)
+    }
+    byKeyword.set(keyword, indices)
+  }
+  return {
+    candidatesFor: (ruleKey: string) => {
+      const rule = RULE_BY_KEY[ruleKey]
+      if (!rule) return []
+      const seen = new Set<number>()
+      for (const keyword of rule.vaultHints.keywords) {
+        for (const index of byKeyword.get(keyword.toLowerCase()) ?? []) seen.add(index)
+      }
+      return [...seen].sort((a, b) => a - b).map((index) => vault[index])
+    },
+  }
+}
+
+/**
+ * Gap analysis for a whole tender using a prebuilt vault keyword index. Results
+ * are identical to `applyGapToRequirements`; only the vault rescan is removed.
+ */
+export function applyGapToRequirementsIndexed(
+  reqs: RequirementRecord[],
+  index: VaultKeywordIndex,
+  now?: Date,
+): RequirementRecord[] {
+  return reqs.map((req) => applyGapToRequirement(req, index.candidatesFor(req.ruleKey), now))
+}
+
+/** Derive company-scoped views. Returns safe empty company when no workspaces exist. */
+function deriveViews(workspaces: TendersWorkspaceV2[], activeCompanyId: string | null) {
+  const ws = workspaces.find((w) => w.id === activeCompanyId) ?? workspaces[0]
+  if (!ws) {
+    return {
+      workspaces,
+      activeCompanyId: null,
+      company: EMPTY_COMPANY,
+      customers: [],
+      vault: [],
+      tenders: [],
+      hasWorkspaces: false,
+    }
+  }
+  return {
+    workspaces,
+    activeCompanyId: ws.id,
+    company: ws.company,
+    customers: ws.customers,
+    vault: ws.vault,
+    tenders: ws.tenders,
+    hasWorkspaces: true,
+  }
+}
+
+export function cancelPendingSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+}
+
+export function scheduleSaveToMain(): void {
+  if (isSyncingFromMain) return
+  if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) return
+
+  const currentStatus = useTendersStore.getState().saveStatus
+  if (currentStatus === 'conflict') {
+    // Never blind-write when in conflict
+    return
+  }
+
+  cancelPendingSave()
+
+  // A save is already in flight, or the initial v1 migration commit owns the
+  // revision: defer exactly one follow-up instead of dispatching a concurrent
+  // save that would reuse the same `expectedRevision` and be rejected with a
+  // false REVISION_CONFLICT. The follow-up runs after the in-flight save or
+  // migration resolves and reads the freshly committed revision.
+  if (isSaveInFlight || isMigrating) {
+    isSavePending = true
+    return
+  }
+
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    void runSaveToMain()
+  }, 300)
+}
+
+async function runSaveToMain(): Promise<void> {
+  if (isSaveInFlight || isMigrating) {
+    isSavePending = true
+    return
+  }
+  if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) return
+
+  const s = useTendersStore.getState()
+  if (s.saveStatus === 'conflict') return
+
+  isSaveInFlight = true
+
+  const expectedRevision = committedRevision
+  const document: TendersDataV2 = {
+    schemaVersion: 2,
+    revision: expectedRevision,
+    updatedAt: new Date().toISOString(),
+    activeCompanyId: s.activeCompanyId,
+    workspaces: s.workspaces,
+    issuerTemplates: s.issuerTemplates || [],
+  }
+
+  // Belt-and-braces: never hand an invalid document to the authoritative
+  // store. A single extracted/edited field the strict schema cannot represent
+  // (for example a human closing-date string) must surface as a field-level
+  // error instead of failing whole-document validation on every save and
+  // bricking the workspace.
+  const validation = validateTendersDataV2(document)
+  if (!validation.ok) {
+    isSaveInFlight = false
+    isSavePending = false
+    const first = validation.issues[0]
+    useTendersStore.setState({
+      saveStatus: 'error',
+      saveError: first
+        ? first.path
+          ? `${first.path}: ${first.message}`
+          : first.message
+        : 'Tenders data failed schema validation.',
+    })
+    return
+  }
+
+  useTendersStore.setState({ saveStatus: 'saving', saveError: null })
+
+  try {
+    const result = await window.tendersApi.saveStoreV2({
+      expectedRevision,
+      document,
+    })
+
+    if (result.ok) {
+      committedRevision = result.data.revision
+      // Adopt the returned snapshot only when nothing newer was queued while
+      // this save was in flight; otherwise the newer local edits must survive.
+      const hasNewerWork = isSavePending || saveTimer !== null
+      if (!hasNewerWork) {
+        isSyncingFromMain = true
+        try {
+          const activeId = result.data.activeCompanyId || (result.data.workspaces[0]?.id ?? null)
+          const views = deriveViews(result.data.workspaces, activeId)
+          useTendersStore.setState({
+            ...views,
+            issuerTemplates: result.data.issuerTemplates || [],
+            tenderReviews: reviewsFromWorkspaces(result.data.workspaces),
+            saveStatus: 'saved',
+            saveError: null,
+          })
+        } finally {
+          isSyncingFromMain = false
+        }
+      } else {
+        useTendersStore.setState({ saveStatus: 'saved', saveError: null })
+      }
+    } else {
+      // A failure is terminal until the user retries; never auto-loop on it.
+      isSavePending = false
+      if (result.error.code === 'REVISION_CONFLICT') {
+        useTendersStore.setState({ saveStatus: 'conflict', saveError: result.error.message })
+      } else {
+        useTendersStore.setState({ saveStatus: 'error', saveError: result.error.message })
+      }
+    }
+  } catch (err) {
+    isSavePending = false
+    useTendersStore.setState({
+      saveStatus: 'error',
+      saveError: err instanceof Error ? err.message : String(err),
+    })
+  } finally {
+    isSaveInFlight = false
+    if (isSavePending) {
+      isSavePending = false
+      scheduleSaveToMain()
+    }
+  }
+}
+
+export interface TendersState {
   // ── navigation ──────────────────────────────────────────────────────────────
   page: AppPage
   setPage: (p: AppPage) => void
 
   // ── multi-company ────────────────────────────────────────────────────────────
-  workspaces: CompanyWorkspace[]
-  activeCompanyId: string
+  workspaces: TendersWorkspaceV2[]
+  activeCompanyId: string | null
   setActiveCompany: (id: string) => void
   addCompany: (company: CompanyProfile) => string
+  /**
+   * Insert an isolated sample workspace. Forces `dataOrigin: 'demo'` so sample
+   * records can never be confused with (or written into) user data. Persists
+   * through the authoritative v2 store like any other mutation.
+   */
+  addDemoWorkspace: (workspace: TendersWorkspaceV2) => string
   updateActiveCompany: (company: CompanyProfile) => void
+  /** Soft-archive/restore the company (workspace). No destructive delete. */
+  archiveCompany: (id: string) => void
+  restoreCompany: (id: string) => void
 
   // ── company-scoped views (active company) ────────────────────────────────────
   company: CompanyProfile
@@ -88,6 +520,10 @@ interface TendersState {
   setActiveCustomer: (id: string | null) => void
   addCustomer: (c: Customer) => void
   removeCustomer: (id: string) => void
+  updateCustomer: (id: string, patch: Partial<Customer>) => void
+  /** Soft-archive/restore a customer. No destructive delete (see WP-8 note). */
+  archiveCustomer: (id: string) => void
+  restoreCustomer: (id: string) => void
 
   // ── vault (workspace) ────────────────────────────────────────────────────
   addVaultDoc: (d: VaultDoc) => void
@@ -110,12 +546,9 @@ interface TendersState {
   removeIssuerTemplate: (id: string) => void
 
   // ── onboarding ───────────────────────────────────────────────────────────────
-  /** persisted: has the user seen the first-launch welcome walkthrough? */
   onboardingDone: boolean
   setOnboardingDone: () => void
-  /** reset so the welcome walkthrough shows again (Help menu) */
   restartOnboarding: () => void
-  /** transient: is the interactive spotlight tour running? (never persisted) */
   tourActive: boolean
   startTour: () => void
   endTour: () => void
@@ -130,211 +563,318 @@ interface TendersState {
   setCurrentPage: (p: number) => void
   addTender: (t: TenderRecord) => void
   removeTender: (id: string) => void
-  updateTender: (id: string, patch: Partial<TenderRecord>) => void
+  updateTender: (id: string, patch: TenderRecordPatch) => void
   updateRequirement: (tenderId: string, reqId: string, patch: Partial<RequirementRecord>) => void
   setSignatureCheck: (tenderId: string, ruleKey: string, checked: boolean) => void
   setShredding: (p: ShredProgress | null) => void
   rerunGap: () => void
 
-  // ── main-renderer state synchronization ────────────────────────────────────
+  // ── lifecycle (WP-11) — validated by shared/lifecycle ───────────────────────
+  /** Record proof of submission and move to SUBMITTED / SUBMITTED_EVIDENCED. */
+  recordSubmission: (tenderId: string, input: RecordSubmissionInput) => LifecycleActionResult
+  /** Record an outcome (won/lost/withdrawn/cancelled) and move the status. */
+  recordOutcome: (tenderId: string, input: RecordOutcomeInput) => LifecycleActionResult
+  /** Guarded status transition for non-submission moves (assemble/pack/archive). */
+  transitionTenderStatus: (
+    tenderId: string,
+    to: TenderStatus,
+    options?: TransitionTenderOptions,
+  ) => LifecycleActionResult
+
+  // ── extraction review (WP-6) ─────────────────────────────────────────────
+  tenderReviews: Record<string, TenderReview>
+  /** Replace the whole review annotation for a tender. */
+  setTenderReview: (tenderId: string, review: TenderReview) => void
+  /** Patch one reviewed metadata field (confirm / correct / not stated). */
+  updateFieldReview: (tenderId: string, field: ReviewFieldKey, patch: Partial<FieldReview>) => void
+  /** Patch the review-scoped contact e-mail. */
+  setReviewContactEmail: (tenderId: string, contactEmail: string | null) => void
+  /** Patch one requirement's review state. */
+  updateRequirementReview: (
+    tenderId: string,
+    requirementId: string,
+    patch: Partial<RequirementReview>,
+  ) => void
+  /** Upsert the per-page OCR extraction state for one page. */
+  setPageExtractionState: (
+    tenderId: string,
+    pageNumber: number,
+    patch: Partial<PageExtractionState>,
+  ) => void
+  /** Replace the whole per-page extraction state list for a tender. */
+  setPageExtractionStates: (tenderId: string, pages: PageExtractionState[]) => void
+  /** Mark a page as manually reviewed (unblocks the OCR readiness gate). */
+  markPageReviewed: (tenderId: string, pageNumber: number) => void
+  /** Append a requirement the parser missed (repair without re-importing). */
+  addRequirement: (tenderId: string, requirement: RequirementRecord) => void
+  /** Remove a requirement the parser invented. */
+  removeRequirement: (tenderId: string, requirementId: string) => void
+
+  // ── authoritative v2 persistence state & actions ───────────────────────────
+  hydrationStatus: HydrationStatus
+  hydrationError: string | null
+  saveStatus: SaveStatus
+  saveError: string | null
+  hasWorkspaces: boolean
+
+  // ── explicit recovery (Phase 5 WP-2) ───────────────────────────────────────
+  /** True when hydration failed with RECOVERY_REQUIRED (never substitute). */
+  recoveryRequired: boolean
+  recoveryCandidates: TendersRecoveryCandidate[]
+  recoveryError: string | null
+  recoveryBusy: boolean
+
+  hydrateFromMain: () => Promise<void>
+  reloadCommittedFromMain: () => Promise<void>
+  retrySave: () => void
+  /** Re-list validated recovery candidates without touching the primary. */
+  refreshRecoveryCandidates: () => Promise<void>
+  /** Explicitly restore one candidate; on success adopt the returned document. */
+  restoreRecoveryCandidate: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** Dismiss the recovery screen after the user has dealt with it. */
+  clearRecovery: () => void
+
+  // ── legacy main-renderer compatibility forwarders ───────────────────────────
   loadFromMain: () => Promise<void>
   syncFromMain: (data: TendersData) => void
   saveToMain: () => void
 }
 
-export const SEED_TENDER_WTR_04: TenderRecord = {
-  id: 'tender-wtr-04',
-  title: 'Bulk Water Metering & Valve Refurbishment',
-  referenceNumber: 'RFP-WTR-2026-04',
-  issuingBody: 'City of Ekurhuleni Water Dept',
-  closingDate: '2026-10-31',
-  submissionMethod: 'PHYSICAL',
-  submissionAddress: 'Civic Centre, Kempton Park, Ekurhuleni',
-  signatureChecks: {},
-  status: 'IN_PROGRESS',
-  createdAt: '2026-08-01T08:00:00Z',
-  fileName: 'RFP-WTR-2026-04.pdf',
-  fileUrl: '',
-  numPages: 24,
-  ocrPages: 0,
-  estimatedValue: 243000,
-  milestones: [
-    {
-      id: 'ms-01',
-      name: 'Phase 1 Reservoir Valve Refurbishment',
-      title: 'Phase 1 Reservoir Valve Refurbishment',
-      description: 'Complete overhaul of high-pressure control valves per tender specification',
-      amount: 145000,
-      status: 'REACHED',
-      dueDate: '2026-08-30',
-      completedDate: '2026-08-28',
-    },
-    {
-      id: 'ms-02',
-      name: 'Phase 2 Ultrasonic Flow Meter Installation',
-      title: 'Phase 2 Ultrasonic Flow Meter Installation',
-      description: 'Install and calibrate digital flow sensors across metering points',
-      amount: 98000,
-      status: 'PENDING',
-      dueDate: '2026-11-15',
-    },
-  ],
-  requirements: [],
-}
-
-const SEED_COMPANY_ID = 'co-thabo'
-
-function seedWorkspaces(): CompanyWorkspace[] {
-  return [
-    {
-      id: SEED_COMPANY_ID,
-      company: { ...MOCK_COMPANY },
-      customers: MOCK_CUSTOMERS,
-      vault: MOCK_VAULT,
-      tenders: [SEED_TENDER_WTR_04]
-    }
-  ]
-}
-
-let focusToken = 0
-let companySeq = 0
-let templateSeq = 0
-let vaultSeq = 0
-
-/** Mint a fresh vault doc id (used by the upload flow in DocumentsPage). */
-export function newVaultDocId(): string {
-  return `vd-${Date.now()}-${vaultSeq++}`
-}
-
-/** Derive the company-scoped slices for a given workspace list + active id. */
-function deriveViews(workspaces: CompanyWorkspace[], activeCompanyId: string) {
-  const ws = workspaces.find((w) => w.id === activeCompanyId) ?? workspaces[0]
-  return {
-    workspaces,
-    activeCompanyId: ws.id,
-    company: ws.company,
-    customers: ws.customers,
-    vault: ws.vault,
-    tenders: ws.tenders
-  }
-}
-
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let isSyncingFromMain = false
-let lastSavedPayload: string | null = null
-
-export function cancelPendingSave(): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-  }
-}
-
-export function scheduleSaveToMain(): void {
-  if (isSyncingFromMain) return
-  if (typeof window === 'undefined' || !window.tendersApi?.saveStoredData) return
-
-  cancelPendingSave()
-
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    if (isSyncingFromMain) return
-    const state = useTendersStore.getState()
-    const envelope: TendersData = {
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      activeCompanyId: state.activeCompanyId,
-      workspaces: state.workspaces,
-      issuerTemplates: state.issuerTemplates,
-    }
-    const json = JSON.stringify(envelope)
-    if (json === lastSavedPayload) return
-    lastSavedPayload = json
-    window.tendersApi?.saveStoredData(json)?.catch((err) => {
-      console.error('tenders: failed to save store to main:', err)
-    })
-  }, 300)
-}
-
 export const useTendersStore = create<TendersState>()(
   persist(
-    (set, get) => {
-      /**
-       * Patch the active workspace and re-sync all derived slices.
-       * Every company-scoped mutation flows through here so the
-       * derived slices (company/customers/vault/tenders) can never
-       * drift out of sync with `workspaces`.
-       */
-      const patchActive = (patch: (ws: CompanyWorkspace) => Partial<CompanyWorkspace>): void => {
+    (set, get: () => TendersState): TendersState => {
+      const patchActive = (
+        patch: (ws: TendersWorkspaceV2) => Partial<TendersWorkspaceV2>,
+      ): void => {
         const s = get()
+        if (!s.activeCompanyId) return
         const workspaces = s.workspaces.map((ws) =>
-          ws.id === s.activeCompanyId ? { ...ws, ...patch(ws) } : ws
+          ws.id === s.activeCompanyId ? { ...ws, ...patch(ws) } : ws,
         )
         const ws = workspaces.find((w) => w.id === s.activeCompanyId) ?? workspaces[0]
+        if (!ws) return
         set({
           workspaces,
           company: ws.company,
           customers: ws.customers,
           vault: ws.vault,
-          tenders: ws.tenders
+          tenders: ws.tenders,
+          tenderReviews: reviewsFromWorkspaces(workspaces),
+          hasWorkspaces: true,
         })
       }
 
-      const seed = seedWorkspaces()
+      /** Read-write the authoritative intake-verification slice for a tender. */
+      const writeIntakeReview = (tenderId: string, next: TenderReview): void => {
+        const s = get()
+        let found = false
+        const workspaces = s.workspaces.map((ws) => {
+          const index = ws.tenders.findIndex((t) => t.id === tenderId)
+          if (index < 0) return ws
+          found = true
+          const tenders = ws.tenders.slice()
+          tenders[index] = { ...tenders[index], intakeVerification: next }
+          return { ...ws, tenders }
+        })
+        if (found) {
+          const ws = workspaces.find((w) => w.id === s.activeCompanyId) ?? workspaces[0]
+          set({
+            workspaces,
+            ...(ws
+              ? {
+                  company: ws.company,
+                  customers: ws.customers,
+                  vault: ws.vault,
+                  tenders: ws.tenders,
+                }
+              : {}),
+            tenderReviews: reviewsFromWorkspaces(workspaces),
+          })
+        } else {
+          // A review for a tender that is not in any workspace cannot be
+          // authoritative; keep it only in the transient UI cache.
+          set({ tenderReviews: { ...s.tenderReviews, [tenderId]: next } })
+        }
+      }
+
+      /** Patch one tender in whichever workspace owns it; refreshes active views. */
+      const patchTender = (
+        tenderId: string,
+        updater: (tender: TenderRecord) => TenderRecord,
+      ): boolean => {
+        const s = get()
+        let found = false
+        const workspaces = s.workspaces.map((ws) => {
+          const index = ws.tenders.findIndex((t) => t.id === tenderId)
+          if (index < 0) return ws
+          found = true
+          const tenders = ws.tenders.slice()
+          tenders[index] = updater(tenders[index])
+          return { ...ws, tenders }
+        })
+        if (!found) return false
+        const ws = workspaces.find((w) => w.id === s.activeCompanyId) ?? workspaces[0]
+        set({
+          workspaces,
+          ...(ws
+            ? {
+                company: ws.company,
+                customers: ws.customers,
+                vault: ws.vault,
+                tenders: ws.tenders,
+              }
+            : {}),
+          tenderReviews: reviewsFromWorkspaces(workspaces),
+        })
+        return true
+      }
+
+      /** Soft-archive/restore a company (workspace) profile. */
+      const setCompanyArchived = (workspaceId: string, archivedAt: string | null): void => {
+        const s = get()
+        const workspaces = s.workspaces.map((ws) =>
+          ws.id === workspaceId ? { ...ws, company: { ...ws.company, archivedAt } } : ws,
+        )
+        const active = workspaces.find((w) => w.id === s.activeCompanyId)
+        set({ workspaces, ...(active ? { company: active.company } : {}) })
+      }
+
+      /**
+       * Validate one status change with the pure state machine and, when
+       * allowed, write the new status/records plus one appended history entry.
+       */
+      const applyTransition = (
+        current: TenderRecord,
+        to: TenderStatus,
+        options: TransitionTenderOptions,
+      ): LifecycleActionResult => {
+        const decision = evaluateTransition(current.status, to, {
+          readiness: options.readiness ?? null,
+          readinessIsCurrent: options.readinessIsCurrent,
+          blockerOverrideReason: options.blockerOverrideReason ?? null,
+          submission: options.submission ?? current.submission ?? null,
+          outcome: options.outcome ?? current.outcome ?? null,
+        })
+        if (!decision.allowed) {
+          return { ok: false, error: decision.reason ?? 'Transition not allowed.' }
+        }
+        const at = options.at ?? new Date().toISOString()
+        const statusChanged = current.status !== to
+        // History is append-only; the schema bounds it at
+        // MAX_TENDERS_LIFECYCLE_HISTORY (500). Reaching that requires 500
+        // explicit user status changes, so no auto-trim is applied — an
+        // over-full history fails validation and is surfaced via `saveStatus`
+        // (with Retry) rather than silently dropping an audit entry.
+        const updated = patchTender(current.id, (tender) => ({
+          ...tender,
+          status: to,
+          ...(statusChanged
+            ? {
+                lifecycle: appendLifecycleEvent(
+                  tender.lifecycle,
+                  makeLifecycleEvent(tender.status, to, options.reason ?? null, at),
+                ),
+              }
+            : {}),
+          ...(options.submission !== undefined ? { submission: options.submission } : {}),
+          ...(options.outcome !== undefined ? { outcome: options.outcome } : {}),
+        }))
+        if (!updated) return { ok: false, error: 'Tender not found.' }
+        return { ok: true }
+      }
+
       return {
         // ── navigation ──────────────────────────────────────────────────────────
         page: 'overview',
         setPage: (p) => set({ page: p }),
 
         // ── multi-company ────────────────────────────────────────────────────────
-        workspaces: seed,
-        activeCompanyId: SEED_COMPANY_ID,
+        workspaces: [],
+        activeCompanyId: null,
         setActiveCompany: (id) => {
           const s = get()
           if (!s.workspaces.some((w) => w.id === id)) return
           const views = deriveViews(s.workspaces, id)
-          // leaving any tender workspace context
           set({
             ...views,
             activeTenderId: null,
             activeRequirementId: null,
             activeCustomerId: null,
             view: 'list',
-            currentPage: 1
+            currentPage: 1,
           })
         },
         addCompany: (company) => {
           const id = `co-${Date.now()}-${companySeq++}`
-          const ws: CompanyWorkspace = {
+          const ws: TendersWorkspaceV2 = {
             id,
+            name: company.name || company.tradingName,
+            dataOrigin: 'user',
             company: { ...company },
             customers: [],
             vault: [],
-            tenders: []
+            tenders: [],
           }
-          set({ workspaces: [...get().workspaces, ws] })
-          get().setActiveCompany(id)
+          const nextWorkspaces = [...get().workspaces, ws]
+          const views = deriveViews(nextWorkspaces, id)
+          set({
+            ...views,
+            tenderReviews: reviewsFromWorkspaces(nextWorkspaces),
+          })
           return id
         },
+        addDemoWorkspace: (workspace) => {
+          // Force the demo origin: this action can never smuggle sample records
+          // into a user workspace, and callers cannot accidentally mark sample
+          // data as user data. It goes through the same authoritative v2 path
+          // as every other mutation (subscriber -> saveStoreV2 + validation).
+          const id = workspace.id || `co-demo-${Date.now()}-${companySeq++}`
+          const demo: TendersWorkspaceV2 = { ...workspace, id, dataOrigin: 'demo' }
+          const nextWorkspaces = [...get().workspaces, demo]
+          const views = deriveViews(nextWorkspaces, demo.id)
+          set({
+            ...views,
+            tenderReviews: reviewsFromWorkspaces(nextWorkspaces),
+          })
+          return demo.id
+        },
         updateActiveCompany: (company) => patchActive(() => ({ company })),
+        // Soft-archive only: WP-8 destructive company/customer delete is deferred
+        // until it can reuse the managed-file/trash semantics (see report).
+        archiveCompany: (id) => setCompanyArchived(id, new Date().toISOString()),
+        restoreCompany: (id) => setCompanyArchived(id, null),
 
         // ── company-scoped views (active company) ────────────────────────────────
-        company: seed[0].company,
+        company: EMPTY_COMPANY,
         setCompany: (c) => get().updateActiveCompany(c),
-        customers: seed[0].customers,
-        vault: seed[0].vault,
-        tenders: seed[0].tenders,
+        customers: [],
+        vault: [],
+        tenders: [],
         activeCustomerId: null,
         setActiveCustomer: (id) => set({ activeCustomerId: id }),
         addCustomer: (c) => patchActive((ws) => ({ customers: [...ws.customers, c] })),
         removeCustomer: (id) =>
           patchActive((ws) => ({ customers: ws.customers.filter((c) => c.id !== id) })),
+        updateCustomer: (id, patch) =>
+          patchActive((ws) => ({
+            customers: ws.customers.map((c) => (c.id === id ? { ...c, ...patch, id: c.id } : c)),
+          })),
+        archiveCustomer: (id) => {
+          const at = new Date().toISOString()
+          patchActive((ws) => ({
+            customers: ws.customers.map((c) => (c.id === id ? { ...c, archivedAt: at } : c)),
+          }))
+        },
+        restoreCustomer: (id) =>
+          patchActive((ws) => ({
+            customers: ws.customers.map((c) => (c.id === id ? { ...c, archivedAt: null } : c)),
+          })),
 
         // ── vault (workspace) ──────────────────────────────────────────────
         addVaultDoc: (d) => patchActive((ws) => ({ vault: [...ws.vault, d] })),
         updateVaultDoc: (id, patch) =>
           patchActive((ws) => ({
-            vault: ws.vault.map((d) => (d.id === id ? { ...d, ...patch } : d))
+            vault: ws.vault.map((d) => (d.id === id ? { ...d, ...patch } : d)),
           })),
         removeVaultDoc: (id) =>
           patchActive((ws) => ({ vault: ws.vault.filter((d) => d.id !== id) })),
@@ -350,12 +890,17 @@ export const useTendersStore = create<TendersState>()(
 
         setView: (v) => set({ view: v }),
         setActiveTender: (id) =>
-          set({ activeTenderId: id, activeRequirementId: null, currentPage: 1, view: id ? 'workspace' : 'list' }),
+          set({
+            activeTenderId: id,
+            activeRequirementId: null,
+            currentPage: 1,
+            view: id ? 'workspace' : 'list',
+          }),
         setActiveRequirement: (id) => set({ activeRequirementId: id }),
         focusRequirement: (id) =>
           set({
             activeRequirementId: id,
-            pendingFocus: { requirementId: id, token: ++focusToken }
+            pendingFocus: { requirementId: id, token: ++focusToken },
           }),
         clearFocus: () => set({ pendingFocus: null }),
         setZoom: (z) => set({ zoom: Math.min(3, Math.max(0.5, z)) }),
@@ -365,6 +910,8 @@ export const useTendersStore = create<TendersState>()(
 
         removeTender: (id) => {
           const removingActive = get().activeTenderId === id
+          // patchActive rebuilds `tenderReviews` from the authoritative tenders,
+          // so the removed tender's verification slice disappears with it.
           patchActive((ws) => ({ tenders: ws.tenders.filter((t) => t.id !== id) }))
           if (removingActive) {
             set({ activeTenderId: null, view: 'list' })
@@ -373,7 +920,7 @@ export const useTendersStore = create<TendersState>()(
 
         updateTender: (id, patch) =>
           patchActive((ws) => ({
-            tenders: ws.tenders.map((t) => (t.id === id ? { ...t, ...patch } : t))
+            tenders: ws.tenders.map((t) => (t.id === id ? { ...t, ...patch } : t)),
           })),
 
         updateRequirement: (tenderId, reqId, patch) =>
@@ -383,9 +930,11 @@ export const useTendersStore = create<TendersState>()(
                 ? t
                 : {
                     ...t,
-                    requirements: t.requirements.map((r) => (r.id === reqId ? { ...r, ...patch } : r))
-                  }
-            )
+                    requirements: t.requirements.map((r) =>
+                      r.id === reqId ? { ...r, ...patch } : r,
+                    ),
+                  },
+            ),
           })),
 
         setSignatureCheck: (tenderId, ruleKey, checked) =>
@@ -393,8 +942,8 @@ export const useTendersStore = create<TendersState>()(
             tenders: ws.tenders.map((t) =>
               t.id !== tenderId
                 ? t
-                : { ...t, signatureChecks: { ...t.signatureChecks, [ruleKey]: checked } }
-            )
+                : { ...t, signatureChecks: { ...t.signatureChecks, [ruleKey]: checked } },
+            ),
           })),
 
         setShredding: (p) => set({ shredding: p }),
@@ -402,8 +951,6 @@ export const useTendersStore = create<TendersState>()(
         // ── issuer templates ─────────────────────────────────────────────────────
         issuerTemplates: [],
         upsertIssuerTemplate: (tpl) => {
-          // fuzzy match: same issuer under different renderings
-          // ("Dept of …" vs "DEPARTMENT OF …" vs the "DWS" ref prefix)
           const existing = findIssuerTemplate(get().issuerTemplates, tpl.name, tpl.refStyle)
           if (existing) {
             const merged: IssuerTemplate = {
@@ -415,20 +962,21 @@ export const useTendersStore = create<TendersState>()(
               submissionMethod: tpl.submissionMethod ?? existing.submissionMethod,
               submissionAddress: tpl.submissionAddress ?? existing.submissionAddress,
               seenCount: existing.seenCount + 1,
-              lastSeen: new Date().toISOString()
+              lastSeen: new Date().toISOString(),
             }
             set({
-              issuerTemplates: get().issuerTemplates.map((t) => (t.id === existing.id ? merged : t))
+              issuerTemplates: get().issuerTemplates.map((t) =>
+                t.id === existing.id ? merged : t,
+              ),
             })
             return merged
           }
           const created: IssuerTemplate = {
             ...tpl,
-            // keep the incoming normalized name as the canonical template key
             name: tpl.name.toUpperCase().trim(),
             id: `iss-${Date.now()}-${templateSeq++}`,
             seenCount: Math.max(1, tpl.seenCount),
-            lastSeen: new Date().toISOString()
+            lastSeen: new Date().toISOString(),
           }
           set({ issuerTemplates: [...get().issuerTemplates, created] })
           return created
@@ -445,136 +993,545 @@ export const useTendersStore = create<TendersState>()(
         endTour: () => set({ tourActive: false }),
 
         rerunGap: () => {
-          // re-run gap analysis for the active tender (e.g. after linking docs)
           const state = get()
           const id = state.activeTenderId
           if (!id) return
           const tender = state.tenders.find((t) => t.id === id)
           if (!tender) return
-          import('./gap').then(({ applyGapToRequirements }) => {
-            const updated = applyGapToRequirements(tender.requirements, state.vault)
-            get().updateTender(id, { requirements: updated })
+          // One index per analysis pass; no vault rescan per requirement.
+          const index = buildVaultKeywordIndex(state.vault)
+          const updated = applyGapToRequirementsIndexed(tender.requirements, index)
+          get().updateTender(id, { requirements: updated })
+        },
+
+        // ── lifecycle (WP-11) ──────────────────────────────────────────────────
+        // All three actions run the pure shared/lifecycle guards before writing
+        // and persist through the same authoritative v2 document + CAS path.
+        recordSubmission: (tenderId, input) => {
+          const current = findTender(get(), tenderId)
+          if (!current) return { ok: false, error: 'Tender not found.' }
+          const evidence = normalizeSubmissionEvidence(input.evidence)
+          const submission: TenderSubmissionRecord = {
+            submittedAt: input.submittedAt,
+            timeZone: input.timeZone ?? null,
+            method: input.method,
+            destination: input.destination ?? null,
+            confirmationReference: input.confirmationReference ?? null,
+            evidence,
+            person: input.person ?? null,
+            notes: input.notes ?? null,
+            readiness: input.readiness ?? null,
+            blockerOverrideReason: input.blockerOverrideReason?.trim()
+              ? input.blockerOverrideReason.trim()
+              : null,
+          }
+          return applyTransition(current, evidence ? 'SUBMITTED_EVIDENCED' : 'SUBMITTED', {
+            readiness: input.readiness ?? null,
+            readinessIsCurrent: input.readinessIsCurrent,
+            blockerOverrideReason: input.blockerOverrideReason ?? null,
+            submission,
+            reason: input.notes ?? null,
+          })
+        },
+        recordOutcome: (tenderId, input) => {
+          const current = findTender(get(), tenderId)
+          if (!current) return { ok: false, error: 'Tender not found.' }
+          const at = input.at ?? new Date().toISOString()
+          const outcome: TenderOutcomeRecord = {
+            status: input.status,
+            noticeDate: input.noticeDate ?? null,
+            reason: input.reason ?? null,
+            awardedValue: input.awardedValue ?? null,
+            evidenceReference: input.evidenceReference ?? null,
+            recordedAt: at,
+          }
+          return applyTransition(current, outcomeStatusToTenderStatus(input.status), {
+            outcome,
+            reason: input.reason ?? null,
+            at,
+          })
+        },
+        transitionTenderStatus: (tenderId, to, options = {}) => {
+          const current = findTender(get(), tenderId)
+          if (!current) return { ok: false, error: 'Tender not found.' }
+          return applyTransition(current, to, options)
+        },
+
+        // ── extraction review & page extraction state (WP-6 / WP-7) ───────────
+        // `tenderReviews` is a projection of `TenderRecord.intakeVerification`;
+        // every mutation below writes the authoritative document and persists
+        // through `saveStoreV2` with the same CAS revision tracking as any other
+        // domain edit. Nothing here touches localStorage.
+        tenderReviews: {},
+
+        setTenderReview: (tenderId, review) => {
+          writeIntakeReview(tenderId, review)
+        },
+
+        updateFieldReview: (tenderId, field, patch) => {
+          const current = get().tenderReviews[tenderId]
+          if (!current) return
+          const previous: FieldReview = current.fields[field] ?? {
+            extractedValue: null,
+            sourcePage: null,
+            sourceClause: null,
+            confidence: null,
+            candidates: [],
+            state: 'unconfirmed',
+            reviewedAt: null,
+          }
+          writeIntakeReview(tenderId, {
+            ...current,
+            fields: { ...current.fields, [field]: { ...previous, ...patch } },
+            updatedAt: new Date().toISOString(),
           })
         },
 
-        // ── main-renderer state synchronization ──────────────────────────────
-        loadFromMain: async () => {
-          if (typeof window === 'undefined' || !window.tendersApi?.getStoredData) {
+        setReviewContactEmail: (tenderId, contactEmail) => {
+          const current = get().tenderReviews[tenderId]
+          if (!current) return
+          writeIntakeReview(tenderId, {
+            ...current,
+            contactEmail,
+            updatedAt: new Date().toISOString(),
+          })
+        },
+
+        updateRequirementReview: (tenderId, requirementId, patch) => {
+          const current = get().tenderReviews[tenderId]
+          if (!current) return
+          const previous: RequirementReview = current.requirements[requirementId] ?? {
+            state: 'unreviewed',
+            originalTitle: null,
+            originalCategory: null,
+            correctedAt: null,
+          }
+          writeIntakeReview(tenderId, {
+            ...current,
+            requirements: {
+              ...current.requirements,
+              [requirementId]: { ...previous, ...patch },
+            },
+            updatedAt: new Date().toISOString(),
+          })
+        },
+
+        setPageExtractionState: (tenderId, pageNumber, patch) => {
+          const current = get().tenderReviews[tenderId] ?? emptyIntakeReview()
+          const pages = current.pages ? current.pages.slice() : []
+          const index = pages.findIndex((page) => page.pageNumber === pageNumber)
+          const previous: PageExtractionState =
+            index >= 0
+              ? pages[index]
+              : { pageNumber, state: 'native', method: null, confidence: null, reviewedAt: null }
+          const nextPage: PageExtractionState = { ...previous, ...patch, pageNumber }
+          if (index >= 0) pages[index] = nextPage
+          else pages.push(nextPage)
+          writeIntakeReview(tenderId, { ...current, pages, updatedAt: new Date().toISOString() })
+        },
+
+        setPageExtractionStates: (tenderId, pages) => {
+          const current = get().tenderReviews[tenderId] ?? emptyIntakeReview()
+          writeIntakeReview(tenderId, {
+            ...current,
+            pages: pages.map((page) => ({ ...page })),
+            updatedAt: new Date().toISOString(),
+          })
+        },
+
+        markPageReviewed: (tenderId, pageNumber) => {
+          get().setPageExtractionState(tenderId, pageNumber, {
+            state: 'manually-reviewed',
+            reviewedAt: new Date().toISOString(),
+          })
+        },
+
+        addRequirement: (tenderId, requirement) =>
+          patchActive((ws) => ({
+            tenders: ws.tenders.map((t) =>
+              t.id !== tenderId ? t : { ...t, requirements: [...t.requirements, requirement] },
+            ),
+          })),
+
+        removeRequirement: (tenderId, requirementId) =>
+          patchActive((ws) => ({
+            tenders: ws.tenders.map((t) => {
+              if (t.id !== tenderId) return t
+              const requirements = t.requirements.filter((r) => r.id !== requirementId)
+              const intake = t.intakeVerification
+              if (!intake || !intake.requirements[requirementId]) {
+                return { ...t, requirements }
+              }
+              const remaining = Object.fromEntries(
+                Object.entries(intake.requirements).filter(([key]) => key !== requirementId),
+              )
+              return {
+                ...t,
+                requirements,
+                intakeVerification: {
+                  ...intake,
+                  requirements: remaining,
+                  updatedAt: new Date().toISOString(),
+                },
+              }
+            }),
+          })),
+
+        // ── authoritative v2 persistence state & actions ───────────────────────
+        hydrationStatus: 'loading',
+        hydrationError: null,
+        saveStatus: 'saved',
+        saveError: null,
+        hasWorkspaces: false,
+        // Explicit recovery: never auto-substitute a candidate or empty doc.
+        recoveryRequired: false,
+        recoveryCandidates: [],
+        recoveryError: null,
+        recoveryBusy: false,
+
+        hydrateFromMain: async () => {
+          if (typeof window === 'undefined' || !window.tendersApi?.loadStoreV2) {
+            set({ hydrationStatus: 'ready' })
             return
           }
+
+          // Ensure multi-window broadcast listener is registered
+          if (!storeChangedUnsub && window.tendersApi?.onStoreChangedV2) {
+            storeChangedUnsub = window.tendersApi.onStoreChangedV2((externalDoc: TendersDataV2) => {
+              if (externalDoc.revision <= committedRevision) return
+              // F1: never adopt a broadcast while our own save/migration owns
+              // the revision. tenders-main broadcasts the commit to every
+              // trusted WebContents (including the originator) before the
+              // saveStoreV2 reply, so adopting here would clobber edits made
+              // during the in-flight save and the queued follow-up would then
+              // persist the clobbered state. The originator is not threaded
+              // through the store's sender-agnostic onCommitted callback, so
+              // we reconcile on the renderer instead: the save reply adopts
+              // the committed snapshot (when no newer edit is pending), and a
+              // genuine external write that we skipped surfaces as a
+              // REVISION_CONFLICT on the next save (never a silent overwrite).
+              if (isSaveInFlight || isSavePending || isMigrating) return
+              committedRevision = externalDoc.revision
+              isSyncingFromMain = true
+              try {
+                const activeId =
+                  externalDoc.activeCompanyId || (externalDoc.workspaces[0]?.id ?? null)
+                const views = deriveViews(externalDoc.workspaces, activeId)
+                set({
+                  ...views,
+                  issuerTemplates: externalDoc.issuerTemplates || [],
+                  tenderReviews: reviewsFromWorkspaces(externalDoc.workspaces),
+                  hasWorkspaces: externalDoc.workspaces.length > 0,
+                  saveStatus: 'saved',
+                  saveError: null,
+                })
+              } finally {
+                isSyncingFromMain = false
+              }
+            })
+          }
+
+          if (isHydrating) return
+          isHydrating = true
+          set({ hydrationStatus: 'loading', hydrationError: null })
+
           try {
-            const rawJson = await window.tendersApi.getStoredData()
-            if (rawJson) {
-              const parsed = JSON.parse(rawJson) as TendersData
-              if (parsed && Array.isArray(parsed.workspaces) && parsed.workspaces.length > 0) {
-                get().syncFromMain(parsed)
+            const res = await window.tendersApi.loadStoreV2()
+            if (!res.ok) {
+              // Recovery is an explicit user decision. A RECOVERY_REQUIRED
+              // failure never substitutes empty/demo/backup data; the app shows
+              // the recovery screen with the validated candidates instead.
+              if (res.error.code === 'RECOVERY_REQUIRED') {
+                set({
+                  hydrationStatus: 'error',
+                  hydrationError: res.error.message || 'The Tenders store needs recovery.',
+                  saveStatus: 'error',
+                  saveError: res.error.message || 'Store load failed.',
+                  recoveryRequired: true,
+                  recoveryCandidates: res.recoveryCandidates ?? [],
+                  recoveryError: null,
+                })
                 return
               }
+              set({
+                hydrationStatus: 'error',
+                hydrationError: res.error.message || 'Unable to read Tenders data.',
+                saveStatus: 'error',
+                saveError: res.error.message || 'Store load failed.',
+                recoveryRequired: false,
+                recoveryCandidates: [],
+              })
+              return
             }
-            // If null or empty, seed is saved to main via saveStoredData
-            const state = get()
-            const seedEnvelope: TendersData = {
-              version: 1,
-              updatedAt: new Date().toISOString(),
-              activeCompanyId: state.activeCompanyId || SEED_COMPANY_ID,
-              workspaces: state.workspaces && state.workspaces.length > 0 ? state.workspaces : seedWorkspaces(),
-              issuerTemplates: state.issuerTemplates || [],
+
+            // A successful load clears any prior recovery state.
+            set({ recoveryRequired: false, recoveryCandidates: [], recoveryError: null })
+
+            if (!isMigrating) {
+              committedRevision = res.data.revision
             }
-            const seedJson = JSON.stringify(seedEnvelope)
-            lastSavedPayload = seedJson
-            await window.tendersApi.saveStoredData(seedJson)
+
+            if (res.status === 'not-found') {
+              isSyncingFromMain = true
+              try {
+                set({
+                  workspaces: [],
+                  activeCompanyId: null,
+                  company: EMPTY_COMPANY,
+                  customers: [],
+                  vault: [],
+                  tenders: [],
+                  issuerTemplates: [],
+                  tenderReviews: {},
+                  hasWorkspaces: false,
+                  hydrationStatus: 'ready',
+                  hydrationError: null,
+                  saveStatus: 'saved',
+                  saveError: null,
+                })
+              } finally {
+                isSyncingFromMain = false
+              }
+              return
+            }
+
+            if (res.status === 'loaded') {
+              isSyncingFromMain = true
+              try {
+                const activeId = res.data.activeCompanyId || (res.data.workspaces[0]?.id ?? null)
+                const views = deriveViews(res.data.workspaces, activeId)
+                set({
+                  ...views,
+                  issuerTemplates: res.data.issuerTemplates || [],
+                  tenderReviews: reviewsFromWorkspaces(res.data.workspaces),
+                  hasWorkspaces: res.data.workspaces.length > 0,
+                  hydrationStatus: 'ready',
+                  hydrationError: null,
+                  saveStatus: 'saved',
+                  saveError: null,
+                })
+              } finally {
+                isSyncingFromMain = false
+              }
+              return
+            }
+
+            if (res.status === 'migrated') {
+              isSyncingFromMain = true
+              try {
+                const activeId = res.data.activeCompanyId || (res.data.workspaces[0]?.id ?? null)
+                const views = deriveViews(res.data.workspaces, activeId)
+                set({
+                  ...views,
+                  issuerTemplates: res.data.issuerTemplates || [],
+                  tenderReviews: reviewsFromWorkspaces(res.data.workspaces),
+                  hasWorkspaces: res.data.workspaces.length > 0,
+                  hydrationStatus: 'ready',
+                  hydrationError: null,
+                })
+              } finally {
+                isSyncingFromMain = false
+              }
+
+              if (res.needsSave && !isMigrating && !migrationCommitted) {
+                isMigrating = true
+                try {
+                  const saveRes = await window.tendersApi.saveStoreV2({
+                    expectedRevision: 0,
+                    document: res.data,
+                  })
+                  if (saveRes.ok) {
+                    committedRevision = saveRes.data.revision
+                    // Latch the successful commit exactly once; a later
+                    // hydrate must not re-commit the same migration.
+                    migrationCommitted = true
+                    set({ saveStatus: 'saved', saveError: null })
+                  } else {
+                    set({
+                      saveStatus: saveRes.error.code === 'REVISION_CONFLICT' ? 'conflict' : 'error',
+                      saveError: saveRes.error.message,
+                    })
+                  }
+                } catch (saveErr) {
+                  set({
+                    saveStatus: 'error',
+                    saveError: saveErr instanceof Error ? saveErr.message : String(saveErr),
+                  })
+                } finally {
+                  // Always release the latch so a failed migration can be
+                  // retried; success is separately latched by migrationCommitted.
+                  isMigrating = false
+                }
+                // A save requested while migration held the latch can now run
+                // against the freshly committed revision.
+                if (isSavePending) {
+                  isSavePending = false
+                  scheduleSaveToMain()
+                }
+              }
+              return
+            }
           } catch (err) {
-            console.error('tenders: failed to load store from main:', err)
-          }
-        },
-
-        syncFromMain: (data: TendersData) => {
-          cancelPendingSave()
-          if (!data || !Array.isArray(data.workspaces) || data.workspaces.length === 0) return
-
-          lastSavedPayload = JSON.stringify(data)
-
-          isSyncingFromMain = true
-          try {
-            const activeCompanyId = data.activeCompanyId || data.workspaces[0].id
-            const views = deriveViews(data.workspaces, activeCompanyId)
             set({
-              ...views,
-              issuerTemplates: data.issuerTemplates || [],
-              shredding: null,
-              pendingFocus: null,
-              tourActive: false,
+              hydrationStatus: 'error',
+              hydrationError: err instanceof Error ? err.message : String(err),
+              saveStatus: 'error',
+              saveError: err instanceof Error ? err.message : String(err),
             })
           } finally {
-            isSyncingFromMain = false
+            isHydrating = false
           }
         },
 
+        reloadCommittedFromMain: async () => {
+          if (typeof window === 'undefined' || !window.tendersApi?.loadStoreV2) return
+          cancelPendingSave()
+          set({ saveStatus: 'loading', saveError: null })
+          try {
+            const res = await window.tendersApi.loadStoreV2()
+            if (res.ok) {
+              committedRevision = res.data.revision
+              isSyncingFromMain = true
+              try {
+                const activeId = res.data.activeCompanyId || (res.data.workspaces[0]?.id ?? null)
+                const views = deriveViews(res.data.workspaces, activeId)
+                set({
+                  ...views,
+                  issuerTemplates: res.data.issuerTemplates || [],
+                  tenderReviews: reviewsFromWorkspaces(res.data.workspaces),
+                  hasWorkspaces: res.data.workspaces.length > 0,
+                  saveStatus: 'saved',
+                  saveError: null,
+                })
+              } finally {
+                isSyncingFromMain = false
+              }
+            } else {
+              set({ saveStatus: 'error', saveError: res.error.message })
+            }
+          } catch (err) {
+            set({
+              saveStatus: 'error',
+              saveError: err instanceof Error ? err.message : String(err),
+            })
+          }
+        },
+
+        retrySave: () => {
+          cancelPendingSave()
+          scheduleSaveToMain()
+        },
+
+        // ── explicit recovery (Phase 5 WP-2) ───────────────────────────────────
+        refreshRecoveryCandidates: async () => {
+          if (typeof window === 'undefined' || !window.tendersApi?.listRecoveryCandidates) return
+          set({ recoveryBusy: true, recoveryError: null })
+          try {
+            const res = await window.tendersApi.listRecoveryCandidates()
+            if (!res?.ok) {
+              set({ recoveryError: res?.error || 'Could not list recovery candidates.' })
+              return
+            }
+            set({ recoveryCandidates: res.candidates ?? [] })
+          } catch (err) {
+            set({ recoveryError: err instanceof Error ? err.message : String(err) })
+          } finally {
+            set({ recoveryBusy: false })
+          }
+        },
+
+        restoreRecoveryCandidate: async (id) => {
+          if (typeof window === 'undefined' || !window.tendersApi?.restoreRecoveryCandidate) {
+            return { ok: false, error: 'Recovery is unavailable in this build.' }
+          }
+          set({ recoveryBusy: true, recoveryError: null })
+          try {
+            const res = await window.tendersApi.restoreRecoveryCandidate({ id })
+            if (!res?.ok || !res.data) {
+              const message = res?.error?.message || 'Could not restore the selected candidate.'
+              set({ recoveryError: message })
+              return { ok: false, error: message }
+            }
+            // Adopt the restored document directly, exactly as a load would; the
+            // main process has already written it as the new authoritative file.
+            committedRevision = res.currentRevision ?? res.data.revision
+            isSyncingFromMain = true
+            try {
+              const activeId = res.data.activeCompanyId || (res.data.workspaces[0]?.id ?? null)
+              const views = deriveViews(res.data.workspaces, activeId)
+              set({
+                ...views,
+                issuerTemplates: res.data.issuerTemplates || [],
+                tenderReviews: reviewsFromWorkspaces(res.data.workspaces),
+                hasWorkspaces: res.data.workspaces.length > 0,
+                hydrationStatus: 'ready',
+                hydrationError: null,
+                saveStatus: 'saved',
+                saveError: null,
+                recoveryRequired: false,
+                recoveryCandidates: [],
+                recoveryError: null,
+              })
+            } finally {
+              isSyncingFromMain = false
+            }
+            return { ok: true }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            set({ recoveryError: message })
+            return { ok: false, error: message }
+          } finally {
+            set({ recoveryBusy: false })
+          }
+        },
+
+        clearRecovery: () =>
+          set({ recoveryRequired: false, recoveryCandidates: [], recoveryError: null }),
+
+        // ── legacy main-renderer compatibility forwarders ─────────────────────
+        loadFromMain: async () => get().hydrateFromMain(),
+        syncFromMain: (data: TendersData) => {
+          if (!data || !Array.isArray(data.workspaces)) return
+          const activeCompanyId = data.activeCompanyId || (data.workspaces[0]?.id ?? null)
+          const workspaces = data.workspaces as TendersWorkspaceV2[]
+          const views = deriveViews(workspaces, activeCompanyId)
+          set({
+            ...views,
+            issuerTemplates: data.issuerTemplates || [],
+            tenderReviews: reviewsFromWorkspaces(workspaces),
+            shredding: null,
+            pendingFocus: null,
+            tourActive: false,
+          })
+        },
         saveToMain: () => {
           scheduleSaveToMain()
-        }
+        },
       }
     },
     {
-      name: 'zanostack-tenders-v1',
+      name: 'zanostack-tenders-ui',
       version: 1,
+      // localStorage holds UI preferences ONLY. Domain data (workspaces,
+      // tenders, customers, vault) is authoritative on disk via saveStoreV2.
       partialize: (s) => ({
         page: s.page,
-        workspaces: s.workspaces.map((ws) => ({
-          ...ws,
-          // Only blank fileUrl if it strictly starts with 'blob:'.
-          // Stored disk paths (documents/... or vault/...) survive reloads.
-          tenders: ws.tenders.map((t) =>
-            t.fileUrl?.startsWith('blob:') ? { ...t, fileUrl: '' } : t
-          ),
-          // vault docs: only blob: URLs die with the session — static /demo/*
-          // and stored paths survive reload, so blank ONLY the blob: ones.
-          vault: ws.vault.map((d) =>
-            d.fileUrl?.startsWith('blob:') ? { ...d, fileUrl: null } : d
-          )
-        })),
-        activeCompanyId: s.activeCompanyId,
-        activeCustomerId: s.activeCustomerId,
         view: s.view,
-        activeTenderId: s.activeTenderId,
-        activeRequirementId: s.activeRequirementId,
         zoom: s.zoom,
         currentPage: s.currentPage,
-        issuerTemplates: s.issuerTemplates,
-        onboardingDone: s.onboardingDone
+        onboardingDone: s.onboardingDone,
+        activeTenderId: s.activeTenderId,
+        activeRequirementId: s.activeRequirementId,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return
-        // Ensure default seed tender RFP-WTR-2026-04 exists if tender list is empty
-        for (const ws of state.workspaces) {
-          if (!ws.tenders || ws.tenders.length === 0) {
-            ws.tenders = [SEED_TENDER_WTR_04]
-          } else if (!ws.tenders.some((t) => t.id === 'tender-wtr-04' || t.referenceNumber === 'RFP-WTR-2026-04')) {
-            ws.tenders.push(SEED_TENDER_WTR_04)
-          }
-        }
-        // Only wipe fileUrl if it strictly starts with 'blob:'
-        state.workspaces = state.workspaces.map((ws) => ({
-          ...ws,
-          tenders: ws.tenders.map((t) =>
-            t.fileUrl?.startsWith('blob:') ? { ...t, fileUrl: '' } : t
-          ),
-          // safety net for any blob: vault URL that slipped into storage
-          vault: ws.vault.map((d) =>
-            d.fileUrl?.startsWith('blob:') ? { ...d, fileUrl: null } : d
-          )
-        }))
-        const activeWs = state.workspaces.find((w) => w.id === state.activeCompanyId) ?? state.workspaces[0]
-        if (activeWs) {
-          state.tenders = activeWs.tenders
-        }
-        // transient state must never leak in from storage
+        // Clear transient UI flags only. Never synthesize demo/seed domain data.
         state.shredding = null
         state.pendingFocus = null
         state.tourActive = false
-      }
-    }
-  )
+      },
+    },
+  ),
 )
 
 useTendersStore.subscribe((state, prevState) => {
@@ -595,8 +1552,8 @@ export const selectActiveTender = (s: TendersState): TenderRecord | null =>
   s.tenders.find((t) => t.id === s.activeTenderId) ?? null
 
 /** Convenience selector: active company workspace. */
-export const selectActiveCompanyWs = (s: TendersState): CompanyWorkspace =>
-  s.workspaces.find((w) => w.id === s.activeCompanyId) ?? s.workspaces[0]
+export const selectActiveCompanyWs = (s: TendersState): CompanyWorkspace | null =>
+  s.workspaces.find((w) => w.id === s.activeCompanyId) ?? s.workspaces[0] ?? null
 
 /** Build a TenderRecord from a completed shred. */
 export function buildTenderRecord(
@@ -612,7 +1569,7 @@ export function buildTenderRecord(
     closingDate: string | null
     submissionMethod: SubmissionMethod | null
     submissionAddress: string | null
-  }
+  },
 ): TenderRecord {
   return {
     id,
@@ -629,6 +1586,6 @@ export function buildTenderRecord(
     fileUrl,
     numPages: ex.numPages,
     ocrPages: ex.ocrPages,
-    requirements
+    requirements,
   }
 }

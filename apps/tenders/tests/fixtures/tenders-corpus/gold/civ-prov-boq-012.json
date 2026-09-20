@@ -1,0 +1,72 @@
+{
+  "id": "civ-prov-boq-012",
+  "synthetic": true,
+  "sector": "construction-civil",
+  "issuerType": "provincial-government",
+  "tags": ["construction", "provincial", "boq", "bid-security"],
+  "title": "Upgrade of Provincial Road P27/1 with Ancillary Works",
+  "titleAlternatives": [],
+  "referenceNumber": "KZN-DOT-2026-0567",
+  "issuingBody": "KWAZULU-NATAL DEPARTMENT OF TRANSPORT",
+  "closingDateTime": "05 February 2027 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the Inkosi Albert Luthuli Central Hospital complex, Durban",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "financials",
+    "turnover",
+    "bid_security",
+    "closing_time",
+    "contact_person",
+    "bill_of_quantities"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "csd", "sbd_forms", "bid_security"],
+  "disqualifiers": ["tax_pin", "coida", "csd", "sbd_forms", "bid_security"],
+  "pricingRequirements": ["bill_of_quantities"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 4,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Upgrade of Provincial Road P27/1 with Ancillary Works"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: KZN-DOT-2026-0567"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "KWAZULU-NATAL DEPARTMENT OF TRANSPORT" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 05 February 2027 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "bid box at the Inkosi Albert Luthuli Central Hospital complex, Durban"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the Inkosi Albert Luthuli Central Hospital complex, Durban"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "financials": { "page": 2 },
+      "turnover": { "page": 2 },
+      "bid_security": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "bill_of_quantities": { "page": 2 }
+    }
+  },
+  "pdfSha256": "169547542e8f0451e5d5ae324c3a32b20acc1077714125aed2a8cc8bf13dfc2c",
+  "pdfBytes": 3164
+}

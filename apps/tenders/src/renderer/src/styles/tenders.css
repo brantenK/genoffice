@@ -1,11 +1,51 @@
-@import "tailwindcss";
-@import "@genoffice/ui/tokens.css";
+@import 'tailwindcss';
+@import '@genoffice/ui/tokens.css';
 
 @theme {
-  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans:
+    'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
 }
 
-html, body, #root {
+/* App-scoped design tokens. `--accent*` is the Tenders brand accent (Zano green)
+   and `--warn*` covers the review step's "needs review / conflicting" state,
+   which the shared token set does not provide. Raw values are allowed here
+   because these are custom-property definitions. */
+:root {
+  --accent: #16864a;
+  --accent-dark: #0f5c34;
+  --accent-soft: #e7f2ec;
+  --accent-contrast: #ffffff;
+  --warn: #8a5a0b;
+  --warn-bg: #fdf4e3;
+  --warn-border: #ecd6a8;
+}
+
+[data-theme='dark'] {
+  --accent: #2fbd74;
+  --accent-dark: #8fe3b3;
+  --accent-soft: #1d3328;
+  --accent-contrast: #0d130f;
+  --warn: #e8bd6c;
+  --warn-bg: #2e2617;
+  --warn-border: #4f4327;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    --accent: #2fbd74;
+    --accent-dark: #8fe3b3;
+    --accent-soft: #1d3328;
+    --accent-contrast: #0d130f;
+    --warn: #e8bd6c;
+    --warn-bg: #2e2617;
+    --warn-border: #4f4327;
+  }
+}
+
+html,
+body,
+#root {
   height: 100%;
   width: 100%;
   margin: 0;
@@ -21,6 +61,56 @@ body {
 }
 
 /* thin scrollbars for the split panes */
-.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Review step: one orchestrated entrance (panel + staggered field cards) rather
+   than scattered micro-interactions. Disabled for reduced-motion users.
+
+   Movement only — deliberately no opacity step: the panel carries the chrome
+   colours, and any ancestor opacity multiplies the rendered contrast of every
+   label and button inside it while the animation runs, which made text dip
+   below 4.5:1 for the first ~160ms of a scan. */
+@keyframes tenders-review-enter {
+  from {
+    transform: translateY(4px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.review-enter {
+  animation: tenders-review-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Dialogs (company / customer forms) get the same single, short entrance.
+   Movement only, for the same contrast reason as above. */
+@keyframes tenders-dialog-enter {
+  from {
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.dialog-enter {
+  animation: tenders-dialog-enter 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-enter,
+  .dialog-enter {
+    animation: none;
+  }
+}

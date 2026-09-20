@@ -32,7 +32,10 @@
   --text: #131316;
   --text-primary: #131316;
   --text-secondary: #3d3d4a;
-  --text-tertiary: #6b6b7d;
+  /* #6b6b7d only reached 4.37:1 on --canvas (#ecebe4), so the faintest chrome
+     text failed there; #63636f clears 4.5:1 on every light chrome surface
+     (canvas 4.96, surface-subtle 5.29, surface 5.67). */
+  --text-tertiary: #63636f;
   --text-muted: #6b6b7d;
   --text-dim: #6b6b7d;
   --hover: #f3f2ed;
@@ -45,11 +48,20 @@
   --bg-content: #f6f5f0;
   --icon-muted: #a9a8b0;
   --danger: #be3737;
+  /* Danger text sitting on --danger-bg / --surface. --danger is tuned for
+     borders and icons: in dark it only reaches 3.69:1 on --danger-bg, so text
+     uses this lighter step instead (>= 4.5:1 on both surfaces, both themes). */
+  --danger-text: #be3737;
   --danger-bg: #faecec;
   --danger-border: #eec4c4;
   --success: #16864a;
   --success-bg: #e7f2ec;
   --success-border: #c4dfce;
+  /* Neutral "informational" status family (the set had success/danger/warning
+     but no info). Text on its own background clears 4.5:1 in both themes. */
+  --info: #1f5f8b;
+  --info-bg: #eaf3fa;
+  --info-border: #c3d9ea;
   --color-bg-overlay: rgb(19 19 22 / 40%);
   /* Zano shadow curve: soft, wide, low-alpha (spec 08 §5 / spec 09 §2) */
   --shadow-modal-strong: 0 12px 40px rgb(0 0 0 / 16%);
@@ -127,6 +139,7 @@
   --bg-content: #121612;
   --icon-muted: #6d756c;
   --danger: #e54848;
+  --danger-text: #f5a3a3;
   --danger-bg: #3d2222;
   --search-hit-bg: #745a1e;
   --search-hit-active-bg: #d4781f;
@@ -135,6 +148,9 @@
   --success: #2fbd74;
   --success-bg: #1d3328;
   --success-border: #2c4a3a;
+  --info: #7fb8dd;
+  --info-bg: #1b2833;
+  --info-border: #2f4759;
   --color-bg-overlay: rgb(0 0 0 / 60%);
   --shadow-modal-strong: 0 12px 40px rgb(0 0 0 / 60%);
   --shadow-btn-hover: 0 2px 8px rgb(0 0 0 / 50%);
@@ -191,6 +207,7 @@
     --bg-content: #121612;
     --icon-muted: #6d756c;
     --danger: #e54848;
+    --danger-text: #f5a3a3;
     --danger-bg: #3d2222;
     --search-hit-bg: #745a1e;
     --search-hit-active-bg: #d4781f;
@@ -199,6 +216,9 @@
     --success: #2fbd74;
     --success-bg: #1d3328;
     --success-border: #2c4a3a;
+    --info: #7fb8dd;
+    --info-bg: #1b2833;
+    --info-border: #2f4759;
     --color-bg-overlay: rgb(0 0 0 / 60%);
     --shadow-modal-strong: 0 12px 40px rgb(0 0 0 / 60%);
     --shadow-btn-hover: 0 2px 8px rgb(0 0 0 / 50%);

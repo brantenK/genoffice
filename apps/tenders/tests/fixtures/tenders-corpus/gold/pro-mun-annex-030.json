@@ -1,0 +1,103 @@
+{
+  "id": "pro-mun-annex-030",
+  "synthetic": true,
+  "sector": "professional-services",
+  "issuerType": "municipal",
+  "tags": ["professional-services", "municipal", "annexures", "b-bbee-variants"],
+  "title": "Appointment of Transaction Advisors for Infrastructure Projects",
+  "titleAlternatives": [],
+  "referenceNumber": "JHB-PRO-2026-0729",
+  "issuingBody": "JOHANNESBURG METROPOLITAN MUNICIPALITY",
+  "closingDateTime": "16 December 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "tender box at the Metro Centre, Braamfontein",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "declaration",
+    "experience",
+    "key_personnel",
+    "financials",
+    "pppfa",
+    "subcontracting",
+    "closing_time",
+    "contact_person",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "declaration",
+    "pricing_schedule"
+  ],
+  "disqualifiers": [
+    "tax_pin",
+    "coida",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "declaration",
+    "pricing_schedule"
+  ],
+  "pricingRequirements": ["pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 4,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Appointment of Transaction Advisors for Infrastructure Projects"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: JHB-PRO-2026-0729"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "JOHANNESBURG METROPOLITAN MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 16 December 2026 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "tender box at the Metro Centre, Braamfontein"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "tender box at the Metro Centre, Braamfontein"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "director_ids": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "signed_initialled": { "page": 2 },
+      "declaration": { "page": 2 },
+      "experience": { "page": 2 },
+      "key_personnel": { "page": 2 },
+      "financials": { "page": 2 },
+      "pppfa": { "page": 2 },
+      "subcontracting": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "c0aa5ef9788869d8f3b313009e36e24bcb492179dbf8b6eb0ae4bf9dfe7d361f",
+  "pdfBytes": 3364
+}

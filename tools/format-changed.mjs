@@ -85,22 +85,30 @@ const prettierExecutable = join(
   process.platform === 'win32' ? 'prettier.cmd' : 'prettier',
 )
 const prettierMode = mode === '--write' ? '--write' : '--check'
-const result = spawnSync(
-  prettierExecutable,
-  [prettierMode, '--ignore-unknown', '--', ...changedFiles],
-  {
+const env = {
+  ...process.env,
+  PATH: `${join(repoRoot, 'node_modules', '.bin')}${delimiter}${process.env.PATH}`,
+}
+
+// Windows caps a single command line at ~8191 characters, so a large
+// changed/untracked set (for example a generated fixture corpus) cannot be
+// passed to Prettier in one invocation. Spawn Prettier in bounded chunks and
+// report the first failing chunk.
+const MAX_FILES_PER_SPAWN = 40
+let exitStatus = 0
+for (let index = 0; index < changedFiles.length; index += MAX_FILES_PER_SPAWN) {
+  const chunk = changedFiles.slice(index, index + MAX_FILES_PER_SPAWN)
+  const result = spawnSync(prettierExecutable, [prettierMode, '--ignore-unknown', '--', ...chunk], {
     cwd: repoRoot,
     stdio: 'inherit',
     shell: process.platform === 'win32',
-    env: {
-      ...process.env,
-      PATH: `${join(repoRoot, 'node_modules', '.bin')}${delimiter}${process.env.PATH}`,
-    },
-  },
-)
+    env,
+  })
 
-if (result.error) {
-  console.error(`Unable to run Prettier: ${result.error.message}`)
-  process.exit(1)
+  if (result.error) {
+    console.error(`Unable to run Prettier: ${result.error.message}`)
+    process.exit(1)
+  }
+  if (result.status !== 0 && exitStatus === 0) exitStatus = result.status ?? 1
 }
-process.exit(result.status ?? 1)
+process.exit(exitStatus)

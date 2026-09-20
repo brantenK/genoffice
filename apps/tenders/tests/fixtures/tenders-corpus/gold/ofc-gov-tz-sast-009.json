@@ -1,0 +1,57 @@
+{
+  "id": "ofc-gov-tz-sast-009",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "government",
+  "tags": ["office-equipment", "government", "timezone", "unsupported-abbreviation"],
+  "title": "Supply of Office Equipment for Driver Testing Centres",
+  "titleAlternatives": [],
+  "referenceNumber": "DOT-OFC-2026-0666",
+  "issuingBody": "DEPARTMENT OF TRANSPORT",
+  "closingDateTime": "02 December 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at Forum Building, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "bbbee", "csd", "sbd_forms"],
+  "disqualifiers": ["tax_pin", "csd", "sbd_forms"],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 2,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Supply of Office Equipment for Driver Testing Centres"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: DOT-OFC-2026-0666"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "DEPARTMENT OF TRANSPORT" },
+    "closingDateTime": {
+      "page": 1,
+      "clauseContains": "Closing Date: 02 December 2026 at 11:00 SAST"
+    },
+    "submissionMethod": { "page": 1, "clauseContains": "bid box at Forum Building, Pretoria" },
+    "submissionDestination": { "page": 1, "clauseContains": "bid box at Forum Building, Pretoria" },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "7502d8f0ee9bdc277a9e107c5a2b1393ee5f3ab5aedf29039eedac78324b9644",
+  "pdfBytes": 1910
+}

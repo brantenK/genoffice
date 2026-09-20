@@ -126,8 +126,14 @@ async function waitForDocumentReady(
  *
  * Open editor tabs trigger a native Save/Don't Save/Cancel dialog on close,
  * which would block app.close() forever — stub the dialog to answer
- * "Don't Save" (button index 1) so shutdown stays unattended. If close still
- * hangs, kill the process after 20s so the suite never wedges.
+ * "Don't Save" (button index 1) so shutdown stays unattended.
+ *
+ * The shell's dirty-document close flow can cancel the window close and wait
+ * on a renderer that never answers (docs query timeout), which leaves
+ * Playwright's close() promise dangling and fails the worker with "Worker
+ * teardown timeout" while every test is green. So the shutdown is bounded:
+ * quit -> destroy the windows (bypasses the close flow) -> kill, and close()
+ * is called exactly once against an already-exited process.
  */
 export async function closeAndSaveVideo(
   launched: LaunchedApp,
@@ -142,25 +148,102 @@ export async function closeAndSaveVideo(
       })) as typeof dialog.showMessageBox
     })
     .catch(() => {})
-  let killTimer: NodeJS.Timeout | undefined
-  await Promise.race([
-    launched.app.close(),
-    new Promise<void>((resolvePromise) => {
-      killTimer = setTimeout(() => {
-        launched.app.process().kill()
-        resolvePromise()
-      }, 20_000)
-    }),
-  ])
-  if (killTimer) clearTimeout(killTimer)
+  // Capture the OS pid while Playwright state is alive: process() throws once
+  // the application is torn down, and a lingering OS process is what makes the
+  // worker die with "Worker teardown timeout" even though every test is green.
+  const launchedPid = ((): number | undefined => {
+    try {
+      return launched.app.process()?.pid
+    } catch {
+      return undefined
+    }
+  })()
+  const osProcessAlive = (): boolean => {
+    if (typeof launchedPid !== 'number') return false
+    try {
+      process.kill(launchedPid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const processExited = (): boolean => {
+    // After the app exits, Playwright tears its ElectronApplication state down
+    // and process() throws — fall back to the OS pid to tell "state gone" apart
+    // from "process actually gone".
+    try {
+      const proc = launched.app.process()
+      if (!proc) return !osProcessAlive()
+      return proc.exitCode !== null || proc.signalCode !== null || !osProcessAlive()
+    } catch {
+      return !osProcessAlive()
+    }
+  }
+  const waitForExit = async (timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      if (processExited()) return true
+      if (Date.now() >= deadline) return processExited()
+      await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+  // 1) Ask the app to quit; Electron then runs its normal shutdown.
+  await launched.app.evaluate(({ app }) => app.quit()).catch(() => {})
+  let exited = await waitForExit(6_000)
+  // 2) The dirty-document close flow may refuse to close the window: destroy
+  //    the windows so `window-all-closed` quits without that async flow.
+  if (!exited) {
+    await launched.app
+      .evaluate(({ BrowserWindow }) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.destroy()
+        }
+      })
+      .catch(() => {})
+    exited = await waitForExit(6_000)
+  }
+  // 3) Last resort: kill the process so the suite never wedges.
+  if (!exited) {
+    try {
+      launched.app.process()?.kill()
+    } catch {
+      // already gone
+    }
+    if (osProcessAlive() && typeof launchedPid === 'number') {
+      try {
+        process.kill(launchedPid)
+      } catch {
+        // already gone
+      }
+    }
+    await waitForExit(4_000)
+  }
+  // close() only while the process is (still) alive: against an already-exited
+  // app Playwright's close() can wait forever for a close event that already
+  // fired. An exited app needs no close — the worker releases it on exit.
+  if (!processExited()) {
+    await Promise.race([
+      launched.app.close().catch(() => undefined),
+      new Promise<void>((r) => setTimeout(r, 8_000)),
+    ])
+  }
   if (!video) return undefined
   const target = join(ARTIFACTS_DIR, 'videos', `${name}.webm`)
-  try {
-    await video.saveAs(target)
-    return target
-  } catch {
-    return undefined
+  // Finalization is async once the process exits; retry briefly before giving up.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await Promise.race([
+        video.saveAs(target),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('saveAs timeout')), 5_000),
+        ),
+      ])
+      return target
+    } catch {
+      await new Promise((r) => setTimeout(r, 750))
+    }
   }
+  return undefined
 }
 
 export function screenshotPath(name: string): string {

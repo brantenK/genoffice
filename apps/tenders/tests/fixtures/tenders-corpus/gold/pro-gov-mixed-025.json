@@ -1,0 +1,68 @@
+{
+  "id": "pro-gov-mixed-025",
+  "synthetic": true,
+  "sector": "professional-services",
+  "issuerType": "government",
+  "tags": ["professional-services", "government", "mixed", "ocr-required"],
+  "title": "Provision of Environmental Impact Assessment Services",
+  "titleAlternatives": [],
+  "referenceNumber": "DEA-PRO-2026-0663",
+  "issuingBody": "DEPARTMENT OF ENVIRONMENTAL AFFAIRS",
+  "closingDateTime": "22 December 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the Environment House, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "key_personnel",
+    "methodology",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "csd", "sbd_forms"],
+  "disqualifiers": ["tax_pin", "coida", "csd", "sbd_forms"],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [2, 4],
+  "pageCount": 4,
+  "clearable": false,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Provision of Environmental Impact Assessment Services"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: DEA-PRO-2026-0663"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "DEPARTMENT OF ENVIRONMENTAL AFFAIRS" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 22 December 2026 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "bid box at the Environment House, Pretoria"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the Environment House, Pretoria"
+    },
+    "requirements": {
+      "tax_pin": { "page": 3 },
+      "coida": { "page": 3 },
+      "bbbee": { "page": 3 },
+      "csd": { "page": 3 },
+      "sbd_forms": { "page": 3 },
+      "experience": { "page": 3 },
+      "key_personnel": { "page": 3 },
+      "methodology": { "page": 3 },
+      "closing_time": { "page": 3 },
+      "contact_person": { "page": 3 }
+    }
+  },
+  "pdfSha256": "417d9cdb05171e2f7eccc78c943e8aa0b5d22ed5a1077dcc2a4d2a3ee615b9b1",
+  "pdfBytes": 3908
+}

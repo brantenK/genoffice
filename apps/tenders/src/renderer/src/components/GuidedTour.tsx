@@ -1,11 +1,17 @@
 // Interactive spotlight tour of the live UI. Each step locates its target
 // element via a `data-tour` attribute; the spotlight is a fixed div with an
 // oversized box-shadow that dims everything except the target, with a
-// floating tooltip beside it. Non-modal: the UI stays visible underneath.
-import { useEffect, useState } from 'react'
+// floating tooltip beside it.
+//
+// The tooltip is the tour's dialog surface: it carries the shared overlay
+// accessibility contract (role/aria-modal/labelled heading/Escape/Tab trap/
+// focus restore) from Dialog.tsx, and every colour is a theme token.
+import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react'
 import type { AppPage } from '../../shared/types'
 import { useTendersStore } from '../store'
+import { useOverlayBehaviour } from './Dialog'
+import { Button } from './ui'
 
 interface TourStep {
   /** value of the data-tour attribute to spotlight */
@@ -136,9 +142,12 @@ const STEPS: TourStep[] = [
           <strong>Load demo RFP</strong> to try the full workflow right now.
         </p>
         <p className="mt-2">
-          Zanostack Tenders reads every page in your browser — including scanned pages — builds the
-          compliance matrix, auto-links matching vault documents and recognizes the issuing
-          authority from its letterhead.
+          Zanostack Tenders reads your PDF in the browser, builds the compliance matrix, auto-links
+          matching vault documents and recognizes the issuing authority from its letterhead.
+        </p>
+        <p className="mt-2">
+          Pages saved as images have no text layer: their text is not extracted, and they block
+          readiness until you review them by hand.
         </p>
       </>
     ),
@@ -158,6 +167,78 @@ const STEPS: TourStep[] = [
     ),
   },
 ]
+
+interface TourTooltipProps {
+  step: TourStep
+  idx: number
+  last: boolean
+  style: React.CSSProperties
+  onEnd: () => void
+  onBack: () => void
+  onNext: () => void
+}
+
+/**
+ * The tooltip itself. Split out so the overlay behaviour mounts with the tour
+ * (the parent renders `null` while the tour is inactive) — Escape and the Tab
+ * trap come from the shared hook, and focus returns to the opener on close.
+ */
+function TourTooltip({ step, idx, last, style, onEnd, onBack, onNext }: TourTooltipProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useOverlayBehaviour(panelRef, onEnd)
+
+  return (
+    <div
+      ref={panelRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      style={style}
+      className="pointer-events-auto fixed rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-[var(--text)] shadow-[var(--shadow-modal-strong)] outline-none"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold tracking-wide text-[var(--accent-dark)] uppercase">
+          Guided tour · {idx + 1} / {STEPS.length}
+        </p>
+        <Button variant="ghost" size="sm" onClick={onEnd}>
+          End tour
+        </Button>
+      </div>
+      <h3 id={titleId} className="text-sm font-bold text-[var(--text)]">
+        {step.title}
+      </h3>
+      <div className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
+        {step.body}
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-2">
+        <Button variant="ghost" size="sm" disabled={idx === 0} onClick={onBack}>
+          <ArrowLeft size={13} aria-hidden="true" /> Back
+        </Button>
+        <div className="flex items-center gap-1" aria-hidden="true">
+          {STEPS.map((s, i) => (
+            <span
+              key={s.title}
+              className={`size-1.5 rounded-full ${
+                i === idx ? 'w-4 bg-[var(--accent)]' : 'bg-[var(--border-strong)]'
+              }`}
+            />
+          ))}
+        </div>
+        {last ? (
+          <Button variant="primary" size="sm" data-autofocus onClick={onEnd}>
+            <Check size={13} aria-hidden="true" /> Done
+          </Button>
+        ) : (
+          <Button variant="primary" size="sm" data-autofocus onClick={onNext}>
+            Next <ArrowRight size={13} aria-hidden="true" />
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function GuidedTour() {
   const tourActive = useTendersStore((s) => s.tourActive)
@@ -222,15 +303,7 @@ export function GuidedTour() {
     }
   }, [idx, tourActive])
 
-  // Escape ends the tour
-  useEffect(() => {
-    if (!tourActive) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') endTour()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [tourActive, endTour])
+  // Escape ends the tour (handled by the tooltip's shared overlay behaviour)
 
   if (!tourActive) return null
 
@@ -263,73 +336,27 @@ export function GuidedTour() {
       {/* spotlight hole — giant box-shadow dims everything except the target */}
       {rect && (
         <div
-          className="fixed rounded-xl ring-2 ring-indigo-500/80 transition-all duration-300"
+          className="fixed rounded-xl ring-2 ring-[var(--accent)] transition-all duration-300"
           style={{
             top: rect.top - PAD,
             left: rect.left - PAD,
             width: rect.width + PAD * 2,
             height: rect.height + PAD * 2,
-            boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.62)',
+            boxShadow: '0 0 0 9999px var(--color-bg-overlay)',
           }}
         />
       )}
-      {!rect && <div className="fixed inset-0 bg-slate-950/60" />}
+      {!rect && <div className="fixed inset-0 bg-[var(--color-bg-overlay)]" />}
 
-      {/* tooltip */}
-      <div
-        className="pointer-events-auto fixed rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
+      <TourTooltip
+        step={step}
+        idx={idx}
+        last={last}
         style={tooltipStyle}
-      >
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-500">
-            Guided tour · {idx + 1} / {STEPS.length}
-          </p>
-          <button
-            type="button"
-            onClick={endTour}
-            className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            End tour
-          </button>
-        </div>
-        <h3 className="text-sm font-bold text-slate-900">{step.title}</h3>
-        <div className="mt-1.5 text-[12.5px] leading-relaxed text-slate-600">{step.body}</div>
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            disabled={idx === 0}
-            onClick={() => setIdx((i) => Math.max(0, i - 1))}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-0"
-          >
-            <ArrowLeft size={13} /> Back
-          </button>
-          <div className="flex items-center gap-1">
-            {STEPS.map((s, i) => (
-              <span
-                key={s.title}
-                className={`size-1.5 rounded-full ${i === idx ? 'w-4 bg-indigo-500' : 'bg-slate-200'}`}
-              />
-            ))}
-          </div>
-          {last ? (
-            <button
-              type="button"
-              onClick={endTour}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-indigo-700"
-            >
-              <Check size={13} /> Done
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIdx((i) => Math.min(STEPS.length - 1, i + 1))}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-indigo-700"
-            >
-              Next <ArrowRight size={13} />
-            </button>
-          )}
-        </div>
-      </div>
+        onEnd={endTour}
+        onBack={() => setIdx((i) => Math.max(0, i - 1))}
+        onNext={() => setIdx((i) => Math.min(STEPS.length - 1, i + 1))}
+      />
     </div>
   )
 }

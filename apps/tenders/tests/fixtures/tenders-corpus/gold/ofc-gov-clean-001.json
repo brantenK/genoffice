@@ -1,0 +1,102 @@
+{
+  "id": "ofc-gov-clean-001",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "government",
+  "tags": ["office-equipment", "government", "native", "clean", "pricing-schedule"],
+  "title": "Supply and Delivery of Multifunction Office Printers",
+  "titleAlternatives": [],
+  "referenceNumber": "DPWI-OFC-2026-0114",
+  "issuingBody": "DEPARTMENT OF PUBLIC WORKS AND INFRASTRUCTURE",
+  "closingDateTime": "30 November 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the DPWI reception, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "declaration",
+    "experience",
+    "methodology",
+    "financials",
+    "non_compliance",
+    "closing_time",
+    "contact_person",
+    "pricing_schedule",
+    "bill_of_quantities"
+  ],
+  "mandatoryRequirements": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "declaration",
+    "non_compliance",
+    "pricing_schedule"
+  ],
+  "disqualifiers": [
+    "tax_pin",
+    "coida",
+    "cipc",
+    "director_ids",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "declaration",
+    "non_compliance",
+    "pricing_schedule"
+  ],
+  "pricingRequirements": ["pricing_schedule", "bill_of_quantities"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 5,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Supply and Delivery of Multifunction Office Printers"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: DPWI-OFC-2026-0114"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "DEPARTMENT OF PUBLIC WORKS AND INFRASTRUCTURE" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 30 November 2026 at 11:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "bid box at the DPWI reception, Pretoria" },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the DPWI reception, Pretoria"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "director_ids": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "signed_initialled": { "page": 2 },
+      "declaration": { "page": 2 },
+      "experience": { "page": 2 },
+      "methodology": { "page": 2 },
+      "financials": { "page": 2 },
+      "non_compliance": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "pricing_schedule": { "page": 2 },
+      "bill_of_quantities": { "page": 2 }
+    }
+  },
+  "pdfSha256": "aca78838dbf925cec301a1ad78317605c9e16857b6b3901c8dea3f93cea7a9c9",
+  "pdfBytes": 3879
+}

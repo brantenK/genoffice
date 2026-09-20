@@ -18,6 +18,13 @@ export interface Deal {
   invoiceNumber?: string
   invoicedAt?: string
   deletedAt?: string
+  /**
+   * Typed tender provenance (Phase 4). Set when the opportunity originated from
+   * a Tenders opportunity instead of a CRM-native deal, so a repeating sync
+   * updates one deal and the tender can be traced back.
+   */
+  tenderId?: string
+  tenderReference?: string
   createdAt: string
   updatedAt: string
 }

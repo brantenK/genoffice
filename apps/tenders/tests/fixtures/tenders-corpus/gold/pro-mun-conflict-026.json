@@ -1,0 +1,62 @@
+{
+  "id": "pro-mun-conflict-026",
+  "synthetic": true,
+  "sector": "professional-services",
+  "issuerType": "municipal",
+  "tags": ["professional-services", "municipal", "conflict", "amended-deadline"],
+  "title": "Provision of Internal Audit Services to the Municipality",
+  "titleAlternatives": [],
+  "referenceNumber": "ETH-PRO-2026-0512",
+  "issuingBody": "ETHEKWINI MUNICIPALITY",
+  "closingDateTime": "14 December 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "tender box at the Durban City Hall",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "cipc",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "key_personnel",
+    "financials",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "bbbee", "cipc", "csd", "sbd_forms"],
+  "disqualifiers": ["tax_pin", "cipc", "csd", "sbd_forms"],
+  "pricingRequirements": [],
+  "conflicts": { "closingDateTime": true },
+  "unconfirmedFields": ["closingDateTime"],
+  "scannedPages": [],
+  "pageCount": 3,
+  "clearable": false,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Provision of Internal Audit Services to the Municipality"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: ETH-PRO-2026-0512"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "ETHEKWINI MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 14 December 2026 at 11:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "tender box at the Durban City Hall" },
+    "submissionDestination": { "page": 1, "clauseContains": "tender box at the Durban City Hall" },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "key_personnel": { "page": 2 },
+      "financials": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "dcc6f98eb191c83ddb424b0492200905655a46411e1ed741da98d78e0f423ac0",
+  "pdfBytes": 2558
+}

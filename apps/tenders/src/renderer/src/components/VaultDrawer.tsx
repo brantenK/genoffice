@@ -1,11 +1,15 @@
-// Company vault drawer: mock vault documents with live health assessment
-// (expiry, 90-day police stamp window) + usage count per tender requirements.
-import { useMemo } from 'react'
-import { FileText, X } from 'lucide-react'
+// Company vault drawer: the company's documents with live health assessment
+// (expiry, 90-day police stamp window) + how many tender requirements use each.
+//
+// Chrome only: every colour is a semantic token so the drawer follows the suite
+// theme. Document data (titles, dates, metadata) is never re-authored here.
+import { useMemo, useState } from 'react'
+import { AlertTriangle, FileText, X } from 'lucide-react'
 import { DOC_CATEGORY_LABEL } from '../../shared/types'
 import type { DocHealth, VaultDoc } from '../../shared/types'
 import { assessDocHealth, healthSummary, POLICE_STAMP_WINDOW_DAYS } from '../gap'
 import { selectActiveTender, useTendersStore } from '../store'
+import { Drawer } from './Drawer'
 import { Badge, Button } from './ui'
 
 const HEALTH_TONE: Record<DocHealth, 'green' | 'red' | 'amber' | 'slate'> = {
@@ -24,6 +28,7 @@ const HEALTH_LABEL: Record<DocHealth, string> = {
 
 export function VaultDrawer({ onClose }: { onClose: () => void }) {
   const vault = useTendersStore((s) => s.vault)
+  const company = useTendersStore((s) => s.company)
   const tender = useTendersStore(selectActiveTender)
 
   // how many requirements link each vault doc (active tender)
@@ -52,50 +57,62 @@ export function VaultDrawer({ onClose }: { onClose: () => void }) {
   )
 
   return (
-    <aside className="absolute inset-y-0 right-0 z-20 flex w-[380px] max-w-[90%] flex-col border-l border-slate-200 bg-white shadow-2xl">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-2.5">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">Company vault</h2>
-          <p className="text-[11px] text-slate-500">
-            Thabo Engineering (Pty) Ltd · {vault.length} documents
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose} title="Close vault">
-          <X size={15} />
-        </Button>
-      </div>
-
+    <Drawer
+      title="Company vault"
+      subtitle={`${company.tradingName || 'This company'} · ${vault.length} document${
+        vault.length === 1 ? '' : 's'
+      }`}
+      closeLabel="Close vault"
+      width="sm"
+      onClose={onClose}
+      footer={
+        <p className="text-[11px] text-[var(--text-tertiary)]">
+          Certified stamps older than {POLICE_STAMP_WINDOW_DAYS} days are flagged stale
+          (police-stamp rule).
+        </p>
+      }
+    >
       {issues.length > 0 && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5">
-          <p className="text-xs font-medium text-amber-800">
-            ⚠ {issues.length} document{issues.length === 1 ? '' : 's'} need attention before
-            submission.
+        <div className="shrink-0 border-b border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-2.5">
+          <p className="flex items-start gap-1.5 text-xs font-medium text-[var(--warn)]">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              {issues.length} document{issues.length === 1 ? '' : 's'} need attention before
+              submission.
+            </span>
           </p>
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin p-3">
-        <ul className="space-y-2">
-          {docs.map(({ doc, rep }) => (
-            <li key={doc.id}>
-              <VaultDocCard
-                doc={doc}
-                health={rep.health}
-                summary={healthSummary(doc, rep)}
-                usedBy={usage.get(doc.id) ?? 0}
-              />
-            </li>
-          ))}
-        </ul>
+      {/* documents — keyboard-focusable scroll region (a document with no file
+          on record has no focusable control of its own) */}
+      <div
+        role="group"
+        aria-label="Company vault documents"
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-y-auto scroll-thin p-3 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset focus-visible:outline-none"
+      >
+        {docs.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-[var(--border)] px-4 py-6 text-center text-xs text-[var(--text-tertiary)]">
+            No vault documents yet. Add them on the Documents page; Tenders checks expiry and the
+            police-stamp window for you.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {docs.map(({ doc, rep }) => (
+              <li key={doc.id}>
+                <VaultDocCard
+                  doc={doc}
+                  health={rep.health}
+                  summary={healthSummary(doc, rep)}
+                  usedBy={usage.get(doc.id) ?? 0}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-
-      <div className="shrink-0 border-t border-slate-200 px-4 py-2">
-        <p className="text-[11px] text-slate-400">
-          Certified stamps older than {POLICE_STAMP_WINDOW_DAYS} days are flagged stale
-          (police-stamp rule).
-        </p>
-      </div>
-    </aside>
+    </Drawer>
   )
 }
 
@@ -117,10 +134,41 @@ function VaultDocCard({
   summary: string
   usedBy: number
 }) {
+  // A user-triggered open failure is shown here, not just console.warn'd.
+  const [openError, setOpenError] = useState<string | null>(null)
+
+  const openDocument = async (): Promise<void> => {
+    const url = doc.fileUrl
+    if (!url) return
+    setOpenError(null)
+    if (
+      typeof window !== 'undefined' &&
+      window.tendersApi?.openDocument &&
+      !url.startsWith('blob:') &&
+      !url.startsWith('http') &&
+      !url.startsWith('/demo')
+    ) {
+      try {
+        const res = await window.tendersApi.openDocument({ storedPath: url })
+        if (!res?.ok) {
+          setOpenError(
+            `Could not open this document: ${res?.error || 'the shell refused the request.'}`,
+          )
+        }
+      } catch (err) {
+        setOpenError(
+          `Could not open this document: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    } else {
+      window.open(url, '_blank')
+    }
+  }
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-slate-800">
+        <p className="min-w-0 flex-1 text-[13px] leading-snug font-semibold text-[var(--text)]">
           {doc.title}
         </p>
         <Badge tone={HEALTH_TONE[health]}>{HEALTH_LABEL[health]}</Badge>
@@ -134,50 +182,55 @@ function VaultDocCard({
           </Badge>
         )}
         {doc.fileUrl ? (
-          <button
-            type="button"
-            onClick={async () => {
-              const url = doc.fileUrl
-              if (!url) return
-              if (
-                typeof window !== 'undefined' &&
-                window.tendersApi?.openDocument &&
-                !url.startsWith('blob:') &&
-                !url.startsWith('http') &&
-                !url.startsWith('/demo')
-              ) {
-                const res = await window.tendersApi.openDocument({ storedPath: url })
-                if (!res?.ok) {
-                  console.warn('tenders: failed to open vault document via shell', res?.error)
-                }
-              } else {
-                window.open(url, '_blank')
-              }
-            }}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700"
+          <Button
+            size="sm"
+            variant="default"
+            className="rounded-full"
+            onClick={() => void openDocument()}
+            title="Open this vault document"
           >
-            <FileText size={11} /> View PDF
-          </button>
+            <FileText size={11} aria-hidden="true" /> View PDF
+          </Button>
         ) : (
-          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-[11px] text-slate-400">
+          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--text-tertiary)]">
             No file on record
           </span>
         )}
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">{summary}</p>
+      {openError && (
+        <div
+          role="alert"
+          className="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2 py-1.5 text-[11px] text-[var(--danger-text)]"
+        >
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 leading-relaxed">{openError}</span>
+          <button
+            type="button"
+            onClick={() => setOpenError(null)}
+            aria-label="Dismiss document error"
+            className="shrink-0 cursor-pointer rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
-      <dl className="mt-1.5 grid grid-cols-1 gap-x-3 gap-y-0.5">
-        {Object.entries(doc.metadata).map(([k, v]) => (
-          <div key={k} className="flex items-baseline justify-between gap-2 text-[11px]">
-            <dt className="text-slate-400">{k}</dt>
-            <dd className="truncate text-slate-600">{v}</dd>
-          </div>
-        ))}
-      </dl>
+      <p className="mt-2 text-xs text-[var(--text-secondary)]">{summary}</p>
+
+      {Object.keys(doc.metadata).length > 0 && (
+        <dl className="mt-1.5 grid grid-cols-1 gap-x-3 gap-y-0.5">
+          {Object.entries(doc.metadata).map(([key, value]) => (
+            <div key={key} className="flex items-baseline justify-between gap-2 text-[11px]">
+              <dt className="shrink-0 text-[var(--text-tertiary)]">{key}</dt>
+              <dd className="min-w-0 truncate text-[var(--text-secondary)]">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       {(doc.issueDate || doc.expiryDate) && (
-        <p className="mt-1.5 text-[11px] text-slate-400">
+        <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
           {doc.issueDate && <>Issued {doc.issueDate}</>}
           {doc.issueDate && doc.expiryDate && <> · </>}
           {doc.expiryDate && <>Expires {doc.expiryDate}</>}

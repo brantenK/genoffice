@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  BadgeCheck,
   BookMarked,
   CheckCircle2,
   Clock,
@@ -14,58 +15,164 @@ import {
   Monitor,
   ShieldCheck,
   Trash2,
-  Upload
+  Upload,
 } from 'lucide-react'
-import { applyGapToRequirements } from '../gap'
 import { deadlineStatus, urgencyClasses, useNow } from '../deadline'
-import { extractAllPages, loadPdfDocument } from '../pdf/extract'
+import {
+  assertPdfBytesWithinLimit,
+  assertPdfPagesWithinLimit,
+  extractAllPages,
+  formatBytes,
+  loadPdfDocument,
+  PDF_PREFLIGHT_LIMITS,
+  PdfImportCancelledError,
+  PdfPreflightError,
+} from '../pdf/extract'
 import { extractIssuerInfo, extractTenderMeta, shredExtraction } from '../pdf/shred'
-import { buildTenderRecord, useTendersStore } from '../store'
+import {
+  applyGapToRequirementsIndexed,
+  buildTenderRecord,
+  buildVaultKeywordIndex,
+  useTendersStore,
+} from '../store'
 import { assessReadiness } from '../readiness'
 import {
   SUBMISSION_METHOD_LABEL,
-  TENDER_STATUS_LABEL,
+  TENDER_OUTCOME_LABEL,
   type RequirementRecord,
-  type TenderRecord
+  type TenderRecord,
 } from '../../shared/types'
+import { deriveTenderReview, gateConflictingMeta, summarizeReview } from './ExtractionReview'
+import { lifecycleCardSummary } from './TenderLifecyclePanel'
 import { Badge, Button, Spinner } from './ui'
+import { Dialog } from './Dialog'
 
 let tenderSeq = 0
 
-async function shredFile(file: File): Promise<TenderRecord> {
+async function shredFile(
+  file: File,
+  signal: AbortSignal,
+): Promise<{
+  record: TenderRecord
+  extraction: Awaited<ReturnType<typeof extractAllPages>>
+  meta: ReturnType<typeof extractTenderMeta>
+  /** Non-null when the RFP could not be persisted and fell back to a blob. */
+  persistError: string | null
+}> {
   const setShredding = useTendersStore.getState().setShredding
+  const throwIfAborted = (): void => {
+    if (signal.aborted) throw new PdfImportCancelledError()
+  }
   try {
+    // Preflight BEFORE reading the file buffer.
+    assertPdfBytesWithinLimit(file.size)
     setShredding({ stage: 'loading', message: 'Reading PDF…', page: 0, total: 0 })
+    throwIfAborted()
     const buf = await file.arrayBuffer()
     const doc = await loadPdfDocument(buf)
 
-    setShredding({ stage: 'extracting', message: 'Extracting text & coordinates…', page: 0, total: doc.numPages })
-    const ex = await extractAllPages(doc, (page, total) =>
-      useTendersStore.getState().setShredding({
-        stage: 'extracting',
-        message: 'Extracting text & coordinates…',
-        page,
-        total
-      })
-    )
+    // Page-count preflight BEFORE any page is read or rendered.
+    assertPdfPagesWithinLimit(doc.numPages)
+    throwIfAborted()
 
-    setShredding({ stage: 'shredding', message: 'Matching compliance rules…', page: ex.numPages, total: ex.numPages })
+    setShredding({
+      stage: 'extracting',
+      message: 'Extracting text & coordinates…',
+      page: 0,
+      total: doc.numPages,
+    })
+    const ex = await extractAllPages(
+      doc,
+      (page, total) =>
+        useTendersStore.getState().setShredding({
+          stage: 'extracting',
+          message: 'Extracting text & coordinates…',
+          page,
+          total,
+        }),
+      { signal },
+    )
+    throwIfAborted()
+
+    setShredding({
+      stage: 'shredding',
+      message: 'Matching compliance rules…',
+      page: ex.numPages,
+      total: ex.numPages,
+    })
     await new Promise((r) => setTimeout(r, 120)) // let the UI paint
+    throwIfAborted()
     const extracted = shredExtraction(ex)
     const meta = extractTenderMeta(ex, file.name.replace(/\.pdf$/i, ''))
 
-    setShredding({ stage: 'analysing', message: 'Running vault gap analysis…', page: ex.numPages, total: ex.numPages })
-    const requirements: RequirementRecord[] = applyGapToRequirements(
-      extracted.map((r) => ({ ...r, status: 'OUTSTANDING' as const, linkedVaultDocId: null, reason: null, suggestedVaultDocIds: [] })),
-      useTendersStore.getState().vault
+    setShredding({
+      stage: 'analysing',
+      message: 'Running vault gap analysis…',
+      page: ex.numPages,
+      total: ex.numPages,
+    })
+    // ONE vault keyword index for this analysis pass; each requirement matches
+    // against a prefiltered candidate set instead of rescanning the vault.
+    const vaultIndex = buildVaultKeywordIndex(useTendersStore.getState().vault)
+    const requirements: RequirementRecord[] = applyGapToRequirementsIndexed(
+      extracted.map((r) => ({
+        ...r,
+        status: 'OUTSTANDING' as const,
+        linkedVaultDocId: null,
+        reason: null,
+        suggestedVaultDocIds: [],
+      })),
+      vaultIndex,
     )
 
     // letterhead analysis — recognize the issuing authority and store a
     // template so recurring buyers are auto-recognized next time
     const issuer = extractIssuerInfo(ex, {
       referenceNumber: meta.referenceNumber,
-      issuingBody: meta.issuingBody
+      issuingBody: meta.issuingBody,
     })
+
+    throwIfAborted()
+    let fileUrl = ''
+    // A failure here is never silent: it is returned so the list can show a
+    // visible warning that the imported PDF is only a session blob.
+    let persistError: string | null = null
+    if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
+      let storedPath: string | null = null
+      try {
+        const buffer = await file.arrayBuffer()
+        const saveRes = await window.tendersApi.saveDocument({
+          fileName: file.name,
+          buffer,
+          category: 'rfp',
+        })
+        if (saveRes?.ok && saveRes.storedPath) {
+          storedPath = saveRes.storedPath
+          fileUrl = saveRes.storedPath
+        } else {
+          persistError = saveRes?.error || 'The document store rejected the file.'
+        }
+      } catch (saveErr) {
+        persistError = saveErr instanceof Error ? saveErr.message : String(saveErr)
+      }
+      // If the import was cancelled while the document was being reserved,
+      // release it so a cancelled import leaves no orphan file.
+      if (signal.aborted) {
+        if (storedPath) {
+          try {
+            await window.tendersApi.deleteDocument?.({ storedPath })
+          } catch {
+            /* best-effort cleanup */
+          }
+        }
+        throw new PdfImportCancelledError()
+      }
+    }
+    if (!fileUrl) {
+      fileUrl = URL.createObjectURL(file)
+    }
+    // Only now (after the last cancellation checkpoint) mutate authoritative
+    // state, so a cancelled import leaves no issuer template or partial tender.
     if (issuer) {
       useTendersStore.getState().upsertIssuerTemplate({
         id: '',
@@ -77,29 +184,13 @@ async function shredFile(file: File): Promise<TenderRecord> {
         submissionMethod: meta.submissionMethod,
         submissionAddress: meta.submissionAddress,
         seenCount: 1,
-        lastSeen: new Date().toISOString()
+        lastSeen: new Date().toISOString(),
       })
     }
-
-    let fileUrl = ''
-    if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
-      try {
-        const buffer = await file.arrayBuffer()
-        const saveRes = await window.tendersApi.saveDocument({
-          fileName: file.name,
-          buffer,
-          category: 'rfp'
-        })
-        if (saveRes?.ok && saveRes.storedPath) {
-          fileUrl = saveRes.storedPath
-        }
-      } catch (saveErr) {
-        console.warn('tenders: failed to persist RFP document via IPC, falling back', saveErr)
-      }
-    }
-    if (!fileUrl) {
-      fileUrl = URL.createObjectURL(file)
-    }
+    // A readiness-critical field is only imported when the parse is
+    // unambiguous. Competing candidates stay in the review step for resolution
+    // instead of one of them silently deciding the deadline/method/destination.
+    const gated = gateConflictingMeta(meta)
     const record = buildTenderRecord(
       `t-${Date.now()}-${tenderSeq++}`,
       file.name,
@@ -110,14 +201,19 @@ async function shredFile(file: File): Promise<TenderRecord> {
       {
         referenceNumber: meta.referenceNumber,
         issuingBody: meta.issuingBody,
-        closingDate: meta.closingDate,
-        submissionMethod: meta.submissionMethod,
-        submissionAddress: meta.submissionAddress
-      }
+        closingDate: gated.closingDate,
+        submissionMethod: gated.submissionMethod,
+        submissionAddress: gated.submissionAddress,
+      },
     )
     setShredding({ stage: 'done', message: 'Done', page: ex.numPages, total: ex.numPages })
-    return record
+    return { record, extraction: ex, meta, persistError }
   } catch (err) {
+    if (err instanceof PdfImportCancelledError) {
+      // Clean cancellation: no tender is added, no partial state is kept.
+      setShredding(null)
+      throw err
+    }
     const msg = err instanceof Error ? err.message : String(err)
     setShredding({ stage: 'error', message: msg, page: 0, total: 0 })
     throw err
@@ -128,17 +224,40 @@ export function TenderList() {
   const tenders = useTendersStore((s) => s.tenders)
   const shredding = useTendersStore((s) => s.shredding)
   const vault = useTendersStore((s) => s.vault)
+  const customers = useTendersStore((s) => s.customers)
   const company = useTendersStore((s) => s.company)
   const now = useNow(60_000)
   const issuerTemplates = useTendersStore((s) => s.issuerTemplates)
+  const tenderReviews = useTendersStore((s) => s.tenderReviews)
   const addTender = useTendersStore((s) => s.addTender)
   const removeTender = useTendersStore((s) => s.removeTender)
   const removeIssuerTemplate = useTendersStore((s) => s.removeIssuerTemplate)
   const setActiveTender = useTendersStore((s) => s.setActiveTender)
   const setShredding = useTendersStore((s) => s.setShredding)
+  const setTenderReview = useTendersStore((s) => s.setTenderReview)
+  const updateTender = useTendersStore((s) => s.updateTender)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Visible (role="alert") notice when an imported RFP could not be persisted
+  // and is only a session blob — never a silent console warning.
+  const [storageWarning, setStorageWarning] = useState<{
+    tenderId: string
+    message: string
+  } | null>(null)
+  // Tender removal goes through the managed-file lifecycle: an in-app
+  // confirmation first, then a soft-delete of the RFP into .trash (recoverable).
+  // A failed trash keeps the record and surfaces the reason (fail closed).
+  const [pendingDelete, setPendingDelete] = useState<TenderRecord | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const importAbortRef = useRef<AbortController | null>(null)
+  const lastImportFileRef = useRef<File | null>(null)
+
+  const cancelImport = useCallback(() => {
+    importAbortRef.current?.abort()
+  }, [])
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -147,17 +266,194 @@ export function TenderList() {
         return
       }
       setError(null)
+      setStorageWarning(null)
+      const controller = new AbortController()
+      importAbortRef.current?.abort()
+      importAbortRef.current = controller
       try {
-        const record = await shredFile(file)
+        const { record, extraction, meta, persistError } = await shredFile(file, controller.signal)
+        if (controller.signal.aborted) return
         addTender(record)
+        if (persistError) {
+          // The tender imports fine, but the PDF fell back to an object URL that
+          // dies on reload. Say so, and offer to retry the save.
+          lastImportFileRef.current = file
+          setStorageWarning({
+            tenderId: record.id,
+            message: `The PDF could not be saved to the workspace: ${persistError}. It is open for this session only and must be re-attached before you rely on it after a restart.`,
+          })
+        }
+        // Seed the extraction review from the parser's candidates so the user
+        // sees competing values and source pages straight away.
+        setTenderReview(
+          record.id,
+          deriveTenderReview({
+            meta,
+            extraction,
+            requirements: record.requirements,
+            estimatedValue: record.estimatedValue ?? null,
+          }),
+        )
         setActiveTender(record.id)
-      } catch {
+      } catch (err) {
+        if (err instanceof PdfImportCancelledError) {
+          setError('Import cancelled.')
+          return
+        }
+        if (err instanceof PdfPreflightError) {
+          // Typed, user-visible reason (oversize file / too many pages).
+          setError(err.message)
+          return
+        }
         setError('Could not process that PDF. Is it encrypted or malformed?')
         setTimeout(() => setShredding(null), 2500)
+      } finally {
+        if (importAbortRef.current === controller) importAbortRef.current = null
       }
     },
-    [addTender, setActiveTender, setShredding]
+    [addTender, setActiveTender, setShredding, setTenderReview],
   )
+
+  /** Retry persisting the RFP that previously fell back to a session blob. */
+  const retryPersistStorage = useCallback(async () => {
+    const warning = storageWarning
+    const file = lastImportFileRef.current
+    if (!warning || !file || typeof window === 'undefined' || !window.tendersApi?.saveDocument) {
+      return
+    }
+    try {
+      const buffer = await file.arrayBuffer()
+      const res = await window.tendersApi.saveDocument({
+        fileName: file.name,
+        buffer,
+        category: 'rfp',
+      })
+      if (res?.ok && res.storedPath) {
+        // Point the stored tender at the now-durable file and clear the warning.
+        updateTender(warning.tenderId, { fileUrl: res.storedPath })
+        setStorageWarning(null)
+        return
+      }
+      setStorageWarning({
+        ...warning,
+        message: `The PDF still could not be saved to the workspace: ${
+          res?.error || 'the document store rejected the file.'
+        }. It remains available for this session only.`,
+      })
+    } catch (err) {
+      setStorageWarning({
+        ...warning,
+        message: `The PDF still could not be saved to the workspace: ${
+          err instanceof Error ? err.message : String(err)
+        }. It remains available for this session only.`,
+      })
+    }
+  }, [storageWarning, updateTender])
+
+  /** A workspace-relative managed file path (not a blob/http/demo URL). */
+  const managedTenderPath = (url: string | null | undefined): string | null => {
+    if (!url) return null
+    if (url.startsWith('blob:') || url.startsWith('http') || url.startsWith('/demo')) return null
+    return url
+  }
+
+  /** Human-readable records that reference this tender before it is removed. */
+  const tenderReferences = (t: TenderRecord): string[] => {
+    const refs: string[] = []
+    const path = managedTenderPath(t.fileUrl)
+    if (t.linkedCrmDealId) refs.push(`CRM deal ${t.linkedCrmDealId}`)
+    if (path) {
+      for (const other of tenders) {
+        if (other.id !== t.id && other.fileUrl === path) refs.push(`tender “${other.title}”`)
+      }
+      const linkedVaultIds = new Set<string>()
+      for (const doc of vault) {
+        if (doc.fileUrl === path) {
+          refs.push(`vault document “${doc.title}”`)
+          linkedVaultIds.add(doc.id)
+        }
+      }
+      if (linkedVaultIds.size > 0) {
+        for (const customer of customers) {
+          if (
+            customer.requiredDocs.some(
+              (required) =>
+                required.linkedVaultDocId !== null && linkedVaultIds.has(required.linkedVaultDocId),
+            )
+          ) {
+            refs.push(`customer “${customer.name}”`)
+          }
+        }
+      }
+    }
+    const milestoneCount = t.milestones?.length ?? 0
+    if (milestoneCount > 0) refs.push(`${milestoneCount} contract milestone(s)`)
+    return refs
+  }
+
+  const requestRemoveTender = useCallback((t: TenderRecord) => {
+    setDeleteError(null)
+    setDeleteNotice(null)
+    setPendingDelete(t)
+  }, [])
+
+  const cancelRemoveTender = useCallback(() => setPendingDelete(null), [])
+
+  const performRemoveTender = useCallback(
+    async (t: TenderRecord) => {
+      setDeleteError(null)
+      setDeleteNotice(null)
+      const storedPath = managedTenderPath(t.fileUrl)
+      if (storedPath) {
+        if (!window.tendersApi?.deleteDocument) {
+          // Fail closed: keep the record so its RFP is never orphaned silently.
+          setDeleteError(
+            'Document deletion is unavailable in this build; the tender was not removed.',
+          )
+          return
+        }
+        setDeleteBusy(true)
+        try {
+          const res = await window.tendersApi.deleteDocument({ storedPath })
+          if (!res?.ok) {
+            setDeleteError(
+              res?.error || 'Could not move the RFP to Trash; the tender was not removed.',
+            )
+            return
+          }
+          const notes: string[] = [...(res.warnings ?? [])]
+          if (res.links && res.links.length > 0) {
+            notes.push(
+              `Referenced by ${res.links.length} record(s): ${res.links
+                .map((link) => `${link.kind} “${link.label}”`)
+                .join(', ')}.`,
+            )
+          }
+          if (res.trashId) notes.push('The RFP was moved to Trash (recoverable).')
+          if (notes.length > 0) setDeleteNotice(notes.join(' '))
+        } catch (err) {
+          setDeleteError(err instanceof Error ? err.message : String(err))
+          return
+        } finally {
+          setDeleteBusy(false)
+        }
+      } else if (t.fileUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(t.fileUrl)
+      }
+      // Only after the file is safely in Trash (or there was none) is the record
+      // removed, so reconcile never sees a false orphan.
+      removeTender(t.id)
+    },
+    [removeTender],
+  )
+
+  const confirmRemoveTender = useCallback(() => {
+    const t = pendingDelete
+    setPendingDelete(null)
+    if (t) void performRemoveTender(t)
+  }, [pendingDelete, performRemoveTender])
+
+  const pendingReferences = pendingDelete ? tenderReferences(pendingDelete) : []
 
   const loadDemo = useCallback(async () => {
     setError(null)
@@ -175,262 +471,434 @@ export function TenderList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin">
-      <div className="border-b border-slate-200 bg-white px-8 py-5">
-        <h1 className="text-xl font-bold text-slate-900">Tenders</h1>
-        <p className="mt-0.5 text-sm text-slate-500">
-          Drop a tender RFP pack — Zanostack Tenders shreds it in your browser into a compliance matrix,
-          cross-references your company vault, and highlights every source clause.
+      <div className="border-b border-[var(--border)] bg-[var(--surface)] px-8 py-5">
+        <h1 className="text-xl font-bold text-[var(--text)]">Tenders</h1>
+        <p className="mt-0.5 text-sm text-[var(--text-secondary)]">
+          Drop a tender RFP pack — Zanostack Tenders shreds it in your browser into a compliance
+          matrix, cross-references your company vault, and highlights every source clause.
         </p>
       </div>
-    <main className="mx-auto w-full max-w-5xl flex-1 px-8 py-8">
-      {/* Dropzone */}
-      <section
-        data-tour="tour-dropzone"
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDragOver(false)
-          const f = e.dataTransfer.files?.[0]
-          if (f && !busy) void handleFile(f)
-        }}
-        className={`rounded-xl border-2 border-dashed p-10 text-center transition-colors ${
-          dragOver ? 'border-indigo-400 bg-indigo-50/60' : 'border-slate-300 bg-white'
-        }`}
-      >
-        {busy ? (
-          <ShredProgress />
-        ) : (
-          <>
-            <Upload className="mx-auto size-8 text-slate-400" />
-            <p className="mt-3 text-sm font-medium text-slate-700">
-              Drag &amp; drop a tender RFP (PDF), or
+      <main className="mx-auto w-full max-w-5xl flex-1 px-8 py-8">
+        {/* Dropzone */}
+        <section
+          data-tour="tour-dropzone"
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragOver(true)
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragOver(false)
+            const f = e.dataTransfer.files?.[0]
+            if (f && !busy) void handleFile(f)
+          }}
+          className={`rounded-xl border-2 border-dashed p-10 text-center transition-colors ${
+            dragOver
+              ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+              : 'border-[var(--border-strong)] bg-[var(--surface)]'
+          }`}
+        >
+          {busy ? (
+            <ShredProgress onCancel={cancelImport} />
+          ) : (
+            <>
+              <Upload className="mx-auto size-8 text-[var(--text-tertiary)]" />
+              <p className="mt-3 text-sm font-medium text-[var(--text-secondary)]">
+                Drag &amp; drop a tender RFP (PDF), or
+              </p>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <Button variant="primary" onClick={() => inputRef.current?.click()}>
+                  <FolderOpen size={15} /> Choose PDF
+                </Button>
+                <Button onClick={loadDemo}>
+                  <FileText size={15} /> Load demo RFP
+                </Button>
+              </div>
+              <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+                100% client-side processing — your documents never leave this browser.
+              </p>
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                Import limits: up to {PDF_PREFLIGHT_LIMITS.maxPages} pages ·{' '}
+                {formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes)} per PDF.
+              </p>
+            </>
+          )}
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) void handleFile(f)
+              e.target.value = ''
+            }}
+          />
+          {error && (
+            <p
+              role="alert"
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--danger)]"
+            >
+              <AlertTriangle size={14} aria-hidden="true" /> {error}
             </p>
-            <div className="mt-3 flex items-center justify-center gap-2">
-              <Button variant="primary" onClick={() => inputRef.current?.click()}>
-                <FolderOpen size={15} /> Choose PDF
+          )}
+        </section>
+
+        {/* The import succeeded but the PDF is not durable — visible, retryable. */}
+        {storageWarning && (
+          <div
+            role="alert"
+            className="mt-4 flex flex-wrap items-start gap-2 rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2.5 text-[12px] text-[var(--text-secondary)]"
+          >
+            <AlertTriangle
+              size={14}
+              className="mt-0.5 shrink-0 text-[var(--warn)]"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 leading-relaxed">{storageWarning.message}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="default" onClick={() => void retryPersistStorage()}>
+                Retry save
               </Button>
-              <Button onClick={loadDemo}>
-                <FileText size={15} /> Load demo RFP
+              <Button size="sm" variant="ghost" onClick={() => setStorageWarning(null)}>
+                Dismiss
               </Button>
             </div>
-            <p className="mt-3 text-xs text-slate-400">
-              100% client-side processing — your documents never leave this browser.
-            </p>
-          </>
+          </div>
         )}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="application/pdf,.pdf"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) void handleFile(f)
-            e.target.value = ''
-          }}
-        />
-        {error && (
-          <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-600">
-            <AlertTriangle size={14} /> {error}
-          </p>
-        )}
-      </section>
 
-      {/* Tender list */}
-      <section className="mt-8">
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">
-          Tenders {tenders.length > 0 && <span className="text-slate-400">({tenders.length})</span>}
-        </h2>
-        {tenders.length === 0 ? (
-          <p className="rounded-lg border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
-            No tenders yet — load the demo RFP to see the full compliance workflow.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {tenders.map((t) => {
-              const counts = countsFor(t)
-              const dl = deadlineStatus(t.closingDate, now)
-              const readiness = assessReadiness(t, vault, company, now)
-              const MethodIcon =
-                t.submissionMethod === 'EMAIL' ? Mail : t.submissionMethod === 'PHYSICAL' ? MapPin : Monitor
-              return (
-                <li
-                  key={t.id}
-                  className="group cursor-pointer rounded-lg border border-slate-200 bg-white p-4 transition-shadow hover:shadow-md"
-                  onClick={() => {
-                    setActiveTender(t.id)
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">{t.title}</p>
-                      <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                        <span className="inline-flex items-center gap-1">
-                          <FileText size={12} /> {t.fileName}
-                        </span>
-                        {t.referenceNumber && <span>Ref {t.referenceNumber}</span>}
-                        {dl.date && (
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${urgencyClasses(dl.urgency)}`}
-                            title={`${dl.formatted}${dl.submitBy ? ` · target submit by ${dl.submitBy.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
-                          >
-                            <Clock size={11} /> {dl.countdownLabel}
+        {/* Removal feedback: the RFP's trash outcome / link warnings. */}
+        {deleteNotice && (
+          <div
+            role="status"
+            data-testid="delete-tender-notice"
+            className="mt-4 flex flex-wrap items-start gap-2 rounded-lg border border-[var(--success-border)] bg-[var(--success-bg)] px-3 py-2.5 text-[12px] text-[var(--text-secondary)]"
+          >
+            <CheckCircle2
+              size={14}
+              className="mt-0.5 shrink-0 text-[var(--success)]"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 leading-relaxed">{deleteNotice}</span>
+            <Button size="sm" variant="ghost" onClick={() => setDeleteNotice(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
+        {deleteError && (
+          <div
+            role="alert"
+            data-testid="delete-tender-error"
+            className="mt-4 flex flex-wrap items-start gap-2 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2.5 text-[12px] text-[var(--text-secondary)]"
+          >
+            <AlertTriangle
+              size={14}
+              className="mt-0.5 shrink-0 text-[var(--danger)]"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 leading-relaxed">{deleteError}</span>
+            <Button size="sm" variant="ghost" onClick={() => setDeleteError(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
+
+        {/* Tender list */}
+        <section className="mt-8">
+          <h2 className="mb-3 text-sm font-semibold text-[var(--text)]">
+            Tenders{' '}
+            {tenders.length > 0 && (
+              <span className="text-[var(--text-tertiary)]">({tenders.length})</span>
+            )}
+          </h2>
+          {tenders.length === 0 ? (
+            <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
+              No tenders yet — load the demo RFP to see the full compliance workflow.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {tenders.map((t) => {
+                const counts = countsFor(t)
+                const dl = deadlineStatus(t.closingDate, now)
+                const readiness = assessReadiness(t, vault, company, now)
+                const review = tenderReviews[t.id]
+                const reviewSummary = summarizeReview(t, review)
+                const lifecycle = lifecycleCardSummary(t)
+                const MethodIcon =
+                  t.submissionMethod === 'EMAIL'
+                    ? Mail
+                    : t.submissionMethod === 'PHYSICAL'
+                      ? MapPin
+                      : Monitor
+                return (
+                  <li
+                    key={t.id}
+                    className="group cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 transition-shadow hover:shadow-md"
+                    onClick={() => {
+                      setActiveTender(t.id)
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[var(--text)]">
+                          {t.title}
+                        </p>
+                        <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
+                          <span className="inline-flex items-center gap-1">
+                            <FileText size={12} /> {t.fileName}
                           </span>
+                          {t.referenceNumber && <span>Ref {t.referenceNumber}</span>}
+                          {dl.date && (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${urgencyClasses(dl.urgency)}`}
+                              title={`${dl.formatted}${dl.submitBy ? ` · target submit by ${dl.submitBy.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
+                            >
+                              <Clock size={11} /> {dl.countdownLabel}
+                            </span>
+                          )}
+                          {dl.insideSubmitWindow && dl.date && (
+                            <Badge tone="amber" className="ring-1 ring-[var(--warn-border)]">
+                              Inside 24h submit window
+                            </Badge>
+                          )}
+                          {t.submissionMethod && (
+                            <span
+                              className="inline-flex items-center gap-1"
+                              title={
+                                t.submissionAddress ?? SUBMISSION_METHOD_LABEL[t.submissionMethod]
+                              }
+                            >
+                              <MethodIcon size={12} /> {SUBMISSION_METHOD_LABEL[t.submissionMethod]}
+                            </span>
+                          )}
+                          <span>{t.numPages} pages</span>
+                          {t.ocrPages > 0 && (
+                            <Badge tone="amber">
+                              {t.ocrPages} scanned page{t.ocrPages === 1 ? '' : 's'}
+                            </Badge>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {reviewSummary.complete ? (
+                          <Badge tone="green" className="ring-1 ring-[var(--success-border)]">
+                            <BadgeCheck size={12} /> Extraction reviewed
+                          </Badge>
+                        ) : (
+                          <Badge tone="amber" className="ring-1 ring-[var(--warn-border)]">
+                            <AlertTriangle size={12} /> Review{' '}
+                            {reviewSummary.pendingFields +
+                              reviewSummary.requirementAttention.length}{' '}
+                            to confirm
+                          </Badge>
                         )}
-                        {dl.insideSubmitWindow && dl.date && (
-                          <Badge tone="amber" className="ring-1 ring-amber-200">Inside 24h submit window</Badge>
-                        )}
-                        {t.submissionMethod && (
-                          <span
-                            className="inline-flex items-center gap-1"
-                            title={t.submissionAddress ?? SUBMISSION_METHOD_LABEL[t.submissionMethod]}
-                          >
-                            <MethodIcon size={12} /> {SUBMISSION_METHOD_LABEL[t.submissionMethod]}
-                          </span>
-                        )}
-                        <span>{t.numPages} pages</span>
-                        {t.ocrPages > 0 && (
-                          <Badge tone="amber">{t.ocrPages} scanned page{t.ocrPages === 1 ? '' : 's'}</Badge>
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {t.status === 'READY_FOR_SUBMISSION' && readiness.ready && (
-                        <Badge tone="green">
-                          <ShieldCheck size={12} /> {TENDER_STATUS_LABEL[t.status]}
+                        {/* lifecycle status + proof of submission + outcome */}
+                        <Badge tone={lifecycle.tone}>
+                          <ShieldCheck size={12} /> {lifecycle.label}
                         </Badge>
-                      )}
-                      <span className="text-xs font-semibold text-slate-700">
-                        {counts.fulfilled}/{counts.total} fulfilled
+                        {lifecycle.evidence && (
+                          <Badge tone={lifecycle.evidenceTone}>{lifecycle.evidence}</Badge>
+                        )}
+                        {lifecycle.override && (
+                          <span title="Submitted with blockers using an audited override">
+                            <Badge tone="red">Override</Badge>
+                          </span>
+                        )}
+                        {t.outcome && (
+                          <Badge tone="violet">{TENDER_OUTCOME_LABEL[t.outcome.status]}</Badge>
+                        )}
+                        {t.status === 'READY_FOR_SUBMISSION' && readiness.ready && (
+                          <Badge tone="green">Checks clear</Badge>
+                        )}
+                        <span className="text-xs font-semibold text-[var(--text-secondary)]">
+                          {counts.fulfilled}/{counts.total} fulfilled
+                        </span>
+                        <button
+                          type="button"
+                          title="Remove tender"
+                          aria-label="Remove tender"
+                          disabled={deleteBusy}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            requestRemoveTender(t)
+                          }}
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2
+                            size={14}
+                            className="text-[var(--text-tertiary)] hover:text-[var(--danger)]"
+                          />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--canvas)]">
+                      <div
+                        className="h-full rounded-full bg-[var(--accent)] transition-all"
+                        style={{
+                          width: `${counts.total ? (counts.fulfilled / counts.total) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="mt-2 flex gap-3 text-[11px] text-[var(--text-secondary)]">
+                      <span className="inline-flex items-center gap-1">
+                        <CheckCircle2 size={12} className="text-[var(--success)]" />{' '}
+                        {counts.fulfilled} fulfilled
                       </span>
+                      <span className="inline-flex items-center gap-1">
+                        <AlertTriangle size={12} className="text-[var(--warn)]" />{' '}
+                        {counts.actionRequired} action
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Loader2 size={12} className="text-[var(--danger)]" /> {counts.outstanding}{' '}
+                        outstanding
+                      </span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+
+        {/* Recognized issuer letterhead templates */}
+        {issuerTemplates.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-1 text-sm font-semibold text-[var(--text)]">
+              Recognized issuers{' '}
+              <span className="text-[var(--text-tertiary)]">({issuerTemplates.length})</span>
+            </h2>
+            <p className="mb-3 text-xs text-[var(--text-tertiary)]">
+              Letterhead templates captured from shredded tenders — recurring buyers are
+              auto-recognized, with their usual reference style and submission logistics on file.
+            </p>
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {issuerTemplates.map((tpl) => {
+                const MethodIcon =
+                  tpl.submissionMethod === 'EMAIL'
+                    ? Mail
+                    : tpl.submissionMethod === 'PHYSICAL'
+                      ? MapPin
+                      : Monitor
+                return (
+                  <li
+                    key={tpl.id}
+                    className="group relative rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4"
+                  >
+                    <div className="flex items-start justify-between gap-2 pr-7">
+                      <p className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
+                        <BookMarked size={13} className="shrink-0 text-[var(--accent)]" />
+                        <span className="truncate" title={tpl.displayName}>
+                          {tpl.displayName}
+                        </span>
+                      </p>
                       <button
                         type="button"
-                        title="Remove tender"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeTender(t.id)
-                        }}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                        title="Forget this issuer template"
+                        aria-label="Forget this issuer template"
+                        onClick={() => removeIssuerTemplate(tpl.id)}
+                        className="absolute right-2 top-2 cursor-pointer rounded-md p-1.5 text-[var(--text-tertiary)] opacity-0 transition-opacity hover:bg-[var(--hover)] hover:text-[var(--danger)] group-hover:opacity-100 focus-visible:opacity-100"
                       >
-                        <Trash2 size={14} className="text-slate-400 hover:text-red-500" />
+                        <Trash2 size={13} />
                       </button>
                     </div>
-                  </div>
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-emerald-500 transition-all"
-                      style={{ width: `${counts.total ? (counts.fulfilled / counts.total) * 100 : 0}%` }}
-                    />
-                  </div>
-                  <div className="mt-2 flex gap-3 text-[11px] text-slate-500">
-                    <span className="inline-flex items-center gap-1">
-                      <CheckCircle2 size={12} className="text-emerald-500" /> {counts.fulfilled} fulfilled
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <AlertTriangle size={12} className="text-amber-500" /> {counts.actionRequired} action
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Loader2 size={12} className="text-red-400" /> {counts.outstanding} outstanding
-                    </span>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* Recognized issuer letterhead templates */}
-      {issuerTemplates.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-1 text-sm font-semibold text-slate-700">
-            Recognized issuers{' '}
-            <span className="text-slate-400">({issuerTemplates.length})</span>
-          </h2>
-          <p className="mb-3 text-xs text-slate-400">
-            Letterhead templates captured from shredded tenders — recurring buyers are
-            auto-recognized, with their usual reference style and submission logistics on file.
-          </p>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {issuerTemplates.map((tpl) => {
-              const MethodIcon =
-                tpl.submissionMethod === 'EMAIL'
-                  ? Mail
-                  : tpl.submissionMethod === 'PHYSICAL'
-                    ? MapPin
-                    : Monitor
-              return (
-                <li
-                  key={tpl.id}
-                  className="group relative rounded-lg border border-slate-200 bg-white p-4"
-                >
-                  <div className="flex items-start justify-between gap-2 pr-7">
-                    <p className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold text-slate-900">
-                      <BookMarked size={13} className="shrink-0 text-indigo-500" />
-                      <span className="truncate" title={tpl.displayName}>
-                        {tpl.displayName}
-                      </span>
+                    <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-dark)]">
+                      seen {tpl.seenCount} tender{tpl.seenCount === 1 ? '' : 's'} · last{' '}
+                      {new Date(tpl.lastSeen).toLocaleDateString('en-ZA', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })}
                     </p>
-                    <button
-                      type="button"
-                      title="Forget this issuer template"
-                      onClick={() => removeIssuerTemplate(tpl.id)}
-                      className="absolute right-2 top-2 cursor-pointer rounded-md p-1.5 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-red-500 group-hover:opacity-100"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                  <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600">
-                    seen {tpl.seenCount} tender{tpl.seenCount === 1 ? '' : 's'} · last{' '}
-                    {new Date(tpl.lastSeen).toLocaleDateString('en-ZA', {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric'
-                    })}
-                  </p>
-                  <div className="mt-2 space-y-1 text-[11px] text-slate-500">
-                    {tpl.refStyle && (
-                      <p className="flex items-start gap-1.5">
-                        <Hash size={11} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span>{tpl.refStyle}</span>
-                      </p>
-                    )}
-                    {tpl.address && (
-                      <p className="flex items-start gap-1.5">
-                        <MapPin size={11} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span className="line-clamp-2">{tpl.address}</span>
-                      </p>
-                    )}
-                    {tpl.contact && (
-                      <p className="flex items-start gap-1.5">
-                        <Mail size={11} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span className="line-clamp-2">{tpl.contact}</span>
-                      </p>
-                    )}
-                    {tpl.submissionMethod && (
-                      <p className="flex items-start gap-1.5">
-                        <MethodIcon size={11} className="mt-0.5 shrink-0 text-slate-400" />
-                        <span
-                          className="line-clamp-2"
-                          title={tpl.submissionAddress ?? undefined}
-                        >
-                          {SUBMISSION_METHOD_LABEL[tpl.submissionMethod]}
-                          {tpl.submissionAddress ? ` — ${tpl.submissionAddress}` : ''}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
+                    <div className="mt-2 space-y-1 text-[11px] text-[var(--text-secondary)]">
+                      {tpl.refStyle && (
+                        <p className="flex items-start gap-1.5">
+                          <Hash size={11} className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />
+                          <span>{tpl.refStyle}</span>
+                        </p>
+                      )}
+                      {tpl.address && (
+                        <p className="flex items-start gap-1.5">
+                          <MapPin
+                            size={11}
+                            className="mt-0.5 shrink-0 text-[var(--text-tertiary)]"
+                          />
+                          <span className="line-clamp-2">{tpl.address}</span>
+                        </p>
+                      )}
+                      {tpl.contact && (
+                        <p className="flex items-start gap-1.5">
+                          <Mail size={11} className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />
+                          <span className="line-clamp-2">{tpl.contact}</span>
+                        </p>
+                      )}
+                      {tpl.submissionMethod && (
+                        <p className="flex items-start gap-1.5">
+                          <MethodIcon
+                            size={11}
+                            className="mt-0.5 shrink-0 text-[var(--text-tertiary)]"
+                          />
+                          <span className="line-clamp-2" title={tpl.submissionAddress ?? undefined}>
+                            {SUBMISSION_METHOD_LABEL[tpl.submissionMethod]}
+                            {tpl.submissionAddress ? ` — ${tpl.submissionAddress}` : ''}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        )}
+      </main>
+
+      {/* Managed-file confirmation: the RFP is moved to .trash (recoverable) and
+          the record is only removed after that succeeds. */}
+      {pendingDelete && (
+        <div data-testid="delete-tender-dialog" className="fixed inset-0 z-[75]">
+          <Dialog
+            title="Remove tender?"
+            subtitle={`“${pendingDelete.title}” will be removed from the workspace.`}
+            icon={<Trash2 size={16} aria-hidden="true" />}
+            size="md"
+            onClose={cancelRemoveTender}
+            footer={
+              <>
+                {/* Destructive action: Cancel takes initial focus so a stray
+                    Enter/Space does not remove. Escape and backdrop also cancel. */}
+                <Button variant="ghost" data-autofocus onClick={cancelRemoveTender}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  data-testid="delete-tender-confirm"
+                  disabled={deleteBusy}
+                  onClick={confirmRemoveTender}
+                >
+                  Remove tender
+                </Button>
+              </>
+            }
+          >
+            <div className="space-y-2 px-5 py-4 text-sm leading-relaxed text-[var(--text-secondary)]">
+              <p>
+                The RFP file{pendingDelete.fileName ? ` “${pendingDelete.fileName}”` : ''} is moved
+                to Trash and can be restored from the Documents trash. Removing the tender deletes
+                its compliance matrix and review from the workspace.
+              </p>
+              {pendingReferences.length > 0 && (
+                <p
+                  data-testid="delete-tender-links"
+                  className="rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-xs"
+                >
+                  Also referenced by: {pendingReferences.join(', ')}.
+                </p>
+              )}
+            </div>
+          </Dialog>
+        </div>
       )}
-    </main>
     </div>
   )
 }
@@ -447,27 +915,47 @@ function countsFor(t: TenderRecord) {
   return { total: t.requirements.length, fulfilled, actionRequired, outstanding }
 }
 
-function ShredProgress() {
+function ShredProgress({ onCancel }: { onCancel?: () => void }) {
   const s = useTendersStore((s2) => s2.shredding)
   if (!s) return null
   const pct = s.total > 0 ? Math.round((s.page / s.total) * 100) : null
-  const icon = s.stage === 'error' ? <AlertTriangle className="mx-auto size-8 text-red-400" /> : <Spinner className="mx-auto size-7" />
+  const icon =
+    s.stage === 'error' ? (
+      <AlertTriangle className="mx-auto size-8 text-[var(--danger)]" />
+    ) : (
+      <Spinner className="mx-auto size-7" />
+    )
   return (
     <div className="py-2">
       {icon}
-      <p className={`mt-3 text-sm font-medium ${s.stage === 'error' ? 'text-red-600' : 'text-slate-700'}`}>
+      <p
+        role={s.stage === 'error' ? 'alert' : undefined}
+        className={`mt-3 text-sm font-medium ${s.stage === 'error' ? 'text-[var(--danger)]' : 'text-[var(--text-secondary)]'}`}
+      >
         {s.stage === 'error' ? 'Shredding failed' : s.message}
       </p>
       {s.stage !== 'error' && (
         <>
           {pct !== null && (
-            <div className="mx-auto mt-3 h-1.5 w-56 overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${pct}%` }} />
+            <div className="mx-auto mt-3 h-1.5 w-56 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-all"
+                style={{ width: `${pct}%` }}
+              />
             </div>
           )}
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-tertiary)]">
             page {s.page} / {s.total || '?'}
           </p>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="mt-3 cursor-pointer rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)]"
+            >
+              Cancel import
+            </button>
+          )}
         </>
       )}
     </div>

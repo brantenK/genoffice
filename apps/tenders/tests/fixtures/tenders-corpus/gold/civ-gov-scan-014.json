@@ -1,0 +1,33 @@
+{
+  "id": "civ-gov-scan-014",
+  "synthetic": true,
+  "sector": "construction-civil",
+  "issuerType": "government",
+  "tags": ["construction", "government", "scanned-only", "ocr-required"],
+  "title": null,
+  "titleAlternatives": [],
+  "referenceNumber": null,
+  "issuingBody": null,
+  "closingDateTime": null,
+  "submissionMethod": null,
+  "submissionDestination": null,
+  "expectedRequirementKeys": [],
+  "mandatoryRequirements": [],
+  "disqualifiers": [],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [
+    "title",
+    "referenceNumber",
+    "issuingBody",
+    "closingDateTime",
+    "submissionMethod",
+    "submissionDestination"
+  ],
+  "scannedPages": [1, 2, 3],
+  "pageCount": 3,
+  "clearable": false,
+  "sources": { "unavailable": "scanned-only fixture has no text layer" },
+  "pdfSha256": "962d1f55071f441fc14ae3be6ff5d7287215f7e06316016e34c2fde522d23628",
+  "pdfBytes": 3163
+}

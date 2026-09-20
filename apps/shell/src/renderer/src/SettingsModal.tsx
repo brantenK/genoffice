@@ -999,9 +999,13 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const applyTheme = (next: UiTheme) => {
     setTheme(next)
-    void window.aiOffice.setTheme(next)
-    if (next === 'system') document.documentElement.removeAttribute('data-theme')
-    else document.documentElement.setAttribute('data-theme', next)
+    // The shell resolves 'system' to light|dark; apply that explicit value
+    // (Electron 43 does not flip prefers-color-scheme, so never clear the attr).
+    void window.aiOffice.setTheme(next).then(() => {
+      void window.aiOffice.getEffectiveTheme?.().then((resolved) => {
+        if (resolved) document.documentElement.setAttribute('data-theme', resolved)
+      })
+    })
   }
 
   const updateAiPrefs = (patch: Partial<AiPanelPrefs>) => {

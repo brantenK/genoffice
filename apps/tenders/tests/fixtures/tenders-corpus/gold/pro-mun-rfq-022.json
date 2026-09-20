@@ -1,0 +1,59 @@
+{
+  "id": "pro-mun-rfq-022",
+  "synthetic": true,
+  "sector": "professional-services",
+  "issuerType": "municipal",
+  "tags": ["professional-services", "municipal", "rfq", "pricing-schedule"],
+  "title": "Appointment of a Service Provider for Municipal Financial Audit Support",
+  "titleAlternatives": [],
+  "referenceNumber": "STB-PRO-2026-0288",
+  "issuingBody": "STELLENBOSCH MUNICIPALITY",
+  "closingDateTime": "09 December 2026 at 12:00",
+  "submissionMethod": "EMAIL",
+  "submissionDestination": "scm@stellenbosch.gov.za",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "key_personnel",
+    "financials",
+    "closing_time",
+    "contact_person",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": ["tax_pin", "bbbee", "csd", "sbd_forms", "pricing_schedule"],
+  "disqualifiers": ["tax_pin", "csd", "sbd_forms", "pricing_schedule"],
+  "pricingRequirements": ["pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 4,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Appointment of a Service Provider for Municipal Financial Audit Support"
+    },
+    "referenceNumber": { "page": 1, "clauseContains": "Reference No: STB-PRO-2026-0288" },
+    "issuingBody": { "page": 1, "clauseContains": "STELLENBOSCH MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 09 December 2026 at 12:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "scm@stellenbosch.gov.za" },
+    "submissionDestination": { "page": 1, "clauseContains": "scm@stellenbosch.gov.za" },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "key_personnel": { "page": 2 },
+      "financials": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "cb84ec6e223aab923c0c8b42f3ae4682000ecb93a3eb124753efc762998ec3d8",
+  "pdfBytes": 2757
+}

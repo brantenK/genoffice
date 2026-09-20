@@ -1,0 +1,169 @@
+/* WP-12 — responsive workspace chrome.
+ *
+ * Layout-only helpers for the resizable matrix/PDF split, the compact
+ * Requirements ⇄ PDF switch, the overflow menu and the sticky context headers.
+ * Every chrome colour comes from the shared semantic tokens in
+ * packages/ui/src/tokens.css (light / dark / system), so nothing here needs a
+ * raw value and the PDF page canvases in PdfViewer.tsx stay document-white.
+ */
+
+:root {
+  /* Height of the PDF pane's sticky context header; used to offset page jumps
+     so a focused clause is not hidden underneath the header. */
+  --workspace-pdf-header-h: 2.75rem;
+  /* Upper bound for a sticky matrix group header, and a floor for the matrix
+     scrollport. Both are in `em` so they scale with the text: at 200% zoom the
+     header cap and the scrollport floor both double, keeping rows reachable
+     (WCAG 1.4.4 — content must stay reachable when text is resized). */
+  --matrix-group-header-max: 3.5em;
+  --matrix-scroll-min-h: 6em;
+}
+
+/* ── Resizable split handle ─────────────────────────────────────────────── */
+.workspace-split-handle {
+  position: relative;
+  flex: 0 0 auto;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  background: var(--border);
+  transition: background-color var(--transition-fast);
+}
+
+/* A wider invisible hit target than the 6px visual rule, without moving
+   neighbouring panes. */
+.workspace-split-handle::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline: -5px;
+}
+
+.workspace-split-handle:hover,
+.workspace-split-handle[data-dragging='true'] {
+  background: var(--accent);
+}
+
+.workspace-split-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: var(--accent);
+}
+
+/* ── Sticky context headers ─────────────────────────────────────────────── */
+/* The matrix and PDF headers stay in view while their panes scroll, and the
+   PDF scroll container reserves matching space so a located clause lands
+   below the header instead of underneath it. */
+.matrix-context-header,
+.pdf-context-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+/* The workspace (tender) header is the top-level chrome bar. It owns the
+   overflow menu, whose popup must paint over the pane headers below it.
+   `position: sticky` + a z-index creates a stacking context, and any z-index
+   inside it (the menu's z-50) is trapped there — so the header itself must
+   out-rank the pane headers, or the later-painted matrix header (equal z-20,
+   later in DOM order) intercepts clicks on the menu. z-30 keeps the top bar
+   above the pane headers (z-20) while the menu's z-50 layers within it. */
+.workspace-context-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.pdf-scroll {
+  scroll-padding-top: var(--workspace-pdf-header-h);
+}
+
+.pdf-scroll [data-page] {
+  scroll-margin-top: var(--workspace-pdf-header-h);
+}
+
+/* ── Matrix scrollport at large text sizes (WCAG 1.4.4) ─────────────────── */
+/* At 200% text zoom the pane's own header grows tall enough to starve the
+   scrollport (measured: clientHeight 14px with a 97px sticky group header over
+   it), so no row could be scrolled into view. Two guards keep rows reachable:
+     1. the scrollport keeps a floor, so it can never collapse to a sliver;
+     2. the sticky group header is capped, so it cannot consume that floor.
+   The floor is expressed in `em` so it scales WITH the text — at 200% it is
+   twice as tall, which is exactly when it is needed. */
+.matrix-scroll {
+  /* Establishes its own formatting context and can shrink below its content so
+     rows scroll instead of overflowing the pane. `min-height` gives the
+     scrollport a floor even when the flex parent is over-constrained. */
+  min-height: var(--matrix-scroll-min-h, 6em);
+  overflow-y: auto;
+}
+
+.matrix-group-header {
+  /* Capped in `em` too: the cap tracks the text size rather than fighting it. */
+  max-height: var(--matrix-group-header-max, 3.5em);
+  overflow: clip;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pdf-scroll [data-page] {
+    scroll-behavior: auto;
+  }
+}
+
+/* ── Compact mode ───────────────────────────────────────────────────────── */
+/* Requirements ⇄ PDF segmented switch. */
+.workspace-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  background: var(--surface-subtle);
+}
+
+.workspace-segmented [aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-btn-hover);
+}
+
+/* In compact mode only the active pane is laid out; the other stays mounted
+   (so PDF page + list state survive the switch) but takes no space and is
+   removed from the accessibility tree / tab order. */
+.workspace-pane[data-active='false'] {
+  display: none;
+}
+
+/* ── Overflow menu ──────────────────────────────────────────────────────── */
+.workspace-menu {
+  animation: workspace-menu-enter 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes workspace-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── Narrow / text-zoom guards ──────────────────────────────────────────── */
+/* At 200% text zoom the toolbar and pane headers wrap onto more rows instead
+   of clipping horizontally; min-width:0 lets flex children shrink. */
+.workspace-toolbar {
+  min-width: 0;
+}
+
+.workspace-toolbar > * {
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-menu {
+    animation: none;
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "id": "civ-gov-mixed-015",
+  "synthetic": true,
+  "sector": "construction-civil",
+  "issuerType": "government",
+  "tags": ["construction", "government", "mixed", "ocr-required"],
+  "title": "Construction of the Vlakfontein Bulk Water Reservoir",
+  "titleAlternatives": [],
+  "referenceNumber": "DWS-CIV-2026-0455",
+  "issuingBody": "DEPARTMENT OF WATER AND SANITATION",
+  "closingDateTime": "19 February 2027 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the Sedibeng Building, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "methodology",
+    "bid_security",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "csd", "sbd_forms", "bid_security"],
+  "disqualifiers": ["tax_pin", "coida", "csd", "sbd_forms", "bid_security"],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [2, 4],
+  "pageCount": 4,
+  "clearable": false,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Construction of the Vlakfontein Bulk Water Reservoir"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: DWS-CIV-2026-0455"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "DEPARTMENT OF WATER AND SANITATION" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 19 February 2027 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "bid box at the Sedibeng Building, Pretoria"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the Sedibeng Building, Pretoria"
+    },
+    "requirements": {
+      "tax_pin": { "page": 3 },
+      "coida": { "page": 3 },
+      "bbbee": { "page": 3 },
+      "csd": { "page": 3 },
+      "sbd_forms": { "page": 3 },
+      "experience": { "page": 3 },
+      "methodology": { "page": 3 },
+      "bid_security": { "page": 3 },
+      "closing_time": { "page": 3 },
+      "contact_person": { "page": 3 }
+    }
+  },
+  "pdfSha256": "93dbabf2d498c96dbb6f248d4142e395a512937e7c89d02773b94b6ebb929330",
+  "pdfBytes": 3361
+}

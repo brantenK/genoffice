@@ -1,0 +1,64 @@
+{
+  "id": "ofc-gov-tz-008",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "government",
+  "tags": ["office-equipment", "government", "timezone", "rfc3339"],
+  "title": "Provision of Office Equipment for Missions Abroad",
+  "titleAlternatives": [],
+  "referenceNumber": "DIRCO-OFC-2026-0099",
+  "issuingBody": "DEPARTMENT OF INTERNATIONAL RELATIONS AND COOPERATION",
+  "closingDateTime": "2026-12-11T11:00:00+02:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "tender box at OR Tambo Building, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "financials",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "csd", "sbd_forms"],
+  "disqualifiers": ["tax_pin", "coida", "csd", "sbd_forms"],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 2,
+  "clearable": true,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Provision of Office Equipment for Missions Abroad" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: DIRCO-OFC-2026-0099"
+    },
+    "issuingBody": {
+      "page": 1,
+      "clauseContains": "DEPARTMENT OF INTERNATIONAL RELATIONS AND COOPERATION"
+    },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 2026-12-11T11:00:00+02:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "tender box at OR Tambo Building, Pretoria"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "tender box at OR Tambo Building, Pretoria"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "financials": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "8db21cf20907f90e93c979f9c44d37c249a270fa86b2c76c461bffe731959e5c",
+  "pdfBytes": 2100
+}

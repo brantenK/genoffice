@@ -1,0 +1,33 @@
+{
+  "id": "ofc-gov-scan-005",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "government",
+  "tags": ["office-equipment", "government", "scanned-only", "ocr-required"],
+  "title": null,
+  "titleAlternatives": [],
+  "referenceNumber": null,
+  "issuingBody": null,
+  "closingDateTime": null,
+  "submissionMethod": null,
+  "submissionDestination": null,
+  "expectedRequirementKeys": [],
+  "mandatoryRequirements": [],
+  "disqualifiers": [],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [
+    "title",
+    "referenceNumber",
+    "issuingBody",
+    "closingDateTime",
+    "submissionMethod",
+    "submissionDestination"
+  ],
+  "scannedPages": [1, 2],
+  "pageCount": 2,
+  "clearable": false,
+  "sources": { "unavailable": "scanned-only fixture has no text layer" },
+  "pdfSha256": "b21b9a5fb1f7cab84cf6445a2457322c7bbe820d75d746bc8f46f94fc63bdae2",
+  "pdfBytes": 2322
+}

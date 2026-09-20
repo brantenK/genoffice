@@ -128,6 +128,8 @@ const DEAL_AUDIT_FIELDS: ReadonlyArray<keyof Deal> = [
   'invoiceId',
   'invoiceNumber',
   'invoicedAt',
+  'tenderId',
+  'tenderReference',
 ]
 
 const CONTACT_AUDIT_FIELDS: ReadonlyArray<keyof Contact> = [
@@ -182,6 +184,8 @@ export function isDeal(raw: unknown): raw is Deal {
     (raw.invoiceId === undefined || typeof raw.invoiceId === 'string') &&
     (raw.invoiceNumber === undefined || typeof raw.invoiceNumber === 'string') &&
     (raw.invoicedAt === undefined || typeof raw.invoicedAt === 'string') &&
+    (raw.tenderId === undefined || typeof raw.tenderId === 'string') &&
+    (raw.tenderReference === undefined || typeof raw.tenderReference === 'string') &&
     (raw.deletedAt === undefined || typeof raw.deletedAt === 'string')
   )
 }
@@ -293,6 +297,11 @@ export function sanitizeDeal(raw: unknown): Deal {
   if (typeof d.invoiceNumber === 'string') sanitized.invoiceNumber = d.invoiceNumber
   if (typeof d.invoicedAt === 'string') sanitized.invoicedAt = d.invoicedAt
   if (typeof d.deletedAt === 'string') sanitized.deletedAt = d.deletedAt
+  if (typeof d.tenderId === 'string' && d.tenderId.trim()) sanitized.tenderId = d.tenderId.trim()
+  else delete sanitized.tenderId
+  if (typeof d.tenderReference === 'string' && d.tenderReference.trim())
+    sanitized.tenderReference = d.tenderReference
+  else delete sanitized.tenderReference
   return sanitized
 }
 
@@ -440,15 +449,23 @@ export function writeDealsStore(baseDirOrPath: string, envelope: DealsStoreEnvel
 
 export class CrmStore {
   private readonly baseDir: string
+  private readonly seed: boolean
   private readonly quarantinedEntities = new Set<RecoveryEntity>()
 
-  constructor(userDataDir: string) {
+  /**
+   * `seed: false` is used by the Tenders integration port: it must be able to
+   * write a tender's opportunity without creating CRM demo records as a side
+   * effect. Defaults to `true` so the CRM app keeps its existing behaviour.
+   */
+  constructor(userDataDir: string, options: { seed?: boolean } = {}) {
     this.baseDir = join(userDataDir, 'crm')
+    this.seed = options.seed !== false
     this.init()
   }
 
   private init(): void {
     if (!existsSync(this.baseDir)) mkdirSync(this.baseDir, { recursive: true })
+    if (!this.seed) return
     const defaults: Array<[RecoveryEntity, string, unknown]> = [
       [
         'deals',
@@ -745,7 +762,7 @@ export class CrmStore {
       this.quarantinedEntities.add('deals')
       return emptyDeals()
     }
-    return readDealsStore(this.baseDir, SEED_DEALS, (item) => {
+    return readDealsStore(this.baseDir, this.seed ? SEED_DEALS : [], (item) => {
       this.quarantinedEntities.add('deals')
       this.recordRecovery(item)
     })
@@ -878,7 +895,7 @@ export class CrmStore {
 
   // ── Contacts ──
   private getRawContacts(): Contact[] {
-    return this.readJson<Contact[]>('contacts.json', SEED_CONTACTS, isContact)
+    return this.readJson<Contact[]>('contacts.json', this.seed ? SEED_CONTACTS : [], isContact)
   }
   getContacts(): Contact[] {
     return this.getRawContacts().filter((contact) => !contact.deletedAt)
@@ -949,7 +966,7 @@ export class CrmStore {
 
   // ── Companies ──
   private getRawCompanies(): Company[] {
-    return this.readJson<Company[]>('companies.json', SEED_COMPANIES, isCompany)
+    return this.readJson<Company[]>('companies.json', this.seed ? SEED_COMPANIES : [], isCompany)
   }
   getCompanies(): Company[] {
     return this.getRawCompanies().filter((company) => !company.deletedAt)
@@ -1010,7 +1027,11 @@ export class CrmStore {
 
   // ── Activities ──
   getActivities(filter?: { dealId?: string; contactId?: string }): Activity[] {
-    const list = this.readJson<Activity[]>('activities.json', SEED_ACTIVITIES, isActivity)
+    const list = this.readJson<Activity[]>(
+      'activities.json',
+      this.seed ? SEED_ACTIVITIES : [],
+      isActivity,
+    )
     if (!filter) return list
     return list.filter(
       (activity) =>

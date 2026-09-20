@@ -1,0 +1,64 @@
+{
+  "id": "ofc-mun-email-003",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "municipal",
+  "tags": ["office-equipment", "municipal", "email", "pricing-schedule"],
+  "title": "Quotation for Laptops, Docking Stations and Monitors",
+  "titleAlternatives": [],
+  "referenceNumber": "RFQ-SCM-2026-0451",
+  "issuingBody": "NELSON MANDELA BAY METROPOLITAN MUNICIPALITY",
+  "closingDateTime": "04 December 2026 at 12:00",
+  "submissionMethod": "EMAIL",
+  "submissionDestination": "scmquotes@mandela.gov.za",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "financials",
+    "closing_time",
+    "contact_person",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": [
+    "tax_pin",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "signed_initialled",
+    "pricing_schedule"
+  ],
+  "disqualifiers": ["tax_pin", "csd", "sbd_forms", "signed_initialled", "pricing_schedule"],
+  "pricingRequirements": ["pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 4,
+  "clearable": true,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Quotation for Laptops, Docking Stations and Monitors"
+    },
+    "referenceNumber": { "page": 1, "clauseContains": "Reference No: RFQ-SCM-2026-0451" },
+    "issuingBody": { "page": 1, "clauseContains": "NELSON MANDELA BAY METROPOLITAN MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 04 December 2026 at 12:00" },
+    "submissionMethod": { "page": 1, "clauseContains": "scmquotes@mandela.gov.za" },
+    "submissionDestination": { "page": 1, "clauseContains": "scmquotes@mandela.gov.za" },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "signed_initialled": { "page": 2 },
+      "financials": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 },
+      "pricing_schedule": { "page": 2 }
+    }
+  },
+  "pdfSha256": "9d20bbbadec74f2493cba06e28cd4a52a625cf15dfd1b625035d5f231dc2ad98",
+  "pdfBytes": 2652
+}

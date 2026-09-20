@@ -1,7 +1,96 @@
-// Small shared UI primitives (shadcn-style, Tailwind-only).
+// Small shared UI primitives (tokens-only chrome) plus the Tenders theme bridge.
+//
+// Every colour here is a semantic token from packages/ui/src/tokens.css (or the
+// app-scoped accent/warn/info tokens), so chrome follows the suite light/dark
+// theme. Document content (PDF page canvases, editor paper) never uses these.
 import clsx from 'clsx'
-import type { ReactNode } from 'react'
+import { useId, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import type { FulfillmentStatus, RiskLevel } from '../../shared/types'
+
+// ── suite theme (data-theme on <html>) ─────────────────────────────────────────
+// The suite switches themes by setting `data-theme` on the document element and
+// broadcasting `app:theme-changed`. The shell owns that state; the renderer
+// reads it through the preload bridge (`tendersApi.getTheme` /
+// `onThemeChanged`) — the app's renderer entry is owned by another lane, so this
+// primitives module, imported at boot, installs the bridge instead. It is
+// defensive: with no bridge the app simply follows the OS
+// `prefers-color-scheme` fallback defined in tokens.css.
+
+export type UiTheme = 'light' | 'dark' | 'system'
+
+interface ThemeBridge {
+  getTheme?: () => Promise<UiTheme>
+  onThemeChanged?: (handler: (theme: UiTheme) => void) => () => void
+}
+
+/** Mirror a suite theme choice onto `<html data-theme>` ('system' clears it). */
+export function applyTendersTheme(theme: UiTheme): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  if (theme === 'system') root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', theme)
+}
+
+/** Subscribe to the suite theme bridge; returns an unsubscribe function. */
+export function installTendersTheme(): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const bridgeHost = window as unknown as {
+    tendersApi?: ThemeBridge
+    desktop?: ThemeBridge
+  }
+  // Pick the first host that actually carries the bridge: `tendersApi` is the
+  // app's own IPC surface and may not implement it in every build.
+  const bridge = [bridgeHost.tendersApi, bridgeHost.desktop].find(
+    (candidate) => candidate?.getTheme || candidate?.onThemeChanged,
+  )
+  if (!bridge) return () => {}
+  void bridge
+    .getTheme?.()
+    .then(applyTendersTheme)
+    .catch(() => {})
+  const off = bridge.onThemeChanged?.(applyTendersTheme)
+  return () => off?.()
+}
+
+// Installed once at module load, i.e. before the first React render.
+installTendersTheme()
+
+// ── primitives ────────────────────────────────────────────────────────────────
+
+export type ButtonVariant = 'default' | 'primary' | 'ghost' | 'danger'
+
+const BUTTON_BASE =
+  'inline-flex items-center gap-1.5 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50'
+
+// min-h-6 = 24px: every button meets the minimum pointer target size.
+const BUTTON_SIZES: Record<'sm' | 'md', string> = {
+  sm: 'min-h-6 px-2.5 py-1.5 text-xs',
+  md: 'min-h-6 px-3.5 py-2 text-sm',
+}
+
+const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
+  primary:
+    'border border-transparent bg-[var(--accent)] text-[var(--accent-contrast)] hover:bg-[var(--accent-dark)]',
+  default:
+    'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--hover)]',
+  ghost: 'border border-transparent text-[var(--text-secondary)] hover:bg-[var(--hover)]',
+  danger:
+    'border border-[var(--danger-border)] bg-[var(--surface)] text-[var(--danger-text)] hover:bg-[var(--danger-bg)]',
+}
+
+export interface ButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  'children' | 'className' | 'disabled' | 'onClick' | 'title' | 'type'
+> {
+  children: ReactNode
+  onClick?: () => void
+  variant?: ButtonVariant
+  size?: 'sm' | 'md'
+  className?: string
+  disabled?: boolean
+  title?: string
+  type?: 'button' | 'submit'
+}
 
 export function Button({
   children,
@@ -10,61 +99,84 @@ export function Button({
   size = 'md',
   className,
   disabled,
-  title
-}: {
-  children: ReactNode
-  onClick?: () => void
-  variant?: 'default' | 'primary' | 'ghost' | 'danger'
-  size?: 'sm' | 'md'
-  className?: string
-  disabled?: boolean
-  title?: string
-}) {
+  title,
+  type = 'button',
+  ...rest
+}: ButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={clsx(
-        'inline-flex items-center gap-1.5 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-        size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3.5 py-2 text-sm',
-        variant === 'primary' && 'bg-indigo-600 text-white hover:bg-indigo-700',
-        variant === 'default' && 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
-        variant === 'ghost' && 'text-slate-600 hover:bg-slate-100',
-        variant === 'danger' && 'border border-red-200 bg-white text-red-600 hover:bg-red-50',
-        className
-      )}
+      className={clsx(BUTTON_BASE, BUTTON_SIZES[size], BUTTON_VARIANTS[variant], className)}
+      {...rest}
     >
       {children}
     </button>
   )
 }
 
+/**
+ * Icon-only control. `label` becomes the accessible name (aria-label + title) so
+ * the control is never nameless, and the target is at least 24x24 CSS px.
+ */
+export function IconButton({
+  label,
+  children,
+  onClick,
+  variant = 'ghost',
+  size = 'sm',
+  className,
+  ...rest
+}: Omit<ButtonProps, 'title' | 'children'> & { label: string; children: ReactNode }) {
+  return (
+    <Button
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      variant={variant}
+      size={size}
+      className={clsx('justify-center', size === 'sm' ? 'min-w-6' : 'min-w-8', className)}
+      {...rest}
+    >
+      {children}
+    </Button>
+  )
+}
+
+export type BadgeTone = 'slate' | 'green' | 'amber' | 'red' | 'indigo' | 'sky' | 'violet'
+
+// Semantic tone map. The legacy tone names are kept as aliases so callers across
+// the app keep working, but each one now resolves to a token pair that is legible
+// in both themes. Green text uses the darker brand green because --success on
+// --success-bg is only 4.06:1 at the 11px badge size.
+const BADGE_TONES: Record<BadgeTone, string> = {
+  slate: 'border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--text-secondary)]',
+  green:
+    'border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--color-brand-secondary)]',
+  amber: 'border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn)]',
+  red: 'border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-text)]',
+  indigo: 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-dark)]',
+  violet: 'border-[var(--accent)] bg-[var(--surface)] text-[var(--accent-dark)]',
+  sky: 'border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info)]',
+}
+
 export function Badge({
   children,
   tone = 'slate',
-  className
+  className,
 }: {
   children: ReactNode
-  tone?: 'slate' | 'green' | 'amber' | 'red' | 'indigo' | 'sky' | 'violet'
+  tone?: BadgeTone
   className?: string
 }) {
-  const tones: Record<string, string> = {
-    slate: 'bg-slate-100 text-slate-600 border-slate-200',
-    green: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200',
-    red: 'bg-red-50 text-red-700 border-red-200',
-    indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    sky: 'bg-sky-50 text-sky-700 border-sky-200',
-    violet: 'bg-violet-50 text-violet-700 border-violet-200'
-  }
   return (
     <span
       className={clsx(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap',
-        tones[tone],
-        className
+        BADGE_TONES[tone] ?? BADGE_TONES.slate,
+        className,
       )}
     >
       {children}
@@ -72,39 +184,173 @@ export function Badge({
   )
 }
 
-export const RISK_TONE: Record<RiskLevel, 'red' | 'sky' | 'slate'> = {
+export const RISK_TONE: Record<RiskLevel, BadgeTone> = {
   CRITICAL_DISQUALIFIER: 'red',
   POINT_SCORED: 'sky',
-  INFORMATIONAL: 'slate'
+  INFORMATIONAL: 'slate',
 }
 
 export const RISK_LABEL: Record<RiskLevel, string> = {
   CRITICAL_DISQUALIFIER: 'Disqualifier',
   POINT_SCORED: 'Points',
-  INFORMATIONAL: 'Info'
+  INFORMATIONAL: 'Info',
 }
 
-export const STATUS_TONE: Record<FulfillmentStatus, 'green' | 'amber' | 'red' | 'slate'> = {
+export const STATUS_TONE: Record<FulfillmentStatus, BadgeTone> = {
   FULFILLED: 'green',
   ACTION_REQUIRED: 'amber',
   OUTSTANDING: 'red',
-  NOT_APPLICABLE: 'slate'
+  NOT_APPLICABLE: 'slate',
 }
 
 export const STATUS_LABEL: Record<FulfillmentStatus, string> = {
   FULFILLED: 'Fulfilled',
   ACTION_REQUIRED: 'Action required',
   OUTSTANDING: 'Outstanding',
-  NOT_APPLICABLE: 'N/A'
+  NOT_APPLICABLE: 'N/A',
 }
 
 export function Spinner({ className }: { className?: string }) {
   return (
     <span
       className={clsx(
-        'inline-block size-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600',
-        className
+        'inline-block size-4 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)]',
+        className,
       )}
+      aria-hidden="true"
     />
+  )
+}
+
+// ── form fields (shared by the overlay forms) ─────────────────────────────────
+
+export const FORM_CONTROL_CLASS =
+  'w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] hover:border-[var(--border-hover)] focus-visible:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent-soft)]'
+
+export const FORM_LABEL_CLASS = 'mb-1 block text-[11px] font-medium text-[var(--text-secondary)]'
+
+/** 16px visual box + 4px padding = a 24x24 pointer target. */
+export const FORM_CHECKBOX_CLASS =
+  'size-4 box-content cursor-pointer rounded p-1 accent-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none'
+
+export interface FormFieldProps {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  required?: boolean
+  error?: string | null
+  hint?: string
+  type?: string
+  textarea?: boolean
+  rows?: number
+  className?: string
+  autoFocus?: boolean
+}
+
+export function FormField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+  error,
+  hint,
+  type = 'text',
+  textarea,
+  rows = 3,
+  className,
+  autoFocus,
+}: FormFieldProps) {
+  const id = useId()
+  const describedBy = `${id}-help`
+  const described = error || hint ? describedBy : undefined
+  return (
+    <div className={className}>
+      <label htmlFor={id} className={FORM_LABEL_CLASS}>
+        {label}
+        {required && (
+          <span className="text-[var(--danger-text)]" aria-hidden="true">
+            {' '}
+            *
+          </span>
+        )}
+      </label>
+      {textarea ? (
+        <textarea
+          id={id}
+          rows={rows}
+          value={value}
+          placeholder={placeholder}
+          required={required}
+          data-autofocus={autoFocus ? true : undefined}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={described}
+          onChange={(event) => onChange(event.target.value)}
+          className={clsx('resize-y', FORM_CONTROL_CLASS)}
+        />
+      ) : (
+        <input
+          id={id}
+          type={type}
+          value={value}
+          placeholder={placeholder}
+          required={required}
+          autoFocus={autoFocus}
+          data-autofocus={autoFocus ? true : undefined}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={described}
+          onChange={(event) => onChange(event.target.value)}
+          className={FORM_CONTROL_CLASS}
+        />
+      )}
+      {(error || hint) && (
+        <p
+          id={describedBy}
+          role={error ? 'alert' : undefined}
+          className={clsx(
+            'mt-1 text-[11px]',
+            error ? 'font-medium text-[var(--danger-text)]' : 'text-[var(--text-tertiary)]',
+          )}
+        >
+          {error || hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function FormSelect({
+  label,
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string }[]
+  className?: string
+}) {
+  const id = useId()
+  return (
+    <div className={className}>
+      <label htmlFor={id} className={FORM_LABEL_CLASS}>
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={FORM_CONTROL_CLASS}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
   )
 }

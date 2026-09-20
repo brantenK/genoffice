@@ -210,7 +210,8 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
 
     it('handles giant sentences exceeding MAX_CLAUSE_CHARS (600 chars) gracefully without throwing or losing text', () => {
       // Create a 750-character continuous line without punctuation
-      const segment = 'The tenderer shall submit comprehensive documentation confirming registration with SARS and full tax compliance '
+      const segment =
+        'The tenderer shall submit comprehensive documentation confirming registration with SARS and full tax compliance '
       const longText = segment.repeat(7) // ~784 chars
       const page = makePage(1, [
         makeLine(longText.slice(0, 300), 1, { top: 0.1, left: 0.1, width: 0.8, height: 0.02 }),
@@ -282,7 +283,11 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
       const doc = makeDoc(p1, p2, p3)
       const meta = extractTenderMeta(doc, 'Default Title')
       expect(meta.referenceNumber).toBe('RFP-2026-TEST-99')
-      expect(meta.closingDate).toBe('15 December 2026 at 11:00.')
+      // Sentence-terminating punctuation is stripped at the shred boundary and
+      // the value is then gated through the shared strict schema parser, so the
+      // deadline is preserved (without the trailing period) rather than stored
+      // verbatim and rejected by saveStoreV2.
+      expect(meta.closingDate).toBe('15 December 2026 at 11:00')
       expect(meta.submissionMethod).toBe('PHYSICAL')
       expect(meta.submissionAddress).toContain('tender box at 185 Francis Baard Street Pretoria')
 
@@ -395,7 +400,11 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
       expect(matches[0].confidence).toBeGreaterThan(matches[1].confidence)
       expect(matches[1].confidence).toBeGreaterThanOrEqual(0.5)
 
-      const result = applyGapToRequirement(req, [docHighConfExpired, docLowConfValid], new Date('2026-09-01T00:00:00Z'))
+      const result = applyGapToRequirement(
+        req,
+        [docHighConfExpired, docLowConfValid],
+        new Date('2026-09-01T00:00:00Z'),
+      )
       expect(result.linkedVaultDocId).toBe('doc-valid-low')
       expect(result.status).toBe('FULFILLED')
       expect(result.reason).toContain('Valid — expires in')
@@ -422,16 +431,20 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
     it('empirically verifies mathematical boundary behavior at 0.490, 0.499, 0.500, 0.501, and 0.510', () => {
       // Direct verification of boundary decisions
       const testCases = [
-        { conf: 0.490, expectedLink: false, expectedStatus: 'OUTSTANDING', expectedReason: '49%' },
+        { conf: 0.49, expectedLink: false, expectedStatus: 'OUTSTANDING', expectedReason: '49%' },
         { conf: 0.499, expectedLink: false, expectedStatus: 'OUTSTANDING', expectedReason: '50%' },
-        { conf: 0.500, expectedLink: true, expectedStatus: 'FULFILLED', expectedReason: 'Valid' },
+        { conf: 0.5, expectedLink: true, expectedStatus: 'FULFILLED', expectedReason: 'Valid' },
         { conf: 0.501, expectedLink: true, expectedStatus: 'FULFILLED', expectedReason: 'Valid' },
-        { conf: 0.510, expectedLink: true, expectedStatus: 'FULFILLED', expectedReason: 'Valid' },
+        { conf: 0.51, expectedLink: true, expectedStatus: 'FULFILLED', expectedReason: 'Valid' },
       ]
 
       for (const tc of testCases) {
         const req = createMockReq({ ruleKey: 'tax_pin' })
-        const doc = createMockDoc({ id: `doc-${tc.conf}`, title: `Tax Doc ${tc.conf}`, expiryDate: '2027-01-01' })
+        const doc = createMockDoc({
+          id: `doc-${tc.conf}`,
+          title: `Tax Doc ${tc.conf}`,
+          expiryDate: '2027-01-01',
+        })
         const matches = [{ doc, confidence: tc.conf }]
 
         // Simulate applyGap logic using matches directly

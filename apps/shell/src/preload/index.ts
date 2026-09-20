@@ -188,6 +188,11 @@ const homeApi: HomeApi = {
     const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.getTheme)
     return result === 'dark' || result === 'light' ? result : 'system'
   },
+  async getEffectiveTheme() {
+    // `app:get-theme` publishes the resolved theme; never 'system'.
+    const result: unknown = await ipcRenderer.invoke('app:get-theme')
+    return result === 'dark' ? 'dark' : 'light'
+  },
   async setTheme(theme) {
     if (theme !== 'light' && theme !== 'dark' && theme !== 'system')
       throw new Error('Invalid theme.')
@@ -230,7 +235,8 @@ const homeApi: HomeApi = {
   },
   onThemeChanged(handler) {
     const listener = (_event: Electron.IpcRendererEvent, theme: unknown) => {
-      if (theme === 'light' || theme === 'dark' || theme === 'system') handler(theme)
+      // The shell publishes the resolved theme; 'system' is never sent.
+      if (theme === 'light' || theme === 'dark') handler(theme)
     }
     ipcRenderer.on('app:theme-changed', listener)
     return () => ipcRenderer.removeListener('app:theme-changed', listener)

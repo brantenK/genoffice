@@ -1,0 +1,64 @@
+{
+  "id": "civ-mun-conflict-016",
+  "synthetic": true,
+  "sector": "construction-civil",
+  "issuerType": "municipal",
+  "tags": ["construction", "municipal", "conflict", "amended-deadline", "conflicting-destination"],
+  "title": "Rehabilitation of Water and Sewer Networks in Bloemfontein",
+  "titleAlternatives": [],
+  "referenceNumber": "MAN-CIV-2026-0310",
+  "issuingBody": "MANGAUNG METROPOLITAN MUNICIPALITY",
+  "closingDateTime": "23 January 2027 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "tender box at Bram Fischer Building, Bloemfontein",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "bid_security",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "bbbee", "csd", "sbd_forms", "bid_security"],
+  "disqualifiers": ["tax_pin", "csd", "sbd_forms", "bid_security"],
+  "pricingRequirements": [],
+  "conflicts": { "closingDateTime": true },
+  "unconfirmedFields": ["closingDateTime"],
+  "scannedPages": [],
+  "pageCount": 3,
+  "clearable": false,
+  "sources": {
+    "title": {
+      "page": 1,
+      "clauseContains": "Rehabilitation of Water and Sewer Networks in Bloemfontein"
+    },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: MAN-CIV-2026-0310"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "MANGAUNG METROPOLITAN MUNICIPALITY" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 23 January 2027 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "tender box at Bram Fischer Building, Bloemfontein"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "tender box at Bram Fischer Building, Bloemfontein"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "bid_security": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "db9fb0fb2f763d9e39ab7ca96286e12475e3189dfe8900486ffd75cf103771f1",
+  "pdfBytes": 2522
+}

@@ -1,0 +1,65 @@
+{
+  "id": "civ-gov-tz-017",
+  "synthetic": true,
+  "sector": "construction-civil",
+  "issuerType": "government",
+  "tags": ["construction", "government", "timezone", "rfc3339"],
+  "title": "Refurbishment of Government Buildings in Polokwane",
+  "titleAlternatives": [],
+  "referenceNumber": "DPWI-CIV-2026-0912",
+  "issuingBody": "DEPARTMENT OF PUBLIC WORKS AND INFRASTRUCTURE",
+  "closingDateTime": "2027-01-27T11:00:00+02:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the Polokwane Public Works offices",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "cipc",
+    "csd",
+    "sbd_forms",
+    "experience",
+    "key_personnel",
+    "closing_time",
+    "contact_person"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "cipc", "csd", "sbd_forms"],
+  "disqualifiers": ["tax_pin", "coida", "cipc", "csd", "sbd_forms"],
+  "pricingRequirements": [],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [],
+  "pageCount": 2,
+  "clearable": true,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Refurbishment of Government Buildings in Polokwane" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: DPWI-CIV-2026-0912"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "DEPARTMENT OF PUBLIC WORKS AND INFRASTRUCTURE" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 2027-01-27T11:00:00+02:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "bid box at the Polokwane Public Works offices"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the Polokwane Public Works offices"
+    },
+    "requirements": {
+      "tax_pin": { "page": 2 },
+      "coida": { "page": 2 },
+      "bbbee": { "page": 2 },
+      "cipc": { "page": 2 },
+      "csd": { "page": 2 },
+      "sbd_forms": { "page": 2 },
+      "experience": { "page": 2 },
+      "key_personnel": { "page": 2 },
+      "closing_time": { "page": 2 },
+      "contact_person": { "page": 2 }
+    }
+  },
+  "pdfSha256": "f0e81c750aed86c3a09359fe8f5351b161c6760a3a30701ac5d1db75b022256b",
+  "pdfBytes": 2233
+}

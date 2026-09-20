@@ -1,0 +1,63 @@
+{
+  "id": "ofc-gov-mixed-006",
+  "synthetic": true,
+  "sector": "office-equipment",
+  "issuerType": "government",
+  "tags": ["office-equipment", "government", "mixed", "ocr-required"],
+  "title": "Procurement of Office Equipment for Police Stations",
+  "titleAlternatives": [],
+  "referenceNumber": "SAPS-OFC-2026-0788",
+  "issuingBody": "SOUTH AFRICAN POLICE SERVICE",
+  "closingDateTime": "27 November 2026 at 11:00",
+  "submissionMethod": "PHYSICAL",
+  "submissionDestination": "bid box at the SAPS Head Office, Pretoria",
+  "expectedRequirementKeys": [
+    "tax_pin",
+    "coida",
+    "bbbee",
+    "csd",
+    "sbd_forms",
+    "closing_time",
+    "contact_person",
+    "bill_of_quantities",
+    "pricing_schedule"
+  ],
+  "mandatoryRequirements": ["tax_pin", "coida", "bbbee", "csd", "sbd_forms", "pricing_schedule"],
+  "disqualifiers": ["tax_pin", "coida", "csd", "sbd_forms", "pricing_schedule"],
+  "pricingRequirements": ["bill_of_quantities", "pricing_schedule"],
+  "conflicts": {},
+  "unconfirmedFields": [],
+  "scannedPages": [2, 5],
+  "pageCount": 5,
+  "clearable": false,
+  "sources": {
+    "title": { "page": 1, "clauseContains": "Procurement of Office Equipment for Police Stations" },
+    "referenceNumber": {
+      "page": 1,
+      "clauseContains": "Tender Reference Number: SAPS-OFC-2026-0788"
+    },
+    "issuingBody": { "page": 1, "clauseContains": "SOUTH AFRICAN POLICE SERVICE" },
+    "closingDateTime": { "page": 1, "clauseContains": "Closing Date: 27 November 2026 at 11:00" },
+    "submissionMethod": {
+      "page": 1,
+      "clauseContains": "bid box at the SAPS Head Office, Pretoria"
+    },
+    "submissionDestination": {
+      "page": 1,
+      "clauseContains": "bid box at the SAPS Head Office, Pretoria"
+    },
+    "requirements": {
+      "tax_pin": { "page": 3 },
+      "coida": { "page": 3 },
+      "bbbee": { "page": 3 },
+      "csd": { "page": 3 },
+      "sbd_forms": { "page": 3 },
+      "closing_time": { "page": 3 },
+      "contact_person": { "page": 3 },
+      "bill_of_quantities": { "page": 3 },
+      "pricing_schedule": { "page": 3 }
+    }
+  },
+  "pdfSha256": "5b4afb5c09382bc1bcd9936ffd07db815b457c3e1bc744dc49a8a549546a4e94",
+  "pdfBytes": 3979
+}
