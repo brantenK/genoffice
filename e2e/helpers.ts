@@ -158,6 +158,60 @@ export async function closeAndSaveVideo(
       })) as typeof dialog.showMessageBox
     })
     .catch(() => {})
+  // Capture the OS pid while Playwright state is alive: process() throws once
+  // the application is torn down, and a lingering OS process is what makes the
+  // worker die with "Worker teardown timeout" even though every test is green.
+  const launchedPid = ((): number | undefined => {
+    try {
+      return launched.app.process()?.pid
+    } catch {
+      return undefined
+    }
+  })()
+  const osProcessAlive = (): boolean => {
+    if (typeof launchedPid !== 'number') return false
+    try {
+      process.kill(launchedPid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const processExited = (): boolean => {
+    // After the app exits, Playwright tears its ElectronApplication state down
+    // and process() throws — fall back to the OS pid to tell "state gone" apart
+    // from "process actually gone".
+    try {
+      const proc = launched.app.process()
+      if (!proc) return !osProcessAlive()
+      return proc.exitCode !== null || proc.signalCode !== null || !osProcessAlive()
+    } catch {
+      return !osProcessAlive()
+    }
+  }
+  const waitForExit = async (timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      if (processExited()) return true
+      if (Date.now() >= deadline) return processExited()
+      await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+  // 1) Ask the app to quit; Electron then runs its normal shutdown.
+  await launched.app.evaluate(({ app }) => app.quit()).catch(() => {})
+  let exited = await waitForExit(6_000)
+  // 2) The dirty-document close flow may refuse to close the window: destroy
+  //    the windows so `window-all-closed` quits without that async flow.
+  if (!exited) {
+    await launched.app
+      .evaluate(({ BrowserWindow }) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.destroy()
+        }
+      })
+      .catch(() => {})
+    exited = await waitForExit(6_000)
+  }
   // 3) Last resort: kill the process so the suite never wedges.
   if (!exited) {
     try {
