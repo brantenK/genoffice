@@ -140,7 +140,12 @@ describe('Zanostack Gothic KR (real source metrics, unmodified)', () => {
     for (const { nameId, value } of names) {
       expect(value, `name ID ${nameId}`).not.toMatch(/nanum/i)
     }
-    expect(names).toContainEqual({ nameId: 1, value: 'GenOffice Gothic KR' })
+    // nameId 1 is the family name embedded in the bundled .woff2 itself. The
+    // sweep cannot rename it: fonts.css aliases the face to 'Zanostack Gothic
+    // KR' for CSS, but the binary keeps the upstream name until the font is
+    // regenerated with tools/build-gothic-kr-font.py (open item in
+    // fork/TRIAGE.md). This assertion documents the binary, not the brand.
+    expect(names).toContainEqual({ nameId: 1, value: 'GenOffice Gothic KR' }) // brand-check-ignore
     expect(names).toContainEqual({ nameId: 6, value: 'GenOfficeGothicKR-Regular' })
   })
 })

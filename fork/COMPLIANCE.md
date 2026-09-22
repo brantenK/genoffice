@@ -37,32 +37,43 @@ merge (see `fork/RUNBOOK.md`).
    `apps/shell/electron-builder.cjs` (files/extraResources) or added to
    installers.
 2. NOTICE intact: `git diff main -- NOTICE LICENSE` shows no deletions.
-3. Trademark sweep: `grep -ri "genoffice" apps packages --include="*.ts" -l`
-   (excluding i18n string-data files and tests) plus a visual pass over the
-   built app's About/settings screens. Count only user-visible strings.
-4. Updater feed: confirm the auto-updater does not point at Genspark's release
+3. Trademark sweep: `npm run check:brand` (fatal tier must pass; the advisory
+   tier reports remaining vendor-name strings). Then a visual pass over the
+   built app's About/settings screens, counting only user-visible strings.
+4. Fork chrome intact: `npm run check:app-chrome` — asserts the Home launcher
+   markup/styles, fork-only design tokens and fork-only tab kinds survived the
+   merge. A pass here does not prove the UI looks right; open Home once.
+5. Updater feed: confirm the auto-updater does not point at Genspark's release
    feed (fork must own its update channel or have updates disabled).
-5. Modified-files list: update the table below.
+6. Modified-files list: update the table below.
 
 ## Modified files (fork changes vs upstream/main)
 
-| File / path | Change | Reason |
-| --- | --- | --- |
-| `fork/` (this directory) | Added | Fork docs, brand.json, rebrand-sweep.mjs — new files, no upstream conflict |
-| 37 source files + packaging (see `git diff main --stat` on product) | "GenOffice"/"GenTeam" string sweep → current brand | Trademark compliance; run `node fork/rebrand-sweep.mjs` to re-apply after syncs or a name change |
-| `apps/shell/electron-builder.cjs` | appId, productName, executableName, deb/rpm names, maintainer/vendor | Trademark compliance |
-| `apps/shell/package.json` | productName | Electron app.name + userData dir |
-| `packages/ai-search/src/gsk.ts` | gsk backend default OFF (opt in with `AI_SEARCH_DISABLE_GSK=0`) | Do not route fork users through Genspark services |
-| Upstream sync merge (2026-09-10) | Integrated the upstream commit range (Docs/Sheets/Slides/PDF/Markdown fixes + the HTML editor) while keeping Zanostack brand, BYOK-first defaults, and CRM/Tenders/Books | Take upstream fixes without losing fork policy |
-| `apps/html/` | New upstream module, re-branded (`productName`, window title, page/AI prompts → Zanostack), port 5181 | Trademark compliance for the integrated HTML editor |
-| `apps/docs/.../fonts/fonts.css`, `line-metrics.ts`, `editor/marks.ts`, docs font tests | Internal `GenOffice *` font aliases → `Zanostack *` (bundled font binaries keep their embedded names) | White-label consistency: CSS family names must match the code that emits them |
-| `packages/ai-provider/src/fetch.ts` | Default AI `User-Agent` → `Zanostack` | Trademark compliance |
-| `packages/ai-provider/src/codex-app-server.ts`, `packages/ai-search/src/search-tools.ts`, `apps/docs/src/main/docs-main.ts`, `apps/sheets/src/main/sheets-main.ts`, `apps/slides/src/main/ai-ipc.ts`, `apps/shell/src/renderer/src/strings.ts` | Bare `GenOffice` strings → `Zanostack` | Trademark compliance |
+| File / path                                                                                                                                                                                                                                    | Change                                                                                                                                                                                                                                                                                                                                                                                 | Reason                                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fork/` (this directory)                                                                                                                                                                                                                       | Added                                                                                                                                                                                                                                                                                                                                                                                  | Fork docs, brand.json, rebrand-sweep.mjs — new files, no upstream conflict                                                                                        |
+| ~40 source files + packaging (see `git diff main --stat` on product)                                                                                                                                                                           | "GenOffice"/"GenTeam"/"Zano Office" string sweep → current brand                                                                                                                                                                                                                                                                                                                       | Trademark compliance; run `node fork/rebrand-sweep.mjs` to re-apply after syncs or a name change                                                                  |
+| `fork/rebrand-sweep.mjs`                                                                                                                                                                                                                       | Scope is now an explicit dir allowlist (`apps/`, `packages/`, `e2e/`, `skills/`, `scripts/`, `tools/`, `.github/` + root `README.md`/`CONTRIBUTING.md`/`PRIVACY.md`); extensions added `.css`, `.md`, `.sh`, `.cmd`, `.nsh`, `.cjs`, `.mjs`, `.js`, `.py`, `.yml`; test files no longer excluded; honours the `brand-check-ignore` marker; `--dry` no longer counts no-op self-renames | The old scope silently missed brand strings in CSS, docs, installer scripts, agent skills and upstream's own test assertions                                      |
+| `fork/tools/check-brand.mjs`                                                                                                                                                                                                                   | Scope matched to the sweep; two-tier gate (fatal upstream product name, advisory upstream vendor name); `brand-check-ignore` support; fixed a `/g`-regex `lastIndex` bug that made `.test()` skip matches                                                                                                                                                                              | Gate and sweep must agree, or a leak can be invisible to both                                                                                                     |
+| `fork/tools/check-app-chrome.mjs`                                                                                                                                                                                                              | Added — asserts the Home launcher chrome, fork-only design tokens and fork-only tab kinds survive a merge                                                                                                                                                                                                                                                                              | The sweep protects brand _strings_, not structural UI; upstream rewrites the same files, so a conflict resolved upstream's way can leave the UI silently unstyled |
+| `apps/shell/electron-builder.cjs`                                                                                                                                                                                                              | appId, productName, executableName, deb/rpm names, maintainer/vendor                                                                                                                                                                                                                                                                                                                   | Trademark compliance                                                                                                                                              |
+| `apps/shell/package.json`                                                                                                                                                                                                                      | productName                                                                                                                                                                                                                                                                                                                                                                            | Electron app.name + userData dir                                                                                                                                  |
+| `packages/ai-search/src/gsk.ts`                                                                                                                                                                                                                | gsk backend default OFF (opt in with `AI_SEARCH_DISABLE_GSK=0`)                                                                                                                                                                                                                                                                                                                        | Do not route fork users through Genspark services                                                                                                                 |
+| Upstream sync merge (2026-09-10)                                                                                                                                                                                                               | Integrated the upstream commit range (Docs/Sheets/Slides/PDF/Markdown fixes + the HTML editor) while keeping Zanostack brand, BYOK-first defaults, and CRM/Tenders/Books                                                                                                                                                                                                               | Take upstream fixes without losing fork policy                                                                                                                    |
+| `apps/html/`                                                                                                                                                                                                                                   | New upstream module, re-branded (`productName`, window title, page/AI prompts → Zanostack), port 5181                                                                                                                                                                                                                                                                                  | Trademark compliance for the integrated HTML editor                                                                                                               |
+| `apps/docs/.../fonts/fonts.css`, `line-metrics.ts`, `editor/marks.ts`, docs font tests                                                                                                                                                         | Internal `GenOffice *` font aliases → `Zanostack *` (bundled font binaries keep their embedded names)                                                                                                                                                                                                                                                                                  | White-label consistency: CSS family names must match the code that emits them                                                                                     |
+| `packages/ai-provider/src/fetch.ts`                                                                                                                                                                                                            | Default AI `User-Agent` → `Zanostack`                                                                                                                                                                                                                                                                                                                                                  | Trademark compliance                                                                                                                                              |
+| `packages/ai-provider/src/codex-app-server.ts`, `packages/ai-search/src/search-tools.ts`, `apps/docs/src/main/docs-main.ts`, `apps/sheets/src/main/sheets-main.ts`, `apps/slides/src/main/ai-ipc.ts`, `apps/shell/src/renderer/src/strings.ts` | Bare `GenOffice` strings → `Zanostack`                                                                                                                                                                                                                                                                                                                                                 | Trademark compliance                                                                                                                                              |
 
 Protections verified after the sweep: `@genoffice/*` npm scope, `GENOFFICE_*`
 env-var prefix, and PDF format keys (`GenOfficeStaticFormFills`,
-`GenOfficeFormField`) are untouched; zero bare "GenOffice" strings remain in
-non-test sources.
+`GenOfficeFormField`) are untouched. `node fork/tools/check-brand.mjs` reports
+zero bare "GenOffice" strings across the swept scope, which now includes test
+files. Four paths are outside the sweep by design, and the reasons live in the
+header of `fork/rebrand-sweep.mjs`: `NOTICE` and `LICENSE` (Apache-2.0 §4 needs
+the upstream copyright line verbatim), `fork/` (the rebrand machinery names
+upstream on purpose), and `tools/ooxml-validate/schemas/*.xsd` (must stay
+byte-identical to the published ISO/IEC 29500 schemas).
 
 ## Branding swap status
 
@@ -70,24 +81,43 @@ Brand: **Zano Office** (placeholder ExampleOffice fully retired; sweep
 `previousNames` migrates both). Design system ported from
 `brantenK/zano-suite-agno` (frontend tokens.css): warm cream surfaces, Zano
 green `#16864a` / dark `#2fbd74`, 18px radius curve, Plus Jakarta Sans (UI)
-+ Instrument Serif (display moments: Home hero, AI-panel empty states),
-Zano logo + icon set. Applied via:
 
-- `packages/ui/src/tokens.css` — token values swapped, `--gs-panel-bg` and
+- Instrument Serif (display moments: Home hero, AI-panel empty states),
+  Zano logo + icon set. Applied via:
+
+* `packages/ui/src/tokens.css` — token values swapped, `--gs-panel-bg` and
   `--gs-font-display` added (all three theme blocks)
-- per-app `styles.css` accents → Zano green; `.ai-panel`/`.copilot` surfaces
+* per-app `styles.css` accents → Zano green; `.ai-panel`/`.copilot` surfaces
   → `--gs-panel-bg`; empty-state titles → Instrument Serif italic
-- `apps/shell` Home lockup = `zano-logo.png` + text wordmark; hero serif
-- icons: `build/icon.png` (1024px Zano) + Linux hicolor set; electron-builder
+* `apps/shell` Home lockup = `zano-logo.png` + text wordmark; hero serif
+* icons: `build/icon.png` (1024px Zano) + Linux hicolor set; electron-builder
   generates ico/icns from the png
-- fonts self-hosted via `@fontsource/plus-jakarta-sans` +
+* fonts self-hosted via `@fontsource/plus-jakarta-sans` +
   `@fontsource/instrument-serif` (packages/ui deps; OFL, offline-safe)
 
 Still open:
+
 - **Icon raster sizes**: 48/128/256/512 px slots reuse the nearest available
   Zano PNGs (16/32/64/80/1024 source sizes); regenerate exact sizes from the
   1024px source with real image tooling before release.
 - **README.md** is still upstream's.
+- **`docs/` is outside the rebrand sweep by design** (see the header of
+  `fork/rebrand-sweep.mjs`). It still carries upstream's name in ~800 places,
+  mostly the 19 translated copies of upstream's README under `docs/i18n/`. The
+  fork does not ship these. Decide per release whether to sweep, replace or
+  delete them — do not let this grow silently.
+- **~1,000 advisory "Genspark" strings in the i18n dictionaries**
+  (`npm run check:brand` prints the count and top files; `strings.ts` alone has
+  ~340). These are user-visible strings left over from the removed sign-in,
+  credits and cloud-project surfaces. They ship in the bundle but no code path
+  renders them today. Burning them down touches every locale shard at once
+  (CLAUDE.md's i18n key-set invariant), so it is a deliberate, separate task.
+- **Bundled font binaries keep upstream family names.** `fonts.css` aliases the
+  faces to `Zanostack *`, but the `.woff2` name tables still say
+  `GenOffice *`/`GenOfficeGothicKR-Regular`, so font pickers that enumerate
+  installed fonts can still show the old name. Regenerate with `tools/build-*.py`.
+  `apps/docs/tests/kr-font-metrics.test.ts` asserts the binary's real name and is
+  exempted with the `brand-check-ignore` marker — do not "fix" it by hand.
 - **Main-process leftovers**: the gsk auth/cloud-projects machinery in
   `packages/ai-search/src/genoffice-auth.ts`, `apps/shell/src/main/cloud-projects.ts`
   and the star-prompt IPC handlers are unreachable dead code (renderer UI
@@ -95,6 +125,9 @@ Still open:
 - 5 pre-existing Windows test failures (HEAD-identical): shell
   `cloud-projects.test.ts` account-store binding/lifecycle — the store file
   delete does not take effect on win32; candidate upstream Windows-CI PR.
+- `apps/docs` has 2 load-flaky tests (`docx-encryption.test.ts`,
+  `protect-dialog.test.ts`) that pass in isolation but time out in the full
+  workspace run on this OneDrive-synced disk — see `fork/TRIAGE.md`.
 
 ## Genspark surface removal (done)
 
@@ -116,4 +149,3 @@ Still open:
   feed.
 - GA4 analytics (`GENOFFICE_GA4_*`): unset → fully disabled.
 - Font CDN (`GENOFFICE_FONT_CDN_URL`): unset → download catalog hidden.
-

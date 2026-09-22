@@ -23,6 +23,7 @@
     "check:theme-colors": "node tools/check-theme-colors.mjs",
     "check:english-comments": "node tools/check-english-comments.mjs",
     "check:brand": "node fork/tools/check-brand.mjs",
+    "check:app-chrome": "node fork/tools/check-app-chrome.mjs",
     "sync:upstream": "node fork/tools/sync-upstream.mjs",
     "lint": "eslint .",
     "fixtures": "npm run fixtures -w @genoffice/docx-engine",
