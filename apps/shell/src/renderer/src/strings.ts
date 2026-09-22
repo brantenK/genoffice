@@ -3818,9 +3818,9 @@ export const strings = {
       'Vytvářejte dokumenty, tabulky a prezentace a kontrolujte PDF. AI je součástí každého kroku.',
     onbTitle2: 'Toto je jen začátek',
     onbBody2:
-      'Zanostack je stále ve fázi alfa. Připojte se ke skupinovému chatu na GenTeam, sdílejte zpětnou vazbu a pomozte utvářet, co přijde dál.',
+      'Zanostack je stále ve fázi alfa. Připojte se ke skupinovému chatu na Zanostack, sdílejte zpětnou vazbu a pomozte utvářet, co přijde dál.',
     onbCredits: 'Aktivní přispěvatelé získají **1 000+ kreditů Genspark**',
-    onbJoinGenTeam: 'Připojit se ke GenTeam',
+    onbJoinGenTeam: 'Připojit se ke Zanostack',
     onbSkip: 'Přeskočit',
     onbNext: 'Další',
     onbStart: 'Začít',

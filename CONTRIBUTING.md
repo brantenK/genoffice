@@ -1,4 +1,4 @@
-# Contributing to GenOffice
+# Contributing to Zanostack
 
 Thanks for your interest in contributing. This document covers the local
 setup, the checks a change must pass, and the conventions used in this
@@ -6,7 +6,7 @@ repository.
 
 ## How upstream changes land
 
-The original GenOffice project publishes `main` as a mirror: development happens
+The original Zanostack project publishes `main` as a mirror: development happens
 in its private tree, and its `main` advances through single squashed snapshot
 commits (`Sync snapshot (<date>)`). That is why every file in an upstream sync
 shows the same last-commit message, and why upstream maintainers do not push

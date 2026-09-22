@@ -3,7 +3,7 @@ import { findDocxPath } from '../src/shared/open-file'
 
 describe('findDocxPath', () => {
   it('finds Finder and Explorer document arguments case-insensitively', () => {
-    expect(findDocxPath(['/Applications/GenOffice Docs.app', '/tmp/Quarterly Plan.docx'])).toBe(
+    expect(findDocxPath(['/Applications/Zanostack Docs.app', '/tmp/Quarterly Plan.docx'])).toBe(
       '/tmp/Quarterly Plan.docx',
     )
     expect(findDocxPath(['Zanostack Docs.exe', 'C:\\Users\\Me\\REPORT.DOCX'])).toBe(

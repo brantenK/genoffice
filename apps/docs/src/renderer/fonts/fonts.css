@@ -716,7 +716,7 @@
  * (text-weighted mean 0.769em, bold 0.820em), U+30FC 0.816/0.882em,
  * ideographic space and 、。 0.664em, corner/angle brackets and ・ 0.5em, at
  * full glyph height; kanji and （）：；！？ stay 1em and fall through to the
- * chain. The bundled GenOffice UI Kana JP faces (tools/build-meiryo-ui-kana-
+ * chain. The bundled Zanostack UI Kana JP faces (tools/build-meiryo-ui-kana-
  * font.py: Noto Sans JP outlines condensed horizontally to Meiryo UI's exact
  * per-glyph advances) carry those ranges — a size-adjust alias would shrink
  * the height too and leave kana at ~77% next to full-size kanji. Latin in

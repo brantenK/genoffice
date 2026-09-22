@@ -296,7 +296,7 @@ Zanostack is in active development and your feedback shapes it.
 - **Report a bug or request a feature** in
   [GitHub Issues](https://github.com/brantenK/genoffice/issues).
 - **Join the Zanostack group chat** on
-  [GenTeam](https://genoffice.ai/join) to talk to the team and other users.
+  [Zanostack](https://genoffice.ai/join) to talk to the team and other users.
 - **Star the repo** if Zanostack is useful to you — it is the best way to
   support the project.
 

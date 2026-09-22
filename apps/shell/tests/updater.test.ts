@@ -329,10 +329,10 @@ describe('initAutoUpdater', () => {
 
 describe('manual download fallback', () => {
   const macFiles = [
-    { url: 'GenOffice-0.2.0-arm64.zip' },
-    { url: 'GenOffice-0.2.0.zip' },
-    { url: 'GenOffice-0.2.0-arm64.dmg' },
-    { url: 'GenOffice-0.2.0.dmg' },
+    { url: 'Zanostack-0.2.0-arm64.zip' },
+    { url: 'Zanostack-0.2.0.zip' },
+    { url: 'Zanostack-0.2.0-arm64.dmg' },
+    { url: 'Zanostack-0.2.0.dmg' },
   ]
 
   function setArch(arch: string): () => void {
@@ -364,7 +364,7 @@ describe('manual download fallback', () => {
       const actions = await failTwiceIntoManual(macFiles)
       actions.onOpenDownload()
       expect(openExternal).toHaveBeenCalledWith(
-        'https://cdn.example.com/mac/GenOffice-0.2.0-arm64.dmg',
+        'https://cdn.example.com/mac/Zanostack-0.2.0-arm64.dmg',
       )
     } finally {
       restoreArch()
@@ -378,7 +378,7 @@ describe('manual download fallback', () => {
     try {
       const actions = await failTwiceIntoManual(macFiles)
       actions.onOpenDownload()
-      expect(openExternal).toHaveBeenCalledWith('https://cdn.example.com/mac/GenOffice-0.2.0.dmg')
+      expect(openExternal).toHaveBeenCalledWith('https://cdn.example.com/mac/Zanostack-0.2.0.dmg')
     } finally {
       restoreArch()
     }
@@ -446,13 +446,13 @@ describe('manual download fallback', () => {
     const restoreArch = setArch('arm64')
     try {
       const actions = await failTwiceIntoManual([
-        { url: 'https://attacker.example/GenOffice-0.2.0-arm64.zip' },
-        { url: 'https://attacker.example/GenOffice-0.2.0-arm64.dmg' },
-        { url: 'https://attacker.example/GenOffice-0.2.0.dmg' },
+        { url: 'https://attacker.example/Zanostack-0.2.0-arm64.zip' },
+        { url: 'https://attacker.example/Zanostack-0.2.0-arm64.dmg' },
+        { url: 'https://attacker.example/Zanostack-0.2.0.dmg' },
       ])
       actions.onOpenDownload()
       expect(openExternal).toHaveBeenCalledWith(
-        'https://cdn.example.com/mac/GenOffice-0.2.0-arm64.dmg',
+        'https://cdn.example.com/mac/Zanostack-0.2.0-arm64.dmg',
       )
     } finally {
       restoreArch()
@@ -472,7 +472,7 @@ describe('manual download fallback', () => {
   it('falls back to the generic download page when the feed base cannot be read', async () => {
     // readFileSyncMock throws by default (no app-update.yml)
     const actions = await failTwiceIntoManual([
-      { url: 'https://attacker.example/GenOffice-0.2.0-arm64.dmg' },
+      { url: 'https://attacker.example/Zanostack-0.2.0-arm64.dmg' },
     ])
     actions.onOpenDownload()
     expect(openExternal).toHaveBeenCalledWith(

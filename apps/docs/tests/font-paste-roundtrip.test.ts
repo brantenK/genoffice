@@ -81,7 +81,7 @@ describe('fontAttrsFromFamilyChain', () => {
     })
   })
 
-  it('skips internal GenOffice aliases even at the chain head', () => {
+  it('skips internal Zanostack aliases even at the chain head', () => {
     expect(
       fontAttrsFromFamilyChain("'Zanostack Songti SC','STSong','SimSun','Noto Serif CJK SC',serif"),
     ).toEqual({ font: 'STSong' })

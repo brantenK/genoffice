@@ -1,7 +1,7 @@
 /**
  * Meiryo / Meiryo UI metric aliases (fonts.css): Word renders the real faces
  * (probe 2026-09-03, advances read from Word's meiryo.ttc). Kana and JP
- * punctuation ride the bundled GenOffice UI Kana JP faces (Noto Sans JP
+ * punctuation ride the bundled Zanostack UI Kana JP faces (Noto Sans JP
  * outlines condensed to Meiryo UI's exact per-glyph advances at full height;
  * tools/build-meiryo-ui-kana-font.py) and Latin rides a Verdana size-adjust,
  * so text advances like Meiryo instead of 1em / Helvetica widths.
