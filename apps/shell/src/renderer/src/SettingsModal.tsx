@@ -1528,8 +1528,8 @@ export function SettingsModal({
                   label={t('setGithub')}
                   value={
                     githubStars === null
-                      ? 'github.com/genspark-ai/genoffice'
-                      : `github.com/genspark-ai/genoffice · ★ ${formatStars(githubStars)}`
+                      ? 'github.com/brantenK/genoffice'
+                      : `github.com/brantenK/genoffice · ★ ${formatStars(githubStars)}`
                   }
                   action={
                     <button
