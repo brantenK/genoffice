@@ -93,9 +93,16 @@ describe('cloud command plumbing', () => {
     expect((await run(['media', '--json'])).code).toBe(1)
     const missing = await run(['media', '/nonexistent/photo.jpg', '--json'])
     expect(missing.code).toBe(2)
-    const missingUrl = await run(['media', 'file:///nonexistent/photo.jpg', '--json'])
+    // A POSIX-absolute file URL has no drive letter, so win32 refuses to turn it
+    // into a path at all (ERR_INVALID_FILE_URL_PATH) before the file check runs.
+    // Ask for the same missing file as a local path on Windows so both platforms
+    // reach the same code 2 / "file not found"-shaped failure.
+    const missingUrl =
+      process.platform === 'win32'
+        ? await run(['media', 'file:///C:/nonexistent/photo.jpg', '--json'])
+        : await run(['media', 'file:///nonexistent/photo.jpg', '--json'])
     expect(missingUrl.code).toBe(2)
-    expect(missingUrl.json().message).toContain('/nonexistent/photo.jpg')
+    expect(missingUrl.json().message).toContain(join('nonexistent', 'photo.jpg'))
   })
 
   it('unwraps the Genspark per-file analysis map and leaves prose alone', () => {

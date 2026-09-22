@@ -69,7 +69,16 @@ describe('exportViaApp', () => {
       env,
       spawn: fakeSpawn(
         {
-          stdout: `log line\n{"status":"ok","summary":"Exported /tmp/a.docx to ${out}","output_path":"${out}"}\n`,
+          // JSON.stringify, not interpolation: a Windows temp path is full of
+          // backslashes, which would become JSON escapes inside the literal
+          stdout:
+            'log line\n' +
+            JSON.stringify({
+              status: 'ok',
+              summary: `Exported /tmp/a.docx to ${out}`,
+              output_path: out,
+            }) +
+            '\n',
           writeOutput: true,
         },
         calls,
@@ -172,7 +181,8 @@ describe('exportViaApp', () => {
     expect(launch!.command).toMatch(
       process.platform === 'darwin' ? /MacOS\/Electron$/ : /electron/i,
     )
-    expect(launch!.args[0]).toMatch(/apps\/shell$/)
+    // appLaunch builds this with node:path, so it is "apps\shell" here
+    expect(launch!.args[0]).toMatch(/apps[\\/]shell$/)
   })
 
   it('parses the last JSON line of stdout', () => {

@@ -95,6 +95,11 @@ describe('genoffice capabilities', () => {
     async (provider) => {
       vi.spyOn(aiSearch, 'hasGskAuth').mockReturnValue(true)
       const settings = settingsFile(tempDir(), {
+        // the fork ships with the Genspark cloud tools off; a signed-in user who
+        // turned them on is the case this test describes. `providers` must be
+        // present for the explicit flag to be honoured (resolveAiSettings returns
+        // the defaults wholesale when it is absent).
+        gskToolsEnabled: true,
         search: { provider, providers: { [provider]: { apiKey: 'test-key' } } },
       })
       const r = await run(['capabilities', '--json'], {
@@ -105,6 +110,24 @@ describe('genoffice capabilities', () => {
       expect(d.image_search).toEqual({ available: false, via: null })
       expect(d.image_generation).toEqual({ available: true, via: 'genspark' })
       expect(d.media_analysis).toEqual({ available: true, via: 'genspark' })
+    },
+  )
+
+  it.each(['tavily', 'parallel'])(
+    '%s advertises no Genspark feature when signed in with the fork default (cloud tools off)',
+    async (provider) => {
+      vi.spyOn(aiSearch, 'hasGskAuth').mockReturnValue(true)
+      const settings = settingsFile(tempDir(), {
+        search: { provider, providers: { [provider]: { apiKey: 'test-key' } } },
+      })
+      const r = await run(['capabilities', '--json'], {
+        env: { ...process.env, GENOFFICE_AI_SETTINGS: settings },
+      })
+      const d = r.json().detail
+      expect(d.search).toEqual({ available: true, via: provider })
+      expect(d.image_search).toEqual({ available: false, via: null })
+      expect(d.image_generation).toEqual({ available: false, via: null })
+      expect(d.media_analysis).toEqual({ available: false, via: null })
     },
   )
 

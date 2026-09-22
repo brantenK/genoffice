@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../src/gsk', () => ({
@@ -10,11 +13,18 @@ import { generateImageTool, GSK_RMBG_MODEL } from '../src/media-tools'
 import { gskGenerateImage } from '../src/gsk'
 
 const gskGen = vi.mocked(gskGenerateImage)
-// nonexistent settings file → defaults: no BYOK media provider, cloud tools on → Genspark route
-const SETTINGS = '/nonexistent/ai-settings.json'
+// The Genspark route is opt-in in this fork — cloud tools default OFF — so the
+// fixture has to turn them on to reach it. `providers` must be present for the
+// stored settings to be honoured at all: resolveAiSettings() early-returns the
+// defaults when it is absent, which would drop the flag. With no BYOK media
+// provider configured either, the tool still resolves to the Genspark path.
+let SETTINGS: string
 
 beforeEach(() => {
   gskGen.mockReset()
+  const dir = mkdtempSync(join(tmpdir(), 'genoffice-media-tools-'))
+  SETTINGS = join(dir, 'ai-settings.json')
+  writeFileSync(SETTINGS, JSON.stringify({ providers: {}, gskToolsEnabled: true }), 'utf8')
 })
 
 describe('generateImageTool transparentBackground (Genspark route)', () => {

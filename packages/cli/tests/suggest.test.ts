@@ -62,7 +62,13 @@ describe('writeOutput', () => {
     chmodSync(file, 0o600)
     writeOutput(file, 'new content')
     expect(readFileSync(file, 'utf-8')).toBe('new content')
-    expect(statSync(file).mode & 0o777).toBe(0o600)
+    if (process.platform === 'win32') {
+      // NTFS has no POSIX mode: chmod(0o600) reads back as 0o666, so only the
+      // write-back itself can be asserted here (upstream CI is Linux-only)
+      expect(statSync(file).mode & 0o777).toBe(0o666)
+    } else {
+      expect(statSync(file).mode & 0o777).toBe(0o600)
+    }
     const fresh = join(tempDir(), 'fresh.bin')
     writeOutput(fresh, Buffer.from([1, 2, 3]))
     expect(readFileSync(fresh)).toEqual(Buffer.from([1, 2, 3]))

@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseArgs } from '../src/args'
 import { parseTarget } from '../src/commands/open'
@@ -19,16 +20,18 @@ afterEach(() => {
   while (servers.length) servers.pop()!.close()
 })
 
+/** Windows named pipes have no unlink and their name is unique only until the last handle closes: `pid + index` repeats across vitest workers, so make the name itself unique. */
+function pipeName(): string {
+  return `\\\\.\\pipe\\genoffice-test-${process.pid}-${randomBytes(8).toString('hex')}`
+}
+
 /** A stand-in shell: publishes control.json into `dir` and answers with `reply`. */
 async function fakeShell(
   dir: string,
   reply: (request: unknown) => ControlReply,
 ): Promise<{ env: NodeJS.ProcessEnv; requests: unknown[] }> {
   const requests: unknown[] = []
-  const endpoint =
-    process.platform === 'win32'
-      ? `\\\\.\\pipe\\genoffice-test-${process.pid}-${servers.length}`
-      : join(dir, 'control.sock')
+  const endpoint = process.platform === 'win32' ? pipeName() : join(dir, 'control.sock')
   const server = createServer((socket) => {
     let buffer = ''
     socket.setEncoding('utf8')

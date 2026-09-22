@@ -83,7 +83,10 @@ describe('installCliLink', () => {
     const r = installCliLink({ launcher, platform: 'linux', candidateDirs: [locked] })
     const seen = inspectCliLink({ launcher, platform: 'linux', candidateDirs: [locked] })
     chmodSync(locked, 0o755)
-    if (process.getuid?.() !== 0) {
+    // NTFS has no POSIX directory mode: 0o555 reads back as 0o777, so the
+    // unwritable branch is not reachable here (see packages/electron-utils,
+    // which skips its 0o500 case for the same reason)
+    if (process.getuid?.() !== 0 && process.platform !== 'win32') {
       expect(r.status).toBe('unwritable')
       expect(r.manual).toContain(launcher)
       expect(seen.status).toBe('unwritable')

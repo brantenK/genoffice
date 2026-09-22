@@ -238,11 +238,14 @@ describe('remote defaults', () => {
       for (const name of ['render', 'slides_render']) {
         const args: Record<string, unknown> = { file: 'x.pptx' }
         defaultOut(tools.get(name)!, args, ctx)
-        expect(String(args.out)).toMatch(new RegExp(`^${ctx.scratchDir}/render-`))
+        // defaultOut composes this with join(): on win32 the separator is a backslash
+        const scratch = ctx.scratchDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        expect(String(args.out)).toMatch(new RegExp(`^${scratch}(?:\\\\|/)render-`))
+        expect(String(args.out).replace(/\\/g, '/')).toMatch(/\/render-[0-9a-f]{8}$/)
       }
       const created: Record<string, unknown> = { from: 'notes.md' }
       defaultOut(tools.get('create_pdf')!, created, ctx)
-      expect(String(created.out)).toMatch(/\/notes\.pdf$/)
+      expect(String(created.out).replace(/\\/g, '/')).toMatch(/\/notes\.pdf$/)
       const kept: Record<string, unknown> = { file: 'a.docx', out: 'b.docx' }
       defaultOut(tools.get('docs_apply')!, kept, ctx)
       expect(kept.out).toBe('b.docx')
@@ -291,9 +294,10 @@ describe('file store and fetch guard', () => {
     try {
       const dir = tempDir()
       const path = await fetchToFile(`http://127.0.0.1:${port}/redirect`, dir)
-      expect(path.endsWith('/data.csv')).toBe(true)
+      expect(path.replace(/\\/g, '/').endsWith('/data.csv')).toBe(true)
       expect(readFileSync(path, 'utf8')).toBe('a,b\n1,2\n')
-      const byName = await fetchToFile(`http://localhost:${port}/dir/data.csv`, dir)
+      // "localhost" may resolve to ::1 while the server listens on 127.0.0.1 only
+      const byName = await fetchToFile(`http://127.0.0.1:${port}/dir/data.csv`, dir)
       expect(readFileSync(byName, 'utf8')).toBe('a,b\n1,2\n')
       for (const host of ['169.254.169.254', '[::ffff:a9fe:a9fe]', '[fd00:ec2:0:0:0:0:0:254]']) {
         await expect(fetchToFile(`http://${host}/latest/meta-data`, dir)).rejects.toThrow(
