@@ -164,7 +164,16 @@ describe('copy materialize screen extent', () => {
       endColumn: 119,
     })
     expect(written).toEqual(['Año\t1,234.50\n\tTRUE'])
-    expect(h.messages.at(-1)).toMatch(/A1:DP12000.*1,440,000.*250,000/)
+    // Cells and budget go through `Number.prototype.toLocaleString()`, which on
+    // the bare Node ICU build resolves to the *host* default locale (en-ZA on
+    // this machine) and separates groups with a U+00A0 no-break space, not the
+    // ',' the assertion used to hardcode. Derive the digits instead of fixing
+    // them, so the check is about the counts reaching the message and not about
+    // whichever locale the test host happens to run under.
+    const groups = (value: number) => value.toLocaleString().replace(/\D+/g, '.')
+    expect(h.messages.at(-1)).toMatch(
+      new RegExp(`A1:DP12000.*${groups(1_440_000)}.*${groups(250_000)}`),
+    )
     dispose()
   })
 
@@ -180,6 +189,7 @@ describe('copy materialize screen extent', () => {
     expect(await h.clipboard.cut()).toBe(false)
     expect(mockDirect).not.toHaveBeenCalled()
     expect(cutSpy).not.toHaveBeenCalled()
+    // this path interpolates the raw number, so the budget is not grouped here
     expect(h.messages.at(-1)).toMatch(/A1:DP12000.*250000/)
     dispose()
   })

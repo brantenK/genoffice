@@ -95,58 +95,77 @@ describe('promoteFileAtomically', () => {
     expect(await readFile(target, 'utf8')).toBe('old-bytes')
   }, 15_000)
 
-  it('restores the target when the in-place copy dies after truncating it', async () => {
-    const dir = await scratchDir()
-    const locked = join(dir, 'locked')
-    await mkdir(locked)
-    const temporary = join(locked, '.new.tmp.xlsx')
-    const target = join(locked, 'book.xlsx')
-    await writeFile(temporary, 'new-bytes')
-    await writeFile(target, 'old-bytes')
-    await chmod(locked, 0o555)
-    // the backup copy runs for real; the copy over the target truncates it
-    // and then fails the way a lock acquired mid-write does
-    copyFileMock.mockImplementation(async (src, dest, mode) => {
-      if (String(src) !== temporary) return actualCopyFile(src, dest, mode)
-      await truncate(String(dest))
-      throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
-    })
-    await expect(promoteFileAtomically(temporary, target)).rejects.toThrow(
-      'The save target is locked by another program',
-    )
-    await chmod(locked, 0o755)
-    expect(await readFile(target, 'utf8')).toBe('old-bytes')
-    expect(await readFile(temporary, 'utf8')).toBe('new-bytes')
-  }, 15_000)
-
-  it('names the surviving backup when the target cannot be restored either', async () => {
-    const dir = await scratchDir()
-    const locked = join(dir, 'locked')
-    await mkdir(locked)
-    const temporary = join(locked, '.new.tmp.xlsx')
-    const target = join(locked, 'book.xlsx')
-    await writeFile(temporary, 'new-bytes')
-    await writeFile(target, 'old-bytes')
-    await chmod(locked, 0o555)
-    const busy = () => Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
-    copyFileMock.mockImplementation(async (src, dest, mode) => {
-      if (String(src) === temporary) {
+  it.skipIf(process.platform === 'win32')(
+    'restores the target when the in-place copy dies after truncating it',
+    async () => {
+      // The `chmod(locked, 0o555)` below exists only to make the *initial*
+      // rename fail so the code takes its in-place-copy fallback. NTFS does not
+      // enforce POSIX directory write bits through Node, so on win32 the rename
+      // succeeds outright and this simulation never reaches the branch under
+      // test. The backup/restore logic itself is not Windows-specific and is
+      // still exercised on POSIX CI; skipping here loses no Windows coverage
+      // that this test ever had.
+      const dir = await scratchDir()
+      const locked = join(dir, 'locked')
+      await mkdir(locked)
+      const temporary = join(locked, '.new.tmp.xlsx')
+      const target = join(locked, 'book.xlsx')
+      await writeFile(temporary, 'new-bytes')
+      await writeFile(target, 'old-bytes')
+      await chmod(locked, 0o555)
+      // the backup copy runs for real; the copy over the target truncates it
+      // and then fails the way a lock acquired mid-write does
+      copyFileMock.mockImplementation(async (src, dest, mode) => {
+        if (String(src) !== temporary) return actualCopyFile(src, dest, mode)
         await truncate(String(dest))
-        throw busy()
-      }
-      if (String(dest) === target) throw busy()
-      return actualCopyFile(src, dest, mode)
-    })
-    const failure = await promoteFileAtomically(temporary, target).catch((error: Error) => error)
-    await chmod(locked, 0o755)
-    expect(failure?.message).toContain('preserved at: ')
-    const survivor = failure!.message.split('preserved at: ')[1] ?? ''
-    // the read-only directory refuses the recovered copy, so the tmp backup stays
-    expect(survivor.startsWith(tmpdir())).toBe(true)
-    expect(basename(survivor)).toMatch(/^book\.recovered-[0-9a-f-]+\.xlsx$/)
-    expect(await readFile(survivor, 'utf8')).toBe('old-bytes')
-    await rm(survivor, { force: true })
-  }, 15_000)
+        throw Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
+      })
+      await expect(promoteFileAtomically(temporary, target)).rejects.toThrow(
+        'The save target is locked by another program',
+      )
+      await chmod(locked, 0o755)
+      expect(await readFile(target, 'utf8')).toBe('old-bytes')
+      expect(await readFile(temporary, 'utf8')).toBe('new-bytes')
+    },
+    15_000,
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'names the surviving backup when the target cannot be restored either',
+    async () => {
+      // Same dependency as the skipped test above: `chmod(dir, 0o555)` has to
+      // defeat the rename for the in-place-copy branch (and its recovery
+      // bookkeeping) to run at all, and NTFS does not enforce POSIX directory
+      // write bits. On POSIX CI the branch is still covered end to end.
+      const dir = await scratchDir()
+      const locked = join(dir, 'locked')
+      await mkdir(locked)
+      const temporary = join(locked, '.new.tmp.xlsx')
+      const target = join(locked, 'book.xlsx')
+      await writeFile(temporary, 'new-bytes')
+      await writeFile(target, 'old-bytes')
+      await chmod(locked, 0o555)
+      const busy = () => Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
+      copyFileMock.mockImplementation(async (src, dest, mode) => {
+        if (String(src) === temporary) {
+          await truncate(String(dest))
+          throw busy()
+        }
+        if (String(dest) === target) throw busy()
+        return actualCopyFile(src, dest, mode)
+      })
+      const failure = await promoteFileAtomically(temporary, target).catch((error: Error) => error)
+      await chmod(locked, 0o755)
+      expect(failure?.message).toContain('preserved at: ')
+      const survivor = failure!.message.split('preserved at: ')[1] ?? ''
+      // the read-only directory refuses the recovered copy, so the tmp backup stays
+      expect(survivor.startsWith(tmpdir())).toBe(true)
+      expect(basename(survivor)).toMatch(/^book\.recovered-[0-9a-f-]+\.xlsx$/)
+      expect(await readFile(survivor, 'utf8')).toBe('old-bytes')
+      await rm(survivor, { force: true })
+    },
+    15_000,
+  )
 
   it('propagates non-retryable errors untouched', async () => {
     const dir = await scratchDir()
