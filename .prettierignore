@@ -25,3 +25,6 @@ packages/html2docx/src/browser/
 
 # Multi-agent audit and teamwork artifacts
 .agents/
+
+# ISO/IEC 29500 schemas: keep byte-identical to the published files (one marked amendment).
+tools/ooxml-validate/schemas/

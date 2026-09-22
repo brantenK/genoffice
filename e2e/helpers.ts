@@ -25,10 +25,14 @@ interface LaunchOptions {
   lang?: string
   /** pre-seed app-settings.json with onboardingSeen=true to start at the home screen */
   onboardingSeen?: boolean
+  /** extra app-settings.json keys (e.g. defaultSaveDir) written before launch */
+  settings?: Record<string, unknown>
   /** subdir of e2e/artifacts to store this launch's video in */
   videoDir: string
   /** absolute document path passed as argv, opened in an editor tab on launch */
   openFile?: string
+  /** extra environment variables for the launched app */
+  env?: Record<string, string>
 }
 
 export interface LaunchedApp {
@@ -42,10 +46,13 @@ export async function launchShell(options: LaunchOptions): Promise<LaunchedApp> 
     throw new Error(`Missing build output at ${SHELL_MAIN} — run \`npm run build:all\` first`)
   }
   const userDataDir = options.userDataDir ?? (await mkdtemp(join(tmpdir(), 'genoffice-e2e-')))
-  if (options.onboardingSeen) {
+  if (options.onboardingSeen || options.settings) {
     await writeFile(
       join(userDataDir, 'app-settings.json'),
-      JSON.stringify({ onboardingSeen: true }),
+      JSON.stringify({
+        ...(options.onboardingSeen ? { onboardingSeen: true } : {}),
+        ...options.settings,
+      }),
     )
   }
   const require = createRequire(join(SHELL_DIR, 'package.json'))
@@ -68,7 +75,9 @@ export async function launchShell(options: LaunchOptions): Promise<LaunchedApp> 
     env: {
       ...hostEnv,
       GENOFFICE_USER_DATA: userDataDir,
+      GENOFFICE_NO_SPARE_VIEW: '1',
       GENOFFICE_LANG: options.lang ?? 'en',
+      ...(options.env ?? {}),
       ...(process.platform === 'linux' ? { ELECTRON_DISABLE_SANDBOX: '1' } : {}),
     },
     // Playwright's Electron screencast wedges the page CDP session on Linux
@@ -132,8 +141,9 @@ async function waitForDocumentReady(
  * on a renderer that never answers (docs query timeout), which leaves
  * Playwright's close() promise dangling and fails the worker with "Worker
  * teardown timeout" while every test is green. So the shutdown is bounded:
- * quit -> destroy the windows (bypasses the close flow) -> kill, and close()
- * is called exactly once against an already-exited process.
+ * quit -> destroy the windows (bypasses the close flow) -> SIGKILL (SIGTERM can
+ * re-enter the graceful path and leave the process alive), and close() is called
+ * exactly once against a process that is still alive.
  */
 export async function closeAndSaveVideo(
   launched: LaunchedApp,
@@ -148,70 +158,19 @@ export async function closeAndSaveVideo(
       })) as typeof dialog.showMessageBox
     })
     .catch(() => {})
-  // Capture the OS pid while Playwright state is alive: process() throws once
-  // the application is torn down, and a lingering OS process is what makes the
-  // worker die with "Worker teardown timeout" even though every test is green.
-  const launchedPid = ((): number | undefined => {
-    try {
-      return launched.app.process()?.pid
-    } catch {
-      return undefined
-    }
-  })()
-  const osProcessAlive = (): boolean => {
-    if (typeof launchedPid !== 'number') return false
-    try {
-      process.kill(launchedPid, 0)
-      return true
-    } catch {
-      return false
-    }
-  }
-  const processExited = (): boolean => {
-    // After the app exits, Playwright tears its ElectronApplication state down
-    // and process() throws — fall back to the OS pid to tell "state gone" apart
-    // from "process actually gone".
-    try {
-      const proc = launched.app.process()
-      if (!proc) return !osProcessAlive()
-      return proc.exitCode !== null || proc.signalCode !== null || !osProcessAlive()
-    } catch {
-      return !osProcessAlive()
-    }
-  }
-  const waitForExit = async (timeoutMs: number): Promise<boolean> => {
-    const deadline = Date.now() + timeoutMs
-    for (;;) {
-      if (processExited()) return true
-      if (Date.now() >= deadline) return processExited()
-      await new Promise((r) => setTimeout(r, 150))
-    }
-  }
-  // 1) Ask the app to quit; Electron then runs its normal shutdown.
-  await launched.app.evaluate(({ app }) => app.quit()).catch(() => {})
-  let exited = await waitForExit(6_000)
-  // 2) The dirty-document close flow may refuse to close the window: destroy
-  //    the windows so `window-all-closed` quits without that async flow.
-  if (!exited) {
-    await launched.app
-      .evaluate(({ BrowserWindow }) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed()) win.destroy()
-        }
-      })
-      .catch(() => {})
-    exited = await waitForExit(6_000)
-  }
   // 3) Last resort: kill the process so the suite never wedges.
   if (!exited) {
     try {
-      launched.app.process()?.kill()
+      // SIGTERM can enter Electron's graceful quit path and leave it alive, and
+      // child.killed would only mean a signal was sent. We are past the quit and
+      // destroy steps already, so escalate straight to SIGKILL.
+      launched.app.process()?.kill('SIGKILL')
     } catch {
       // already gone
     }
     if (osProcessAlive() && typeof launchedPid === 'number') {
       try {
-        process.kill(launchedPid)
+        process.kill(launchedPid, 'SIGKILL')
       } catch {
         // already gone
       }

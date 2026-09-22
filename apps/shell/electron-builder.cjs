@@ -222,6 +222,8 @@ function assertModuleTreesPresent() {
     '../crm/out',
     '../tenders/out',
     '../books/out',
+    '../../packages/cli/dist/genoffice.cjs',
+    '../../packages/cli/dist/node_modules/jsdom',
   ]) {
     if (!existsSync(join(__dirname, rel))) {
       throw new Error(
@@ -313,6 +315,38 @@ const config = {
       from: '../../node_modules/@genspark/cli',
       to: 'gsk/node_modules/@genspark/cli',
     },
+    // genoffice command line: runs on the app binary with ELECTRON_RUN_AS_NODE (as
+    // the gsk CLI above already does), so the RunAsNode fuse must stay enabled.
+    // Layout (Resources/cli next to wasm/, native/, ocr/) is what
+    // packages/cli/src/resources.ts expects.
+    {
+      from: '../../packages/cli/dist/genoffice.cjs',
+      to: 'cli/genoffice.cjs',
+    },
+    {
+      from: '../../packages/cli/bin/genoffice',
+      to: 'cli/genoffice',
+    },
+    {
+      from: '../../packages/cli/bin/genoffice.cmd',
+      to: 'cli/genoffice.cmd',
+    },
+    // the CLI's version (Settings → Integrations shows it) and the agent skill
+    // the same pane installs into Claude Code / Codex / …; bytes identical to the repo file
+    {
+      from: '../../packages/cli/package.json',
+      to: 'cli/package.json',
+    },
+    {
+      from: '../../skills/genoffice/SKILL.md',
+      to: 'cli/skills/genoffice/SKILL.md',
+    },
+    // runtime deps the genoffice bundle leaves external (jsdom for the Word/Markdown
+    // paths); collected by packages/cli/collect-deps.mjs during its build
+    {
+      from: '../../packages/cli/dist/node_modules',
+      to: 'cli/node_modules',
+    },
     {
       from: '../../node_modules/@genspark/cli/node_modules/commander',
       to: 'gsk/node_modules/commander',
@@ -337,6 +371,7 @@ const config = {
     {
       ext: 'docx',
       name: 'Word Document',
+      description: 'Word Document',
       role: 'Editor',
       icon: 'docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -344,6 +379,7 @@ const config = {
     {
       ext: 'xlsx',
       name: 'Excel Workbook',
+      description: 'Excel Workbook',
       role: 'Editor',
       icon: 'xlsx',
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -358,6 +394,7 @@ const config = {
     {
       ext: 'pptx',
       name: 'PowerPoint Presentation',
+      description: 'PowerPoint Presentation',
       role: 'Editor',
       icon: 'pptx',
       mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -455,6 +492,11 @@ const config = {
         from: WIN_SIDECAR,
         to: 'native/xlsx-sidecar.exe',
       },
+      {
+        from: 'build/shell-new',
+        to: 'shell-new',
+        filter: ['*.docx', '*.xlsx', '*.pptx'],
+      },
     ],
   },
   // Unlike win (which cross-compiles the sidecar to an explicit target
@@ -518,8 +560,11 @@ const config = {
   // install, breaking upgrades. Without it, fpm receives productName
   // "Zanostack" and only happens to downcase it to the right value.
   deb: {
-    artifactName: 'exampleoffice_${version}_${arch}.deb',
+    artifactName: 'zanostack_${version}_${arch}.deb',
     packageName: 'zanostack',
+    // expose the genoffice command line shipped inside the app
+    afterInstall: 'build/linux-after-install.sh',
+    afterRemove: 'build/linux-after-remove.sh',
   },
   // Same "@genoffice/shell" naming problem as deb: spell the artifact name
   // out (${arch} expands to the rpm arch string, x86_64) and pin the rpm
@@ -533,9 +578,11 @@ const config = {
   // latest-linux.yml keeps listing exactly what the CDN pipeline uploads
   // (AppImage + deb) and the promote workflow needs no rpm alias.
   rpm: {
-    artifactName: 'exampleoffice-${version}.${arch}.rpm',
+    artifactName: 'zanostack-${version}.${arch}.rpm',
     packageName: 'zanostack',
     publish: null,
+    afterInstall: 'build/linux-after-install.sh',
+    afterRemove: 'build/linux-after-remove.sh',
   },
   nsis: {
     oneClick: false,
