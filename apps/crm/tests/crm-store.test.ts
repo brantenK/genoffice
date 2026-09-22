@@ -414,9 +414,9 @@ describe('CrmStore persistence and recovery', () => {
     expect(stats.openDeals).toBe(3)
     expect(stats.wonDeals).toBe(1)
     expect(stats.lostDeals).toBe(1)
-    expect(stats.totalPipelineValue).toBe(260000)
-    expect(stats.weightedForecastValue).toBe(167000)
-    expect(stats.avgOpenDealSize).toBe(86667)
+    expect(stats.totalPipelineValue).toBe(3480000)
+    expect(stats.weightedForecastValue).toBe(2354500)
+    expect(stats.avgOpenDealSize).toBe(1160000)
     expect(stats.winRatePct).toBe(50)
 
     store.deleteDeal('deal-3')

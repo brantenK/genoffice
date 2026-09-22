@@ -346,7 +346,7 @@ export function DealDetail({
             <section className="crm-detail-summary" aria-label="Opportunity summary">
               <div>
                 <span>Amount</span>
-                <strong>${(deal.amount || 0).toLocaleString()}</strong>
+                <strong>R{(deal.amount || 0).toLocaleString()}</strong>
               </div>
               <div>
                 <span>Stage</span>

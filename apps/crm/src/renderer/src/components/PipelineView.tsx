@@ -84,7 +84,7 @@ export function PipelineView({
                 <span className="crm-stage-name">{st.label}</span>
                 <span className="crm-stage-badge">{stageDeals.length}</span>
               </div>
-              <span className="crm-stage-total">${stageTotal.toLocaleString()}</span>
+              <span className="crm-stage-total">R{stageTotal.toLocaleString()}</span>
             </div>
 
             {/* Cards List */}
@@ -215,7 +215,7 @@ export function PipelineView({
                     {/* Main Deal Information */}
                     <div className="crm-deal-main" onClick={() => setDetailDealId(deal.id)}>
                       <div className="crm-deal-title">{deal.name}</div>
-                      <div className="crm-deal-amount">${(deal.amount || 0).toLocaleString()}</div>
+                      <div className="crm-deal-amount">R{(deal.amount || 0).toLocaleString()}</div>
                       {deal.notes && <p className="crm-deal-notes">{deal.notes}</p>}
                       {(deal.owner || deal.nextStep) && (
                         <div className="crm-deal-context">

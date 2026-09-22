@@ -1,7 +1,7 @@
-# BRIEFING — 2026-09-05T17:01:00Z
+# BRIEFING — 2026-09-15T04:53:30Z
 
 ## Mission
-Coordinate, monitor, and audit the comprehensive audit and hardening of the Zano Books backend (`apps/books`), establishing strict double-entry ledger balancing for all invoice types, full Chart of Accounts harmonization, precise bank reconciliation with partial/exact payment handling, live IPC synchronization (`books:data-changed`), and an automated test suite.
+Coordinate, monitor, and audit the execution of Phase 2 (Durability) remaining work for the Tenders 9/10 hardening project in `apps/tenders`: cutting renderer persistence over from localStorage to the authoritative v2 store via typed IPC, verifying with live smoke tests, and passing the Phase 2 Oracle gate.
 
 ## 🔒 My Identity
 - Archetype: sentinel
@@ -19,6 +19,11 @@ Coordinate, monitor, and audit the comprehensive audit and hardening of the Zano
 - Cron 1 Task ID (Progress - Books Hardening): task-647 (Cancelled)
 - Cron 2 Task ID (Liveness - Books Hardening): task-649 (Cancelled)
 - Victory Auditor 2: 90cbaad3-16c0-4cdd-ad5b-4ab9dcc679eb (Completed)
+- Active Orchestrator 6 (Tenders Phase 2): a9d4a245-3b25-475a-8aa2-4fa2652d4f58 (Interrupted)
+- Active Orchestrator 7 (Tenders Phase 2): 35afc8d8-67e4-4566-a753-99b3c04c6533
+- Cron 1 Task ID (Progress - Tenders Phase 2 Orch 7): task-44
+- Cron 2 Task ID (Liveness - Tenders Phase 2 Orch 7): task-48
+- Victory Auditor 3: [to be spawned on victory claim]
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -27,30 +32,21 @@ Coordinate, monitor, and audit the comprehensive audit and hardening of the Zano
 - Clean up crons and subagents upon completion
 
 ## User Context
-- **Last user request**: Quota has reset. Revive orchestrator_5 and complete Milestone 5 Gate Evaluation and final monorepo certification.
+- **Last user request**: Execute Phase 2 (Durability) remaining work for the Tenders 9/10 hardening project in `apps/tenders`, cutting renderer persistence over from localStorage to the authoritative v2 store via typed IPC, verifying with live smoke tests, and passing the Phase 2 Oracle gate.
 - **Pending clarifications**: [none]
-- **Delivered results**:
-  - Full Chart of Accounts harmonization (22 standard accounts across 5 root categories) and atomic store persistence with corruption recovery backups.
-  - Strict double-entry ledger balancing for all invoice operations (Sales Invoices, Purchase Bills, payments/reversals, party balance invariants, 2-decimal rounding).
-  - Robust South African bank statement import & reconciliation engine (FNB, Standard Bank, Nedbank, Absa CSV parsing, frequency deduplication, settlement math bound to tx.amount, milestone status back-propagation).
-  - Real-time `books:data-changed` IPC broadcast pipeline with dual-layer echo loop suppression.
-  - Dedicated automated Vitest test suite for `apps/books` (76/76 tests passed, 100% pass rate, zero typecheck errors across all 22 monorepo packages).
-  - Independent Victory Audit: VICTORY CONFIRMED.
+- **Delivered results**: [in progress under orchestrator_7]
 
 ## Project Status
-- **Phase**: complete
+- **Phase**: in progress
 - **Route**: General (teamwork_preview_orchestrator)
-- **Active Agent**: none (all cleaned up)
+- **Active Agent**: orchestrator_7 (35afc8d8-67e4-4566-a753-99b3c04c6533)
 
 ## Victory Audit Status
-- **Triggered**: yes
-- **Verdict**: VICTORY CONFIRMED
+- **Triggered**: no
+- **Verdict**: pending
 - **Retry count**: 0
 
 ## Artifact Index
 - c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\ORIGINAL_REQUEST.md — Verbatim user request record
-- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\orchestrator_5\DISPATCH.md — Dispatch instructions for orchestrator_5
-- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\orchestrator_5\handoff.md — Orchestrator project handoff report
-- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\victory_auditor_2\DISPATCH.md — Victory Auditor dispatch instructions
-- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\victory_auditor_2\handoff.md — Independent Victory Audit handoff report
-- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\sentinel\handoff.md — Sentinel final handoff report
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\orchestrator_7\DISPATCH.md — Dispatch instructions for orchestrator_7
+- c:\Users\brant\OneDrive\Documents\GenOffice\genoffice\.agents\sentinel\BRIEFING.md — Sentinel persistent briefing

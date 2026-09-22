@@ -547,7 +547,7 @@ export function App() {
       <div className="crm-metrics-strip">
         <div className="crm-metric-item">
           <span className="crm-metric-label">Open Pipeline</span>
-          <span className="crm-metric-value">${stats.totalPipelineValue.toLocaleString()}</span>
+          <span className="crm-metric-value">R{stats.totalPipelineValue.toLocaleString()}</span>
         </div>
         <div className="crm-metric-divider" />
         <div className="crm-metric-item">
@@ -557,7 +557,7 @@ export function App() {
         <div className="crm-metric-divider" />
         <div className="crm-metric-item">
           <span className="crm-metric-label">Closed Won</span>
-          <span className="crm-metric-value highlight">${stats.wonValue.toLocaleString()}</span>
+          <span className="crm-metric-value highlight">R{stats.wonValue.toLocaleString()}</span>
         </div>
         <div className="crm-metric-divider" />
         <div className="crm-metric-item">

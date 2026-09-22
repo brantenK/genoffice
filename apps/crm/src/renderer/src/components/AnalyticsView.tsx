@@ -29,17 +29,17 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
       <div className="crm-stat-cards-grid">
         <div className="crm-stat-card">
           <div className="crm-stat-title">Total Pipeline Value</div>
-          <div className="crm-stat-number">${stats.totalPipelineValue.toLocaleString()}</div>
+          <div className="crm-stat-number">R{stats.totalPipelineValue.toLocaleString()}</div>
           <div className="crm-stat-sub">Across {stats.openDeals} open opportunities</div>
           <div className="crm-stat-sub">
-            Weighted forecast: ${stats.weightedForecastValue.toLocaleString()}
+            Weighted forecast: R{stats.weightedForecastValue.toLocaleString()}
           </div>
         </div>
 
         <div className="crm-stat-card">
           <div className="crm-stat-title">Closed Won Revenue</div>
           <div className="crm-stat-number" style={{ color: '#059669' }}>
-            ${stats.wonValue.toLocaleString()}
+            R{stats.wonValue.toLocaleString()}
           </div>
           <div className="crm-stat-sub">Confirmed signed contracts</div>
         </div>
@@ -54,7 +54,7 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
 
         <div className="crm-stat-card">
           <div className="crm-stat-title">Average Deal Size</div>
-          <div className="crm-stat-number">${stats.avgOpenDealSize.toLocaleString()}</div>
+          <div className="crm-stat-number">R{stats.avgOpenDealSize.toLocaleString()}</div>
           <div className="crm-stat-sub">Per open opportunity</div>
         </div>
       </div>
@@ -64,7 +64,7 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
         <div className="crm-chart-header">
           <div className="crm-chart-title">Value by Stage</div>
           <div style={{ fontSize: '12px', color: 'var(--crm-text-muted)' }}>
-            Total Value: ${totalValue.toLocaleString()}
+            Total Value: R{totalValue.toLocaleString()}
           </div>
         </div>
 
@@ -87,7 +87,7 @@ export function AnalyticsView({ stats, deals }: AnalyticsViewProps) {
                   </span>
                 </span>
                 <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                  ${item.value.toLocaleString()} ({item.pct}%)
+                  R{item.value.toLocaleString()} ({item.pct}%)
                 </span>
               </div>
               <div className="crm-progress-track">

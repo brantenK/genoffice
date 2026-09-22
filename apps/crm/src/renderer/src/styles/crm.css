@@ -403,6 +403,7 @@ body {
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
   min-height: 80px;
 }
@@ -423,6 +424,7 @@ body {
     box-shadow 0.15s ease,
     transform 0.15s ease;
   position: relative;
+  min-width: 0;
 }
 
 .crm-deal-card:hover {
@@ -444,6 +446,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .crm-deal-company-badge {
@@ -454,6 +457,7 @@ body {
   font-weight: 500;
   color: var(--crm-text-muted);
   max-width: 200px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -489,6 +493,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .crm-deal-title {
@@ -497,6 +502,7 @@ body {
   color: var(--crm-text);
   line-height: 1.35;
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
 }
 
 .crm-deal-amount {
@@ -524,12 +530,14 @@ body {
   justify-content: space-between;
   padding-top: 6px;
   border-top: 1px solid rgba(0, 0, 0, 0.04);
+  min-width: 0;
 }
 
 .crm-deal-contact {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .crm-avatar-sm {
@@ -551,6 +559,7 @@ body {
   color: var(--crm-text-secondary);
   font-weight: 500;
   max-width: 120px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -560,6 +569,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .crm-pill-action-btn {
@@ -574,6 +584,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 
