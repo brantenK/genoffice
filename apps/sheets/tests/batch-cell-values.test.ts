@@ -6,13 +6,9 @@ import {
   cellChangesToSparse,
   cellDataFromAfter,
 } from '../src/renderer/batch-cell-values'
-import type { CellChange } from '../src/domain/workbook.types'
+import type { CellChange } from '@genoffice/xlsx-gateway/domain/workbook.types'
 
-function change(
-  address: string,
-  after: CellChange['after'],
-  sheetId = 's1',
-): CellChange {
+function change(address: string, after: CellChange['after'], sheetId = 's1'): CellChange {
   return { sheetId, address, before: { value: null }, after }
 }
 
@@ -81,7 +77,9 @@ describe('applyCellChangesBatched', () => {
   })
 
   it('is a no-op for an empty plan', () => {
-    expect(applyCellChangesBatched(() => ({ getRange: () => ({ setValues: () => {} }) }), [])).toBe(0)
+    expect(applyCellChangesBatched(() => ({ getRange: () => ({ setValues: () => {} }) }), [])).toBe(
+      0,
+    )
   })
 })
 
@@ -89,7 +87,13 @@ describe('applySparseCellValues', () => {
   it('skips an empty matrix', () => {
     let called = 0
     applySparseCellValues(
-      { getRange: () => ({ setValues: () => { called += 1 } }) },
+      {
+        getRange: () => ({
+          setValues: () => {
+            called += 1
+          },
+        }),
+      },
       {},
     )
     expect(called).toBe(0)

@@ -12,8 +12,8 @@
  * null entry would delete the cell outright.
  */
 import { CellValueType, type ICellData } from '@univerjs/core'
-import { parseAddress } from '../domain/cell-address'
-import type { CellChange, CellState } from '../domain/workbook.types'
+import { parseAddress } from '@genoffice/xlsx-gateway/domain/cell-address'
+import type { CellChange, CellState } from '@genoffice/xlsx-gateway/domain/workbook.types'
 import { isNumericIdentifierText } from './cell-warning'
 
 export type SparseCellRow = Record<number, ICellData>

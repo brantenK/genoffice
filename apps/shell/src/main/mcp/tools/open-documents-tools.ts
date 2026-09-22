@@ -17,14 +17,41 @@ import { sanitizeFileBase, uniquePathIn } from './document-tools'
  * a fake.
  */
 
-/** tab kind -> format family (the registry's vocabulary, for the type label) */
-const FAMILY_BY_KIND: Record<Exclude<TabKind, 'home'>, EditorFamily> = {
+/**
+ * tab kind -> format family (the registry's vocabulary, for the type label).
+ *
+ * `undefined` is deliberate: the fork's business apps (crm/tenders/books) hold
+ * JSON stores, so they are not editor families and have no format here. The
+ * map stays exhaustive so a new tab kind cannot be added silently.
+ */
+const FAMILY_BY_KIND: Record<Exclude<TabKind, 'home'>, EditorFamily | undefined> = {
   docs: 'docx',
   sheets: 'xlsx',
   slides: 'pptx',
   markdown: 'md',
   html: 'html',
   pdf: 'pdf',
+  crm: undefined,
+  tenders: undefined,
+  books: undefined,
+}
+
+/**
+ * The open tabs this tool can act on: editor families only. The business apps
+ * are filtered out so the MCP surface never advertises a tab it cannot read,
+ * close or edit.
+ */
+function editorTabs(documents: readonly OpenDocumentTab[]): OpenDocumentTab[] {
+  return documents.filter((doc) => FAMILY_BY_KIND[doc.kind] !== undefined)
+}
+
+/** the family of an editor tab; never called for a business-app tab */
+function familyOf(doc: OpenDocumentTab): EditorFamily {
+  const family = FAMILY_BY_KIND[doc.kind]
+  if (!family) {
+    throw new Error(`"${doc.title}" is a ${doc.kind} tab, which is not an editable document format`)
+  }
+  return family
 }
 
 /** families whose live content can be read back over MCP */
@@ -112,6 +139,12 @@ export function resolveOpenDocumentOfFamily(
   const doc = resolveOpenDocument(documents, target)
   if (!doc) throw noMatch(target, documents)
   const actual = FAMILY_BY_KIND[doc.kind]
+  if (!actual) {
+    throw new Error(
+      `"${doc.title}" is a ${doc.kind} tab, which has no editable document format, so it ` +
+        `cannot satisfy this tool's ${familyLabel(family)} document argument`,
+    )
+  }
   if (actual !== family) {
     throw new Error(
       `"${doc.title}" is a ${familyLabel(actual)}, but this tool edits ${familyLabel(family)} documents`,
@@ -132,7 +165,7 @@ function noMatch(target: string, documents: readonly OpenDocumentTab[]): Error {
 }
 
 function typeLabel(doc: OpenDocumentTab): string {
-  return familyLabel(FAMILY_BY_KIND[doc.kind])
+  return familyLabel(familyOf(doc))
 }
 
 /** one row of the `list` action */
@@ -155,7 +188,7 @@ function describeDocument(doc: OpenDocumentTab): Record<string, unknown> {
  */
 export function closeSavePath(doc: OpenDocumentTab, defaultSaveDir: () => string): string {
   if (doc.filePath) return doc.filePath
-  const name = `${sanitizeFileBase(doc.title)}${extensionFor(FAMILY_BY_KIND[doc.kind])}`
+  const name = `${sanitizeFileBase(doc.title)}${extensionFor(familyOf(doc))}`
   return uniquePathIn(defaultSaveDir(), name)
 }
 
@@ -196,14 +229,14 @@ export function createOpenDocumentTools(deps: OpenDocumentsDeps): McpToolDefinit
         }
         const action = String(args.action ?? '')
         if (action === 'list') {
-          const documents = await control.list()
+          const documents = editorTabs(await control.list())
           return { documents: documents.map(describeDocument) }
         }
 
         const target = typeof args.target === 'string' ? args.target.trim() : ''
         if (!target) throw new Error(`"${action}" needs a target (a path, or an id from "list")`)
 
-        const documents = await control.list()
+        const documents = editorTabs(await control.list())
         const doc = resolveOpenDocument(documents, target)
         if (!doc) throw noMatch(target, documents)
 

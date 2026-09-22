@@ -4,12 +4,22 @@
  * re-exported from the package index so app bundles never pull in Playwright.
  */
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { chromium } from 'playwright-core'
 import type { Browser, BrowserContext, Page } from 'playwright-core'
 import type { BrowserDriver, ScreenshotOptions, Viewport } from '../driver'
 
+// Windows entries are the fork's: upstream lists macOS/Linux locations only, so
+// `npm test` failed to find an installed Chrome on Windows unless CHROME_PATH
+// was set by hand (and it skips the whole feature suite when it cannot).
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
+  process.env.PROGRAMFILES &&
+    join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'),
+  process.env['PROGRAMFILES(X86)'] &&
+    join(process.env['PROGRAMFILES(X86)'], 'Google/Chrome/Application/chrome.exe'),
+  process.env.LOCALAPPDATA &&
+    join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome',
   '/usr/bin/google-chrome-stable',

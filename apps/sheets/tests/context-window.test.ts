@@ -9,7 +9,7 @@ import {
   type ActiveSheetInfo,
   type SheetsSkillDeps,
 } from '../src/renderer/ai/tools'
-import type { CellScalar, ChangePlan } from '../src/domain/workbook.types'
+import type { CellScalar, ChangePlan } from '@genoffice/xlsx-gateway/domain/workbook.types'
 
 function call(name: string, input: Record<string, unknown>) {
   return { id: 'call-1', name, input }
