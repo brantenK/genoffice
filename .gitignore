@@ -91,3 +91,6 @@ apps/*/src/renderer/i18n/generated/
 
 # Local Deepwork coordination state
 .slim/deepwork/
+
+# ripgrep ignore-override file (local: re-enables searching .slim/deepwork/)
+.ignore
