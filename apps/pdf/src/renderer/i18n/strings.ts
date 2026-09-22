@@ -640,7 +640,8 @@ export const strings = {
     aiOverloadedError: 'The AI service is busy right now — please try again in a moment',
     aiNetworkError:
       'Network problem: could not reach the AI service. Check your connection and try again',
-    aiCreditsExhausted: 'Your AI credits have run out. Configure another AI provider in Settings, then try again',
+    aiCreditsExhausted:
+      'Your AI credits have run out. Configure another AI provider in Settings, then try again',
     aiToolReadPages: 'Read pages {start}-{end}',
     aiToolSearch: 'Search "{query}" ({count} hits)',
     aiToolGoto: 'Go to page {page}',
@@ -973,7 +974,8 @@ export const strings = {
     aiOverloadedError: 'AI サービスが混み合っています。しばらくしてからもう一度お試しください',
     aiNetworkError:
       'ネットワークに問題があり、AI サービスに接続できません。接続を確認して再試行してください',
-    aiCreditsExhausted: 'AIクレジットを使い切りました。設定で別のAIプロバイダーを設定して、もう一度お試しください',
+    aiCreditsExhausted:
+      'AIクレジットを使い切りました。設定で別のAIプロバイダーを設定して、もう一度お試しください',
     aiToolReadPages: 'ページ {start}-{end} を読む',
     aiToolSearch: '「{query}」を検索（{count} 件）',
     aiToolGoto: 'ページ {page} へ移動',
@@ -1308,7 +1310,8 @@ export const strings = {
     aiOverloadedError: 'AI 서비스가 혼잡합니다. 잠시 후 다시 시도해 주세요',
     aiNetworkError:
       '네트워크에 문제가 있어 AI 서비스에 연결할 수 없습니다. 연결을 확인한 후 다시 시도해 주세요',
-    aiCreditsExhausted: 'AI 크레딧이 모두 소진되었습니다. 설정에서 다른 AI 제공업체를 구성한 후 다시 시도하세요',
+    aiCreditsExhausted:
+      'AI 크레딧이 모두 소진되었습니다. 설정에서 다른 AI 제공업체를 구성한 후 다시 시도하세요',
     aiToolReadPages: '{start}-{end}쪽 읽기',
     aiToolSearch: '"{query}" 검색 ({count}건)',
     aiToolGoto: '{page}쪽으로 이동',
@@ -1645,7 +1648,8 @@ export const strings = {
     aiOverloadedError: "Le service d'IA est actuellement surchargé — réessayez dans un instant",
     aiNetworkError:
       'Problème réseau : impossible de joindre le service IA. Vérifiez votre connexion et réessayez',
-    aiCreditsExhausted: 'Vos crédits IA sont épuisés. Configurez un autre fournisseur dans les paramètres puis réessayez.',
+    aiCreditsExhausted:
+      'Vos crédits IA sont épuisés. Configurez un autre fournisseur dans les paramètres puis réessayez.',
     aiToolReadPages: 'Lire les pages {start}-{end}',
     aiToolSearch: 'Rechercher « {query} » ({count} occurrences)',
     aiToolGoto: 'Aller à la page {page}',
@@ -1986,7 +1990,8 @@ export const strings = {
     aiOverloadedError: 'Der KI-Dienst ist derzeit überlastet — bitte gleich erneut versuchen',
     aiNetworkError:
       'Netzwerkproblem: Der KI-Dienst ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut',
-    aiCreditsExhausted: 'Ihre KI-Guthaben sind aufgebraucht. Richten Sie in den Einstellungen einen anderen KI-Anbieter ein und versuchen Sie es erneut.',
+    aiCreditsExhausted:
+      'Ihre KI-Guthaben sind aufgebraucht. Richten Sie in den Einstellungen einen anderen KI-Anbieter ein und versuchen Sie es erneut.',
     aiToolReadPages: 'Seiten {start}-{end} lesen',
     aiToolSearch: '„{query}" suchen ({count} Treffer)',
     aiToolGoto: 'Zu Seite {page} springen',
@@ -2326,7 +2331,8 @@ export const strings = {
       'El servicio de IA está saturado en este momento; inténtalo de nuevo en unos instantes',
     aiNetworkError:
       'Problema de red: no se pudo conectar con el servicio de IA. Comprueba tu conexión e inténtalo de nuevo',
-    aiCreditsExhausted: 'Se agotaron tus créditos de IA. Configura otro proveedor de IA en Ajustes e inténtalo de nuevo.',
+    aiCreditsExhausted:
+      'Se agotaron tus créditos de IA. Configura otro proveedor de IA en Ajustes e inténtalo de nuevo.',
     aiToolReadPages: 'Leer páginas {start}-{end}',
     aiToolSearch: 'Buscar «{query}» ({count} resultados)',
     aiToolGoto: 'Ir a la página {page}',
@@ -2997,7 +3003,8 @@ export const strings = {
     aiOverloadedError: 'Layanan AI sedang sibuk — silakan coba lagi sebentar lagi',
     aiNetworkError:
       'Masalah jaringan: tidak dapat terhubung ke layanan AI. Periksa koneksi Anda lalu coba lagi',
-    aiCreditsExhausted: 'Kredit AI Anda habis. Konfigurasikan penyedia AI lain di Pengaturan, lalu coba lagi.',
+    aiCreditsExhausted:
+      'Kredit AI Anda habis. Konfigurasikan penyedia AI lain di Pengaturan, lalu coba lagi.',
     aiToolReadPages: 'Baca halaman {start}-{end}',
     aiToolSearch: 'Cari "{query}" ({count} temuan)',
     aiToolGoto: 'Ke halaman {page}',
@@ -3334,7 +3341,8 @@ export const strings = {
     aiOverloadedError: 'Сервис ИИ сейчас перегружен — повторите попытку чуть позже',
     aiNetworkError:
       'Проблема с сетью: не удалось подключиться к сервису ИИ. Проверьте подключение и повторите попытку',
-    aiCreditsExhausted: 'Кредиты ИИ исчерпаны. Настройте другого поставщика ИИ в настройках и попробуйте снова.',
+    aiCreditsExhausted:
+      'Кредиты ИИ исчерпаны. Настройте другого поставщика ИИ в настройках и попробуйте снова.',
     aiToolReadPages: 'Чтение страниц {start}-{end}',
     aiToolSearch: 'Поиск «{query}» ({count} совпадений)',
     aiToolGoto: 'Перейти на страницу {page}',
@@ -3670,7 +3678,8 @@ export const strings = {
     aiOverloadedError: 'خدمة الذكاء الاصطناعي مشغولة حاليًا — يرجى المحاولة مرة أخرى بعد قليل',
     aiNetworkError:
       'مشكلة في الشبكة: تعذّر الوصول إلى خدمة الذكاء الاصطناعي. تحقق من الاتصال وحاول مجددًا',
-    aiCreditsExhausted: 'نفدت رصيد الذكاء الاصطناعي. قم بإعداد مزود ذكاء اصطناعي آخر في الإعدادات ثم حاول مجددًا.',
+    aiCreditsExhausted:
+      'نفدت رصيد الذكاء الاصطناعي. قم بإعداد مزود ذكاء اصطناعي آخر في الإعدادات ثم حاول مجددًا.',
     aiToolReadPages: 'قراءة الصفحات {start}-{end}',
     aiToolSearch: 'بحث عن "{query}" ({count} نتيجة)',
     aiToolGoto: 'الانتقال إلى الصفحة {page}',
@@ -4005,7 +4014,8 @@ export const strings = {
       'O serviço de IA está sobrecarregado no momento — tente novamente em instantes',
     aiNetworkError:
       'Problema de rede: não foi possível conectar ao serviço de IA. Verifique sua conexão e tente novamente',
-    aiCreditsExhausted: 'Seus créditos de IA acabaram. Configure outro provedor de IA nas Configurações e tente novamente.',
+    aiCreditsExhausted:
+      'Seus créditos de IA acabaram. Configure outro provedor de IA nas Configurações e tente novamente.',
     aiToolReadPages: 'Ler páginas {start}-{end}',
     aiToolSearch: 'Pesquisar "{query}" ({count} ocorrências)',
     aiToolGoto: 'Ir para a página {page}',
@@ -4344,7 +4354,8 @@ export const strings = {
     aiOverloadedError: 'Il servizio IA è momentaneamente sovraccarico — riprova tra poco',
     aiNetworkError:
       'Problema di rete: impossibile raggiungere il servizio IA. Controlla la connessione e riprova',
-    aiCreditsExhausted: 'I tuoi crediti AI sono esauriti. Configura un altro provider AI nelle Impostazioni e riprova.',
+    aiCreditsExhausted:
+      'I tuoi crediti AI sono esauriti. Configura un altro provider AI nelle Impostazioni e riprova.',
     aiToolReadPages: 'Leggi le pagine {start}-{end}',
     aiToolSearch: 'Cerca "{query}" ({count} risultati)',
     aiToolGoto: 'Vai alla pagina {page}',
@@ -4683,7 +4694,8 @@ export const strings = {
     aiOverloadedError: 'Usługa AI jest obecnie przeciążona — spróbuj ponownie za chwilę',
     aiNetworkError:
       'Problem z siecią: nie można połączyć się z usługą AI. Sprawdź połączenie i spróbuj ponownie',
-    aiCreditsExhausted: 'Twoje kredyty AI się wyczerpały. Skonfiguruj innego dostawcę AI w Ustawieniach i spróbuj ponownie.',
+    aiCreditsExhausted:
+      'Twoje kredyty AI się wyczerpały. Skonfiguruj innego dostawcę AI w Ustawieniach i spróbuj ponownie.',
     aiToolReadPages: 'Czytaj strony {start}-{end}',
     aiToolSearch: 'Szukaj „{query}" ({count} wyników)',
     aiToolGoto: 'Przejdź do strony {page}',
@@ -5021,7 +5033,7 @@ export const strings = {
     aiNetworkError:
       'Problém se sítí: službu AI se nepodařilo kontaktovat. Zkontrolujte připojení a zkuste to znovu',
     aiCreditsExhausted:
-      'Vaše kredity Genspark byly vyčerpány. Navštivte genspark.ai/pricing, dobijte je a zkuste to znovu',
+      'Došly vám AI kredity. Nastavte v Nastavení jiného poskytovatele AI a zkuste to znovu.',
     aiToolReadPages: 'Číst stránky {start}-{end}',
     aiToolSearch: 'Hledat „{query}“ ({count} výskytů)',
     aiToolGoto: 'Přejít na stránku {page}',
@@ -5190,7 +5202,7 @@ export const strings = {
     removeStamp: 'Kliknutím vyberete tento vodoznak / záhlaví / zápatí',
     props: 'Vlastnosti',
     propsTitle: 'Vlastnosti dokumentu',
-    ribbonAiAssistant: 'Genspark',
+    ribbonAiAssistant: 'AI',
     ribbonAiAssistantTip: 'Otevřít asistenta AI',
     propTitle: 'Název',
     propAuthor: 'Autor',
@@ -5359,7 +5371,8 @@ export const strings = {
     aiOverloadedError: 'De AI-service is momenteel overbelast — probeer het zo opnieuw',
     aiNetworkError:
       'Netwerkprobleem: kan de AI-service niet bereiken. Controleer je verbinding en probeer het opnieuw',
-    aiCreditsExhausted: 'Je AI-tegoed is op. Configureer een andere AI-provider in Instellingen en probeer het opnieuw.',
+    aiCreditsExhausted:
+      'Je AI-tegoed is op. Configureer een andere AI-provider in Instellingen en probeer het opnieuw.',
     aiToolReadPages: "Pagina's {start}-{end} lezen",
     aiToolSearch: 'Zoeken naar "{query}" ({count} resultaten)',
     aiToolGoto: 'Ga naar pagina {page}',
@@ -5696,7 +5709,8 @@ export const strings = {
     aiOverloadedError: 'Perkhidmatan AI sedang sibuk — sila cuba lagi sebentar lagi',
     aiNetworkError:
       'Masalah rangkaian: tidak dapat menghubungi perkhidmatan AI. Semak sambungan anda dan cuba lagi',
-    aiCreditsExhausted: 'Kredit AI anda telah habis. Konfigurasikan pembekal AI lain dalam Tetapan, kemudian cuba lagi.',
+    aiCreditsExhausted:
+      'Kredit AI anda telah habis. Konfigurasikan pembekal AI lain dalam Tetapan, kemudian cuba lagi.',
     aiToolReadPages: 'Baca halaman {start}-{end}',
     aiToolSearch: 'Cari "{query}" ({count} padanan)',
     aiToolGoto: 'Pergi ke halaman {page}',
@@ -6361,7 +6375,8 @@ export const strings = {
     aiOverloadedError: 'AI सेवा अभी व्यस्त है — कृपया थोड़ी देर बाद फिर से प्रयास करें',
     aiNetworkError:
       'नेटवर्क समस्या: AI सेवा से कनेक्ट नहीं हो सका। कनेक्शन जांचें और फिर से प्रयास करें',
-    aiCreditsExhausted: 'AI क्रेडिट समाप्त हो गए हैं। सेटिंग में कोई अन्य AI प्रदाता कॉन्फ़िगर करें और फिर से प्रयास करें।',
+    aiCreditsExhausted:
+      'AI क्रेडिट समाप्त हो गए हैं। सेटिंग में कोई अन्य AI प्रदाता कॉन्फ़िगर करें और फिर से प्रयास करें।',
     aiToolReadPages: 'पृष्ठ {start}-{end} पढ़ें',
     aiToolSearch: '"{query}" खोजें ({count} परिणाम)',
     aiToolGoto: 'पृष्ठ {page} पर जाएँ',

@@ -95,7 +95,7 @@ export interface AppLaunch {
   args: string[]
 }
 
-/** How to start the GenOffice GUI: the app binary that hosts this CLI, an installed app, or the dev checkout. */
+/** How to start the Zanostack GUI: the app binary that hosts this CLI, an installed app, or the dev checkout. */
 export function appLaunch(env: NodeJS.ProcessEnv = process.env): AppLaunch | null {
   if (env.GENOFFICE_APP_BIN) return { command: env.GENOFFICE_APP_BIN, args: [] }
   if (packagedResourcesDir() && process.versions.electron) {
@@ -116,16 +116,16 @@ function installedAppBinaries(env: NodeJS.ProcessEnv): string[] {
   switch (process.platform) {
     case 'darwin':
       return [
-        '/Applications/GenOffice.app/Contents/MacOS/GenOffice',
-        join(homedir(), 'Applications/GenOffice.app/Contents/MacOS/GenOffice'),
+        '/Applications/Zanostack.app/Contents/MacOS/Zanostack',
+        join(homedir(), 'Applications/Zanostack.app/Contents/MacOS/Zanostack'),
       ]
     case 'win32':
       return [
-        env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Programs', 'GenOffice', 'GenOffice.exe') : '',
-        env.ProgramFiles ? join(env.ProgramFiles, 'GenOffice', 'GenOffice.exe') : '',
+        env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Programs', 'Zanostack', 'Zanostack.exe') : '',
+        env.ProgramFiles ? join(env.ProgramFiles, 'Zanostack', 'Zanostack.exe') : '',
       ].filter(Boolean)
     default:
-      return ['/opt/GenOffice/genoffice', '/usr/bin/genoffice']
+      return ['/opt/Zanostack/genoffice', '/usr/bin/genoffice']
   }
 }
 

@@ -827,7 +827,7 @@ export function cssFontFamily(font: string, followAltName = true): string {
   // Segoe UI is an M365 cloud font Word renders real; where it is missing the
   // size-adjusted Helvetica alias (fonts.css) carries its narrower advances
   if (SEGOE_UI_TEXT_RE.test(f))
-    return `${chain(font, 'Segoe UI GO', 'Noto Sans CJK GO', 'GenOffice PUA Blank')},sans-serif`
+    return `${chain(font, 'Segoe UI GO', 'Noto Sans CJK GO', 'Zanostack PUA Blank')},sans-serif`
   // Consolas is Office-only: the size-adjusted Menlo alias (fonts.css) carries its advances
   if (f.includes('consolas')) return `${chain(font, 'Consolas GO', CJK_SANS)},monospace`
   // Century Gothic is Office-only too: the per-case size-adjusted Liberation

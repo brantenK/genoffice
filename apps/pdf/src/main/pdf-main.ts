@@ -635,7 +635,11 @@ export function pdfFileRenamed(contents: WebContents, oldPath: string, newPath: 
   const wcId = contents.id
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
   const allowed = allowedByWc.get(wcId)
-  if (allowed?.has(oldPath)) allowed.add(newPath)
+  if (allowed?.has(oldPath)) {
+    // the shell moved the file: revoke the stale grant, then grant the new path
+    allowed.delete(oldPath)
+    allowed.add(newPath)
+  }
   if (saveAsTargetByWc.get(wcId) === oldPath) saveAsTargetByWc.set(wcId, newPath)
   if (untitledPdfPaths.delete(oldPath)) untitledPdfPaths.add(newPath)
   if (!contents.isDestroyed()) contents.send(PDF_CHANNELS.fileRenamed, newPath)
@@ -645,17 +649,6 @@ export function setPdfRenamedHook(
   hook: (wc: WebContents, oldPath: string, newPath: string) => void,
 ): void {
   pdfRenamedHook = hook
-}
-
-/** Shell/Home notification: rebind an open view after its file is renamed on disk. */
-export function pdfFileRenamed(wc: WebContents, oldPath: string, newPath: string): void {
-  const allowed = allowedByWc.get(wc.id)
-  if (!allowed?.has(oldPath)) return
-  allowed.delete(oldPath)
-  allowed.add(newPath)
-  if (openPathByWc.get(wc.id) === oldPath) openPathByWc.set(wc.id, newPath)
-  untitledPdfPaths.delete(oldPath)
-  if (!wc.isDestroyed()) wc.send(PDF_CHANNELS.fileRenamed, { oldPath, newPath })
 }
 
 /** Sanitize a proposed base name into a safe filename: strip illegal path chars, collapse whitespace, cap length; null if nothing survives. (Mirrors docs' deriveAutoFileName.) */

@@ -43,7 +43,6 @@ export const PDF_CHANNELS = {
   saveAsResult: 'pdf:save-as-result',
   saveAsFlow: 'pdf:save-as-flow',
   printRequest: 'pdf:print-request',
-  fileRenamed: 'pdf:file-renamed',
   getLanguage: 'app:get-language',
   languageChanged: 'app:language-changed',
   getTheme: 'app:get-theme',
@@ -711,8 +710,6 @@ export interface PdfApi {
       The main process renames only while the file still carries the shell's auto-created
       untitled name, so user-chosen names are never touched. */
   autoRename(path: string, baseName: string): Promise<PdfAutoRenameResult>
-  /** Shell/Home renamed the open file; update the renderer's live path. */
-  onFileRenamed(handler: (event: { oldPath: string; newPath: string }) => void): () => void
   /** Whether the file is a shell-created blank still carrying its untitled name
       (gates the after-AI-run silent save; a PDF the user merely opened must never auto-write) */
   isUntitled(path: string): Promise<boolean>

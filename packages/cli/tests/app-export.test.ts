@@ -58,7 +58,7 @@ function fakeSpawn(script: Script, calls: { command: string; args: string[] }[])
   }) as unknown as typeof import('node:child_process').spawn
 }
 
-const env = { GENOFFICE_APP_BIN: '/Applications/GenOffice.app/Contents/MacOS/GenOffice' }
+const env = { GENOFFICE_APP_BIN: '/Applications/Zanostack.app/Contents/MacOS/Zanostack' }
 
 describe('exportViaApp', () => {
   it('spawns the app in headless-export mode and returns the envelope', async () => {

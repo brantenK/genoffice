@@ -1285,14 +1285,6 @@ export default function App() {
     })()
   }, [openPath])
 
-  useEffect(
-    () =>
-      window.pdfApi.onFileRenamed(({ oldPath, newPath }) => {
-        setFilePath((current) => (current === oldPath ? newPath : current))
-      }),
-    [],
-  )
-
   /** pdf-lib cannot write encrypted files, including owner-protected files that open without a password. */
   const readOnly = status === 'ready' && (passwordRef.current !== undefined || documentEncrypted)
 

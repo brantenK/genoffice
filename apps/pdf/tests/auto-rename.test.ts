@@ -155,10 +155,7 @@ describe('pdf auto-rename', () => {
 
     expect(handlers.get(PDF_CHANNELS.consumePending)?.({ sender: { id: wcId } })).toBe(target)
     await expect(readGranted(wcId, path)).rejects.toThrow('path not granted')
-    expect(lastWebContents.send).toHaveBeenCalledWith(PDF_CHANNELS.fileRenamed, {
-      oldPath: path,
-      newPath: target,
-    })
+    expect(lastWebContents.send).toHaveBeenCalledWith(PDF_CHANNELS.fileRenamed, target)
   })
 
   it('sanitizes illegal filename characters and caps the length', () => {

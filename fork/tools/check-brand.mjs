@@ -59,6 +59,9 @@ const tracked = execFileSync('git', ['ls-files', ...SWEPT_DIRS, ...SWEPT_ROOT_FI
     if (f.includes('fixtures/') || f.endsWith('package-lock.json') || f.endsWith('.xsd')) {
       return false
     }
+    // Matches fork/rebrand-sweep.mjs: the vendored ISO toolset's README must stay
+    // consistent with the byte-identical .xsd it documents.
+    if (f.startsWith('tools/ooxml-validate/')) return false
     if (SWEPT_ROOT_FILES.includes(f)) return true
     if (f.endsWith('package.json')) return f !== 'package.json'
     if (SWEPT_EXTENSIONS.some((ext) => f.endsWith(ext))) return true

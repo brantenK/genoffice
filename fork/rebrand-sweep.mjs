@@ -155,6 +155,10 @@ const tracked = execFileSync('git', ['ls-files', ...SWEPT_DIRS, ...SWEPT_ROOT_FI
     if (f.includes('fixtures/') || f.endsWith('package-lock.json') || f.endsWith('.xsd')) {
       return false
     }
+    // Vendored ISO/IEC 29500 toolset: its README documents an amendment marker
+    // that lives inside the byte-identical .xsd files, so re-branding the prose
+    // would leave it describing something the schema no longer says.
+    if (f.startsWith('tools/ooxml-validate/')) return false
     if (SWEPT_ROOT_FILES.includes(f)) return true
     if (f.endsWith('package.json')) return f !== 'package.json'
     if (SWEPT_EXTENSIONS.some((ext) => f.endsWith(ext))) return true
