@@ -1,11 +1,23 @@
 import { test, expect, _electron as electron } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
-import { cp, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { createRequire } from 'node:module'
+import JSZip from 'jszip'
 import { PNG } from 'pngjs'
 import type { SlidesApi } from '../apps/slides/src/shared/ipc'
+
+/** jszip instead of the `zip` CLI, which is absent on stock Windows */
+async function zipDirectory(dir: string, outPath: string): Promise<void> {
+  const zip = new JSZip()
+  // recursive readdir yields directories too, and readFile on one throws EISDIR
+  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    const full = join(entry.parentPath, entry.name)
+    zip.file(relative(dir, full).split(sep).join('/'), await readFile(full))
+  }
+  await writeFile(outPath, await zip.generateAsync({ type: 'nodebuffer' }))
+}
 
 test('Slides copy provides an OS image while internal paste stays editable and stale captures are rejected', async ({
   browserName: _browserName,
@@ -16,7 +28,7 @@ test('Slides copy provides an OS image while internal paste stays editable and s
   const xmlPath = join(fixture, 'ppt/slides/slide1.xml')
   await writeFile(xmlPath, (await readFile(xmlPath, 'utf8')).replaceAll('Rubik', 'Arial'))
   const pptx = join(dir, 'selection.pptx')
-  execFileSync('zip', ['-X', '-q', '-r', pptx, '.'], { cwd: fixture })
+  await zipDirectory(fixture, pptx)
   const require = createRequire(resolve('apps/slides/package.json'))
   const { ELECTRON_RUN_AS_NODE: _node, ...env } = process.env
   const app = await electron.launch({
