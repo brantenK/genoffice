@@ -2,16 +2,20 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+  openAppFromHome,
+} from './helpers'
 
 test.describe('html editor', () => {
-  test('AI HTML quick card opens an html editor tab in preview view with a ribbon', async () => {
+  test('the Home launcher opens an html editor tab in preview view with a ribbon', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'new-html-tab' })
     const { app, page } = launched
     try {
-      const card = page.locator('.quick-card', { hasText: 'AI HTML' })
-      await expect(card).toHaveCount(1)
-      await card.click()
+      await openAppFromHome(page, 'html')
 
       const editorTab = page.locator('.tab-bar .tab-item:not(.tab-home)')
       await expect(editorTab).toHaveCount(1)

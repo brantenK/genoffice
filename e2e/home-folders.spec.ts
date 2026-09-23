@@ -10,8 +10,8 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, screenshotPath } from './helpers'
+import { basename, join } from 'node:path'
+import { launchShell, closeAndSaveVideo, screenshotPath, openAppFromHome } from './helpers'
 
 /**
  * Home "Folders" panel: the tree over the default save folder, the folder
@@ -45,7 +45,7 @@ test.describe('home folders panel', () => {
       const tree = page.locator('.folder-panel .tree')
       await expect(page.locator('.folder-panel-title')).toHaveText('Folders')
       const rootRow = tree.locator('.tree-row').first()
-      await expect(rootRow).toContainText(root.split('/').pop()!)
+      await expect(rootRow).toContainText(basename(root))
       // root is expanded by default: its first-level folders are listed
       await expect(tree.locator('.tree-name', { hasText: 'Clients' })).toBeVisible()
       await expect(tree.locator('.tree-name', { hasText: 'Personal' })).toBeVisible()
@@ -138,8 +138,8 @@ test.describe('home folders panel', () => {
       const tree = page.locator('.folder-panel .tree')
       const rootRows = tree.locator(':scope > .tree-item > .tree-row')
       await expect(rootRows).toHaveCount(2)
-      await expect(rootRows.nth(0)).toContainText(root.split('/').pop()!)
-      await expect(rootRows.nth(1)).toContainText(extra.split('/').pop()!)
+      await expect(rootRows.nth(0)).toContainText(basename(root))
+      await expect(rootRows.nth(1)).toContainText(basename(extra))
 
       // every root row opens on a fresh profile, so the added root shows its real contents
       await expect(rootRows.nth(1)).toHaveAttribute('aria-expanded', 'true')
@@ -192,7 +192,7 @@ test.describe('home folders panel', () => {
         'Personal',
       )
       // the blank PDF is written synchronously by the shell, so it exercises the pending-folder path
-      await page.locator('.quick-card', { hasText: 'AI PDF' }).click()
+      await openAppFromHome(page, 'pdf')
       const hasPdf = (dir: string) =>
         existsSync(dir) && readdirSync(dir).some((f) => f.endsWith('.pdf'))
       await expect.poll(() => hasPdf(join(root, 'Personal')), { timeout: 15_000 }).toBe(true)
@@ -201,7 +201,7 @@ test.describe('home folders panel', () => {
       await expect(page.locator('.tab-bar .tab-item', { hasText: '.pdf' })).toBeVisible()
       // a second New from the same folder view lands there too (the folder is not a one-shot slot)
       await page.locator('.tab-bar .tab-item.tab-home').click()
-      await page.locator('.quick-card', { hasText: 'AI Sheets' }).click()
+      await openAppFromHome(page, 'xlsx')
       const hasXlsx = (dir: string) =>
         existsSync(dir) && readdirSync(dir).some((f) => f.endsWith('.xlsx'))
       await expect.poll(() => hasXlsx(join(root, 'Personal')), { timeout: 15_000 }).toBe(true)

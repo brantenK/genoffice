@@ -2,16 +2,20 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+  openAppFromHome,
+} from './helpers'
 
 test.describe('markdown editor', () => {
-  test('AI Markdown quick card opens a markdown editor tab', async () => {
+  test('the Home launcher opens a markdown editor tab', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'new-markdown-tab' })
     const { app, page } = launched
     try {
-      const card = page.locator('.quick-card', { hasText: 'AI Markdown' })
-      await expect(card).toHaveCount(1)
-      await card.click()
+      await openAppFromHome(page, 'md')
 
       const editorTab = page.locator('.tab-bar .tab-item:not(.tab-home)')
       await expect(editorTab).toHaveCount(1)
