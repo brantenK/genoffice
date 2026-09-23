@@ -1,7 +1,37 @@
 import { test, expect } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import { launchShell, closeAndSaveVideo, screenshotPath } from './helpers'
+
+/**
+ * The docs tab the user actually sees.
+ *
+ * The fork keeps a hidden docs renderer warmed during idle
+ * (`TabManager.prewarmDocs`, scheduled ~800ms after the shell loads) so the
+ * first docs tab opens without the module cold-start. That warm view is
+ * detached and never laid out: it reports `window.innerWidth === 0` forever
+ * while still exposing a `.ProseMirror` and the `data-*` flags on `<html>`.
+ * A document opened at runtime therefore produces TWO pages whose URL contains
+ * `://docs/`, and `waitForPageWithUrl` may return either one. Measure the
+ * laid-out page: it is the only docs page with a non-zero viewport.
+ */
+async function waitForVisibleDocsPage(app: ElectronApplication, timeoutMs = 30_000): Promise<Page> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    for (const candidate of app.windows()) {
+      const href =
+        candidate.url() || (await candidate.evaluate(() => window.location.href).catch(() => ''))
+      if (!href.includes('://docs/')) continue
+      const laidOut = await candidate
+        .evaluate(() => window.innerWidth > 0 && window.innerHeight > 0)
+        .catch(() => false)
+      if (laidOut) return candidate
+    }
+    if (Date.now() >= deadline) throw new Error('No laid-out docs page appeared')
+    await new Promise((r) => setTimeout(r, 250))
+  }
+}
 
 test('AI panel side persists across restart and updates an open Docs tab without losing the draft', async () => {
   const fixture = join(__dirname, 'assets/justify-pagegap-fr.docx')
@@ -18,7 +48,7 @@ test('AI panel side persists across restart and updates an open Docs tab without
     await page.screenshot({ path: screenshotPath('ai-panel-side-settings') })
     await page.locator('.set-close').click()
     await page.evaluate((path) => window.aiOffice.openPath(path), fixture)
-    const editor = await waitForPageWithUrl(launched.app, '://docs/')
+    const editor = await waitForVisibleDocsPage(launched.app)
     await expect(editor.locator('.ProseMirror').first()).toBeVisible()
     await expect(editor.locator('html')).toHaveAttribute('data-ai-panel-side', 'right')
     const dock = editor.locator('.ai-dock')
@@ -72,7 +102,7 @@ test('AI panel side persists across restart and updates an open Docs tab without
     openFile: fixture,
   })
   try {
-    const editor = await waitForPageWithUrl(restarted.app, '://docs/')
+    const editor = await waitForVisibleDocsPage(restarted.app)
     await expect(editor.locator('.ProseMirror').first()).toBeVisible()
     await expect(editor.locator('html')).toHaveAttribute('data-ai-panel-side', 'right')
     expect((await editor.locator('.ai-dock').boundingBox())!.x).toBeGreaterThan(

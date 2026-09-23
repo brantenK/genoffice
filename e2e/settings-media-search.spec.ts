@@ -29,10 +29,12 @@ test('Jev reranking lives in the AI Media & Search pane, saves with it, and repo
     // the block reports its own verdict: no key entered, nothing leaves the machine
     await page.getByRole('button', { name: 'Test connection', exact: true }).click()
     await expect(block.locator('.set-ai-status.err')).toHaveText('Enter an API key')
-    // the footer names the first failing block and its provider; which one comes
-    // first depends on whether this machine is signed in to Genspark
+    // the footer names the first failing block and its provider; the block is
+    // always Web search (it is checked before file search and has no key) but
+    // WHICH provider it names depends on the configured search provider, so the
+    // label is matched generically: "<provider>: <message>"
     await expect(page.locator('.set-pane-actions .set-ai-status.err')).toHaveText(
-      /^(Web search · Genspark|Local file search · TypeSafe): .+/,
+      /^Web search · \w+: .+/,
     )
     await page.screenshot({ path: screenshotPath('settings-media-search-test') })
 

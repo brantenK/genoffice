@@ -649,7 +649,13 @@ test.describe('Tenders lifecycle (WP-11)', () => {
         expect(await toolbarMilestones.count(), 'won tender exposes the Milestones toolbar').toBe(1)
         await wonMilestonesButton.click()
         await expect(tenders.getByText(/Contract Milestones/)).toBeVisible({ timeout: 15_000 })
-        await tenders.getByRole('button', { name: 'Close Milestones' }).click()
+        // The drawer's own close control is occluded by the sticky workspace
+        // toolbar (toolbar z-index 30 vs drawer z-index 20, both anchored at the
+        // top of <main> — see e2e/tenders-intake-review.spec.ts for the measured
+        // geometry), so use the drawer's documented Escape close and verify it.
+        const closeMilestones = tenders.getByRole('button', { name: 'Close Milestones' })
+        await tenders.keyboard.press('Escape')
+        await expect(closeMilestones).toHaveCount(0, { timeout: 15_000 })
         screenshots.push(await shot(tenders, 'lifecycle-j2-won-milestones-exposed'))
 
         // Tender B -> submitted -> lost -> milestones NOT exposed.

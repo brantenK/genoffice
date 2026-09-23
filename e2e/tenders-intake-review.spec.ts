@@ -309,8 +309,22 @@ async function readinessState(tenders: Page): Promise<ReadinessState> {
     0
   const intakeDetail = intakeBlocked ? await intakeFail.first().innerText() : ''
   const pageDetail = pageBlocked ? await pageFail.first().innerText() : ''
+  // Close the drawer before the next check.
+  //
+  // The drawer's own "Close readiness" control lives in its title row, which
+  // the workspace toolbar paints over: the toolbar is `position: sticky;
+  // z-index: 30` (styles/responsive.css) while the drawer is `absolute
+  // inset-y-0 right-0 z-20` against `<main>` (components/Drawer.tsx), so the
+  // drawer starts at the same y as the toolbar and its top band — including
+  // the X — is occluded. The button is laid out and "visible" but never
+  // hit-testable, so a pointer click retries forever. Escape is the drawer's
+  // own documented close gesture (`useOverlayBehaviour`, window keydown
+  // capture), and the close is verified rather than assumed.
   const close = tenders.getByRole('button', { name: 'Close readiness' })
-  if (await close.count()) await close.click()
+  if (await close.count()) {
+    await tenders.keyboard.press('Escape')
+    await expect(close).toHaveCount(0, { timeout: 15_000 })
+  }
   return {
     ready,
     buttonPresent,

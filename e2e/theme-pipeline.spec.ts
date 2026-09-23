@@ -8,6 +8,18 @@ function themeAttr(page: Page): Promise<string | null> {
   return page.evaluate(() => document.documentElement.getAttribute('data-theme'))
 }
 
+/**
+ * The main process owns theme resolution: it turns the stored preference
+ * (`light | dark | system`) into a concrete `light | dark` and publishes that,
+ * so renderers always stamp `<html data-theme>` with the resolved value —
+ * "system" never leaves the attribute absent.
+ */
+function resolvedTheme(app: ElectronApplication): Promise<'light' | 'dark'> {
+  return app
+    .evaluate(({ nativeTheme }) => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'))
+    .then((value) => value as 'light' | 'dark')
+}
+
 function hasHomeApi(page: Page): Promise<boolean> {
   return page
     .evaluate(() => Boolean((window as unknown as { aiOffice?: unknown }).aiOffice))
@@ -50,8 +62,11 @@ test.describe('theme pipeline', () => {
       const shellPage = await findShellPage(app)
       const editorPage = await waitForPageWithUrl(app, '://markdown/')
       await expect(editorPage.locator('.doc-editor')).toBeVisible()
-      expect(await themeAttr(shellPage)).toBeNull()
-      expect(await themeAttr(editorPage)).toBeNull()
+      // the preference is still "system" (the default): main resolves it from
+      // the OS appearance and every renderer stamps that resolved light|dark
+      const systemResolved = await resolvedTheme(app)
+      await expect.poll(() => themeAttr(shellPage)).toBe(systemResolved)
+      await expect.poll(() => themeAttr(editorPage)).toBe(systemResolved)
 
       await setTheme(shellPage, 'dark')
       await expect.poll(() => themeAttr(shellPage)).toBe('dark')
@@ -61,8 +76,9 @@ test.describe('theme pipeline', () => {
       expect(await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('dark')
 
       await setTheme(shellPage, 'system')
-      await expect.poll(() => themeAttr(shellPage)).toBeNull()
-      await expect.poll(() => themeAttr(editorPage)).toBeNull()
+      // back to "system": the OS-resolved theme again, still stamped on both
+      await expect.poll(() => themeAttr(shellPage)).toBe(systemResolved)
+      await expect.poll(() => themeAttr(editorPage)).toBe(systemResolved)
 
       await setTheme(shellPage, 'dark')
       await expect.poll(() => themeAttr(shellPage)).toBe('dark')
