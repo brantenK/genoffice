@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
-import { copyFile, mkdtemp } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import JSZip from 'jszip'
 import type { Page } from '@playwright/test'
 import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
 
@@ -31,6 +31,12 @@ async function gridOrigin(page: Page): Promise<{ x: number; y: number }> {
 /** center of a cell: ~46px row header, ~24px column header, ~74px × ~23px cells */
 function cellPoint(origin: { x: number; y: number }, row: number, column: number) {
   return { x: origin.x + 46 + column * 74 + 37, y: origin.y + 20 + row * 20 + 10 }
+}
+
+/** jszip instead of `unzip -l`, which needs a Unix CLI absent on stock Windows */
+async function archiveEntries(workbookPath: string): Promise<string[]> {
+  const zip = await JSZip.loadAsync(await readFile(workbookPath))
+  return Object.keys(zip.files)
 }
 
 test.describe('sheets: Insert → Recommended Charts and Icons', () => {
@@ -104,10 +110,10 @@ test.describe('sheets: Insert → Recommended Charts and Icons', () => {
         const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
         wc?.send('menu:action', 'save')
       })
-      await expect(() => {
-        const listing = execSync(`unzip -l "${workbook}"`).toString()
-        expect(listing).toContain('xl/media/')
-        expect(listing).toContain('xl/charts/')
+      await expect(async () => {
+        const entries = await archiveEntries(workbook)
+        expect(entries.some((name) => name.startsWith('xl/media/'))).toBe(true)
+        expect(entries.some((name) => name.startsWith('xl/charts/'))).toBe(true)
       }).toPass({ timeout: 20_000 })
     } finally {
       await closeAndSaveVideo(launched, 'sheets-insert-gallery')

@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
-import { copyFile, mkdtemp } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import JSZip from 'jszip'
 import type { Page } from '@playwright/test'
 import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
 
@@ -40,6 +40,19 @@ function cellPoint(origin: { x: number; y: number }, row: number, column: number
   return { x: origin.x + 46 + column * 74 + 37, y: origin.y + 20 + row * 20 + 10 }
 }
 
+/** jszip instead of the `unzip` CLI, which is absent on stock Windows */
+async function archiveEntries(workbookPath: string): Promise<string[]> {
+  const zip = await JSZip.loadAsync(await readFile(workbookPath))
+  return Object.keys(zip.files)
+}
+
+async function sheetXml(workbookPath: string): Promise<string> {
+  const zip = await JSZip.loadAsync(await readFile(workbookPath))
+  const sheet = zip.file('xl/worksheets/sheet1.xml')
+  if (!sheet) throw new Error('missing zip entry: xl/worksheets/sheet1.xml')
+  return (await sheet.async('nodebuffer')).toString()
+}
+
 test.describe('sheets: Insert → Equation and Checkbox', () => {
   test('renders LaTeX to a picture and saves it into the workbook', async () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-tier2-e2e-'))
@@ -74,9 +87,9 @@ test.describe('sheets: Insert → Equation and Checkbox', () => {
       await sheets.screenshot({ path: screenshotPath('equation-inserted') })
 
       await saveWorkbook(launched.app)
-      await expect(() => {
-        const listing = execSync(`unzip -l "${workbook}"`).toString()
-        expect(listing).toContain('xl/media/')
+      await expect(async () => {
+        const entries = await archiveEntries(workbook)
+        expect(entries.some((name) => name.startsWith('xl/media/'))).toBe(true)
       }).toPass({ timeout: 20_000 })
     } finally {
       await closeAndSaveVideo(launched, 'sheets-insert-tier2')
@@ -103,9 +116,9 @@ test.describe('sheets: Insert → Equation and Checkbox', () => {
       await expect(async () => {
         await sheets.getByRole('button', { name: 'Checkbox' }).click()
         await saveWorkbook(launched.app)
-        const sheetXml = execSync(`unzip -p "${workbook}" xl/worksheets/sheet1.xml`).toString()
-        expect(sheetXml).toContain('<dataValidation type="list"')
-        expect(sheetXml).toContain('<formula1>"1,0"</formula1>')
+        const xml = await sheetXml(workbook)
+        expect(xml).toContain('<dataValidation type="list"')
+        expect(xml).toContain('<formula1>"1,0"</formula1>')
       }).toPass({ timeout: 30_000 })
       await sheets.screenshot({ path: screenshotPath('checkbox-inserted') })
     } finally {

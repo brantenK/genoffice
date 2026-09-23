@@ -1,9 +1,23 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
-import { mkdtemp, readdir } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import JSZip from 'jszip'
+import {
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+  openAppFromHome,
+} from './helpers'
+
+/** jszip instead of the `unzip` CLI, which is absent on stock Windows */
+async function sheetXml(workbookPath: string): Promise<string> {
+  const zip = await JSZip.loadAsync(await readFile(workbookPath))
+  const sheet = zip.file('xl/worksheets/sheet1.xml')
+  if (!sheet) throw new Error('missing zip entry: xl/worksheets/sheet1.xml')
+  return (await sheet.async('nodebuffer')).toString()
+}
 
 /**
  * Regression for "new spreadsheet cannot be saved" (feedback 2368785): the
@@ -21,8 +35,7 @@ test.describe('sheets: new blank workbook', () => {
         electronApp.setPath('documents', dir)
       }, scratch)
 
-      await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
-      await page.locator('.quick-card').nth(1).click()
+      await openAppFromHome(page, 'xlsx')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
       await sheets.waitForFunction(() => document.body.textContent?.includes('Sheet1'), null, {
@@ -54,9 +67,8 @@ test.describe('sheets: new blank workbook', () => {
         const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
         wc?.send('menu:action', 'save')
       })
-      await expect(() => {
-        const xml = execSync(`unzip -p "${workbook}" xl/worksheets/sheet1.xml`).toString()
-        expect(xml).toContain('<v>42</v>')
+      await expect(async () => {
+        expect(await sheetXml(workbook)).toContain('<v>42</v>')
       }).toPass({ timeout: 15_000 })
     } finally {
       await closeAndSaveVideo(launched, 'sheets-new-blank')

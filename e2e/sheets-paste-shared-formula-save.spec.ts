@@ -1,12 +1,20 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
-import { mkdtemp, readdir } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import JSZip from 'jszip'
+import { launchShell, closeAndSaveVideo, waitForPageWithUrl, openAppFromHome } from './helpers'
 
 // the preload exposes window.__genofficeDebug only under this env var
 process.env.GENOFFICE_DEBUG_HOOKS = '1'
+
+/** jszip instead of the `unzip` CLI, which is absent on stock Windows */
+async function sheetXml(workbookPath: string): Promise<string> {
+  const zip = await JSZip.loadAsync(await readFile(workbookPath))
+  const sheet = zip.file('xl/worksheets/sheet1.xml')
+  if (!sheet) throw new Error('missing zip entry: xl/worksheets/sheet1.xml')
+  return (await sheet.async('nodebuffer')).toString()
+}
 
 /**
  * Regression for "tile-pasted cells vanish after save" (user
@@ -28,8 +36,7 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
         electronApp.setPath('documents', dir)
       }, scratch)
 
-      await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
-      await page.locator('.quick-card').nth(1).click()
+      await openAppFromHome(page, 'xlsx')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
       await sheets.waitForFunction(() => document.body.textContent?.includes('Sheet1'), null, {
@@ -100,9 +107,7 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
       await expect(async () => {
         const files = (await readdir(saveDir)).filter((f) => f.endsWith('.xlsx'))
         expect(files).toHaveLength(1)
-        const xml = execSync(
-          `unzip -p "${join(saveDir, files[0])}" xl/worksheets/sheet1.xml`,
-        ).toString()
+        const xml = await sheetXml(join(saveDir, files[0]))
         // both pasted repetitions keep values and a row-shifted formula
         expect(xml).toContain('<c r="A2" s="1"><v>10</v></c>')
         expect(xml).toContain('<c r="A3" s="1"><v>10</v></c>')
