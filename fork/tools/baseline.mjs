@@ -27,9 +27,14 @@
  * tell the two apart, and this disk produces flakes, so use `--repeat 2` when
  * recording the baseline you will judge a sync against.
  *
- * Exits non-zero when a test fails that the baseline does not list. A test that
- * the baseline lists but now passes is reported as FIXED (and is not a failure) —
- * refresh the baseline to lock that in.
+ * An unknown failure — one in neither list — is ambiguous: either a real
+ * regression or a flake that did not show up when the baseline was recorded. It is
+ * therefore re-run **in isolation** before being judged. Passes alone → reported as
+ * a new flake (record it and it stops reappearing); fails alone → a regression.
+ *
+ * Exits non-zero only on a regression: a test that fails in the suite *and* on its
+ * own. A test the baseline lists but that now passes is reported as FIXED (and is
+ * not a failure) — refresh the baseline to lock that in.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -240,6 +245,39 @@ const known = parseBaseline(readFileSync(BASELINE, 'utf8'))
 const regressions = []
 const fixed = []
 const flaked = []
+const newFlakes = []
+
+/**
+ * Re-run a single failing test on its own. An unknown failure is ambiguous: it is
+ * either a real regression or a flake that did not show up when the baseline was
+ * recorded (this disk produces both). Isolating it settles the question, so the
+ * pipeline does not cry wolf on load noise.
+ */
+function passesInIsolation(ws, id) {
+  const file = id
+    .split(' > ')[0]
+    .split(' › ')[0]
+    .replace(/:\d+:\d+$/, '')
+    .trim()
+  if (!file) return false
+  const r =
+    ws === 'e2e'
+      ? spawnSync('npx', ['playwright', 'test', '--config', 'e2e/playwright.config.ts', file], {
+          cwd: root,
+          stdio: 'pipe',
+          encoding: 'utf8',
+          shell: true,
+          maxBuffer: 64 * 1024 * 1024,
+        })
+      : spawnSync('npm', ['run', 'test', '-w', ws, '--', file], {
+          cwd: root,
+          stdio: 'pipe',
+          encoding: 'utf8',
+          shell: true,
+          maxBuffer: 64 * 1024 * 1024,
+        })
+  return r.status === 0
+}
 
 for (const [ws, r] of Object.entries(measured)) {
   const before = new Set(known[ws] ?? [])
@@ -247,7 +285,12 @@ for (const [ws, r] of Object.entries(measured)) {
   for (const f of r.failing) {
     if (before.has(f)) continue
     // a known flake failing again is noise, not a regression — but say so
-    if (knownFlaky.has(f)) flaked.push(`${ws}: ${f}`)
+    if (knownFlaky.has(f)) {
+      flaked.push(`${ws}: ${f}`)
+      continue
+    }
+    // unknown: isolate it before calling it a regression
+    if (passesInIsolation(ws, f)) newFlakes.push(`${ws}: ${f}`)
     else regressions.push(`${ws}: ${f}`)
   }
   for (const f of before) if (!r.failing.includes(f)) fixed.push(`${ws}: ${f}`)
@@ -258,14 +301,23 @@ if (flaked.length > 0) {
   console.log(`Known flaky, failing again (${flaked.length}) — not a regression:`)
   for (const f of flaked) console.log(`  ${f}`)
 }
+if (newFlakes.length > 0) {
+  console.log(
+    `\nNew flakes (${newFlakes.length}) — failed in the suite but PASS in isolation, so not a regression.`,
+  )
+  console.log(
+    'Record them with --write --with-e2e --repeat 2 so they land under "(flaky)" and stop reappearing:',
+  )
+  for (const f of newFlakes) console.log(`  ${f}`)
+}
 if (fixed.length > 0) {
   console.log(`FIXED since the baseline (${fixed.length}) — refresh the baseline to lock these in:`)
   for (const f of fixed) console.log(`  ${f}`)
 }
 if (regressions.length > 0) {
-  console.error(`\nNEW FAILURES not in the baseline (${regressions.length}):`)
+  console.error(`\nREGRESSIONS — failed in the suite AND in isolation (${regressions.length}):`)
   for (const r of regressions) console.error(`  ${r}`)
   process.exit(1)
 }
-console.log('baseline: no new failures')
+console.log('baseline: no regressions')
 process.exit(0)

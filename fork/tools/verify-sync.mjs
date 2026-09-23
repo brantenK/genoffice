@@ -121,15 +121,16 @@ function npm(args) {
   const r = spawnSync('npm', args, { cwd: root, stdio: 'pipe', encoding: 'utf8', shell: true })
   const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
   if (r.status === 0) return { ok: true, detail: '' }
-  // keep the summary readable: the first error line is the useful part
-  const firstError = out
+  // The useful part is the tail: each of these tools prints its own summary last.
+  // npm's own noise (`> script`, `npm error ...`) is stripped so the real reason
+  // survives instead of a progress line.
+  const lines = out
     .split('\n')
-    .map((l) => l.trim())
-    .find((l) => /error TS|✗|FAIL|not ok|violation|failed/i.test(l))
-  return {
-    ok: false,
-    detail: firstError ?? out.split('\n').filter(Boolean).slice(-1)[0] ?? 'failed',
-  }
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim() && !/^>/.test(l) && !/^npm (error|notice|warn)/.test(l))
+  const strong = lines.filter((l) => /FAILED|NEW FAILURES|error TS|violation|✗/.test(l))
+  const detail = (strong.length > 0 ? strong : lines.slice(-3)).slice(-3).join('\n      ')
+  return { ok: false, detail: detail || 'failed' }
 }
 
 function runGroup(label, checks) {
