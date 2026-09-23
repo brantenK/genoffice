@@ -1978,6 +1978,7 @@ export function Home() {
           <button
             key={item.ext}
             className="nav-item app-nav-item"
+            data-ext={item.ext}
             onClick={() => void item.action()}
             {...(item.hint ? { 'data-tip': item.hint } : {})}
           >

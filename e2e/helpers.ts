@@ -286,3 +286,18 @@ export async function waitForPageWithUrl(
     await app.waitForEvent('window', { timeout: Math.min(remaining, 1_000) }).catch(() => {})
   }
 }
+
+/**
+ * Open an editor app from Home.
+ *
+ * The fork's Home replaced upstream's `.quick-card` row with a grouped sidebar
+ * launcher, so specs navigate by the item's `ext` instead of by a localised card
+ * label ('AI Docs', 'AI Sheets', …). `ext` is one of docx / xlsx / pptx / pdf /
+ * md / html (OFFICE_APP_ITEMS) or crm / tenders / books (BUSINESS_APP_ITEMS) —
+ * see `apps/shell/src/renderer/src/Home.tsx`.
+ */
+export async function openAppFromHome(page: Page, ext: string): Promise<void> {
+  const item = page.locator(`.app-nav-item[data-ext="${ext}"]`)
+  await item.waitFor({ state: 'visible', timeout: 15_000 })
+  await item.click()
+}
