@@ -127,7 +127,7 @@ test.describe('docs web-HTML paste fonts', () => {
       state = await runs()
       expect(state.find((r) => r.text.includes('internal bare'))?.font).toBeNull()
     } finally {
-      await closeAndSaveVideo(launched)
+      await closeAndSaveVideo(launched, 'docs-web-paste-font')
     }
   })
 })

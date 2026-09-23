@@ -199,6 +199,86 @@ git push origin product
 A non-fast-forward mirror update is a stop condition, not an invitation to
 force-push.
 
+## Verify a sync
+
+Run `npm run verify:sync`. It is read-only and runs the gates in the order that
+matters, so nobody has to remember the sequence:
+
+1. the rebrand sweep **in `--dry` mode** — fails if it would change anything, so
+   "the tree is fully rebranded" is a check rather than a step to forget;
+2. `prebuild:locales` — must precede typecheck and tests, or newly merged i18n
+   keys render verbatim;
+3. the gates: brand, fork chrome, theme tokens, English comments, skill version,
+   formatting, typecheck, **e2e typecheck**, baseline;
+4. only if all of those pass: `build:all`, then e2e.
+
+`--fast` stops after step 3. Heavy steps are skipped when a cheap gate fails, so a
+broken tree does not cost a 20-minute e2e run.
+
+**`e2e/` is typechecked separately** (`npm run check:e2e-types`). It sits outside
+every app's tsconfig because it drives _built_ apps rather than importing them —
+which is exactly why a merge resolution there once dropped half a function,
+compiled clean, and only failed ~25 minutes into an e2e run. Add a global a spec
+needs to `e2e/env.d.ts`, never a cast.
+
+### Compare against the baseline, always
+
+`fork/BASELINE.md` records the tests that are _already_ failing, and
+`npm run check:baseline` fails only on failures the baseline does not list. It
+records failing test **IDs**, not counts, because a count can match while the set
+of failures changes underneath it.
+
+Refresh it after a fix lands:
+
+```bash
+node fork/tools/baseline.mjs --write --with-e2e
+```
+
+Before the _next_ sync, re-record it at the pre-merge commit. That comparison is
+the single highest-value thing this runbook asks for: in the 2026-09-22 sync it
+proved that 16 of the 19 "merge-broken" e2e specs were already broken by the
+fork's own Home redesign, which is the difference between fixing the merge and
+fixing the wrong thing.
+
+### Run heavy suites one at a time
+
+This checkout lives on a OneDrive-synced disk. Two heavy suites at once produce
+failures that pass in isolation — measured here as `sheets` failing a _different_
+three tests each run, and Playwright `locator.click` never becoming "visible,
+enabled and stable". If a failure passes alone, treat the isolated run as the
+verdict and re-run the full suite serially; do not "fix" it.
+
+## Porting an upstream spec to the fork's UI
+
+Upstream's e2e specs are written against upstream's Home and are refreshed with
+every sync, so this is recurring maintenance, not a one-off. The fork's Home
+replaced upstream's `.quick-card` row with a grouped sidebar launcher, so a spec
+that looks up a card by its label (`{ hasText: 'AI Docs' }`, `.quick-card`
+`.nth(1)`) will never find it.
+
+Do this instead — it is a one-line change per call site:
+
+```ts
+import { openAppFromHome } from './helpers'
+
+// upstream:  await page.locator('.quick-card', { hasText: 'AI Sheets' }).click()
+// fork:      await openAppFromHome(page, 'xlsx')
+```
+
+`ext` is `docx` / `xlsx` / `pptx` / `pdf` / `md` / `html` for the Office apps and
+`crm` / `tenders` / `books` for the business apps. The items carry `data-ext`
+precisely so specs never match a translated label — several specs run in French.
+
+Other stable hooks: the remaining `.quick-card` is the genuine "Open Local File"
+browse button, and the canvas create action carries `data-action="new-doc"`. When
+the fork diverges from an upstream selector, **add a `data-*` hook to the fork's
+markup rather than teaching the spec a fork-specific label** — the hook is
+invisible, additive, and keeps the next sync's port mechanical.
+
+Do not weaken an assertion to make a ported spec pass, and do not revert a
+deliberate fork divergence to satisfy a stale upstream spec. If the divergence is
+real, the spec is what changes.
+
 ## Rare exception: owner-authorized mirror repair
 
 The only acceptable reason to force-update `origin/main` is an explicit owner

@@ -74,7 +74,7 @@ for (const lang of ['fr', 'en']) {
         expect(right, `${name} paints past the dialog card`).toBeLessThanOrEqual(innerRight + 1)
       }
     } finally {
-      await closeAndSaveVideo(launched)
+      await closeAndSaveVideo(launched, `sheets-format-cells-overflow-${lang}`)
     }
   })
 }

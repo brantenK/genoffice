@@ -1994,7 +1994,11 @@ export function Home() {
   function renderCanvasActions(scope: 'global' | 'folder') {
     return (
       <div className="canvas-actions">
-        <button className="canvas-primary" onClick={() => void window.aiOffice.newDoc(newFileOpts)}>
+        <button
+          className="canvas-primary"
+          data-action="new-doc"
+          onClick={() => void window.aiOffice.newDoc(newFileOpts)}
+        >
           {t('appNavNewDoc')}
         </button>
         {scope === 'global' && (

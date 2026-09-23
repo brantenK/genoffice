@@ -35,9 +35,14 @@ async function openFromHome(app: ElectronApplication, home: Page, file: string):
 
 /** the fix's observable end state: the document's editable surface holds focus */
 async function waitForEditableFocus(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.activeElement?.isContentEditable === true, null, {
-    timeout: 30_000,
-  })
+  await page.waitForFunction(
+    () => {
+      const active = document.activeElement
+      return active instanceof HTMLElement && active.isContentEditable
+    },
+    null,
+    { timeout: 30_000 },
+  )
 }
 
 /** Playwright's keyboard bypasses Electron-level focus, so the shell layer is

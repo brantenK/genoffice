@@ -427,11 +427,11 @@ async function requireBridge(tenders: Page, methods: string[]): Promise<void> {
 }
 
 async function listTrash(tenders: Page): Promise<TrashEntry[]> {
-  return tenders.evaluate(async () => {
+  return tenders.evaluate<TrashEntry[]>(async () => {
     const api = (window as unknown as { tendersApi: any }).tendersApi
     const res = await api.listDocumentTrash()
     if (!res?.ok) throw new Error(`listDocumentTrash failed: ${res?.error ?? 'unknown'}`)
-    return (res.entries ?? []) as unknown[]
+    return res.entries ?? []
   })
 }
 

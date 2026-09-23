@@ -26,7 +26,7 @@ for (const app of ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']) {
         await page.addStyleTag({ content: await readFile(join(__dirname, '..', path), 'utf8') })
       }
       const dock = page.locator(sheets ? '.copilot' : '.ai-dock')
-      const document = page.locator('.fixture-document')
+      const fixture = page.locator('.fixture-document')
       const nav = page.locator('nav')
       for (const side of ['left', 'right', 'left']) {
         await page.evaluate((side) => {
@@ -38,7 +38,7 @@ for (const app of ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']) {
         expect(iconTransform).toBe(side === 'right' ? 'matrix(-1, 0, 0, 1, 0, 0)' : 'none')
         await expect.poll(async () => Math.round((await dock.boundingBox())!.width)).toBe(360)
         const box = (await dock.boundingBox())!
-        const docBox = (await document.boundingBox())!
+        const docBox = (await fixture.boundingBox())!
         expect(side === 'left' ? box.x < docBox.x : box.x > docBox.x).toBe(true)
         expect((await nav.boundingBox())!.x).toBeCloseTo(docBox.x, 0)
         const handle = (await page.locator('.ai-panel-resizer').boundingBox())!
@@ -60,7 +60,7 @@ for (const app of ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']) {
         }
       }, sheets)
       await expect.poll(async () => Math.round((await dock.boundingBox())!.width)).toBe(34)
-      expect((await dock.boundingBox())!.x).toBeGreaterThan((await document.boundingBox())!.x)
+      expect((await dock.boundingBox())!.x).toBeGreaterThan((await fixture.boundingBox())!.x)
     } finally {
       await browser.close()
     }

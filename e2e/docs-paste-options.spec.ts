@@ -149,7 +149,7 @@ test.describe('docs paste options chip', () => {
       await editorPage.keyboard.type('x')
       await expect(chip).toBeHidden()
     } finally {
-      await closeAndSaveVideo(launched)
+      await closeAndSaveVideo(launched, 'docs-paste-options')
     }
   })
 })

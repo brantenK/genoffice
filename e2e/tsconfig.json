@@ -1,0 +1,20 @@
+{
+  // e2e/ drives the built apps, so it is not part of any app's program. Without
+  // this file `npm run typecheck` never sees it: a merge resolution there once
+  // dropped half a function, compiled clean, and only failed ~25 minutes into an
+  // e2e run (see fork/COMPLIANCE.md). Run it with `npm run check:e2e-types`.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // jsx: the specs import types from packages/ui, whose index pulls .tsx sources.
+    "jsx": "react-jsx",
+    // vite/client: the app sources the specs import types from use `?raw` imports.
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "./**/*.ts",
+    // same declarations the apps' tsconfigs pull in for their source imports
+    "../packages/pdf2docx/src/bidi-js.d.ts",
+    "../packages/html2docx/src/raw.d.ts"
+  ]
+}
