@@ -722,9 +722,9 @@ describe('strict civil-date handling', () => {
   )
 
   it.each([
-    ['November 30, 2026', '2026-11-30T23:59:00.000Z'],
-    ['Dec 18, 2026 14:30', '2026-12-18T14:30:00.000Z'],
-    ['30 November 2026 at 11h00', '2026-11-30T11:00:00.000Z'],
+    ['November 30, 2026', '2026-11-30T21:59:00.000Z'],
+    ['Dec 18, 2026 14:30', '2026-12-18T12:30:00.000Z'],
+    ['30 November 2026 at 11h00', '2026-11-30T09:00:00.000Z'],
   ])('parses supported closing date %j to the correct finite instant', (raw, expectedIso) => {
     const parsed = parseClosingDate(raw)
 
@@ -741,11 +741,11 @@ describe('strict civil-date handling', () => {
   )
 
   it.each([
-    ['Dec 18, 2026 12:30 am', '2026-12-18T00:30:00.000Z'],
-    ['Dec 18, 2026 12:30 pm', '2026-12-18T12:30:00.000Z'],
-    ['Dec 18, 2026 1:30 pm', '2026-12-18T13:30:00.000Z'],
-    ['Dec 18, 2026 00:30', '2026-12-18T00:30:00.000Z'],
-    ['Dec 18, 2026 23:59', '2026-12-18T23:59:00.000Z'],
+    ['Dec 18, 2026 12:30 am', '2026-12-17T22:30:00.000Z'],
+    ['Dec 18, 2026 12:30 pm', '2026-12-18T10:30:00.000Z'],
+    ['Dec 18, 2026 1:30 pm', '2026-12-18T11:30:00.000Z'],
+    ['Dec 18, 2026 00:30', '2026-12-17T22:30:00.000Z'],
+    ['Dec 18, 2026 23:59', '2026-12-18T21:59:00.000Z'],
   ])('accepts valid 12-hour or 24-hour clock input %j', (raw, expectedIso) => {
     expect(parseClosingDate(raw)?.toISOString()).toBe(expectedIso)
   })
@@ -815,5 +815,96 @@ describe('strict civil-date handling', () => {
       if (originalTimezone === undefined) delete process.env.TZ
       else process.env.TZ = originalTimezone
     }
+  })
+})
+
+describe('closing-day deadline gate', () => {
+  /** Fully prepared except for the deadline: a confirmed signature-only returnable. */
+  function preparedTender(closingDate: string): TenderRecord {
+    return tender({
+      closingDate,
+      signatureChecks: { sbd_forms: true },
+      requirements: [
+        requirement({
+          id: 'req-sbd',
+          ruleKey: 'sbd_forms',
+          title: 'Signed SBD returnable forms',
+          linkedVaultDocId: null,
+        }),
+      ],
+    })
+  }
+
+  const CLOSING = '30 November 2026 at 11:00'
+
+  it.each([
+    ['the day before closing', '2026-11-29T09:00:00.000Z', true],
+    ['one hour before closing', '2026-11-30T08:00:00.000Z', true],
+    ['one minute before closing', '2026-11-30T08:59:00.000Z', true],
+    ['exactly at the closing instant', '2026-11-30T09:00:00.000Z', false],
+    ['one hour after closing', '2026-11-30T10:00:00.000Z', false],
+  ])('compares instants, not rounded days, at %s', (_label, nowIso, open) => {
+    const report = assessReadiness(preparedTender(CLOSING), [], MOCK_COMPANY, new Date(nowIso))
+    const check = blockingCheck(report, 'deadline')
+
+    // The gate must not round the remaining time away: on the closing day the
+    // deadline is still open, and only the closing instant closes the bid.
+    expect(check?.passed).toBe(open)
+    expect(report.ready).toBe(open)
+    expect(check?.detail).not.toContain('0 day(s)')
+    expect(check?.detail).not.toContain('day(s)')
+  })
+
+  it('credits the deadline dimension while the closing day is still open', () => {
+    const open = assessReadiness(
+      preparedTender(CLOSING),
+      [],
+      MOCK_COMPANY,
+      new Date('2026-11-30T08:00:00.000Z'),
+    )
+    const closed = assessReadiness(
+      preparedTender(CLOSING),
+      [],
+      MOCK_COMPANY,
+      new Date('2026-11-30T10:00:00.000Z'),
+    )
+
+    expect(blockingCheck(open, 'deadline')?.detail).toBe('Closes in 1h 0m.')
+    expect(blockingCheck(closed, 'deadline')?.detail).toBe('This tender closed 1h 0m ago.')
+    // The deadline check carries weight 20; its score follows the same verdict.
+    expect(open.score - closed.score).toBe(20)
+    expect(open.blockingFailedCount).toBe(0)
+    expect(closed.blockingFailedCount).toBe(1)
+  })
+
+  it('parses a closing line with a trailing parenthetical note instead of blocking on null', () => {
+    const raw = '30 November 2026 at 11:00 (No late submissions will be accepted)'
+    const parsed = parseClosingDate(raw)
+
+    expect(parsed?.toISOString()).toBe('2026-11-30T09:00:00.000Z')
+    const report = assessReadiness(
+      preparedTender(raw),
+      [],
+      MOCK_COMPANY,
+      new Date('2026-11-30T08:00:00.000Z'),
+    )
+    expect(blockingCheck(report, 'deadline')?.passed).toBe(true)
+    expect(report.ready).toBe(true)
+  })
+
+  it.each([
+    ['30 November 2026 (11:00)'],
+    ['Friday, 30 November 2026 (11:00)'],
+    ['30 November 2026 deadline extended to 15 December 2026'],
+  ])('never swallows trailing date/time information in %j', (raw) => {
+    expect(parseClosingDate(raw)).toBeNull()
+    const report = assessReadiness(
+      preparedTender(raw),
+      [],
+      MOCK_COMPANY,
+      new Date('2026-11-01T00:00:00.000Z'),
+    )
+    expect(blockingCheck(report, 'deadline')?.passed).toBe(false)
+    expect(report.ready).toBe(false)
   })
 })

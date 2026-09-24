@@ -1,7 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- script-src 'wasm-unsafe-eval': pdf.js image codecs (jbig2/openjpeg/qcms);
+         worker-src 'self' blob: is required by the bundled pdf.js worker;
+         connect-src blob: is required to fetch a document the app opened from a
+         `blob:` URL; `data:` by the same read path. No WebSocket origin is
+         allowed: the packaged build is a `file://` document, so `ws://localhost:*`
+         would let a compromised renderer reach any local listener, and the dev
+         server's HMR socket is same-origin (covered by `'self'`).
+         object-src/base-uri/form-action are closed explicitly because this policy
+         sets no `default-src` fallback for them beyond `'self'`. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Zanostack Tenders</title>
   </head>

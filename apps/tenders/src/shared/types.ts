@@ -184,6 +184,34 @@ export interface VaultDoc {
   metadata: Record<string, string>
 }
 
+/**
+ * The fetchable form of a bundled demonstration asset: document-relative, so it
+ * resolves next to the renderer document. `publicDir` copies
+ * `apps/tenders/public/**` into `out/renderer/**`, so `./demo/…` works in a
+ * packaged build and in the dev server, while an absolute `/demo/…` resolves
+ * against the *drive root* under `file://` (`file:///C:/demo/…`) and never
+ * loads.
+ *
+ * Note the stored demo domain deliberately keeps the absolute form — those bytes
+ * are the frozen historical snapshot that v1→v2 demo recognition compares in
+ * full (see `MOCK_VAULT` in `renderer/src/mock/vault.ts`). The stored value is
+ * never used as a URL directly; `demoAssetRelativeUrl` converts it on read.
+ */
+export const DEMO_ASSET_DIR = './demo/'
+
+/**
+ * Is this file reference a bundled demonstration asset rather than a managed
+ * file on disk? Demo assets are read-only bundle contents: they are never
+ * opened/trashed through the managed-document IPC (which confines paths to
+ * `<userData>/tenders/{documents,vault}`) and never treated as a workspace path.
+ * Both the stored absolute `/demo/…` shape and the fetchable `./demo/…` shape
+ * answer yes, so one predicate covers every call site.
+ */
+export function isDemoAssetUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  return url.startsWith(DEMO_ASSET_DIR) || url.startsWith('/demo/')
+}
+
 /** A frozen readiness checkpoint captured when a submission is recorded. */
 export interface TenderReadinessSnapshot {
   /** True only when a current, blockers-free checkpoint was captured. */
@@ -273,6 +301,14 @@ export interface TenderRecord {
    * readiness only enforces the verification gate when it is present.
    */
   intakeVerification?: IntakeVerification
+  /**
+   * Present only when the tender was shredded from the bundled sample RFP
+   * (see `TenderDataOrigin`). Additive and optional: absent means the user's own
+   * import, and a document written before this field existed validates
+   * unchanged. Persisted with the tender, so the "Demo import" marker survives a
+   * restart — unlike the session-scoped renderer tag it replaces.
+   */
+  dataOrigin?: TenderDataOrigin
   /** Proof-of-submission record. Additive; absent on legacy tenders. */
   submission?: TenderSubmissionRecord | null
   /** Outcome record. Additive; absent until an outcome is known. */
@@ -428,6 +464,17 @@ export interface TendersDataV1 {
 }
 
 export type WorkspaceDataOrigin = 'user' | 'demo'
+
+/**
+ * Origin of a single tender. Deliberately narrower than
+ * `WorkspaceDataOrigin`: `'demo'` is the only value a document may carry, and
+ * absent means "the user's own import". The flag therefore labels demonstration
+ * data and can never be used to *promote* a record — the renderer cannot write
+ * `'user'` here, and the schema rejects that value outright (see `TENDER_DATA_ORIGINS`
+ * in `tenders-schema.ts`). Billing/sync privilege stays gated on the
+ * workspace-level `dataOrigin`, which this field cannot influence.
+ */
+export type TenderDataOrigin = 'demo'
 
 /** Schema v2 workspace: origin is explicit so demo data cannot be mistaken for user data. */
 export interface TendersWorkspaceV2 extends CompanyWorkspace {

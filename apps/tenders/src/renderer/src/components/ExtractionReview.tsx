@@ -51,6 +51,12 @@ import type {
 } from '../../shared/types'
 import { SUBMISSION_METHOD_LABEL } from '../../shared/types'
 import { parseClosingDate, unreviewedOcrPages } from '../readiness'
+import {
+  extractMoneyLiterals,
+  formatRandAmount,
+  parseMoney,
+  parseMoneyDetailed,
+} from '../../../shared/money'
 import { useTendersStore } from '../store'
 import type {
   FieldReview,
@@ -250,13 +256,22 @@ const REF_LABEL_RE = /reference|ref\s*(no|number)|tender\s*no|bid\s*(no|number)/
 const ISSUER_LABEL_RE =
   /issued\s*by|issuing\s*authority|employer|contracting\s*authority|procuring\s*entity|department|municipal|authority/i
 const DESTINATION_LABEL_RE = /submit|deliver|deposit|lodge|hand\s*in|bid\s*box|tender\s*box|portal/i
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
-const MONEY_RE = /(?:R|ZAR)\s?\d[\d\s.,]{3,}/gi
+/**
+ * Two copies of the same e-mail pattern on purpose: `.test()` on a `/g` regex
+ * keeps `lastIndex` between calls, so a probe sharing the collector's regex
+ * would answer "no e-mail here" the second time it saw the same line.
+ */
+const EMAIL_TEST_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
+const EMAIL_RE = new RegExp(EMAIL_TEST_RE.source, 'g')
 const VALUE_LABEL_RE =
   /(estimated|contract|bid|tender|project|budget)\s*(value|amount|budget|price|sum)/i
 
-function inferMethodFromText(text: string): SubmissionMethod | null {
-  if (EMAIL_RE.test(text)) return 'EMAIL'
+/**
+ * Infer how the bid has to be handed over from one source line. Stateless: the
+ * same line always yields the same method.
+ */
+export function inferMethodFromText(text: string): SubmissionMethod | null {
+  if (EMAIL_TEST_RE.test(text)) return 'EMAIL'
   if (/bid\s*box|tender\s*box|receptacle|foyer|reception|registry|counter|security/i.test(text))
     return 'PHYSICAL'
   if (/portal|e-?tender|online|website|e-?submission|electronic/i.test(text)) return 'ELECTRONIC'
@@ -319,23 +334,17 @@ function emailCandidates(lines: SourceLine[]): ReviewCandidate[] {
   return out.slice(0, 4)
 }
 
-function parseMoney(raw: string): number | null {
-  const digits = raw.replace(/[^\d]/g, '')
-  if (!digits) return null
-  const value = Number(digits)
-  return Number.isFinite(value) && value > 0 ? value : null
-}
-
 function valueCandidates(lines: SourceLine[]): ReviewCandidate[] {
   const seen = new Set<string>()
   const out: ReviewCandidate[] = []
   for (const line of lines) {
     const labelled = VALUE_LABEL_RE.test(line.text)
-    if (!MONEY_RE.test(line.text) && !labelled) continue
-    MONEY_RE.lastIndex = 0
-    const matches = line.text.match(MONEY_RE) ?? []
-    for (const match of matches) {
-      const parsed = parseMoney(match)
+    const literals = extractMoneyLiterals(line.text)
+    for (const literal of literals) {
+      // Every literal goes through the shared rand parser, so a candidate is
+      // never the digits a mangled amount happens to contain: an ambiguous
+      // literal ("R 1.200") or an absurd one is dropped instead of offered.
+      const parsed = parseMoney(literal)
       if (parsed === null) continue
       const key = String(parsed)
       if (seen.has(key)) continue
@@ -850,7 +859,7 @@ function stateChip(
 
 function formatMoneyValue(value: string): string {
   const parsed = parseMoney(value)
-  return parsed === null ? value : `R ${parsed.toLocaleString('en-ZA')}`
+  return parsed === null ? value : formatRandAmount(parsed)
 }
 
 function displayCandidateValue(field: ReviewFieldKey, value: string): string {
@@ -1125,6 +1134,29 @@ function PagesSection({
 
 // ── main component ───────────────────────────────────────────────────────────
 
+/** The write a valuation edit must make, refused or not. */
+export type ValuationEdit =
+  | { ok: true; patch: { estimatedValue: number | null; pricingConfirmed: boolean } }
+  | { ok: false; message: string; patch: { pricingConfirmed: false } }
+
+/**
+ * The rand edit behind the estimated-value field.
+ *
+ * An amount is only ever confirmed when the shared parser read it exactly. A
+ * refusal still *withdraws* the confirmation: the field no longer holds the
+ * amount the user confirmed, so leaving `pricingConfirmed: true` would let the
+ * client-facing proposal keep printing the earlier number while the field shows
+ * something else. The recorded amount itself is left alone so the user can fall
+ * back to it — it simply stops counting as confirmed.
+ */
+export function valuationEdit(raw: string): ValuationEdit {
+  const value = raw.replace(/\s+/g, ' ').trim()
+  if (!value) return { ok: true, patch: { estimatedValue: null, pricingConfirmed: false } }
+  const parsed = parseMoneyDetailed(value)
+  if (!parsed.ok) return { ok: false, message: parsed.message, patch: { pricingConfirmed: false } }
+  return { ok: true, patch: { estimatedValue: parsed.value, pricingConfirmed: true } }
+}
+
 export function ExtractionReview({
   tender,
   review,
@@ -1230,13 +1262,15 @@ export function ExtractionReview({
       return null
     }
     if (field === 'estimatedValue') {
-      if (!value) {
-        updateTender(tender.id, { estimatedValue: null, pricingConfirmed: false })
-        return null
+      const edit = valuationEdit(value)
+      updateTender(tender.id, edit.patch)
+      if (!edit.ok) {
+        // The refusal withdraws the confirmation and puts the review back to
+        // unconfirmed, so neither the chip nor the proposal claims a value the
+        // user has just tried to replace.
+        updateFieldReview(tender.id, field, { state: 'unconfirmed', reviewedAt: null })
+        return edit.message
       }
-      const parsed = parseMoney(value)
-      if (parsed === null) return 'Enter a rand amount, for example 1 200 000.'
-      updateTender(tender.id, { estimatedValue: parsed, pricingConfirmed: true })
       return null
     }
     return 'Unsupported field.'

@@ -25,8 +25,15 @@ import {
 } from '../src/shared/rules'
 import type { ExtractedPage, PageExtraction, PageLine } from '../src/shared/types'
 
-/** Closing-date strings the permissive renderer parser accepts but the strict schema rejects. */
-const DIVERGENT_CLOSING_DATES = [
+/**
+ * Closing-date strings the shared `parseClosingDate` rejects, so they must reach
+ * the store as `null`, never as raw text. Each carries date/time information the
+ * parser deliberately refuses to guess at: a weekday-prefixed date, a bracketed
+ * clock time, a comma-separated `11h00` tail, and a year-first slash date. The
+ * same values WITHOUT the comma (`30 Nov 2026 11h00`) are supported — it is the
+ * exact string that is unsupported, not the date it describes.
+ */
+const UNSUPPORTED_CLOSING_DATES = [
   'Friday, 30 November 2026',
   '30 November 2026 (11:00)',
   '30 Nov 2026, 11h00',
@@ -585,19 +592,49 @@ describe('Shredder Heuristics & Clause Reconstruction', () => {
   })
 
   describe('6. Closing-date sanitization at the shred boundary', () => {
-    it('strict parser rejects divergent strings while the display parser accepts them', () => {
-      for (const raw of DIVERGENT_CLOSING_DATES) {
+    it('has one closing-date parser: the display parser IS the strict schema parser', () => {
+      // The audit's closing-date defect: readiness' strict UTC parser and the
+      // badge's lenient local-time parser were two functions, so the countdown
+      // badge and the readiness gate could disagree about the same RFP line.
+      // They are now the same shared `parseClosingDate`; identity is asserted
+      // here (and in closing-date-parser.test.ts) so a second parser cannot
+      // reappear and reopen the divergence.
+      expect(parseDisplayClosingDate).toBe(parseStrictClosingDate)
+
+      // ...and the shred boundary stays strict: no supported form means null,
+      // never the raw text, so an unparseable closing date cannot be stored.
+      for (const raw of UNSUPPORTED_CLOSING_DATES) {
         expect(parseStrictClosingDate(raw), `strict should reject ${raw}`).toBeNull()
-        expect(parseDisplayClosingDate(raw), `display should accept ${raw}`).not.toBeNull()
       }
     })
 
     it('stores null for extracted dates the strict schema rejects (never the raw text)', () => {
-      for (const raw of DIVERGENT_CLOSING_DATES) {
+      for (const raw of UNSUPPORTED_CLOSING_DATES) {
         const doc = makeDoc(makePage(1, [`Closing Date: ${raw}`]))
         const meta = extractTenderMeta(doc, 'Fallback Title')
         expect(meta.closingDate, raw).toBeNull()
       }
+    })
+
+    it('reports a refused closing line to the review UI instead of dropping it', () => {
+      // A realistic SA closing line the parser cannot represent: the raw text
+      // must still reach the user (via the review conflict notes) so they can
+      // confirm or retype it, rather than the deadline vanishing with no reason.
+      const doc = makeDoc(makePage(1, ['Closing Date: 30 November 2026, 11:00']))
+      const meta = extractTenderMeta(doc, 'Fallback Title')
+
+      expect(meta.closingDate).toBeNull()
+      expect(meta.candidates.closingDate).toEqual([])
+      const note = meta.conflicts.find((candidate) => /could not be read/i.test(candidate))
+      expect(note).toBeDefined()
+      expect(note).toContain('30 November 2026, 11:00')
+    })
+
+    it('adds no closing-date note when the document carried a readable closing line', () => {
+      const doc = makeDoc(makePage(1, ['Closing Date: 30 November 2026 at 11:00']))
+      const meta = extractTenderMeta(doc, 'Fallback Title')
+
+      expect(meta.conflicts.some((note) => /could not be read/i.test(note))).toBe(false)
     })
 
     it('preserves an extracted date the strict schema accepts', () => {

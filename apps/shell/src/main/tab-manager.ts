@@ -19,7 +19,7 @@ import {
   requestMarkdownClose,
 } from '../../../markdown/src/main/markdown-main'
 import { createCrmView } from '../../../crm/src/main/crm-main'
-import { createTendersView } from '../../../tenders/src/main/tenders-main'
+import { createTendersView, requestTendersClose } from '../../../tenders/src/main/tenders-main'
 import { createBooksView } from '../../../books/src/main/books-main'
 import {
   createHtmlPresentView,
@@ -597,6 +597,14 @@ export class TabManager {
       .map((t) => ({ id: t.id, webContents: t.view!.webContents }))
   }
 
+  /** all live tenders tabs — unsaved work lives renderer-side behind an autosave
+   *  debounce, so the caller flushes async instead of reading a dirty flag */
+  tendersTabs(): Array<{ id: string; webContents: WebContents }> {
+    return this.tabs
+      .filter((t) => t.kind === 'tenders' && t.view)
+      .map((t) => ({ id: t.id, webContents: t.view!.webContents }))
+  }
+
   /** all live slides tabs (MCP bridge resolves its new tab's webContents through this) */
   slidesTabs(): Array<{ id: string; webContents: WebContents }> {
     return this.tabs
@@ -642,6 +650,11 @@ export class TabManager {
         this.closingIds.delete(id)
       }
     }
+    // tenders autosaves behind a 300 ms debounce and keeps no main-side dirty
+    // flag, so the guard is the flush itself: it commits any pending edit and a
+    // clean view answers immediately. Without it, closing the tab inside the
+    // debounce window drops the edit.
+    if (!closeGuard && tab.kind === 'tenders' && tab.view) closeGuard = requestTendersClose
     if (closeGuard && tab.view) {
       // Bring the tab into view so the save prompt has visible context.
       if (this.activeId !== id) this.activateTab(id)
@@ -660,12 +673,32 @@ export class TabManager {
    * document's unsaved changes (the MCP close tool saves or discards first):
    * this is the plain removal step of `closeTab`, so a dialog never appears in
    * a flow the user did not start.
+   *
+   * Tenders is the exception: its unsaved work lives renderer-side behind the
+   * autosave debounce and main keeps no dirty flag for it, so a caller cannot
+   * establish that the edit was settled — and this method used to destroy the
+   * view and drop a debounced edit silently. A tenders tab is therefore routed
+   * through the same flush guard `closeTab` uses and removed once the flush
+   * settles; `true` means the close was accepted (a flush that cannot commit
+   * still prompts and keeps the tab).
+   *
    * Returns false when there is no such tab (already closed) or one is mid-prompt.
    */
   closeTabWithoutPrompt(id: string): boolean {
     if (id === HOME_ID) return false
     const tab = this.tabs.find((t) => t.id === id)
     if (!tab || this.closingIds.has(id)) return false
+    if (tab.kind === 'tenders' && tab.view) {
+      const webContents = tab.view.webContents
+      this.closingIds.add(id)
+      void requestTendersClose(webContents, this.shellWindow)
+        .catch(() => false)
+        .then((mayClose) => {
+          this.closingIds.delete(id)
+          if (mayClose) this.removeTab(id)
+        })
+      return true
+    }
     this.removeTab(id)
     return true
   }

@@ -67,6 +67,60 @@ describe('preload tenders bridge', () => {
     expect(invoke).toHaveBeenCalledWith(TENDERS_CHANNELS.deleteDocument, deleteReq)
   })
 
+  it('projects the tender id into the proposal payload so main can verify readiness', async () => {
+    await exposed!.draftProposalDoc({
+      id: 'tender-1',
+      title: 'Supply and Delivery of Office Computers',
+      referenceNumber: 'ICT/2026/041',
+      issuingBody: 'Provincial Administration Office',
+      closingDate: '2026-12-18',
+      estimatedValue: 115000,
+      pricingConfirmed: true,
+      status: 'IN_PROGRESS',
+      fileUrl: 'documents/rfp.pdf',
+      requirements: [
+        {
+          id: 'req-tax',
+          title: 'Valid SARS Tax Clearance / TCS PIN',
+          verbatimClause: 'Bidders must submit valid proof of tax compliance.',
+          isMandatory: true,
+          status: 'FULFILLED',
+          linkedVaultDocId: 'vault-tax',
+          healthStatus: 'VALID',
+          ruleKey: 'tax_pin',
+          reason: null,
+          notApplicableReason: null,
+          notes: null,
+          riskLevel: 'CRITICAL_DISQUALIFIER',
+        },
+      ],
+      milestones: [
+        { id: 'ms-1', name: 'Delivery', amount: 115000, dueDate: '2026-11-30', status: 'PENDING' },
+      ],
+      signatureChecks: { declaration: true },
+    })
+
+    expect(invoke).toHaveBeenCalledWith(
+      TENDERS_CHANNELS.draftProposalDoc,
+      expect.objectContaining({ id: 'tender-1', pricingConfirmed: true }),
+    )
+    const payload = invoke.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    // The readiness-critical fields survive the projection; unrelated record
+    // fields (e.g. fileUrl, riskLevel) do not.
+    expect(payload.id).toBe('tender-1')
+    expect(payload).not.toHaveProperty('fileUrl')
+    expect(payload.requirements).toEqual([
+      expect.objectContaining({ id: 'req-tax', ruleKey: 'tax_pin', status: 'FULFILLED' }),
+    ])
+    expect((payload.requirements as Array<Record<string, unknown>>)[0]).not.toHaveProperty(
+      'riskLevel',
+    )
+    expect(payload.milestones).toEqual([
+      { id: 'ms-1', name: 'Delivery', amount: 115000, dueDate: '2026-11-30' },
+    ])
+    expect(payload.signatureChecks).toEqual({ declaration: true })
+  })
+
   it.each([
     ['listDocumentTrash', TENDERS_CHANNELS.listDocumentTrash, [] as unknown[]],
     ['restoreDocument', TENDERS_CHANNELS.restoreDocument, [{ id: 'trash-1' }]],

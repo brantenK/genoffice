@@ -29,6 +29,7 @@ import {
 } from 'electron'
 import type { MenuItemConstructorOptions, NativeImage, WebContents } from 'electron'
 import { tabStripOverlay } from './title-bar-overlay'
+import { newestLegacyProfileDir } from './legacy-user-data'
 import menuDocxIcon1x from './assets/menu-docx.png?asset'
 import menuDocxIcon2x from './assets/menu-docx@2x.png?asset'
 import menuXlsxIcon1x from './assets/menu-xlsx.png?asset'
@@ -249,7 +250,10 @@ import {
 } from '../../../html/src/main/html-main'
 import { configureCrmRuntime } from '../../../crm/src/main/crm-main'
 import { createCrmTenderPort } from '../../../crm/src/main/tender-port'
-import { configureTendersRuntime } from '../../../tenders/src/main/tenders-main'
+import {
+  configureTendersRuntime,
+  requestTendersClose,
+} from '../../../tenders/src/main/tenders-main'
 import { createBooksTenderPort } from '../../../books/src/main/tender-port'
 import { configureBooksRuntime } from '../../../books/src/main/books-main'
 import type {
@@ -423,12 +427,19 @@ if (headlessArgv.kind !== 'none') {
   app.dock?.hide()
 }
 
-// The product rename from "AI Office" to Zanostack changed the userData path; migrate old user data once
+// Every product name this app has ever had was its own Electron userData
+// directory, so an upgrade from any of them has to carry the profile across. The
+// list of names, and the mtime ranking that picks between them, live in
+// `./legacy-user-data` so a test can pin the list against `fork/brand.json`
+// without booting this process (see `tests/legacy-user-data-dirs.test.ts`).
+// Migrate old user data once, when the renamed product's profile is still empty.
 if (app.isPackaged && automationMode.disposition === 'normal') {
-  const oldDir = join(app.getPath('appData'), 'AI Office')
   const newDir = app.getPath('userData')
   const newEmpty = !existsSync(newDir) || readdirSync(newDir).length === 0
-  if (newEmpty && existsSync(oldDir)) cpSync(oldDir, newDir, { recursive: true })
+  if (newEmpty) {
+    const oldDir = newestLegacyProfileDir(app.getPath('appData'))
+    if (oldDir) cpSync(oldDir, newDir, { recursive: true })
+  }
 }
 
 // module build outputs: packaged builds carry them as extraResources
@@ -525,7 +536,11 @@ if (!invalidAutomationLaunch) {
   const booksTenderPort = createBooksTenderPort({ userDataDir: tendersUserDataDir })
   configureTendersRuntime({
     preloadPath: join(TENDERS_OUT, 'preload', 'index.js'),
-    rendererUrl: process.env.TENDERS_RENDERER_URL,
+    // Dev-server override only. TENDERS_RENDERER_URL is also the *trusted* origin
+    // for every privileged Tenders handler, so honouring it in a packaged app let
+    // anything that could set the variable point the view at remote code that
+    // then held full read/write over the user's documents.
+    rendererUrl: app.isPackaged ? undefined : process.env.TENDERS_RENDERER_URL,
     rendererFile: join(TENDERS_OUT, 'renderer', 'index.html'),
     openGeneratedPath: (path) => openGeneratedDocument(path),
     onOpenCrm: () => newCrmTab(),
@@ -3156,6 +3171,8 @@ function createShellWindow(): void {
   // the same save/don't-save/cancel prompt; any cancel aborts the close.
   // docs dirtiness lives renderer-side, so any live docs tab forces the async path
   // and gets queried there (clean tabs pass through without activation).
+  // tenders autosaves behind a debounce, so any live tenders tab is flushed the
+  // same way (a clean view answers immediately and the close proceeds).
   let closeConfirmed = false
   win.on('close', (event) => {
     if (closeConfirmed) return
@@ -3165,13 +3182,15 @@ function createShellWindow(): void {
     const dirtyHtml = manager.dirtyHtmlTabs()
     const dirtySlides = manager.dirtySlidesTabs()
     const docsTabs = manager.docsTabs()
+    const tendersTabs = manager.tendersTabs()
     if (
       dirtySheets.length === 0 &&
       dirtyPdf.length === 0 &&
       dirtyMarkdown.length === 0 &&
       dirtyHtml.length === 0 &&
       dirtySlides.length === 0 &&
-      docsTabs.length === 0
+      docsTabs.length === 0 &&
+      tendersTabs.length === 0
     )
       return
     event.preventDefault()
@@ -3200,6 +3219,12 @@ function createShellWindow(): void {
         if (!(await docsQueryDirty(tab.webContents))) continue
         manager.activateTab(tab.id)
         if (!(await requestDocsClose(tab.webContents, win))) return
+      }
+      // Tenders is the last writer of its own document: the flush commits any
+      // edit still inside the renderer's autosave debounce, and a flush that
+      // could not commit prompts instead of dropping the edit silently.
+      for (const tab of tendersTabs) {
+        if (!(await requestTendersClose(tab.webContents, win))) return
       }
       closeConfirmed = true
       if (!win.isDestroyed()) win.close()

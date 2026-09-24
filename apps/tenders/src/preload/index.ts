@@ -3,6 +3,7 @@ import {
   SUITE_THEME_CHANNELS,
   TENDERS_CHANNELS,
   type TendersApi,
+  type TendersCloseFlushResult,
   type TendersResolvedTheme,
 } from '../shared/ipc'
 import type { TendersData, TendersDataV2 } from '../shared/types'
@@ -16,7 +17,11 @@ function projectProposalDto(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const source = value as Record<string, unknown>
   const dto: Record<string, unknown> = {}
+  // `id` is REQUIRED by the main handler: it is the only way main can resolve
+  // the canonical tender and build the independently verified readiness report.
+  // Without it every proposal is stamped "READINESS NOT INDEPENDENTLY VERIFIED".
   for (const key of [
+    'id',
     'title',
     'referenceNumber',
     'issuingBody',
@@ -124,6 +129,23 @@ const tendersApi: TendersApi = {
     const handler = (_event: Electron.IpcRendererEvent, data: TendersDataV2) => callback(data)
     ipcRenderer.on(TENDERS_CHANNELS.storeChangedV2, handler)
     return () => ipcRenderer.removeListener(TENDERS_CHANNELS.storeChangedV2, handler)
+  },
+  // Shell dirty-close guard: main asks the renderer to commit its debounced edit
+  // before the window closes; the renderer answers with the flush outcome.
+  onCloseFlushRequest: (handler: (requestId: number) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown) => {
+      handler(typeof requestId === 'number' ? requestId : 0)
+    }
+    ipcRenderer.on(TENDERS_CHANNELS.closeFlushRequest, listener)
+    return () => ipcRenderer.removeListener(TENDERS_CHANNELS.closeFlushRequest, listener)
+  },
+  reportCloseFlush: async (requestId, result) => {
+    await ipcRenderer.invoke(TENDERS_CHANNELS.closeFlushResult, {
+      requestId,
+      dirty: result.dirty === true,
+      ok: result.ok === true,
+      error: typeof result.error === 'string' ? result.error : null,
+    })
   },
   exportMatrixToSheets: (tenderId: string, tenderTitle: string, matrixRows: any[]) =>
     ipcRenderer.invoke(TENDERS_CHANNELS.exportMatrixToSheets, tenderId, tenderTitle, matrixRows),

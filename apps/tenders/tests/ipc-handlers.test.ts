@@ -1,20 +1,40 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testDir = join(tmpdir(), `tenders-ipc-test-${randomUUID().slice(0, 8)}`)
 
-const { ipcHandlers, openedPaths, mockBroadcasts, removedHandlers, booksInvoiceCalls } = vi.hoisted(
-  () => ({
-    ipcHandlers: new Map<string, (...args: unknown[]) => any>(),
-    openedPaths: [] as string[],
-    mockBroadcasts: [] as Array<{ channel: string; data: any }>,
-    removedHandlers: [] as string[],
-    booksInvoiceCalls: [] as any[],
-  }),
-)
+const {
+  ipcHandlers,
+  openedPaths,
+  mockBroadcasts,
+  removedHandlers,
+  booksInvoiceCalls,
+  preloadBridge,
+  dialogState,
+  invokeSender,
+} = vi.hoisted(() => ({
+  ipcHandlers: new Map<string, (...args: unknown[]) => any>(),
+  openedPaths: [] as string[],
+  mockBroadcasts: [] as Array<{ channel: string; data: any }>,
+  removedHandlers: [] as string[],
+  booksInvoiceCalls: [] as any[],
+  preloadBridge: { key: '', api: undefined as unknown },
+  /**
+   * The WebContents a renderer-initiated `invoke` is modelled as coming from.
+   * Real Electron hands the handler the calling WebContents, whose numeric `id`
+   * the close-flush reply binding checks, so a test that drives the renderer on
+   * behalf of a specific view sets this to that view.
+   */
+  invokeSender: { current: undefined as any },
+  dialogState: {
+    /** Index the stubbed message box answers with (1 = the safe "keep open"). */
+    response: 1,
+    calls: [] as Array<{ message: string; detail: string }>,
+  },
+}))
 
 vi.mock('electron', () => {
   return {
@@ -34,11 +54,52 @@ vi.mock('electron', () => {
         ipcHandlers.delete(channel)
       },
     },
+    // The preload module is imported below so the real projection runs; its
+    // `invoke` is routed into the real registered main handlers, which makes the
+    // preload -> main boundary testable end to end.
+    contextBridge: {
+      exposeInMainWorld: (key: string, api: unknown) => {
+        preloadBridge.key = key
+        preloadBridge.api = api
+      },
+    },
+    ipcRenderer: {
+      invoke: async (channel: string, ...args: unknown[]) => {
+        const listener = ipcHandlers.get(channel)
+        if (!listener) throw new Error(`No handler registered for ${channel}`)
+        const sender: any = invokeSender.current ?? {
+          isDestroyed: () => false,
+          getURL: () => TRUSTED_RENDERER_URL,
+          send: () => {},
+          once: vi.fn(),
+        }
+        registerTendersWebContents(sender)
+        registeredTestWebContents.push(sender)
+        return listener(
+          { sender, senderFrame: { url: TRUSTED_RENDERER_URL, parent: null } },
+          ...args,
+        )
+      },
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    },
     shell: {
       openPath: vi.fn(async (p: string) => {
         openedPaths.push(p)
         return ''
       }),
+    },
+    // The close guard's last-resort prompt. The stub records the copy it was
+    // asked to show and answers with the configured button index.
+    dialog: {
+      showMessageBox: async (parentOrOptions: any, maybeOptions?: any) => {
+        const options = maybeOptions ?? parentOrOptions
+        dialogState.calls.push({
+          message: String(options?.message ?? ''),
+          detail: String(options?.detail ?? ''),
+        })
+        return { response: dialogState.response, checkboxChecked: false }
+      },
     },
     WebContentsView: class MockWebContentsView {
       webContents = {
@@ -53,6 +114,7 @@ vi.mock('electron', () => {
 })
 
 import {
+  applyTendersNavigationPolicy,
   broadcastTendersData,
   configureTendersRuntime,
   deleteDocumentFile,
@@ -65,6 +127,8 @@ import {
   readTendersStore,
   registerTendersIpc,
   registerTendersWebContents,
+  repairSubmissionReadinessSnapshots,
+  requestTendersClose,
   resolveSafeTendersPath,
   saveDocumentFile,
   SEED_TENDER_WTR_04,
@@ -84,9 +148,19 @@ vi.mock('../../books/src/main/books-core', async (importOriginal) => {
   }
 })
 
-import { MAX_TENDERS_DOCUMENT_UPLOAD_BYTES, TENDERS_CHANNELS } from '../src/shared/ipc'
+import {
+  MAX_TENDERS_DOCUMENT_UPLOAD_BYTES,
+  MAX_TENDERS_MATRIX_EXPORT_BYTES,
+  MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS,
+  MAX_TENDERS_MATRIX_EXPORT_ROWS,
+  TENDERS_CHANNELS,
+} from '../src/shared/ipc'
 import { createEmptyTendersDataV2, migrateTendersDataV1 } from '../src/shared/tenders-schema'
 import type { TenderRecord, TendersData, TendersDataV1, TendersDataV2 } from '../src/shared/types'
+// Importing the preload module runs `contextBridge.exposeInMainWorld`, which the
+// mocked electron captures into `preloadBridge` so the real projection can be
+// exercised against the real main handlers.
+import '../src/preload/index'
 
 const LOAD_STORE_V2_CHANNEL = 'tenders:load-store-v2'
 const SAVE_STORE_V2_CHANNEL = 'tenders:save-store-v2'
@@ -118,6 +192,91 @@ function v2WithSeedTender(revision: number): TendersDataV2 {
   const migrated = migrateTendersDataV1(validV1(), '2026-09-01T08:30:00.000Z')
   if (!migrated.ok) throw new Error(`v2 fixture migration failed: ${migrated.error.message}`)
   return { ...migrated.data, revision }
+}
+
+/**
+ * A valid schema-v2 document whose single tender is GENUINELY ready: every
+ * requirement fulfilled with valid linked evidence, a future closing date,
+ * confirmed pricing that matches the milestone total, and no intake/OCR gate.
+ */
+function v2WithReadyTender(revision: number): TendersDataV2 {
+  const base = v2WithSeedTender(revision)
+  // Keep the seeded vault (the seeded customers reference its documents) and add
+  // the certificate the ready tender links.
+  base.workspaces[0].vault = [
+    ...base.workspaces[0].vault,
+    {
+      id: 'vault-tax',
+      title: 'SARS Tax Clearance Certificate',
+      category: 'COMPLIANCE',
+      fileUrl: 'vault/tax-clearance.pdf',
+      issueDate: '2026-01-01',
+      expiryDate: '2099-12-31',
+      isCertified: false,
+      certifiedDate: null,
+      metadata: {},
+    },
+  ]
+  base.workspaces[0].tenders = [
+    {
+      id: 'tender-ready',
+      title: 'Supply and Delivery of Office Computers',
+      referenceNumber: 'ICT/2026/041',
+      issuingBody: 'Provincial Administration Office',
+      closingDate: '2099-12-18',
+      submissionMethod: 'ELECTRONIC',
+      submissionAddress: 'procurement@example.test',
+      signatureChecks: {},
+      status: 'IN_PROGRESS',
+      createdAt: '2026-08-01T08:00:00Z',
+      fileName: 'office-computers-rfp.pdf',
+      fileUrl: 'documents/office-computers-rfp.pdf',
+      numPages: 12,
+      ocrPages: 0,
+      estimatedValue: 115000,
+      pricingConfirmed: true,
+      requirements: [
+        {
+          id: 'req-tax',
+          ruleKey: 'tax_pin',
+          title: 'Valid SARS Tax Clearance / TCS PIN',
+          category: 'MANDATORY_STAGE_1',
+          isMandatory: true,
+          verbatimClause: 'Bidders must submit valid proof of tax compliance.',
+          pageNumber: 1,
+          boundingBox: { top: 0.1, left: 0.1, width: 0.8, height: 0.05 },
+          riskLevel: 'CRITICAL_DISQUALIFIER',
+          order: 1,
+          status: 'FULFILLED',
+          linkedVaultDocId: 'vault-tax',
+          reason: null,
+          suggestedVaultDocIds: [],
+        },
+      ],
+      milestones: [
+        {
+          id: 'ms-delivery',
+          name: 'Delivery and acceptance',
+          amount: 115000,
+          dueDate: '2099-11-30',
+          status: 'PENDING',
+        },
+      ],
+    },
+  ]
+  return base
+}
+
+/** Locate `apps/tenders` whether Vitest runs from the workspace or the repo root. */
+function resolveTendersDir(): string {
+  let dir = process.cwd()
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(join(dir, 'src', 'renderer', 'index.html'))) return dir
+    if (existsSync(join(dir, 'apps', 'tenders', 'src', 'renderer', 'index.html')))
+      return join(dir, 'apps', 'tenders')
+    dir = dirname(dir)
+  }
+  throw new Error(`Could not locate apps/tenders from ${process.cwd()}`)
 }
 
 function registeredWebContents(
@@ -187,6 +346,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
     mockBroadcasts.length = 0
     removedHandlers.length = 0
     booksInvoiceCalls.length = 0
+    invokeSender.current = undefined
     configureTendersRuntime({
       preloadPath: '',
       rendererUrl: TRUSTED_RENDERER_URL,
@@ -328,21 +488,49 @@ describe('Electron IPC Handlers & Security Validation', () => {
       expect(parsed.workspaces[0].company.tradingName).toBe('Thabo Engineering IPC Test')
     })
 
-    it('saveStoredData persists payload atomically and broadcasts update', async () => {
+    it('saveStoredData accepts only a schema-v2 document and commits it through the authoritative store', async () => {
+      const saveHandler = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)
+      expect(saveHandler).toBeDefined()
+      const recorder = deliveryRecorder()
+      const sender = registeredWebContents(recorder.send)
+
+      const dataToSave = v2WithSeedTender(0)
+      // Distinctive CONTENT, not just metadata: what the caller supplied must be
+      // what lands on disk (the revision/updatedAt assertions below only prove
+      // the store, not the payload, was committed).
+      dataToSave.workspaces[0].tenders[0].estimatedValue = 999000
+      dataToSave.workspaces[0].company.tradingName = 'Legacy v2 content marker'
+
+      const result = await saveHandler!(event(sender), JSON.stringify(dataToSave))
+      expect(result).toEqual({ ok: true })
+
+      const storeFile = join(testDir, 'tenders', 'tenders-data.json')
+      expect(existsSync(storeFile)).toBe(true)
+      const onDisk = JSON.parse(readFileSync(storeFile, 'utf8'))
+      expect(onDisk.workspaces[0].tenders[0].estimatedValue).toBe(999000)
+      expect(onDisk.workspaces[0].company.tradingName).toBe('Legacy v2 content marker')
+      // The store owns the revision and the timestamp; the legacy channel never
+      // writes the file itself.
+      expect(onDisk.schemaVersion).toBe(2)
+      expect(onDisk.revision).toBe(1)
+      expect(onDisk).not.toHaveProperty('version')
+      expect(
+        recorder.deliveries.filter((d) => d.channel === STORE_CHANGED_V2_CHANNEL),
+      ).toHaveLength(1)
+    })
+
+    it('saveStoredData rejects a v1 payload and can no longer synthesize seed data into the store', async () => {
       const saveHandler = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)
       expect(saveHandler).toBeDefined()
       const sender = registeredWebContents()
 
-      const dataToSave = migrateAndValidateTenders(null)
-      dataToSave.workspaces[0].tenders[0].estimatedValue = 999000
+      const result = await saveHandler!(event(sender), JSON.stringify(validV1()))
 
-      const result = await saveHandler!(event(sender), JSON.stringify(dataToSave))
-      expect(result.ok).toBe(true)
-
-      const storeFile = join(testDir, 'tenders', 'tenders-data.json')
-      expect(existsSync(storeFile)).toBe(true)
-      const onDisk = readTendersStore(storeFile)
-      expect(onDisk.workspaces[0].tenders[0].estimatedValue).toBe(999000)
+      expect(result.ok).toBe(false)
+      expect(result.error).toMatch(/schema-v2/i)
+      // No store file was created, so no demo company/vault/tender was seeded.
+      expect(existsSync(storeFile)).toBe(false)
+      expect(readdirSync(join(testDir, 'tenders'))).not.toContain('tenders-data.json')
     })
 
     it('getStoredData rejects an unregistered caller with a typed failure and no read exposure', async () => {
@@ -632,7 +820,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       },
     )
 
-    it('allows a legacy v1/no-file compatibility save but rejects legacy overwrite after the primary file is v2', async () => {
+    it('a v1 payload can no longer create or downgrade the store, and a v2 payload must match the current revision', async () => {
       const legacySave = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)
       expect(legacySave).toBeDefined()
       const legacyGet = ipcHandlers.get(TENDERS_CHANNELS.getStoredData)
@@ -640,24 +828,38 @@ describe('Electron IPC Handlers & Security Validation', () => {
       const sender = registeredWebContents()
       const inputV1 = validV1()
 
+      // No file exists yet: the v1 payload is still refused, so it cannot seed
+      // demo company/vault/tender data into the user's store.
       const compatibilityResult = await legacySave!(event(sender), JSON.stringify(inputV1))
 
-      expect(compatibilityResult).toMatchObject({ ok: true })
-      expect(JSON.parse(readFileSync(storeFile, 'utf8')).version).toBe(1)
+      expect(compatibilityResult.ok).toBe(false)
+      expect(existsSync(storeFile)).toBe(false)
 
       const establishedV2 = validV2(12)
       const establishedBytes = JSON.stringify(establishedV2, null, 2)
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
       writeFileSync(storeFile, establishedBytes, 'utf8')
       await legacyGet!(event(sender))
       expect(readFileSync(storeFile, 'utf8')).toBe(establishedBytes)
+
       const downgrade = validV1()
       downgrade.workspaces[0].company.tradingName = 'Must never overwrite v2'
-
       const rejected = await legacySave!(event(sender), JSON.stringify(downgrade))
 
       expect(rejected.ok).toBe(false)
       expect(rejected.error).toBeDefined()
       expect(readFileSync(storeFile, 'utf8')).toBe(establishedBytes)
+
+      // A v2 payload for a stale revision is a conflict, not a write.
+      const stale = await legacySave!(event(sender), JSON.stringify(validV2(11)))
+      expect(stale.ok).toBe(false)
+      expect(stale.error).toMatch(/revision|conflict/i)
+      expect(readFileSync(storeFile, 'utf8')).toBe(establishedBytes)
+
+      // The same payload at the current revision commits through the store.
+      const accepted = await legacySave!(event(sender), JSON.stringify(validV2(12)))
+      expect(accepted).toEqual({ ok: true })
+      expect(JSON.parse(readFileSync(storeFile, 'utf8')).revision).toBe(13)
     })
 
     it.each([2, 3])(
@@ -1334,7 +1536,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       }
     })
 
-    it('F3: legacy saveStoredData broadcast skips untrusted registered views but reaches trusted views', async () => {
+    it('F3: the legacy v2 save commit reaches trusted views only', async () => {
       const saveHandler = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)
       expect(saveHandler).toBeDefined()
       const trusted = deliveryRecorder()
@@ -1342,16 +1544,16 @@ describe('Electron IPC Handlers & Security Validation', () => {
       const sender = registeredWebContents(trusted.send, TRUSTED_RENDERER_URL)
       registeredWebContents(untrusted.send, UNTRUSTED_RENDERER_URL)
 
-      const result = await saveHandler!(event(sender), JSON.stringify(validV1()))
+      const result = await saveHandler!(event(sender), JSON.stringify(validV2(0)))
 
-      expect(result.ok).toBe(true)
-      const trustedLegacy = trusted.deliveries.filter(
-        (d) => d.channel === TENDERS_CHANNELS.dataChanged,
+      expect(result).toEqual({ ok: true })
+      const trustedCommits = trusted.deliveries.filter(
+        (d) => d.channel === STORE_CHANGED_V2_CHANNEL,
       )
-      expect(trustedLegacy).toHaveLength(1)
-      expect(trustedLegacy[0].data).toMatchObject({ version: 1 })
+      expect(trustedCommits).toHaveLength(1)
+      expect(trustedCommits[0].data).toMatchObject({ schemaVersion: 2, revision: 1 })
       expect(
-        untrusted.deliveries.filter((d) => d.channel === TENDERS_CHANNELS.dataChanged),
+        untrusted.deliveries.filter((d) => d.channel === STORE_CHANGED_V2_CHANNEL),
       ).toHaveLength(0)
     })
 
@@ -1542,6 +1744,620 @@ describe('Electron IPC Handlers & Security Validation', () => {
       expect(row).toContain(`"'@import"`)
       // No cell opens directly with a formula trigger character.
       expect(row).not.toMatch(/"(?:=|\+|@|-)/)
+    })
+
+    it('bounds the matrix export rows, cells, and total payload before writing', async () => {
+      const exportHandler = ipcHandlers.get(TENDERS_CHANNELS.exportMatrixToSheets)!
+      const sender = registeredWebContents()
+
+      // Sized from the export's own byte ceiling (`MAX_TENDERS_MATRIX_EXPORT_BYTES`,
+      // which the handler checks before it builds the CSV) and kept under the row
+      // and per-cell ceilings, so this payload is over-bound for that check alone.
+      // Deliberately not the IPC envelope's `MAX_TENDERS_IPC_PAYLOAD_BYTES`, which
+      // is held above the export ceiling and therefore never binds here.
+      const perCell = MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS - 1
+      const oversizedRowCount = Math.ceil(MAX_TENDERS_MATRIX_EXPORT_BYTES / perCell) + 2
+      expect(oversizedRowCount).toBeLessThanOrEqual(MAX_TENDERS_MATRIX_EXPORT_ROWS)
+      const oversizedRows = (): Array<{ notes: string }> =>
+        Array.from({ length: oversizedRowCount }, () => ({ notes: 'y'.repeat(perCell) }))
+      const exportedBefore = readdirSync(tmpdir()).filter((name) =>
+        name.startsWith('Oversized_Compliance_Matrix_'),
+      )
+
+      const tooMany = await exportHandler(
+        event(sender),
+        't-1',
+        'Too many',
+        Array.from({ length: MAX_TENDERS_MATRIX_EXPORT_ROWS + 1 }, (_v, i) => ({ id: `r-${i}` })),
+      )
+      expect(tooMany.ok).toBe(false)
+      expect(tooMany.error).toMatch(/limited to \d+ rows/i)
+
+      const hugeCell = await exportHandler(event(sender), 't-1', 'Huge cell', [
+        { id: 'r-1', notes: 'x'.repeat(MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS + 1) },
+      ])
+      expect(hugeCell.ok).toBe(false)
+      expect(hugeCell.error).toMatch(/cell exceeds/i)
+
+      const notAnArray = await exportHandler(event(sender), 't-1', 'Bad shape', {} as any)
+      expect(notAnArray.ok).toBe(false)
+      expect(notAnArray.error).toMatch(/must be an array/i)
+
+      // "Before writing" is part of the claim: the refusal must leave no CSV
+      // behind in the export directory (compared against a pre-call listing —
+      // the OS temp directory is shared and keeps earlier runs' exports).
+      const oversized = await exportHandler(event(sender), 't-1', 'Oversized', oversizedRows())
+      expect(oversized.ok).toBe(false)
+      expect(oversized.error).toMatch(/exceeds \d+ bytes/i)
+      expect(
+        readdirSync(tmpdir()).filter((name) => name.startsWith('Oversized_Compliance_Matrix_')),
+      ).toEqual(exportedBefore)
+    })
+  })
+
+  describe('WP-14 navigation + renderer surface hardening', () => {
+    it('denies window.open and will-navigate for anything but the trusted renderer or a blob URL', () => {
+      const handlers: Record<string, (...args: any[]) => any> = {}
+      const webContents: any = {
+        isDestroyed: () => false,
+        getURL: () => TRUSTED_RENDERER_URL,
+        once: vi.fn(),
+        send: vi.fn(),
+        setWindowOpenHandler: (handler: (details: { url: string }) => { action: string }) => {
+          handlers.windowOpen = handler as any
+        },
+        on: (event: string, listener: (...args: any[]) => any) => {
+          handlers[event] = listener
+        },
+      }
+
+      applyTendersNavigationPolicy(webContents)
+
+      // A store-supplied http(s) URL must never be followed.
+      expect(handlers.windowOpen({ url: 'https://attacker.example/steal' })).toEqual({
+        action: 'deny',
+      })
+      expect(handlers.windowOpen({ url: 'file:///C:/Windows/System32/calc.exe' })).toEqual({
+        action: 'deny',
+      })
+      // The in-session object URLs the renderer creates stay usable.
+      expect(handlers.windowOpen({ url: 'blob:http://localhost:5179/abc-123' })).toEqual({
+        action: 'allow',
+      })
+      expect(handlers.windowOpen({ url: TRUSTED_RENDERER_URL })).toEqual({ action: 'allow' })
+
+      const prevented: string[] = []
+      const eventStub = { preventDefault: () => prevented.push('prevented') }
+      handlers['will-navigate'](eventStub, 'https://attacker.example/')
+      handlers['will-navigate'](eventStub, 'file:///etc/passwd')
+      expect(prevented).toHaveLength(2)
+      handlers['will-navigate'](eventStub, `${TRUSTED_RENDERER_URL}index.html`)
+      expect(prevented).toHaveLength(2)
+
+      // Fail closed when no trusted renderer origin is configured.
+      configureTendersRuntime({ preloadPath: '', rendererUrl: '', rendererFile: '' })
+      expect(handlers.windowOpen({ url: TRUSTED_RENDERER_URL })).toEqual({ action: 'deny' })
+      handlers['will-navigate'](eventStub, TRUSTED_RENDERER_URL)
+      expect(prevented).toHaveLength(3)
+      configureTendersRuntime({
+        preloadPath: '',
+        rendererUrl: TRUSTED_RENDERER_URL,
+        rendererFile: '',
+      })
+    })
+
+    it('ships a restrictive CSP in the renderer document', () => {
+      const html = readFileSync(join(resolveTendersDir(), 'src', 'renderer', 'index.html'), 'utf8')
+      const match = html.match(/http-equiv="Content-Security-Policy"[\s\S]*?content="([^"]+)"/)
+      expect(match, 'renderer/index.html must declare a Content-Security-Policy').not.toBeNull()
+      const csp = match![1]
+      expect(csp).toContain("default-src 'self'")
+      expect(csp).toContain("script-src 'self'")
+      expect(csp).toContain("worker-src 'self' blob:")
+      // blob:/data: are the document-read path (a vault document opened from a
+      // `blob:` URL); pdf.js keeps its worker through worker-src above.
+      expect(csp).toContain("connect-src 'self' blob: data:")
+      expect(csp).toContain("object-src 'none'")
+      expect(csp).toContain("base-uri 'none'")
+      expect(csp).toContain("form-action 'none'")
+      expect(csp).not.toContain("'unsafe-eval'")
+      expect(csp).not.toContain('http://')
+      // No WebSocket origin: the shipped document is `file://`, so a
+      // `ws://localhost:*` grant would let a compromised renderer reach any
+      // listener on the machine, and it is redundant in dev where the HMR socket
+      // is same-origin.
+      expect(csp).not.toContain('ws://')
+    })
+  })
+
+  describe('Paid ready-proposal path (preload projection -> canonical readiness)', () => {
+    const generatedPaths: string[] = []
+
+    afterEach(() => {
+      for (const path of generatedPaths.splice(0)) rmSync(path, { force: true })
+    })
+
+    function draftThroughBridge(tender: unknown): Promise<{ ok: boolean; path?: string }> {
+      const api = preloadBridge.api as {
+        draftProposalDoc: (input: unknown) => Promise<{ ok: boolean; path?: string }>
+      }
+      return api.draftProposalDoc(tender)
+    }
+
+    it('projects the tender id through the preload bridge so main can verify readiness', async () => {
+      expect(preloadBridge.key).toBe('tendersApi')
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      writeFileSync(storeFile, JSON.stringify(v2WithReadyTender(3), null, 2), 'utf8')
+
+      const tender = v2WithReadyTender(3).workspaces[0].tenders[0]
+      const result = await draftThroughBridge(tender)
+      expect(result.ok).toBe(true)
+      expect(result.path).toEqual(expect.any(String))
+      generatedPaths.push(result.path!)
+
+      const content = readFileSync(result.path!, 'utf8')
+      expect(content).toContain('**Proposal Status:** **READY FOR SUBMISSION**')
+      expect(content).not.toContain('READINESS NOT INDEPENDENTLY VERIFIED')
+      expect(content).toContain('**Readiness Verification:** Canonical readiness report supplied')
+    })
+
+    it('still drafts an unverified proposal when the payload carries no tender id', async () => {
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      writeFileSync(storeFile, JSON.stringify(v2WithReadyTender(3), null, 2), 'utf8')
+
+      const tender = v2WithReadyTender(3).workspaces[0].tenders[0]
+      // Exactly what the pre-fix projection produced: every readiness-relevant
+      // field except `id`.
+      const payload = {
+        title: tender.title,
+        referenceNumber: tender.referenceNumber,
+        issuingBody: tender.issuingBody,
+        closingDate: tender.closingDate,
+        estimatedValue: tender.estimatedValue,
+        pricingConfirmed: tender.pricingConfirmed,
+        signatureChecks: tender.signatureChecks,
+        requirements: tender.requirements.map((requirement) => ({
+          id: requirement.id,
+          title: requirement.title,
+          verbatimClause: requirement.verbatimClause,
+          isMandatory: requirement.isMandatory,
+          status: requirement.status,
+          linkedVaultDocId: requirement.linkedVaultDocId,
+          ruleKey: requirement.ruleKey,
+          reason: requirement.reason,
+        })),
+        milestones: tender.milestones?.map((milestone) => ({
+          id: milestone.id,
+          name: milestone.name,
+          amount: milestone.amount,
+          dueDate: milestone.dueDate,
+        })),
+      }
+
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.draftProposalDoc)!
+      const sender = registeredWebContents()
+      const result = await handler(event(sender), payload)
+      expect(result.ok).toBe(true)
+      generatedPaths.push(result.path)
+
+      const content = readFileSync(result.path, 'utf8')
+      expect(content).toContain(
+        '**Proposal Status:** **DRAFT — READINESS NOT INDEPENDENTLY VERIFIED**',
+      )
+    })
+  })
+
+  describe('Submission readiness snapshots are verified against canonical readiness', () => {
+    const CAPTURED_AT = '2026-09-10T09:00:00.000Z'
+
+    function clearSnapshot(): Record<string, unknown> {
+      return {
+        ready: true,
+        score: 100,
+        failedCheckIds: [],
+        blockingCheckIds: [],
+        capturedAt: CAPTURED_AT,
+      }
+    }
+
+    function submissionWith(snapshot: unknown): Record<string, unknown> {
+      return {
+        submittedAt: CAPTURED_AT,
+        timeZone: null,
+        method: 'ELECTRONIC',
+        destination: 'https://portal.example.test',
+        confirmationReference: 'REF-1',
+        evidence: null,
+        person: null,
+        notes: null,
+        readiness: snapshot,
+        blockerOverrideReason: null,
+      }
+    }
+
+    /** The ready fixture with its only requirement still outstanding (blocked). */
+    function v2WithBlockedSubmission(revision: number): TendersDataV2 {
+      const document = v2WithReadyTender(revision)
+      const tender = document.workspaces[0].tenders[0]
+      tender.requirements[0].status = 'OUTSTANDING'
+      tender.status = 'SUBMITTED'
+      tender.submission = submissionWith(clearSnapshot()) as any
+      return document
+    }
+
+    function v2WithReadySubmission(revision: number): TendersDataV2 {
+      const document = v2WithReadyTender(revision)
+      const tender = document.workspaces[0].tenders[0]
+      tender.status = 'SUBMITTED'
+      tender.submission = submissionWith(clearSnapshot()) as any
+      return document
+    }
+
+    /**
+     * The ready fixture with its closing date in the past, so `deadline` is the
+     * only blocking check that fails — and it is the one whose verdict depends on
+     * wall-clock time, which is what made the old time-dependent carve-out
+     * forgeable.
+     */
+    function v2WithExpiredDeadlineSubmission(revision: number): TendersDataV2 {
+      const document = v2WithReadyTender(revision)
+      const tender = document.workspaces[0].tenders[0]
+      tender.closingDate = '2026-01-05'
+      tender.status = 'SUBMITTED'
+      tender.submission = submissionWith(clearSnapshot()) as any
+      return document
+    }
+
+    it('recomputes a renderer-authored clear checkpoint for a blocked tender instead of persisting the lie', async () => {
+      const saveHandler = ipcHandlers.get(SAVE_STORE_V2_CHANNEL)!
+      const sender = registeredWebContents()
+
+      const result = await saveHandler(event(sender), {
+        expectedRevision: 0,
+        document: v2WithBlockedSubmission(0),
+      })
+
+      expect(result.ok).toBe(true)
+      const persisted = JSON.parse(readFileSync(storeFile, 'utf8'))
+      const readiness = persisted.workspaces[0].tenders[0].submission.readiness
+      expect(readiness.ready).toBe(false)
+      expect(readiness.blockingCheckIds).toContain('requirements')
+      expect(readiness.capturedAt).toBe(CAPTURED_AT)
+      // The renderer receives the corrected document, so the receipt it shows
+      // matches what was persisted.
+      expect(result.data.workspaces[0].tenders[0].submission.readiness.ready).toBe(false)
+    })
+
+    it('leaves a clear checkpoint that the canonical report agrees with untouched', async () => {
+      const saveHandler = ipcHandlers.get(SAVE_STORE_V2_CHANNEL)!
+      const sender = registeredWebContents()
+
+      const result = await saveHandler(event(sender), {
+        expectedRevision: 0,
+        document: v2WithReadySubmission(0),
+      })
+
+      expect(result.ok).toBe(true)
+      const onDisk = JSON.parse(readFileSync(storeFile, 'utf8'))
+      expect(onDisk.workspaces[0].tenders[0].submission.readiness).toEqual(clearSnapshot())
+    })
+
+    it('keeps an unchanged historical checkpoint even after the tender becomes blocked', async () => {
+      const saveHandler = ipcHandlers.get(SAVE_STORE_V2_CHANNEL)!
+      const sender = registeredWebContents()
+      const first = await saveHandler(event(sender), {
+        expectedRevision: 0,
+        document: v2WithReadySubmission(0),
+      })
+      expect(first.ok).toBe(true)
+
+      // A later edit blocks a requirement: the frozen checkpoint is the record of
+      // the earlier moment and must survive the save.
+      const result = await saveHandler(event(sender), {
+        expectedRevision: 1,
+        document: v2WithBlockedSubmission(1),
+      })
+
+      expect(result.ok).toBe(true)
+      const onDisk = JSON.parse(readFileSync(storeFile, 'utf8'))
+      expect(onDisk.workspaces[0].tenders[0].submission.readiness.ready).toBe(true)
+    })
+
+    it('recomputes a forged clear checkpoint whose only canonical blocker is the closing date', async () => {
+      const saveHandler = ipcHandlers.get(SAVE_STORE_V2_CHANNEL)!
+      const sender = registeredWebContents()
+
+      const result = await saveHandler(event(sender), {
+        expectedRevision: 0,
+        document: v2WithExpiredDeadlineSubmission(0),
+      })
+
+      expect(result.ok).toBe(true)
+      const onDisk = JSON.parse(readFileSync(storeFile, 'utf8'))
+      const readiness = onDisk.workspaces[0].tenders[0].submission.readiness
+      // The wall-clock-dependent check is part of the canonical verdict for a
+      // claim main is seeing for the first time, so excluding it cannot be used
+      // to persist a clearance the closing date denies.
+      expect(readiness.ready).toBe(false)
+      expect(readiness.blockingCheckIds).toContain('deadline')
+    })
+
+    it('refuses a forged clear checkpoint written through the legacy saveStoredData channel', async () => {
+      const legacySave = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)!
+      const sender = registeredWebContents()
+
+      const result = await legacySave(event(sender), JSON.stringify(v2WithBlockedSubmission(0)))
+
+      expect(result.ok).toBe(true)
+      const onDisk = JSON.parse(readFileSync(storeFile, 'utf8'))
+      const readiness = onDisk.workspaces[0].tenders[0].submission.readiness
+      // Every write path commits through the same gate, so the sibling channel
+      // cannot persist a receipt the canonical save path would have corrected.
+      expect(readiness.ready).toBe(false)
+      expect(readiness.blockingCheckIds).toContain('requirements')
+    })
+
+    it('cannot seed a forgery that then rides the carried-over-checkpoint exemption', async () => {
+      const legacySave = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)!
+      const saveHandler = ipcHandlers.get(SAVE_STORE_V2_CHANNEL)!
+      const sender = registeredWebContents()
+
+      // Step 1: the sibling channel (the pre-fix bypass). Step 2: the same forged
+      // document through the canonical path, byte-identical to what the renderer
+      // believes is on disk — the exact shape the old byte-identical carve-out
+      // waved through as a "historical record".
+      const first = await legacySave(event(sender), JSON.stringify(v2WithBlockedSubmission(0)))
+      expect(first.ok).toBe(true)
+      const afterLegacy = JSON.parse(readFileSync(storeFile, 'utf8'))
+      expect(afterLegacy.workspaces[0].tenders[0].submission.readiness.ready).toBe(false)
+
+      const second = await saveHandler(event(sender), {
+        expectedRevision: 1,
+        document: v2WithBlockedSubmission(1),
+      })
+
+      expect(second.ok).toBe(true)
+      const onDisk = JSON.parse(readFileSync(storeFile, 'utf8'))
+      expect(onDisk.workspaces[0].tenders[0].submission.readiness.ready).toBe(false)
+    })
+
+    it('downgrades a clear claim whose canonical verdict cannot be computed at all', () => {
+      // The gate runs on the raw payload, before the store's schema validation,
+      // so one tender malformed enough to break the assessment must not exempt
+      // the document (or that tender) from the gate.
+      const document = v2WithReadySubmission(0) as any
+      document.workspaces[0].tenders[0].requirements = [null]
+
+      const repaired = repairSubmissionReadinessSnapshots(document, null, new Date(CAPTURED_AT))
+
+      expect(repaired).toBe(1)
+      const readiness = document.workspaces[0].tenders[0].submission.readiness
+      expect(readiness.ready).toBe(false)
+      expect(readiness.score).toBe(0)
+      expect(readiness.capturedAt).toBe(CAPTURED_AT)
+    })
+  })
+
+  describe('Milestone billing derives the amount from the canonical milestone', () => {
+    it('rejects an inflated caller amount and posts no invoice', async () => {
+      const billHandler = ipcHandlers.get(TENDERS_CHANNELS.billMilestoneInBooks)!
+      const sender = registeredWebContents()
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      const starting = v2WithSeedTender(7)
+      starting.workspaces[0].tenders[0].status = 'WON'
+      const bytesBefore = JSON.stringify(starting, null, 2)
+      writeFileSync(storeFile, bytesBefore, 'utf8')
+
+      const result = await billHandler(event(sender), {
+        tenderId: 'tender-wtr-04',
+        milestoneId: 'ms-01',
+        amount: 999999,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.error).toMatch(/does not match the milestone amount/i)
+      expect(booksInvoiceCalls).toHaveLength(0)
+      expect(readFileSync(storeFile, 'utf8')).toBe(bytesBefore)
+
+      // The matching echo is still accepted and bills the canonical amount.
+      const accepted = await billHandler(event(sender), {
+        tenderId: 'tender-wtr-04',
+        milestoneId: 'ms-01',
+        amount: 145000,
+      })
+      expect(accepted.ok).toBe(true)
+      expect(accepted.grandTotal).toBe(145000)
+      expect(booksInvoiceCalls).toHaveLength(1)
+    })
+  })
+
+  /**
+   * Dirty-close data loss: Tenders persists through a 300 ms debounce and has no
+   * `beforeunload`, so a window close inside that window used to drop the edit.
+   * The shell now flushes through `requestTendersClose` before it closes; these
+   * tests drive that guard against the REAL renderer store, the REAL preload
+   * bridge and the real main handlers.
+   */
+  describe('21. shell dirty-close guard (tenders:close-flush-request)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+      dialogState.calls.length = 0
+      dialogState.response = 1
+      ;(window as unknown as Record<string, unknown>).tendersApi = undefined
+    })
+
+    /**
+     * A fake Tenders view wired the way the real one is: main's flush request
+     * runs the real renderer flush and answers through the real preload bridge,
+     * whose `invoke` the electron mock routes into the real main handlers.
+     */
+    function closeGuardView(id = 9001): any {
+      const webContents: any = {
+        id,
+        isDestroyed: () => false,
+        getURL: () => TRUSTED_RENDERER_URL,
+        send: (channel: string, payload: unknown) => {
+          if (channel !== TENDERS_CHANNELS.closeFlushRequest) return
+          // The reply the renderer sends back comes from THIS view, so the
+          // mocked `ipcRenderer.invoke` must hand main this view as the sender.
+          invokeSender.current = webContents
+          void (async () => {
+            const store = await import('../src/renderer/src/store')
+            await store.respondToCloseFlushRequest(payload as number)
+          })()
+        },
+        once: vi.fn(),
+      }
+      registerTendersWebContents(webContents)
+      registeredTestWebContents.push(webContents)
+      return webContents
+    }
+
+    /** A registered view that never answers the flush request. */
+    function silentView(id = 9100): any {
+      const webContents: any = {
+        id,
+        isDestroyed: () => false,
+        getURL: () => TRUSTED_RENDERER_URL,
+        send: vi.fn(),
+        once: vi.fn(),
+      }
+      registerTendersWebContents(webContents)
+      registeredTestWebContents.push(webContents)
+      return webContents
+    }
+
+    /** Hydrate the real renderer store against the real main handlers. */
+    async function hydratedStore(): Promise<typeof import('../src/renderer/src/store')> {
+      window.localStorage.clear()
+      ;(window as unknown as Record<string, unknown>).tendersApi = preloadBridge.api
+      const store = await import('../src/renderer/src/store')
+      await store.useTendersStore.getState().hydrateFromMain()
+      return store
+    }
+
+    function addCompany(store: typeof import('../src/renderer/src/store'), name: string): void {
+      const profile = (migrateAndValidateTenders(null) as TendersData).workspaces[0].company
+      store.useTendersStore.getState().addCompany({ ...profile, name, tradingName: name })
+    }
+
+    it('rejects an untrusted sender for the flush reply', async () => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.closeFlushResult)
+      expect(handler).toBeDefined()
+      const untrusted: any = {
+        isDestroyed: () => false,
+        getURL: () => UNTRUSTED_RENDERER_URL,
+        send: vi.fn(),
+        once: vi.fn(),
+      }
+
+      const result = await handler!(event(untrusted, untrustedFrame()), {
+        requestId: 1,
+        dirty: true,
+        ok: true,
+        error: null,
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.error.code).toBe('INVALID_REQUEST')
+      expect(result.error.message).toMatch(/authoriz|trusted|registered/i)
+      expect(dialogState.calls).toEqual([])
+    })
+
+    it('flushes a debounced edit on close instead of dropping it', async () => {
+      // Fake timers: the 300 ms autosave debounce can never fire on its own, so
+      // the only way the edit reaches disk is the close-guard flush.
+      vi.useFakeTimers()
+      const store = await hydratedStore()
+      addCompany(store, 'Dirty Close Civils (Pty) Ltd')
+
+      // The edit exists only in renderer memory — nothing has been committed.
+      expect(existsSync(storeFile)).toBe(false)
+
+      await expect(requestTendersClose(closeGuardView(), null)).resolves.toBe(true)
+
+      const committed = JSON.parse(readFileSync(storeFile, 'utf8')) as TendersDataV2
+      expect(committed.revision).toBe(1)
+      expect(committed.workspaces.map((workspace) => workspace.name)).toEqual([
+        'Dirty Close Civils (Pty) Ltd',
+      ])
+      // A successful flush never prompts, and the renderer reports "saved".
+      expect(dialogState.calls).toEqual([])
+      expect(store.useTendersStore.getState().saveStatus).toBe('saved')
+    })
+
+    it('prompts instead of closing when the flush cannot commit', async () => {
+      vi.useFakeTimers()
+      const store = await hydratedStore()
+      const originalSave = ipcHandlers.get(TENDERS_CHANNELS.saveStoreV2)
+      ipcHandlers.set(TENDERS_CHANNELS.saveStoreV2, async () => ({
+        ok: false,
+        error: { code: 'WRITE_FAILED', message: 'forced close-guard write failure' },
+      }))
+      try {
+        addCompany(store, 'Unflushable Civils (Pty) Ltd')
+
+        // "Keep Zanostack open" (the default button) must abort the close.
+        dialogState.response = 1
+        await expect(requestTendersClose(closeGuardView(), null)).resolves.toBe(false)
+        expect(dialogState.calls).toHaveLength(1)
+        expect(dialogState.calls[0].detail).toMatch(/forced close-guard write failure/)
+        expect(existsSync(storeFile)).toBe(false)
+
+        // "Close anyway" is the only way past it — never a silent drop.
+        dialogState.response = 0
+        await expect(requestTendersClose(closeGuardView(), null)).resolves.toBe(true)
+        expect(dialogState.calls).toHaveLength(2)
+      } finally {
+        if (originalSave) ipcHandlers.set(TENDERS_CHANNELS.saveStoreV2, originalSave)
+      }
+    })
+
+    it('does not close silently when the renderer never answers', async () => {
+      vi.useFakeTimers()
+      dialogState.response = 1
+      const pending = requestTendersClose(silentView(), null)
+      await vi.advanceTimersByTimeAsync(11_000)
+
+      await expect(pending).resolves.toBe(false)
+      expect(dialogState.calls).toHaveLength(1)
+      expect(dialogState.calls[0].detail).toMatch(/did not respond/i)
+    })
+
+    it('ignores a flush reply from any view other than the one being guarded', async () => {
+      vi.useFakeTimers()
+      dialogState.response = 1
+      const guarded = silentView(9200)
+      const pending = requestTendersClose(guarded, null)
+      const requestId = guarded.send.mock.calls[0][1] as number
+      expect(typeof requestId, 'the guarded view must have been asked to flush').toBe('number')
+
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.closeFlushResult)!
+      const reply = { requestId, dirty: false, ok: true, error: null }
+
+      // A registered, trusted view that is not the guarded one.
+      const other = closeGuardView(9300)
+      expect((await handler(event(other), reply)).ok).toBe(false)
+
+      // A trusted view that cannot identify itself at all: the pre-fix
+      // negative-form binding accepted this and waved the close through with no
+      // flush at all.
+      const anonymous: any = {
+        isDestroyed: () => false,
+        getURL: () => TRUSTED_RENDERER_URL,
+        send: vi.fn(),
+        once: vi.fn(),
+      }
+      registerTendersWebContents(anonymous)
+      registeredTestWebContents.push(anonymous)
+      expect((await handler(event(anonymous), reply)).ok).toBe(false)
+
+      // Neither reply settled the waiter, so the guarded view's flush is still
+      // outstanding and the close fails closed into the prompt.
+      await vi.advanceTimersByTimeAsync(11_000)
+      await expect(pending).resolves.toBe(false)
+      expect(dialogState.calls).toHaveLength(1)
+      expect(dialogState.calls[0].detail).toMatch(/did not respond/i)
     })
   })
 })

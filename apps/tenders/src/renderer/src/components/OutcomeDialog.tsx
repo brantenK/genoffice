@@ -11,6 +11,7 @@ import {
   type TenderOutcomeStatus,
   type TenderRecord,
 } from '../../shared/types'
+import { parseMoneyDetailed } from '../../../shared/money'
 import { useTendersStore } from '../store'
 import { Dialog } from './Dialog'
 import { Button, FormField, FormSelect } from './ui'
@@ -57,11 +58,18 @@ export function civilDateToRfc3339(value: string | null | undefined): string | n
   return parsed.toISOString().slice(0, 10) === raw ? parsed.toISOString() : null
 }
 
-function parseMoney(raw: string): number | null {
-  const digits = raw.replace(/[^\d.]/g, '')
-  if (!digits) return null
-  const value = Number(digits)
-  return Number.isFinite(value) && value >= 0 ? value : null
+/**
+ * Validation for the awarded-value field. Blank means the issuer has not stated
+ * the value yet (`null`); anything else must be a single rand amount the shared
+ * parser reads exactly, and a refusal carries the parser's own explanation so
+ * the field error says why. "R 2.5 million" is 2 500 000 — never 2,5.
+ */
+export function parseAwardedValue(
+  raw: string,
+): { ok: true; value: number | null } | { ok: false; message: string } {
+  if (!raw.trim()) return { ok: true, value: null }
+  const parsed = parseMoneyDetailed(raw)
+  return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, message: parsed.message }
 }
 
 export interface OutcomeDialogProps {
@@ -94,9 +102,8 @@ export function OutcomeDialog({ tender, onClose }: OutcomeDialogProps) {
     if (noticeDate.trim() && noticeDateInstant === null) {
       nextErrors.noticeDate = 'Enter a real calendar date (YYYY-MM-DD).'
     }
-    if (chosen === 'won' && awardedValue.trim() && parseMoney(awardedValue) === null) {
-      nextErrors.awardedValue = 'Enter the awarded value as a number, or leave it blank.'
-    }
+    const awarded = chosen === 'won' ? parseAwardedValue(awardedValue) : null
+    if (awarded && !awarded.ok) nextErrors.awardedValue = awarded.message
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0 || !chosen) return
 
@@ -104,7 +111,7 @@ export function OutcomeDialog({ tender, onClose }: OutcomeDialogProps) {
       status: chosen,
       noticeDate: noticeDateInstant,
       reason: reason.trim() || null,
-      awardedValue: chosen === 'won' ? parseMoney(awardedValue) : null,
+      awardedValue: awarded && awarded.ok ? awarded.value : null,
       evidenceReference: evidenceReference.trim() || null,
     })
 

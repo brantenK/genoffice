@@ -8,6 +8,7 @@ import {
   type ReadinessBinding,
   type ReadinessReport,
 } from '../shared/readiness'
+import { formatRandAmount, safeMoneyLocale } from '../shared/money'
 
 /**
  * Build the binding the proposal generator must verify, from facts the main
@@ -106,23 +107,6 @@ function cell(value: unknown, fallback = ''): string {
 
 function positiveNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
-}
-
-function money(value: number, locale: string): string {
-  return `R ${new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)}`
-}
-
-function safeLocale(value: string | undefined): string {
-  if (!value) return 'en-ZA'
-  try {
-    new Intl.NumberFormat(value).format(1)
-    return value
-  } catch {
-    return 'en-ZA'
-  }
 }
 
 function stableNow(value: Date | string | undefined): Date {
@@ -226,7 +210,7 @@ function assessPricing(
     }
     sumCents += Math.round(amount * 100)
     rows.push(
-      `| ${cell(milestone.name || milestone.title, 'Contract milestone')} | ${cell(milestone.dueDate, 'TBD')} | ${money(amount, locale)} |`,
+      `| ${cell(milestone.name || milestone.title, 'Contract milestone')} | ${cell(milestone.dueDate, 'TBD')} | ${formatRandAmount(amount, locale)} |`,
     )
   }
 
@@ -250,7 +234,7 @@ export function generateProposalMarkdown(
   options: ProposalGenerationOptions = {},
 ): string {
   const tender = input ?? {}
-  const locale = safeLocale(options.locale)
+  const locale = safeMoneyLocale(options.locale)
   const now = stableNow(options.now)
   const title = inline(tender.title, 'Tender Proposal')
   const ref = inline(tender.referenceNumber, 'Not supplied')
@@ -318,7 +302,7 @@ export function generateProposalMarkdown(
   })
   const pricingSection =
     pricing.confirmed && pricing.value !== null
-      ? `**Confirmed Total Bid Valuation:** ${money(pricing.value, locale)} (amount supplied; tax treatment not specified)`
+      ? `**Confirmed Total Bid Valuation:** ${formatRandAmount(pricing.value, locale)} (amount supplied; tax treatment not specified)`
       : '**Pricing:** Not provided or unconfirmed — pricing requires confirmation before submission.'
   const scheduleSection =
     pricing.confirmed && pricing.value !== null
@@ -326,7 +310,7 @@ export function generateProposalMarkdown(
           '| Milestone | Due Date | Amount (as supplied) |',
           '| :--- | :--- | ---: |',
           ...pricing.scheduleRows,
-          `| **TOTAL** | | **${money(pricing.value, locale)}** |`,
+          `| **TOTAL** | | **${formatRandAmount(pricing.value, locale)}** |`,
         ].join('\n')
       : milestones.length > 0
         ? `Milestone descriptions supplied (amounts not shown until pricing is confirmed): ${milestones.map((milestone) => cell(milestone.name || milestone.title, 'Contract milestone')).join('; ')}`

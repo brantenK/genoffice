@@ -16,6 +16,7 @@ import type {
   ReviewCandidate,
   ReviewFieldKey,
   ReviewFieldState,
+  TenderDataOrigin,
   TenderLifecycleEvent,
   TenderOutcomeRecord,
   TenderReadinessSnapshot,
@@ -182,10 +183,18 @@ const TENDER = new Set([
   'pricingConfirmed',
   'milestones',
   'intakeVerification',
+  'dataOrigin',
   'submission',
   'outcome',
   'lifecycle',
 ])
+/**
+ * Allowed per-tender origins. `'demo'` is the only representable value: absent
+ * means the user's own import, so this flag can label demonstration data but can
+ * never claim user provenance (billing/sync privilege is gated on the
+ * workspace-level `dataOrigin`, which the renderer cannot reach through here).
+ */
+const TENDER_DATA_ORIGINS = new Set(['demo'])
 const SUBMISSION = new Set([
   'submittedAt',
   'timeZone',
@@ -1482,6 +1491,20 @@ function parseTender(value: unknown, path: string, issues: Issues): TenderRecord
             .filter((item): item is ContractMilestone => item !== undefined),
         }),
     ...(intakeVerification === undefined ? {} : { intakeVerification }),
+    ...(hasDefined(object, 'dataOrigin')
+      ? {
+          // `enumValue` records INVALID and returns undefined for anything that
+          // is not exactly 'demo', so 'user' cannot be asserted through this
+          // field. The fallback keeps the label on the safe side: an
+          // unrecognised value can never be read as user provenance.
+          dataOrigin: (enumValue(
+            object.dataOrigin,
+            `${path}.dataOrigin`,
+            TENDER_DATA_ORIGINS,
+            issues,
+          ) ?? 'demo') as TenderDataOrigin,
+        }
+      : {}),
     ...(submission === undefined ? {} : { submission }),
     ...(outcome === undefined ? {} : { outcome }),
     ...(lifecycle === undefined

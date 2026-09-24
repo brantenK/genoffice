@@ -1,21 +1,22 @@
 // Client-side gap analysis: cross-reference shredded requirements against the
 // company vault. Flags EXPIRED documents and stale (>90-day) police stamps,
 // assigns fulfilment status + human-readable reasons.
+//
+// Document health and the day maths are NOT implemented here: they are the
+// canonical shared ones (`assessDocHealth` / `daysBetween` in
+// `shared/readiness.ts`), so the vault UI, the renewal runway and the readiness
+// gate can never disagree about whether a document is valid.
 import { RULE_BY_KEY } from '../shared/rules'
-import type {
-  DocHealth,
-  FulfillmentStatus,
-  RequirementRecord,
-  VaultDoc
-} from '../shared/types'
+import {
+  assessDocHealth as assessCanonicalDocHealth,
+  daysBetween,
+  healthWillFail,
+  POLICE_STAMP_WINDOW_DAYS,
+  type ReadinessDocHealth,
+} from '../../shared/readiness'
+import type { DocHealth, FulfillmentStatus, RequirementRecord, VaultDoc } from '../shared/types'
 
-export const POLICE_STAMP_WINDOW_DAYS = 90
-
-const DAY_MS = 86_400_000
-
-export function daysBetween(a: Date, b: Date): number {
-  return Math.round((a.getTime() - b.getTime()) / DAY_MS)
-}
+export { daysBetween, POLICE_STAMP_WINDOW_DAYS }
 
 export interface DocHealthReport {
   health: DocHealth
@@ -26,24 +27,41 @@ export interface DocHealthReport {
   stampDaysLeft: number | null
 }
 
-export function assessDocHealth(doc: VaultDoc, now: Date = new Date()): DocHealthReport {
-  const daysUntilExpiry = doc.expiryDate ? daysBetween(new Date(doc.expiryDate), now) : null
-  const daysSinceCertified = doc.certifiedDate ? daysBetween(now, new Date(doc.certifiedDate)) : null
-  const stampDaysLeft =
-    doc.isCertified && daysSinceCertified !== null
-      ? POLICE_STAMP_WINDOW_DAYS - daysSinceCertified
-      : null
+/**
+ * The shared report is the single implementation; this narrows its two extra
+ * states onto the vault UI's four-state `DocHealth` contract. The narrowing is
+ * presentation only: `applyGapToRequirement` classifies a requirement from the
+ * canonical six-state health (with the rule's own `validityKind`), so a
+ * requirement is never auto-marked FULFILLED for a document the readiness gate
+ * blocks as `UNKNOWN` / `INVALID_DATE`.
+ */
+function toDocHealth(health: ReadinessDocHealth): DocHealth {
+  return health === 'UNKNOWN' || health === 'INVALID_DATE' ? 'NO_EXPIRY_INFO' : health
+}
 
-  if (daysUntilExpiry !== null && daysUntilExpiry < 0) {
-    return { health: 'EXPIRED', daysUntilExpiry, daysSinceCertified, stampDaysLeft }
+export function assessDocHealth(doc: VaultDoc, now: Date = new Date()): DocHealthReport {
+  const report = assessCanonicalDocHealth(doc, now)
+  return {
+    health: toDocHealth(report.health),
+    daysUntilExpiry: report.daysUntilExpiry,
+    daysSinceCertified: report.daysSinceCertified,
+    stampDaysLeft: report.stampDaysLeft,
   }
-  if (stampDaysLeft !== null && stampDaysLeft < 0) {
-    return { health: 'STALE_CERTIFICATION', daysUntilExpiry, daysSinceCertified, stampDaysLeft }
+}
+
+/** Health summary over the canonical (six-state) health, for requirement reasons. */
+function canonicalHealthSummary(
+  doc: VaultDoc,
+  report: { health: ReadinessDocHealth } & Omit<DocHealthReport, 'health'>,
+): string {
+  switch (report.health) {
+    case 'UNKNOWN':
+      return 'expiry/certification information is unknown — confirm the date on file'
+    case 'INVALID_DATE':
+      return 'the date on file is not a valid date — correct it in the vault'
+    default:
+      return healthSummary(doc, { ...report, health: toDocHealth(report.health) })
   }
-  if (daysUntilExpiry === null && daysSinceCertified === null) {
-    return { health: 'NO_EXPIRY_INFO', daysUntilExpiry, daysSinceCertified, stampDaysLeft }
-  }
-  return { health: 'VALID', daysUntilExpiry, daysSinceCertified, stampDaysLeft }
 }
 
 export function healthSummary(doc: VaultDoc, report: DocHealthReport): string {
@@ -83,7 +101,7 @@ export const AUTO_LINK_THRESHOLD = 0.5
  *  Returns candidates sorted by confidence (desc). */
 export function matchVaultDocsWithConfidence(
   req: RequirementRecord,
-  vault: VaultDoc[]
+  vault: VaultDoc[],
 ): VaultMatch[] {
   const rule = RULE_BY_KEY[req.ruleKey]
   if (!rule) return []
@@ -120,18 +138,20 @@ export function matchVaultDocs(req: RequirementRecord, vault: VaultDoc[]): Vault
   return matchVaultDocsWithConfidence(req, vault).map((m) => m.doc)
 }
 
-const HEALTH_RANK: Record<DocHealth, number> = {
+const HEALTH_RANK: Record<ReadinessDocHealth, number> = {
   VALID: 3,
   NO_EXPIRY_INFO: 2,
+  UNKNOWN: 1,
   STALE_CERTIFICATION: 1,
-  EXPIRED: 0
+  EXPIRED: 0,
+  INVALID_DATE: 0,
 }
 
 /** Auto-assign status/reason/linked doc for one requirement. */
 export function applyGapToRequirement(
   req: RequirementRecord,
   vault: VaultDoc[],
-  now: Date = new Date()
+  now: Date = new Date(),
 ): RequirementRecord {
   const matches = matchVaultDocsWithConfidence(req, vault)
   const suggested = matches.map((m) => m.doc.id)
@@ -142,7 +162,7 @@ export function applyGapToRequirement(
       suggestedVaultDocIds: [],
       linkedVaultDocId: null,
       status: 'OUTSTANDING',
-      reason: 'No matching document found in the company vault.'
+      reason: 'No matching document found in the company vault.',
     }
   }
 
@@ -159,31 +179,39 @@ export function applyGapToRequirement(
       linkedVaultDocId: null,
       status: 'OUTSTANDING',
       reason: `Possible match: ${top.doc.title} — low confidence (${Math.round(
-        top.confidence * 100
-      )}%), confirm manually.`
+        top.confidence * 100,
+      )}%), confirm manually.`,
     }
   }
 
   // Best linkable match: healthiest doc; tie-break on earliest expiry (freshest).
-  const withReports = linkable.map((m) => ({ doc: m.doc, rep: assessDocHealth(m.doc, now) }))
+  // The canonical health is computed WITH the rule's own validity kind, so the
+  // status below is the same verdict the readiness gate reaches for this
+  // document at the closing date.
+  const validityKind = RULE_BY_KEY[req.ruleKey]?.validityKind
+  const withReports = linkable.map((m) => ({
+    doc: m.doc,
+    rep: assessCanonicalDocHealth(m.doc, now, validityKind),
+  }))
   withReports.sort(
     (a, b) =>
       HEALTH_RANK[b.rep.health] - HEALTH_RANK[a.rep.health] ||
-      (a.doc.expiryDate ?? '9999').localeCompare(b.doc.expiryDate ?? '9999')
+      (a.doc.expiryDate ?? '9999').localeCompare(b.doc.expiryDate ?? '9999'),
   )
   const best = withReports[0]
 
-  const status: FulfillmentStatus =
-    best.rep.health === 'EXPIRED' || best.rep.health === 'STALE_CERTIFICATION'
-      ? 'ACTION_REQUIRED'
-      : 'FULFILLED'
+  // `healthWillFail` is the readiness module's own list: a requirement can never
+  // be auto-fulfilled by a document the readiness gate blocks.
+  const status: FulfillmentStatus = healthWillFail(best.rep.health)
+    ? 'ACTION_REQUIRED'
+    : 'FULFILLED'
 
   return {
     ...req,
     suggestedVaultDocIds: suggested,
     linkedVaultDocId: best.doc.id,
     status,
-    reason: `${best.doc.title} — ${healthSummary(best.doc, best.rep)}`
+    reason: `${best.doc.title} — ${canonicalHealthSummary(best.doc, best.rep)}`,
   }
 }
 
@@ -191,7 +219,7 @@ export function applyGapToRequirement(
 export function applyGapToRequirements(
   reqs: RequirementRecord[],
   vault: VaultDoc[],
-  now: Date = new Date()
+  now: Date = new Date(),
 ): RequirementRecord[] {
   return reqs.map((r) => applyGapToRequirement(r, vault, now))
 }

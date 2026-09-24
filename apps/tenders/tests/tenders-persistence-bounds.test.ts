@@ -1,17 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Security review sec-2: resource-bound contract for the authoritative Tenders
-// persistence path. Production does not enforce these yet, so the RED lane uses
-// local constants. Proposed exported names (from either
-// `src/shared/tenders-schema.ts` or `src/shared/tenders-persistence.ts`):
+// persistence path.
 //
 //   MAX_TENDERS_STORE_FILE_BYTES          = 8 * 1024 * 1024       (load raw file)
-//   MAX_TENDERS_DOCUMENT_BYTES            = 1.5 * 1024 * 1024     (save + broadcast)
+//   MAX_TENDERS_DOCUMENT_BYTES            = 4 * 1024 * 1024       (save + broadcast)
 //   MAX_TENDERS_WORKSPACES                = 100
 //   MAX_TENDERS_CUSTOMERS_PER_WORKSPACE   = 10_000
 //   MAX_TENDERS_VAULT_DOCS_PER_WORKSPACE  = 10_000
@@ -20,13 +18,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 //   MAX_TENDERS_MILESTONES_PER_TENDER     = 5_000
 //   MAX_TENDERS_ISSUER_TEMPLATES          = 1_000
 //   MAX_TENDERS_SINGLE_STRING_CHARS       = 32_768
-//   MAX_TENDERS_AGGREGATE_STRING_CHARS    = 1_048_576
+//   MAX_TENDERS_AGGREGATE_STRING_CHARS    = 4 * 1024 * 1024  (never binds first)
 //   MAX_TENDERS_DYNAMIC_ENTRIES           = 2_000
 //   MAX_TENDERS_DYNAMIC_KEY_CHARS         = 256
 //   MAX_TENDERS_SCHEMA_ISSUES             = 500
 //   MAX_TENDERS_REQUIRED_DOCS_PER_CUSTOMER        = 1_000
 //   MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT = 1_000
-//   MAX_TENDERS_IPC_PAYLOAD_BYTES                 = 2 * 1024 * 1024  (outer IPC request)
+//   MAX_TENDERS_REVIEW_CONFLICTS                  = 128
+//   MAX_TENDERS_PAGE_STATES                       = 5_000
+//   MAX_TENDERS_REVIEW_CANDIDATES_PER_FIELD       = 16
+//   MAX_TENDERS_IPC_PAYLOAD_BYTES                 = 5 * 1024 * 1024  (outer IPC request)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ORIGINAL_ISO = '2026-08-20T09:15:30.000Z'
@@ -34,7 +35,7 @@ const CLOCK_ISO = '2026-09-14T10:11:12.345Z'
 const FIXED_NOW = new Date(CLOCK_ISO)
 
 const ASSUMED_MAX_STORE_FILE_BYTES = 8 * 1024 * 1024
-const ASSUMED_MAX_DOCUMENT_BYTES = 1.5 * 1024 * 1024
+const ASSUMED_MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
 const ASSUMED_MAX_WORKSPACES = 100
 const ASSUMED_MAX_CUSTOMERS_PER_WORKSPACE = 10_000
 const ASSUMED_MAX_VAULT_DOCS_PER_WORKSPACE = 10_000
@@ -43,13 +44,21 @@ const ASSUMED_MAX_REQUIREMENTS_PER_TENDER = 5_000
 const ASSUMED_MAX_MILESTONES_PER_TENDER = 5_000
 const ASSUMED_MAX_ISSUER_TEMPLATES = 1_000
 const ASSUMED_MAX_SINGLE_STRING_CHARS = 32_768
-const ASSUMED_MAX_AGGREGATE_STRING_CHARS = 1_048_576
+/**
+ * Equal to the document byte ceiling in characters: the aggregate text bound is
+ * held above the byte bound so it can never be the document's binding limit (see
+ * `MAX_TENDERS_AGGREGATE_STRING_CHARS`). It is a backstop, not a budget.
+ */
+const ASSUMED_MAX_AGGREGATE_STRING_CHARS = 4 * 1024 * 1024
 const ASSUMED_MAX_DYNAMIC_ENTRIES = 2_000
 const ASSUMED_MAX_DYNAMIC_KEY_CHARS = 256
 const ASSUMED_MAX_SCHEMA_ISSUES = 500
 const ASSUMED_MAX_REQUIRED_DOCS_PER_CUSTOMER = 1_000
 const ASSUMED_MAX_ADDITIONAL_CLAUSES_PER_REQUIREMENT = 1_000
-const ASSUMED_MAX_IPC_PAYLOAD_BYTES = 2 * 1024 * 1024
+const ASSUMED_MAX_REVIEW_CONFLICTS = 128
+const ASSUMED_MAX_PAGE_STATES = 5_000
+const ASSUMED_MAX_REVIEW_CANDIDATES_PER_FIELD = 16
+const ASSUMED_MAX_IPC_PAYLOAD_BYTES = 5 * 1024 * 1024
 
 const { electronMock, userDataState, ipcHandlers } = vi.hoisted(() => {
   const userDataState = { dir: '' }
@@ -84,7 +93,16 @@ import {
 } from '../src/main/tenders-main'
 import { createTendersStore } from '../src/main/tenders-store'
 import { TENDERS_CHANNELS } from '../src/shared/ipc'
-import { TENDERS_PERSISTENCE_FILE_NAME } from '../src/shared/tenders-persistence'
+import {
+  TENDERS_PERSISTENCE_FILE_NAME,
+  type SaveTendersResult,
+} from '../src/shared/tenders-persistence'
+import {
+  MAX_TENDERS_AGGREGATE_STRING_CHARS,
+  MAX_TENDERS_DOCUMENT_BYTES,
+  MAX_TENDERS_IPC_PAYLOAD_BYTES,
+  MAX_TENDERS_STORE_FILE_BYTES,
+} from '../src/shared/tenders-persistence'
 import {
   createEmptyTendersDataV2,
   migrateTendersDataV1,
@@ -131,6 +149,20 @@ function storePath(directory: string): string {
 
 function byteLength(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), 'utf8')
+}
+
+/**
+ * String content counted the way the schema's aggregate bound counts it: every
+ * string value, object keys excluded.
+ */
+function aggregateChars(value: unknown): number {
+  if (typeof value === 'string') return value.length
+  if (!value || typeof value !== 'object') return 0
+  let total = 0
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    total += aggregateChars(child)
+  }
+  return total
 }
 
 function makeBoundingBox(): RequirementRecord['boundingBox'] {
@@ -326,31 +358,42 @@ function toV1Workspace(workspace: TendersWorkspaceV2): CompanyWorkspace {
 
 /**
  * Build a schema-valid v2 document whose `JSON.stringify` byte length is exactly
- * `targetBytes`. Requirements are grown until one more would overshoot, then the
- * final requirement's `notes` string is padded (one ASCII byte per character) to
- * land precisely on the target. The padding stays under the single-string cap
- * and the aggregate stays well under the aggregate-string cap.
+ * `targetBytes`. Tenders (one requirement each) are grown until one more would
+ * overshoot, then the last requirement's `notes` is padded (one ASCII byte per
+ * character) to land precisely on the target. One tender is ~650 bytes, so the
+ * padding needed is well under the single-string cap and the aggregate string
+ * total stays under the aggregate cap.
  */
 function buildDocumentAtBytes(targetBytes: number, revision = 0): TendersDataV2 {
-  const build = (requirementCount: number, padding: number): TendersDataV2 => {
-    const requirements = Array.from({ length: requirementCount }, (_, index) =>
-      makeRequirement(index),
-    )
-    if (requirements.length > 0) {
-      requirements[requirements.length - 1].notes = 'P'.repeat(padding)
-    }
-    return {
-      ...makeData([
-        makeWorkspace(0, {
-          tenders: [makeTender(0, { requirements, numPages: 1 })],
+  const build = (tenderCount: number, padding: number): TendersDataV2 => {
+    const workspaces: TendersWorkspaceV2[] = []
+    let remaining = tenderCount
+    let workspaceIndex = 0
+    while (remaining > 0 && workspaces.length < ASSUMED_MAX_WORKSPACES) {
+      const count = Math.min(ASSUMED_MAX_TENDERS_PER_WORKSPACE, remaining)
+      remaining -= count
+      workspaces.push(
+        makeWorkspace(workspaceIndex, {
+          tenders: Array.from({ length: count }, (_, index) =>
+            makeTender(workspaceIndex * 10_000 + index, {
+              requirements: [makeRequirement(index)],
+            }),
+          ),
         }),
-      ]),
-      revision,
+      )
+      workspaceIndex += 1
     }
+    if (padding > 0) {
+      const last = workspaces[workspaces.length - 1]
+      last.tenders[last.tenders.length - 1].requirements[0].notes = 'P'.repeat(padding)
+    }
+    return { ...makeData(workspaces), revision }
   }
 
+  // 500 bytes is a safe lower bound for one tender, so the search never builds a
+  // document materially larger than the target.
   let low = 0
-  let high = ASSUMED_MAX_REQUIREMENTS_PER_TENDER
+  let high = Math.ceil(targetBytes / 500)
   while (low < high) {
     const mid = Math.ceil((low + high) / 2)
     if (byteLength(build(mid, 0)) <= targetBytes) low = mid
@@ -358,18 +401,134 @@ function buildDocumentAtBytes(targetBytes: number, revision = 0): TendersDataV2 
   }
 
   const baseBytes = byteLength(build(low, 0))
-  const padding = targetBytes - baseBytes
-  if (padding < 0 || padding > ASSUMED_MAX_SINGLE_STRING_CHARS) {
+  let padding = targetBytes - baseBytes
+  if (padding > 0) {
+    // Adding the `notes` key itself costs a fixed overhead; measure and subtract it
+    // so the padding lands exactly on the target rather than that many bytes over.
+    padding -= byteLength(build(low, padding)) - (baseBytes + padding)
+  }
+  if (low < 1 || padding < 0 || padding > ASSUMED_MAX_SINGLE_STRING_CHARS) {
     throw new Error(
       `Cannot deterministically reach ${targetBytes} bytes (base=${baseBytes}, padding=${padding}).`,
     )
   }
-  return build(low, padding)
+  const document = build(low, padding)
+  if (byteLength(document) !== targetBytes) {
+    throw new Error(`Reached ${byteLength(document)} bytes instead of ${targetBytes}.`)
+  }
+  return document
+}
+
+/**
+ * The document shape intake verification creates at its own caps: one shredded
+ * tender with 5 000 requirements, 5 000 per-page extraction states, 5 000
+ * requirement reviews and 16 candidates for each of the eight readiness-critical
+ * fields. Measured at 3 026 314 compact bytes — 1.9x the 1.5 MiB ceiling this
+ * suite pins — so it is the regression fixture for the wedge.
+ */
+function heavyWorkspaceDocument(): TendersDataV2 {
+  const fieldReview = (index: number) => ({
+    extractedValue: `Extracted value ${index}`,
+    sourcePage: index + 1,
+    sourceClause: `Clause ${index}`,
+    confidence: 0.9,
+    candidates: Array.from({ length: ASSUMED_MAX_REVIEW_CANDIDATES_PER_FIELD }, (_, candidate) => ({
+      value: `Candidate ${candidate} for field ${index}`,
+      sourcePage: candidate + 1,
+      sourceClause: `Clause ${candidate}`,
+      score: 0.5,
+    })),
+    state: 'confirmed' as const,
+    reviewedAt: ORIGINAL_ISO,
+  })
+  return makeData([
+    makeWorkspace(0, {
+      tenders: [
+        makeTender(0, {
+          numPages: ASSUMED_MAX_PAGE_STATES,
+          ocrPages: 0,
+          requirements: Array.from({ length: ASSUMED_MAX_REQUIREMENTS_PER_TENDER }, (_, index) =>
+            makeRequirement(index),
+          ),
+          intakeVerification: {
+            fields: {
+              title: fieldReview(0),
+              referenceNumber: fieldReview(1),
+              issuingBody: fieldReview(2),
+              contactEmail: fieldReview(3),
+              closingDate: fieldReview(4),
+              submissionMethod: fieldReview(5),
+              submissionDestination: fieldReview(6),
+              estimatedValue: fieldReview(7),
+            },
+            requirements: Object.fromEntries(
+              Array.from({ length: ASSUMED_MAX_REQUIREMENTS_PER_TENDER }, (_, index) => [
+                `req-${index}`,
+                {
+                  state: 'verified' as const,
+                  originalTitle: `Requirement ${index}`,
+                  originalCategory: 'GENERAL_RETURNABLE',
+                  correctedAt: ORIGINAL_ISO,
+                },
+              ]),
+            ),
+            pages: Array.from({ length: ASSUMED_MAX_PAGE_STATES }, (_, index) => ({
+              pageNumber: index + 1,
+              state: 'manually-reviewed' as const,
+              method: null,
+              confidence: null,
+              reviewedAt: ORIGINAL_ISO,
+            })),
+            contactEmail: null,
+            conflicts: [],
+            createdAt: ORIGINAL_ISO,
+            updatedAt: ORIGINAL_ISO,
+          },
+        }),
+      ],
+    }),
+  ])
+}
+
+/**
+ * Schema-valid document whose *pretty-printed* size is far larger than its
+ * compact size: an empty string in an array costs three compact bytes and a full
+ * indented line (measured ratio 3.57 for this shape). Used to prove the store
+ * never writes a file the loader would reject.
+ */
+function emptyStringConflictsDocument(tenderCount: number, revision = 0): TendersDataV2 {
+  return {
+    ...makeData([
+      makeWorkspace(0, {
+        tenders: Array.from({ length: tenderCount }, (_, index) =>
+          makeTender(index, {
+            requirements: [],
+            intakeVerification: {
+              fields: {},
+              requirements: {},
+              conflicts: Array.from({ length: ASSUMED_MAX_REVIEW_CONFLICTS }, () => ''),
+              contactEmail: null,
+              createdAt: ORIGINAL_ISO,
+              updatedAt: ORIGINAL_ISO,
+            },
+          }),
+        ),
+      }),
+    ]),
+    revision,
+  }
 }
 
 function expectSchemaValid(result: ReturnType<typeof validateTendersDataV2>): void {
   expect(result.ok).toBe(true)
   if (!result.ok) throw new Error(`Expected valid data, received ${result.error.code}`)
+}
+
+function expectSaveSuccess(
+  result: SaveTendersResult,
+): asserts result is Extract<SaveTendersResult, { ok: true }> {
+  expect(result.ok).toBe(true)
+  if ('error' in result) throw new Error(`Expected save success, received ${result.error.code}`)
 }
 
 function expectSchemaInvalid(
@@ -608,40 +767,46 @@ describe('sec-2 Tenders persistence resource bounds', () => {
       expectSchemaInvalid(validateTendersDataV2(document), 'workspaces.0.company.description')
     })
 
-    it('accepts aggregate string content just below the documented document total', () => {
+    it('accepts a text-heavy document just below the aggregate string ceiling', () => {
       const perString = ASSUMED_MAX_SINGLE_STRING_CHARS
+      // The most content a fixture can build one 32 KiB string at a time and still
+      // fit: 127 * 32 KiB = 4,161,536 characters, below the ceiling even after the
+      // fixed identifiers and titles are counted.
+      const count = Math.floor(ASSUMED_MAX_AGGREGATE_STRING_CHARS / perString) - 1
       const document = makeData([
         makeWorkspace(0, {
           tenders: [
             makeTender(0, {
               numPages: 1,
-              // 31 * 32 KiB = 1,015,808 chars, safely below the 1 MiB aggregate cap
-              // even after the small fixed identifiers and titles are included.
-              requirements: Array.from({ length: 31 }, (_, index) =>
+              requirements: Array.from({ length: count }, (_, index) =>
                 makeRequirement(index, { notes: 'A'.repeat(perString) }),
               ),
             }),
           ],
         }),
       ])
+      expect(aggregateChars(document)).toBeLessThanOrEqual(ASSUMED_MAX_AGGREGATE_STRING_CHARS)
       expectSchemaValid(validateTendersDataV2(document))
     })
 
-    it('rejects aggregate string content above the documented document total', () => {
+    it('rejects aggregate string content above the aggregate string ceiling', () => {
       const perString = ASSUMED_MAX_SINGLE_STRING_CHARS
+      // One 32 KiB string beyond what the ceiling admits (129 * 32 KiB = 4,227,072
+      // characters) — the finest boundary step available at the single-string cap.
+      const count = Math.floor(ASSUMED_MAX_AGGREGATE_STRING_CHARS / perString) + 1
       const document = makeData([
         makeWorkspace(0, {
           tenders: [
             makeTender(0, {
               numPages: 1,
-              // 33 * 32 KiB = 1,081,344 chars exceeds the 1 MiB aggregate cap on its own.
-              requirements: Array.from({ length: 33 }, (_, index) =>
+              requirements: Array.from({ length: count }, (_, index) =>
                 makeRequirement(index, { notes: 'A'.repeat(perString) }),
               ),
             }),
           ],
         }),
       ])
+      expect(aggregateChars(document)).toBeGreaterThan(ASSUMED_MAX_AGGREGATE_STRING_CHARS)
       expectSchemaInvalid(
         validateTendersDataV2(document),
         undefined,
@@ -750,7 +915,67 @@ describe('sec-2 Tenders persistence resource bounds', () => {
     })
   })
 
+  describe('documented byte ceilings', () => {
+    it('exports the documented ceilings and keeps them ordered so no smaller cap binds first', () => {
+      expect(MAX_TENDERS_DOCUMENT_BYTES).toBe(ASSUMED_MAX_DOCUMENT_BYTES)
+      expect(MAX_TENDERS_IPC_PAYLOAD_BYTES).toBe(ASSUMED_MAX_IPC_PAYLOAD_BYTES)
+      expect(MAX_TENDERS_STORE_FILE_BYTES).toBe(ASSUMED_MAX_STORE_FILE_BYTES)
+      expect(MAX_TENDERS_AGGREGATE_STRING_CHARS).toBe(ASSUMED_MAX_AGGREGATE_STRING_CHARS)
+      // The envelope ceiling must never bind before the document ceiling the
+      // renderer mirrors and reports with an actionable message.
+      expect(ASSUMED_MAX_IPC_PAYLOAD_BYTES).toBeGreaterThan(ASSUMED_MAX_DOCUMENT_BYTES)
+      // The document ceiling is at most half the store-file ceiling: the committed
+      // file is the same document pretty-printed, which measured ~1.8x for
+      // record-heavy documents. Any document whose indented form would not fit is
+      // refused by the store before it can replace a readable primary.
+      expect(ASSUMED_MAX_DOCUMENT_BYTES).toBeLessThanOrEqual(ASSUMED_MAX_STORE_FILE_BYTES / 2)
+      // The aggregate *text* ceiling must never bind before the byte ceiling either,
+      // or the refusal names no field and no way forward. Every counted character
+      // costs at least one byte of the compact JSON the byte ceiling measures (keys,
+      // punctuation and escapes add bytes without adding characters), so holding the
+      // character ceiling at the byte ceiling makes it unreachable by construction.
+      expect(MAX_TENDERS_AGGREGATE_STRING_CHARS).toBeGreaterThanOrEqual(MAX_TENDERS_DOCUMENT_BYTES)
+    })
+  })
+
   describe('save and broadcast serialized size bounds', () => {
+    it('commits the measured intake-verification workspace the previous ceiling rejected', async () => {
+      const directory = await uniqueDirectory('heavy-workspace')
+      const store = createTendersStore({ directory, now: () => FIXED_NOW })
+      const document = heavyWorkspaceDocument()
+      const bytes = byteLength(document)
+
+      // Measured 3 026 314 bytes: one tender at the requirement cap with page
+      // states, requirement reviews and 16 candidates per readiness-critical
+      // field. It is 1.9x the 1.5 MiB ceiling this fix raises, so this is the
+      // regression test for the wedge (every autosave failed, no way out).
+      expect(bytes).toBeGreaterThan(1.5 * 1024 * 1024)
+      expect(bytes).toBeLessThanOrEqual(ASSUMED_MAX_DOCUMENT_BYTES)
+      // The same fixture carries 910 274 counted characters — 87% of the old 1 MiB
+      // aggregate text ceiling — so a document only ~15% larger than it was refused
+      // with a message naming no field: the same non-actionable wedge. At least 2x
+      // headroom is the guard that the text ceiling cannot become the binding
+      // document bound again.
+      const chars = aggregateChars(document)
+      expect(chars).toBeLessThan(ASSUMED_MAX_AGGREGATE_STRING_CHARS)
+      expect(chars * 2).toBeLessThanOrEqual(ASSUMED_MAX_AGGREGATE_STRING_CHARS)
+      expectSchemaValid(validateTendersDataV2(document))
+
+      const saved = await store.save({ expectedRevision: 0, document })
+
+      expectSaveSuccess(saved)
+      expect(saved.data.revision).toBe(1)
+      const loaded = await store.load()
+      expect(loaded.ok).toBe(true)
+      if (!loaded.ok) throw new Error(`Expected heavy workspace to load: ${loaded.error.code}`)
+      const tender = loaded.data.workspaces[0].tenders[0]
+      expect(tender.requirements).toHaveLength(ASSUMED_MAX_REQUIREMENTS_PER_TENDER)
+      expect(tender.intakeVerification?.pages).toHaveLength(ASSUMED_MAX_PAGE_STATES)
+      expect(tender.intakeVerification?.fields.title.candidates).toHaveLength(
+        ASSUMED_MAX_REVIEW_CANDIDATES_PER_FIELD,
+      )
+    })
+
     it('rejects an oversized document as INVALID_DATA before writing and preserves the prior file', async () => {
       const directory = await uniqueDirectory('save-too-large')
       const store = createTendersStore({ directory, now: () => FIXED_NOW })
@@ -759,6 +984,7 @@ describe('sec-2 Tenders persistence resource bounds', () => {
       const priorBytes = await readFile(storePath(directory), 'utf8')
 
       const oversized = buildDocumentAtBytes(ASSUMED_MAX_DOCUMENT_BYTES + 1, 1)
+      expect(byteLength(oversized)).toBe(ASSUMED_MAX_DOCUMENT_BYTES + 1)
       const rejected = await store.save({ expectedRevision: 1, document: oversized })
 
       expect(rejected.ok).toBe(false)
@@ -769,7 +995,7 @@ describe('sec-2 Tenders persistence resource bounds', () => {
       expect(await readFile(storePath(directory), 'utf8')).toBe(priorBytes)
     })
 
-    it('accepts a document whose serialized size is exactly at the documented maximum', async () => {
+    it('accepts a document whose serialized size is exactly at the documented maximum and writes a file the loader reads back', async () => {
       const directory = await uniqueDirectory('save-at-limit')
       const store = createTendersStore({ directory, now: () => FIXED_NOW })
       const document = buildDocumentAtBytes(ASSUMED_MAX_DOCUMENT_BYTES, 0)
@@ -780,6 +1006,50 @@ describe('sec-2 Tenders persistence resource bounds', () => {
       expect(result.ok).toBe(true)
       if (!result.ok) throw new Error(`Expected at-limit document to save: ${result.error.code}`)
       expect(result.data.revision).toBe(1)
+      // The committed file is the same document pretty-printed, so a document at
+      // the compact ceiling must still leave the file inside the store-file
+      // ceiling the loader enforces on read.
+      const onDisk = await stat(storePath(directory))
+      expect(onDisk.size).toBeLessThanOrEqual(ASSUMED_MAX_STORE_FILE_BYTES)
+      const loaded = await store.load()
+      expect(loaded.ok).toBe(true)
+      if (!loaded.ok) throw new Error(`Expected at-limit file to load: ${loaded.error.code}`)
+      expect(loaded.data.revision).toBe(1)
+    })
+
+    it('refuses a document whose pretty-printed file would exceed the store-file ceiling without replacing the readable primary', async () => {
+      const directory = await uniqueDirectory('save-file-ceiling')
+      const store = createTendersStore({ directory, now: () => FIXED_NOW })
+      const prior = await store.save({ expectedRevision: 0, document: validData() })
+      expectSaveSuccess(prior)
+      const priorBytes = await readFile(storePath(directory), 'utf8')
+
+      // Schema-valid and inside the compact ceiling, but its indented form does not
+      // fit the store-file ceiling: committing it would leave a primary the loader
+      // refuses (a post-rename read-back failure), so the store must not write.
+      const document = emptyStringConflictsDocument(3_000, 1)
+      expectSchemaValid(validateTendersDataV2(document))
+      expect(byteLength(document)).toBeLessThanOrEqual(ASSUMED_MAX_DOCUMENT_BYTES)
+      expect(Buffer.byteLength(JSON.stringify(document, null, 2), 'utf8')).toBeGreaterThan(
+        ASSUMED_MAX_STORE_FILE_BYTES,
+      )
+
+      const rejected = await store.save({ expectedRevision: 1, document })
+
+      expect(rejected.ok).toBe(false)
+      if (rejected.ok) throw new Error('Expected the store-file ceiling to reject the commit')
+      expect(rejected.error.code).toBe('INVALID_DATA')
+      expect(rejected.error.message).toMatch(/store file|on disk/i)
+      expect(rejected.error.message).toMatch(String(ASSUMED_MAX_STORE_FILE_BYTES))
+      expect(rejected).not.toHaveProperty('data')
+      expect(await readFile(storePath(directory), 'utf8')).toBe(priorBytes)
+      // No temp artifact and no backup were created for a refused commit.
+      expect(await readdir(directory)).toEqual([TENDERS_PERSISTENCE_FILE_NAME])
+      const loaded = await store.load()
+      expect(loaded.ok).toBe(true)
+      if (!loaded.ok)
+        throw new Error(`Expected the prior document to survive: ${loaded.error.code}`)
+      expect(loaded.data.revision).toBe(1)
     })
 
     it('broadcasts a document whose serialized size is exactly at the documented maximum', () => {

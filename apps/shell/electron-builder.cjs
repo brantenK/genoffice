@@ -212,7 +212,11 @@ function assertUniversalSidecar() {
 }
 
 function assertModuleTreesPresent() {
-  for (const rel of [
+  // electron-vite emits three trees per module. Presence of out/ alone proved
+  // nothing: a stale or half-written one (an interrupted build, or a build whose
+  // renderer step failed) packed just as cleanly, and the tab then opened blank
+  // under a correct title while the Home card still offered it.
+  const MODULE_TREES = [
     '../docs/out',
     '../sheets/out',
     '../slides/out',
@@ -222,9 +226,23 @@ function assertModuleTreesPresent() {
     '../crm/out',
     '../tenders/out',
     '../books/out',
+  ]
+  // vite copies a module's public/ into its renderer output. These are fetched
+  // at runtime, so a build that dropped them ships dead UI — Tenders' "Load demo
+  // RFP" fetches the sample, and its sample workspace opens the vault PDFs.
+  const PUBLIC_ASSETS = {
+    '../tenders/out': ['renderer/demo/sample-rfp.pdf', 'renderer/demo/vault'],
+  }
+  const required = [
+    ...MODULE_TREES.flatMap((rel) => [
+      ...['main/index.js', 'preload/index.js', 'renderer/index.html'].map((a) => `${rel}/${a}`),
+      ...(PUBLIC_ASSETS[rel] ?? []).map((a) => `${rel}/${a}`),
+    ]),
+    // produced by the cli package build, not by electron-vite
     '../../packages/cli/dist/genoffice.cjs',
     '../../packages/cli/dist/node_modules/jsdom',
-  ]) {
+  ]
+  for (const rel of required) {
     if (!existsSync(join(__dirname, rel))) {
       throw new Error(
         `electron-builder extraResources source missing: ${rel} (run npm run build:all first)`,
@@ -249,6 +267,18 @@ const config = {
     {
       from: 'build/THIRD-PARTY-NOTICES.txt',
       to: 'THIRD-PARTY-NOTICES.txt',
+    },
+    // The fork redistributes upstream's source under Apache-2.0, whose §4
+    // requires the LICENSE and any NOTICE to travel with it. Only the generated
+    // third-party notices file was shipped, so an installed app carried no copy
+    // of either — both sit next to the notices file in Resources/.
+    {
+      from: '../../LICENSE',
+      to: 'LICENSE',
+    },
+    {
+      from: '../../NOTICE',
+      to: 'NOTICE',
     },
     {
       from: '../../node_modules/electron/dist/LICENSES.chromium.html',
@@ -518,9 +548,12 @@ const config = {
       { target: 'rpm', arch: ['x64'] },
     ],
     // deb control metadata; values match the manually published 0.5.149 deb
-    // so apt sees the new packages as the same lineage. Homepage comes from
-    // package.json "homepage"; the Package field is pinned in the deb block
-    // below (packageName is a per-target option, rejected here by the schema).
+    // so apt sees the new packages as the same lineage. electron-builder takes
+    // the control Homepage field from package.json "homepage", which the fork
+    // no longer sets (it pointed at upstream's repository) — so the field is
+    // simply absent until the fork has a public product URL of its own. The
+    // Package field is pinned in the deb block below (packageName is a
+    // per-target option, rejected here by the schema).
     maintainer: 'Zanostack <team@zanostack.com>',
     vendor: 'Zanostack <team@zanostack.com>',
     category: 'Office',

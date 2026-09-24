@@ -9,7 +9,9 @@
  *   3. customer create -> edit -> archive -> restore (including required-document
  *      definitions) persists across restart;
  *   4. contextual empty states / quick actions are present, and the destructive
- *      hard-delete path is visible but disabled (not enabled).
+ *      hard-delete path is explained in plain language instead of being rendered
+ *      as a permanently-disabled button;
+ *   5. a tender opens with Tab + Enter and Tab + Space alone (keyboard-only).
  *
  * Assertions read observable UI state and the on-disk `tenders-data.json`.
  * Scratch `userData` under `%LOCALAPPDATA%\Temp\opencode`; no app-source edits.
@@ -17,7 +19,7 @@
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   launchShell,
@@ -25,11 +27,15 @@ import {
   waitForPageWithUrl,
   screenshotPath,
   ARTIFACTS_DIR,
+  SHELL_DIR,
   type LaunchedApp,
 } from './helpers'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
+
+/** The shipped sample RFP, imported through the file input (no network fetch). */
+const SAMPLE_RFP = resolve(SHELL_DIR, '..', 'tenders', 'public', 'demo', 'sample-rfp.pdf')
 
 const COMPANY_ONE = 'E2E First Use Civils (Pty) Ltd'
 const COMPANY_ONE_EDITED = 'E2E First Use Civils (Pty) Ltd (edited)'
@@ -171,6 +177,23 @@ async function shot(page: Page, name: string): Promise<string> {
   return target
 }
 
+/**
+ * Tab forward from a neutral (blurred) focus point until the focused element is
+ * inside a tender card. Returns false when the card is not reachable, so the
+ * caller can fail with a readable message instead of a timeout.
+ */
+async function tabToTenderCard(tenders: Page, maxTabs = 40): Promise<number | null> {
+  await tenders.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  for (let i = 1; i <= maxTabs; i += 1) {
+    await tenders.keyboard.press('Tab')
+    const inside = await tenders.evaluate(() =>
+      Boolean(document.activeElement?.closest('[data-testid="tender-card"]')),
+    )
+    if (inside) return i
+  }
+  return null
+}
+
 interface JourneyResult {
   journey: string
   status: 'PASS' | 'FAIL'
@@ -274,7 +297,9 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
       })
       await expect(tenders.getByRole('button', { name: 'Restore workspace' })).toBeVisible()
 
-      // (4b) The destructive path is exposed but disabled and lists what it owns.
+      // (4b) The destructive path is explained, not rendered as a dead control:
+      // no permanently-disabled delete button, and the panel lists what the
+      // workspace owns plus the archive/restore route that actually exists.
       await tenders.getByRole('button', { name: /^Delete this workspace/ }).click()
       await expect(tenders.getByText('Permanent deletion is not available yet')).toBeVisible()
       const deletePanel = tenders
@@ -285,7 +310,14 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
       await expect(deletePanel.getByText(/vault document/)).toBeVisible()
       await expect(deletePanel.getByText(/customer/)).toBeVisible()
       await expect(deletePanel.getByText(/project record/)).toBeVisible()
-      await expect(tenders.getByRole('button', { name: 'Delete permanently' })).toBeDisabled()
+      await expect(
+        tenders.getByRole('button', { name: 'Delete permanently' }),
+        'a permanently-disabled delete control must not be rendered',
+      ).toHaveCount(0)
+      await expect(deletePanel.getByText(/no permanent workspace delete/i)).toBeVisible()
+      await expect(
+        deletePanel.getByRole('button', { name: /Archive this workspace|Restore workspace/ }),
+      ).toBeVisible()
       screenshots.push(await shot(tenders, 'firstuse-j1-archive-and-guard'))
       await tenders.getByRole('button', { name: 'Keep this workspace' }).click()
 
@@ -422,8 +454,13 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
       await expect(tenders.getByRole('button', { name: 'Restore' })).toBeVisible()
       await tenders.getByRole('button', { name: /^Remove/ }).click()
       await expect(tenders.getByText('Removing a customer is not available yet')).toBeVisible()
-      await expect(tenders.getByRole('button', { name: 'Delete permanently' })).toBeDisabled()
-      await expect(tenders.getByText(/Archive the customer instead/)).toBeVisible()
+      await expect(
+        tenders.getByRole('button', { name: 'Delete permanently' }),
+        'a permanently-disabled delete control must not be rendered',
+      ).toHaveCount(0)
+      await expect(tenders.getByText(/no permanent customer delete/i)).toBeVisible()
+      await expect(tenders.getByText(/moved to Trash/)).toBeVisible()
+      await expect(tenders.getByRole('button', { name: 'Restore customer' })).toBeVisible()
       screenshots.push(await shot(tenders, 'firstuse-j2-customer-archived-guard'))
       await tenders.getByRole('button', { name: 'Keep customer' }).click()
       const archived = await pollStore(userDataDir, (s) =>
@@ -475,6 +512,182 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j2-run1').catch(() => undefined)
       if (run2) await closeAndSaveVideo(run2, 'tenders-first-use-j2-run2').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  /**
+   * Keyboard-only journey: the tender list must be operable without a mouse.
+   * The card is a real `<button>` (not an `onClick` on a list item), so Tab
+   * reaches it and Enter/Space open the workspace exactly like a click.
+   */
+  test('3: a tender opens with Tab + Enter and Tab + Space alone', async () => {
+    const screenshots: string[] = []
+    let run1: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      run1 = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-first-use-j3',
+      })
+      const tenders = await openTendersFromNav(run1.app, run1.page)
+      await createCompanyViaFirstUse(tenders, COMPANY_ONE)
+
+      // Import the shipped sample RFP through the file input, so this journey
+      // never depends on the demo asset being fetchable.
+      await gotoPage(tenders, 'Tenders')
+      await tenders.locator('input[type="file"][accept*="pdf"]').first().setInputFiles(SAMPLE_RFP)
+      const matrix = tenders.getByRole('heading', { name: 'Compliance matrix' })
+      await expect(matrix).toBeVisible({ timeout: 90_000 })
+      const store = await pollStore(
+        userDataDir,
+        (s) => (activeWorkspace(s)?.tenders ?? []).length > 0,
+      )
+      const tender = activeWorkspace(store).tenders[0]
+      expect(tender, 'the imported tender must be committed').toBeTruthy()
+
+      // Back to the list view.
+      await tenders.locator('main').getByRole('button', { name: 'Tenders' }).first().click()
+      const listHeading = tenders.getByRole('heading', { name: 'Tenders', level: 1 })
+      await expect(listHeading).toBeVisible({ timeout: 20_000 })
+
+      // (a) The card carries real button semantics and a named control.
+      const cards = tenders.locator('[data-testid="tender-card"]')
+      await expect(cards).toHaveCount(1)
+      await expect(
+        cards.first().getByRole('button', { name: tender.title }),
+        'the tender card must expose an open-tender button',
+      ).toBeVisible()
+      const cardsWithoutButton = await cards.evaluateAll(
+        (nodes) => nodes.filter((node) => !node.querySelector('button')).length,
+      )
+      expect(cardsWithoutButton, 'every tender card must contain a real button').toBe(0)
+
+      // (b) Tab reaches the card from a neutral focus point, and Enter opens it.
+      const tabsToCard = await tabToTenderCard(tenders)
+      expect(
+        tabsToCard,
+        `the tender card must be reachable with Tab alone (gave up after 40 tabs)`,
+      ).not.toBeNull()
+      await tenders.keyboard.press('Enter')
+      await expect(matrix).toBeVisible({ timeout: 20_000 })
+      await expect(tenders.locator('[data-testid="workspace-context-header"]')).toContainText(
+        tender.title,
+        { timeout: 20_000 },
+      )
+      screenshots.push(await shot(tenders, 'firstuse-j3-keyboard-enter'))
+
+      // (c) The same card opens with Space.
+      await tenders.locator('main').getByRole('button', { name: 'Tenders' }).first().click()
+      await expect(listHeading).toBeVisible({ timeout: 20_000 })
+      expect(await tabToTenderCard(tenders), 'the card must still be reachable with Tab').not.toBe(
+        null,
+      )
+      await tenders.keyboard.press('Space')
+      await expect(matrix).toBeVisible({ timeout: 20_000 })
+      await expect(tenders.locator('[data-testid="workspace-context-header"]')).toContainText(
+        tender.title,
+        { timeout: 20_000 },
+      )
+      screenshots.push(await shot(tenders, 'firstuse-j3-keyboard-space'))
+
+      const result: JourneyResult = {
+        journey: '3: keyboard-only tender opening (Tab + Enter / Tab + Space)',
+        status: 'PASS',
+        detail: `card reachable after ${tabsToCard} tabs; Enter and Space both opened the workspace for ${tender.id}`,
+        evidence: { userDataDir, tenderId: tender.id, tenderTitle: tender.title, tabsToCard },
+        screenshots,
+      }
+      await writeResult('tenders-first-use-journey-3', result)
+    } finally {
+      if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j3').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  /**
+   * Demo-import labelling: a tender shredded from the bundled sample RFP must
+   * stay distinguishable from the user's own tenders, and the tag must be the
+   * import (not the file name) — importing the very same PDF through the file
+   * input must NOT be labelled.
+   *
+   * Depends on the demo asset being served from the renderer output, exactly as
+   * `tenders-regression-smoke.spec.ts` already requires; the probe below reports
+   * the URL and status so a missing asset cannot be misread as a labelling bug.
+   */
+  test('4: a demo import is labelled as demonstration data, a file-input import is not', async () => {
+    const screenshots: string[] = []
+    let run1: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      run1 = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-first-use-j4',
+      })
+      const tenders = await openTendersFromNav(run1.app, run1.page)
+      await createCompanyViaFirstUse(tenders, COMPANY_ONE)
+      await gotoPage(tenders, 'Tenders')
+
+      const probe = await tenders.evaluate(async () => {
+        const url = new URL('./demo/sample-rfp.pdf', document.baseURI).href
+        try {
+          const res = await fetch('./demo/sample-rfp.pdf')
+          return { url, ok: res.ok, status: res.status }
+        } catch (error) {
+          return { url, ok: false, status: 0, error: String(error) }
+        }
+      })
+      expect(
+        probe.ok,
+        `the demo RFP must be served from the renderer output: ${JSON.stringify(probe)}`,
+      ).toBe(true)
+
+      // (a) The demo loader's own import is tagged.
+      await tenders.getByRole('button', { name: 'Load demo RFP' }).click()
+      const matrix = tenders.getByRole('heading', { name: 'Compliance matrix' })
+      await expect(matrix).toBeVisible({ timeout: 90_000 })
+      await tenders.locator('main').getByRole('button', { name: 'Tenders' }).first().click()
+      await expect(tenders.getByRole('heading', { name: 'Tenders', level: 1 })).toBeVisible({
+        timeout: 20_000,
+      })
+      const cards = tenders.locator('[data-testid="tender-card"]')
+      await expect(cards).toHaveCount(1)
+      await expect(cards.first()).toHaveAttribute('data-demo-import', 'true')
+      await expect(tenders.getByText('Demo import').first()).toBeVisible()
+      await expect(
+        tenders.getByText(/demonstration data, not a real tender/i).first(),
+        'the list must say what the demo label means',
+      ).toBeVisible()
+      screenshots.push(await shot(tenders, 'firstuse-j4-demo-labelled'))
+
+      // (b) Control: the same PDF through the file input is the user's own import.
+      await tenders.locator('input[type="file"][accept*="pdf"]').first().setInputFiles(SAMPLE_RFP)
+      await expect(matrix).toBeVisible({ timeout: 90_000 })
+      await tenders.locator('main').getByRole('button', { name: 'Tenders' }).first().click()
+      await expect(tenders.getByRole('heading', { name: 'Tenders', level: 1 })).toBeVisible({
+        timeout: 20_000,
+      })
+      await expect(cards).toHaveCount(2)
+      await expect(
+        tenders.locator('[data-testid="tender-card"][data-demo-import="true"]'),
+        'only the demo-button import may be labelled',
+      ).toHaveCount(1)
+      screenshots.push(await shot(tenders, 'firstuse-j4-control-unlabelled'))
+
+      const result: JourneyResult = {
+        journey: '4: demo import labelled, file-input import not labelled',
+        status: 'PASS',
+        detail: `demo asset ${probe.url} -> HTTP ${probe.status}; 1 of 2 tenders tagged data-demo-import`,
+        evidence: { userDataDir, probe },
+        screenshots,
+      }
+      await writeResult('tenders-first-use-journey-4', result)
+    } finally {
+      if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j4').catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
     }
   })

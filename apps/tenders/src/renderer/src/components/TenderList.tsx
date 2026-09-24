@@ -37,9 +37,11 @@ import {
 } from '../store'
 import { assessReadiness } from '../readiness'
 import {
+  isDemoAssetUrl,
   SUBMISSION_METHOD_LABEL,
   TENDER_OUTCOME_LABEL,
   type RequirementRecord,
+  type TenderDataOrigin,
   type TenderRecord,
 } from '../../shared/types'
 import { deriveTenderReview, gateConflictingMeta, summarizeReview } from './ExtractionReview'
@@ -47,16 +49,83 @@ import { lifecycleCardSummary } from './TenderLifecyclePanel'
 import { Badge, Button, Spinner } from './ui'
 import { Dialog } from './Dialog'
 
+/**
+ * The bundled sample RFP, in both document-relative (`./`) and root-relative
+ * form. A missing asset answers with a non-OK *response* — it does not reject —
+ * so the fallback below is driven by `res.ok`, not only by a thrown fetch.
+ */
+const DEMO_RFP_URLS = ['./demo/sample-rfp.pdf', '/demo/sample-rfp.pdf'] as const
+
+/** File name the bundled sample RFP is imported under. */
+const DEMO_RFP_FILE_NAME = 'sample-rfp.pdf'
+
+/** Label shown on a tender that came from the bundled sample RFP. */
+export const DEMO_TENDER_LABEL = 'Demo import'
+
+/** Why a demo-imported tender is labelled: it is not the user's own document. */
+export const DEMO_TENDER_HINT =
+  'Imported from the bundled sample RFP — demonstration data, not a real tender.'
+
+/** Short form of the same statement, used in the list's explanatory line. */
+export const DEMO_TENDER_NOTE = 'demonstration data, not a real tender.'
+
+/**
+ * A tender shredded from the bundled sample RFP is marked on the record itself
+ * (`TenderRecord.dataOrigin`) instead of in a session-scoped renderer Set, so
+ * the label survives a restart. The renderer can only ever write `'demo'` — the
+ * schema rejects `'user'` — so this flag can never promote a record.
+ */
+export function isDemoTender(tender: Pick<TenderRecord, 'dataOrigin'>): boolean {
+  return tender.dataOrigin === 'demo'
+}
+
+/**
+ * Fetch the bundled sample RFP, trying each candidate URL and falling back on a
+ * non-OK response as well as on a rejected request. Throws with an accurate
+ * reason (which URL answered what) when none of them resolves.
+ */
+export async function fetchDemoRfp(
+  fetchImpl: (input: string) => Promise<Response> = (input) => fetch(input),
+): Promise<Response> {
+  const attempts: string[] = []
+  for (const url of DEMO_RFP_URLS) {
+    try {
+      const response = await fetchImpl(url)
+      if (response.ok) return response
+      attempts.push(`${url} → HTTP ${response.status}`)
+    } catch (err) {
+      attempts.push(`${url} → ${err instanceof Error ? err.message : 'request failed'}`)
+    }
+  }
+  throw new Error(`no demo asset: ${attempts.join('; ')}`)
+}
+
+/**
+ * The document store reports raw I/O failures (`EPERM: …`, absolute paths). A
+ * user-facing alert describes the failure in plain language instead, passing
+ * through only a store-authored size/limit message.
+ */
+export function persistFailureReason(detail: string | null | undefined): string {
+  if (detail && /upload limit|limit reached/i.test(detail)) {
+    return 'the document store rejected it as too large'
+  }
+  return 'the document store could not write it to this machine'
+}
+
 let tenderSeq = 0
 
 async function shredFile(
   file: File,
   signal: AbortSignal,
+  dataOrigin?: TenderDataOrigin,
 ): Promise<{
   record: TenderRecord
   extraction: Awaited<ReturnType<typeof extractAllPages>>
   meta: ReturnType<typeof extractTenderMeta>
-  /** Non-null when the RFP could not be persisted and fell back to a blob. */
+  /**
+   * Non-null when the RFP could not be persisted and fell back to a blob. The
+   * value is a plain-language reason, never the raw store/I-O error.
+   */
   persistError: string | null
 }> {
   const setShredding = useTendersStore.getState().setShredding
@@ -150,10 +219,10 @@ async function shredFile(
           storedPath = saveRes.storedPath
           fileUrl = saveRes.storedPath
         } else {
-          persistError = saveRes?.error || 'The document store rejected the file.'
+          persistError = persistFailureReason(saveRes?.error)
         }
       } catch (saveErr) {
-        persistError = saveErr instanceof Error ? saveErr.message : String(saveErr)
+        persistError = persistFailureReason(saveErr instanceof Error ? saveErr.message : null)
       }
       // If the import was cancelled while the document was being reserved,
       // release it so a cancelled import leaves no orphan file.
@@ -207,7 +276,14 @@ async function shredFile(
       },
     )
     setShredding({ stage: 'done', message: 'Done', page: ex.numPages, total: ex.numPages })
-    return { record, extraction: ex, meta, persistError }
+    // The origin rides on the record, so it is committed with the tender and is
+    // still there after a restart.
+    return {
+      record: dataOrigin ? { ...record, dataOrigin } : record,
+      extraction: ex,
+      meta,
+      persistError,
+    }
   } catch (err) {
     if (err instanceof PdfImportCancelledError) {
       // Clean cancellation: no tender is added, no partial state is kept.
@@ -260,10 +336,10 @@ export function TenderList() {
   }, [])
 
   const handleFile = useCallback(
-    async (file: File) => {
+    async (file: File, options?: { dataOrigin?: TenderDataOrigin }): Promise<string | null> => {
       if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
         setError('Only PDF files are supported.')
-        return
+        return null
       }
       setError(null)
       setStorageWarning(null)
@@ -271,8 +347,12 @@ export function TenderList() {
       importAbortRef.current?.abort()
       importAbortRef.current = controller
       try {
-        const { record, extraction, meta, persistError } = await shredFile(file, controller.signal)
-        if (controller.signal.aborted) return
+        const { record, extraction, meta, persistError } = await shredFile(
+          file,
+          controller.signal,
+          options?.dataOrigin,
+        )
+        if (controller.signal.aborted) return null
         addTender(record)
         if (persistError) {
           // The tender imports fine, but the PDF fell back to an object URL that
@@ -280,7 +360,7 @@ export function TenderList() {
           lastImportFileRef.current = file
           setStorageWarning({
             tenderId: record.id,
-            message: `The PDF could not be saved to the workspace: ${persistError}. It is open for this session only and must be re-attached before you rely on it after a restart.`,
+            message: `The PDF could not be saved to the workspace — ${persistError}. It is open for this session only and must be re-attached before you rely on it after a restart.`,
           })
         }
         // Seed the extraction review from the parser's candidates so the user
@@ -295,18 +375,20 @@ export function TenderList() {
           }),
         )
         setActiveTender(record.id)
+        return record.id
       } catch (err) {
         if (err instanceof PdfImportCancelledError) {
           setError('Import cancelled.')
-          return
+          return null
         }
         if (err instanceof PdfPreflightError) {
           // Typed, user-visible reason (oversize file / too many pages).
           setError(err.message)
-          return
+          return null
         }
         setError('Could not process that PDF. Is it encrypted or malformed?')
         setTimeout(() => setShredding(null), 2500)
+        return null
       } finally {
         if (importAbortRef.current === controller) importAbortRef.current = null
       }
@@ -336,16 +418,16 @@ export function TenderList() {
       }
       setStorageWarning({
         ...warning,
-        message: `The PDF still could not be saved to the workspace: ${
-          res?.error || 'the document store rejected the file.'
-        }. It remains available for this session only.`,
+        message: `The PDF still could not be saved to the workspace — ${persistFailureReason(
+          res?.error,
+        )}. It remains available for this session only.`,
       })
     } catch (err) {
       setStorageWarning({
         ...warning,
-        message: `The PDF still could not be saved to the workspace: ${
-          err instanceof Error ? err.message : String(err)
-        }. It remains available for this session only.`,
+        message: `The PDF still could not be saved to the workspace — ${persistFailureReason(
+          err instanceof Error ? err.message : null,
+        )}. It remains available for this session only.`,
       })
     }
   }, [storageWarning, updateTender])
@@ -353,7 +435,7 @@ export function TenderList() {
   /** A workspace-relative managed file path (not a blob/http/demo URL). */
   const managedTenderPath = (url: string | null | undefined): string | null => {
     if (!url) return null
-    if (url.startsWith('blob:') || url.startsWith('http') || url.startsWith('/demo')) return null
+    if (url.startsWith('blob:') || url.startsWith('http') || isDemoAssetUrl(url)) return null
     return url
   }
 
@@ -458,27 +540,38 @@ export function TenderList() {
   const loadDemo = useCallback(async () => {
     setError(null)
     try {
-      const res = await fetch('./demo/sample-rfp.pdf').catch(() => fetch('/demo/sample-rfp.pdf'))
-      if (!res.ok) throw new Error('demo asset missing')
-      const blob = await res.blob()
-      await handleFile(new File([blob], 'sample-rfp.pdf', { type: 'application/pdf' }))
-    } catch {
-      setError('Demo RFP could not be loaded.')
+      const response = await fetchDemoRfp()
+      const blob = await response.blob()
+      // The origin is recorded on the tender itself, so the "Demo import" marker
+      // is committed with it and survives a restart.
+      await handleFile(new File([blob], DEMO_RFP_FILE_NAME, { type: 'application/pdf' }), {
+        dataOrigin: 'demo',
+      })
+    } catch (err) {
+      // Visible, accurate failure — never the raw fetch error.
+      console.warn('tenders: bundled demo RFP could not be loaded', err)
+      setError(
+        'The bundled sample RFP could not be loaded. Choose a PDF from your own machine instead — shredding works exactly the same.',
+      )
     }
   }, [handleFile])
 
   const busy = shredding !== null && shredding.stage !== 'done' && shredding.stage !== 'error'
+  // Read from the persisted flag, not from a session Set, so the note is right
+  // after a restart too.
+  const hasDemoImport = tenders.some(isDemoTender)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin">
       <div className="border-b border-[var(--border)] bg-[var(--surface)] px-8 py-5">
         <h1 className="text-xl font-bold text-[var(--text)]">Tenders</h1>
         <p className="mt-0.5 text-sm text-[var(--text-secondary)]">
-          Drop a tender RFP pack — Zanostack Tenders shreds it in your browser into a compliance
-          matrix, cross-references your company vault, and highlights every source clause.
+          Drop a tender RFP (one PDF at a time) — Zanostack Tenders shreds it locally on this
+          machine into a compliance matrix, cross-references your company vault, and highlights
+          every source clause.
         </p>
       </div>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-8 py-8">
+      <section aria-label="Tender list" className="mx-auto w-full max-w-5xl flex-1 px-8 py-8">
         {/* Dropzone */}
         <section
           data-tour="tour-dropzone"
@@ -511,12 +604,12 @@ export function TenderList() {
                 <Button variant="primary" onClick={() => inputRef.current?.click()}>
                   <FolderOpen size={15} /> Choose PDF
                 </Button>
-                <Button onClick={loadDemo}>
+                <Button onClick={loadDemo} title={DEMO_TENDER_HINT}>
                   <FileText size={15} /> Load demo RFP
                 </Button>
               </div>
               <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                100% client-side processing — your documents never leave this browser.
+                100% local processing — your documents never leave this computer.
               </p>
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                 Import limits: up to {PDF_PREFLIGHT_LIMITS.maxPages} pages ·{' '}
@@ -612,9 +705,18 @@ export function TenderList() {
               <span className="text-[var(--text-tertiary)]">({tenders.length})</span>
             )}
           </h2>
+          {hasDemoImport && (
+            <p className="mb-3 text-xs text-[var(--text-tertiary)]">
+              <strong className="font-semibold text-[var(--text-secondary)]">
+                {DEMO_TENDER_LABEL}
+              </strong>{' '}
+              marks a tender shredded from the bundled sample RFP — {DEMO_TENDER_NOTE}
+            </p>
+          )}
           {tenders.length === 0 ? (
             <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
-              No tenders yet — load the demo RFP to see the full compliance workflow.
+              No tenders yet — drop an RFP PDF (or load the bundled demo RFP) to see the full
+              compliance workflow.
             </p>
           ) : (
             <ul className="space-y-3">
@@ -625,6 +727,7 @@ export function TenderList() {
                 const review = tenderReviews[t.id]
                 const reviewSummary = summarizeReview(t, review)
                 const lifecycle = lifecycleCardSummary(t)
+                const demoImport = isDemoTender(t)
                 const MethodIcon =
                   t.submissionMethod === 'EMAIL'
                     ? Mail
@@ -634,126 +737,142 @@ export function TenderList() {
                 return (
                   <li
                     key={t.id}
-                    className="group cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 transition-shadow hover:shadow-md"
-                    onClick={() => {
-                      setActiveTender(t.id)
-                    }}
+                    data-testid="tender-card"
+                    data-demo-import={demoImport ? 'true' : undefined}
+                    className="group relative rounded-lg border border-[var(--border)] bg-[var(--surface)] transition-shadow hover:shadow-md"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-[var(--text)]">
-                          {t.title}
-                        </p>
-                        <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
-                          <span className="inline-flex items-center gap-1">
-                            <FileText size={12} /> {t.fileName}
-                          </span>
-                          {t.referenceNumber && <span>Ref {t.referenceNumber}</span>}
-                          {dl.date && (
-                            <span
-                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${urgencyClasses(dl.urgency)}`}
-                              title={`${dl.formatted}${dl.submitBy ? ` · target submit by ${dl.submitBy.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
-                            >
-                              <Clock size={11} /> {dl.countdownLabel}
+                    {/* The card itself is the control: a real button, so Tab +
+                        Enter/Space open a tender exactly like a mouse click. */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTender(t.id)}
+                      className="block w-full cursor-pointer rounded-lg p-4 text-left focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+                    >
+                      <div className="flex items-start justify-between gap-3 pr-8">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--text)]">
+                            {t.title}
+                          </p>
+                          <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
+                            {demoImport && (
+                              <span title={DEMO_TENDER_HINT}>
+                                <Badge tone="violet">{DEMO_TENDER_LABEL}</Badge>
+                              </span>
+                            )}
+                            <span className="inline-flex items-center gap-1">
+                              <FileText size={12} /> {t.fileName}
                             </span>
-                          )}
-                          {dl.insideSubmitWindow && dl.date && (
+                            {t.referenceNumber && <span>Ref {t.referenceNumber}</span>}
+                            {dl.date && (
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${urgencyClasses(dl.urgency)}`}
+                                title={`${dl.formatted}${dl.submitByLabel ? ` · target submit by ${dl.submitByLabel}` : ''}`}
+                              >
+                                <Clock size={11} /> {dl.countdownLabel}
+                              </span>
+                            )}
+                            {dl.insideSubmitWindow && dl.date && (
+                              <Badge tone="amber" className="ring-1 ring-[var(--warn-border)]">
+                                Inside 24h submit window
+                              </Badge>
+                            )}
+                            {t.submissionMethod && (
+                              <span
+                                className="inline-flex items-center gap-1"
+                                title={
+                                  t.submissionAddress ?? SUBMISSION_METHOD_LABEL[t.submissionMethod]
+                                }
+                              >
+                                <MethodIcon size={12} />{' '}
+                                {SUBMISSION_METHOD_LABEL[t.submissionMethod]}
+                              </span>
+                            )}
+                            <span>{t.numPages} pages</span>
+                            {t.ocrPages > 0 && (
+                              // Naming scanned pages obliges the badge to state
+                              // their outcome: nothing on them was extracted, so
+                              // the count is work to review, not text to search.
+                              <Badge tone="amber">
+                                {t.ocrPages} scanned page{t.ocrPages === 1 ? '' : 's'} — text not
+                                extracted
+                              </Badge>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                          {reviewSummary.complete ? (
+                            <Badge tone="green" className="ring-1 ring-[var(--success-border)]">
+                              <BadgeCheck size={12} /> Extraction reviewed
+                            </Badge>
+                          ) : (
                             <Badge tone="amber" className="ring-1 ring-[var(--warn-border)]">
-                              Inside 24h submit window
+                              <AlertTriangle size={12} /> Review{' '}
+                              {reviewSummary.pendingFields +
+                                reviewSummary.requirementAttention.length}{' '}
+                              to confirm
                             </Badge>
                           )}
-                          {t.submissionMethod && (
-                            <span
-                              className="inline-flex items-center gap-1"
-                              title={
-                                t.submissionAddress ?? SUBMISSION_METHOD_LABEL[t.submissionMethod]
-                              }
-                            >
-                              <MethodIcon size={12} /> {SUBMISSION_METHOD_LABEL[t.submissionMethod]}
+                          {/* lifecycle status + proof of submission + outcome */}
+                          <Badge tone={lifecycle.tone}>
+                            <ShieldCheck size={12} /> {lifecycle.label}
+                          </Badge>
+                          {lifecycle.evidence && (
+                            <Badge tone={lifecycle.evidenceTone}>{lifecycle.evidence}</Badge>
+                          )}
+                          {lifecycle.override && (
+                            <span title="Submitted with blockers using an audited override">
+                              <Badge tone="red">Override</Badge>
                             </span>
                           )}
-                          <span>{t.numPages} pages</span>
-                          {t.ocrPages > 0 && (
-                            <Badge tone="amber">
-                              {t.ocrPages} scanned page{t.ocrPages === 1 ? '' : 's'}
-                            </Badge>
+                          {t.outcome && (
+                            <Badge tone="violet">{TENDER_OUTCOME_LABEL[t.outcome.status]}</Badge>
                           )}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {reviewSummary.complete ? (
-                          <Badge tone="green" className="ring-1 ring-[var(--success-border)]">
-                            <BadgeCheck size={12} /> Extraction reviewed
-                          </Badge>
-                        ) : (
-                          <Badge tone="amber" className="ring-1 ring-[var(--warn-border)]">
-                            <AlertTriangle size={12} /> Review{' '}
-                            {reviewSummary.pendingFields +
-                              reviewSummary.requirementAttention.length}{' '}
-                            to confirm
-                          </Badge>
-                        )}
-                        {/* lifecycle status + proof of submission + outcome */}
-                        <Badge tone={lifecycle.tone}>
-                          <ShieldCheck size={12} /> {lifecycle.label}
-                        </Badge>
-                        {lifecycle.evidence && (
-                          <Badge tone={lifecycle.evidenceTone}>{lifecycle.evidence}</Badge>
-                        )}
-                        {lifecycle.override && (
-                          <span title="Submitted with blockers using an audited override">
-                            <Badge tone="red">Override</Badge>
+                          {t.status === 'READY_FOR_SUBMISSION' && readiness.ready && (
+                            <Badge tone="green">Checks clear</Badge>
+                          )}
+                          <span className="text-xs font-semibold text-[var(--text-secondary)]">
+                            {counts.fulfilled}/{counts.total} fulfilled
                           </span>
-                        )}
-                        {t.outcome && (
-                          <Badge tone="violet">{TENDER_OUTCOME_LABEL[t.outcome.status]}</Badge>
-                        )}
-                        {t.status === 'READY_FOR_SUBMISSION' && readiness.ready && (
-                          <Badge tone="green">Checks clear</Badge>
-                        )}
-                        <span className="text-xs font-semibold text-[var(--text-secondary)]">
-                          {counts.fulfilled}/{counts.total} fulfilled
-                        </span>
-                        <button
-                          type="button"
-                          title="Remove tender"
-                          aria-label="Remove tender"
-                          disabled={deleteBusy}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            requestRemoveTender(t)
-                          }}
-                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Trash2
-                            size={14}
-                            className="text-[var(--text-tertiary)] hover:text-[var(--danger)]"
-                          />
-                        </button>
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--canvas)]">
-                      <div
-                        className="h-full rounded-full bg-[var(--accent)] transition-all"
-                        style={{
-                          width: `${counts.total ? (counts.fulfilled / counts.total) * 100 : 0}%`,
-                        }}
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--canvas)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--accent)] transition-all"
+                          style={{
+                            width: `${counts.total ? (counts.fulfilled / counts.total) * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="mt-2 flex gap-3 text-[11px] text-[var(--text-secondary)]">
+                        <span className="inline-flex items-center gap-1">
+                          <CheckCircle2 size={12} className="text-[var(--success)]" />{' '}
+                          {counts.fulfilled} fulfilled
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <AlertTriangle size={12} className="text-[var(--warn)]" />{' '}
+                          {counts.actionRequired} action
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Loader2 size={12} className="text-[var(--danger)]" />{' '}
+                          {counts.outstanding} outstanding
+                        </span>
+                      </div>
+                    </button>
+                    {/* Removal is a sibling of the card button, never nested in
+                        it: two real buttons, both keyboard reachable. */}
+                    <button
+                      type="button"
+                      title="Remove tender"
+                      aria-label="Remove tender"
+                      disabled={deleteBusy}
+                      onClick={() => requestRemoveTender(t)}
+                      className="absolute top-3 right-3 inline-flex min-h-6 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Trash2
+                        size={14}
+                        className="text-[var(--text-tertiary)] hover:text-[var(--danger)]"
                       />
-                    </div>
-                    <div className="mt-2 flex gap-3 text-[11px] text-[var(--text-secondary)]">
-                      <span className="inline-flex items-center gap-1">
-                        <CheckCircle2 size={12} className="text-[var(--success)]" />{' '}
-                        {counts.fulfilled} fulfilled
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <AlertTriangle size={12} className="text-[var(--warn)]" />{' '}
-                        {counts.actionRequired} action
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <Loader2 size={12} className="text-[var(--danger)]" /> {counts.outstanding}{' '}
-                        outstanding
-                      </span>
-                    </div>
+                    </button>
                   </li>
                 )
               })}
@@ -802,6 +921,10 @@ export function TenderList() {
                         <Trash2 size={13} />
                       </button>
                     </div>
+                    {/* `lastSeen` is a real instant — the RFC3339 stamp the store
+                        writes when it recognizes the issuer — not a civil date
+                        someone typed, so it stays on the reader's own clock like
+                        every other instant the app prints. */}
                     <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent-dark)]">
                       seen {tpl.seenCount} tender{tpl.seenCount === 1 ? '' : 's'} · last{' '}
                       {new Date(tpl.lastSeen).toLocaleDateString('en-ZA', {
@@ -851,7 +974,7 @@ export function TenderList() {
             </ul>
           </section>
         )}
-      </main>
+      </section>
 
       {/* Managed-file confirmation: the RFP is moved to .trash (recoverable) and
           the record is only removed after that succeeds. */}

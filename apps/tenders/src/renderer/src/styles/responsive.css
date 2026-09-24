@@ -67,7 +67,15 @@
    inside it (the menu's z-50) is trapped there — so the header itself must
    out-rank the pane headers, or the later-painted matrix header (equal z-20,
    later in DOM order) intercepts clicks on the menu. z-30 keeps the top bar
-   above the pane headers (z-20) while the menu's z-50 layers within it. */
+   above the pane headers (z-20) while the menu's z-50 layers within it.
+
+   Consequence for the Drawer primitive (components/Drawer.tsx): a drawer is a
+   sibling subtree of this bar, so raising the drawer's z-index could never lift
+   it above the bar without also burying the menu inside the bar's stacking
+   context. The drawer therefore starts its box at this bar's bottom edge (the
+   offset is measured there) instead of spanning `inset-y-0` — otherwise its own
+   title row, and with it the only in-drawer close control, is painted under the
+   bar and can never be hit by the pointer. */
 .workspace-context-header {
   position: sticky;
   top: 0;

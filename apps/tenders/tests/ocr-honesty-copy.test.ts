@@ -53,31 +53,58 @@ function listRendererSources(dir = SRC): string[] {
   return out
 }
 
-/** Copy surfaces a user actually reads on the scanned-page journey. */
+/**
+ * Copy surfaces a user actually reads on the scanned-page journey.
+ *
+ * Naming scanned / image-only pages obliges a surface to state the outcome, so
+ * every entry here is held to the consequence check below — including
+ * `TenderList`, whose card badge names the count ("{n} scanned pages — text not
+ * extracted"). There is no exemption list: an exemption is exactly how the badge
+ * shipped naming scanned pages while saying nothing about their text.
+ */
 const COPY_SURFACES = [
   'components/OnboardingModal.tsx',
   'components/GuidedTour.tsx',
   'components/pages/TutorialsPage.tsx',
+  'components/TenderList.tsx',
 ]
+
+/**
+ * The unqualified universal claim: "the text layer of every page" with no
+ * "that has one" / "that has a text layer" qualifier. The honest shipping copy
+ * qualifies it, which is why the qualifier is excluded here rather than the
+ * pattern dropped — an unqualified claim asserts no page is ever skipped.
+ */
+const UNIVERSAL_TEXT_LAYER_CLAIM = /text layer of (?:every|all) pages?(?!\s+that\b)/i
 
 /**
  * Phrasings that claim scanned / image-only pages are read, or that an OCR step
  * runs. Each entry explains what the copy would be asserting.
+ *
+ * `anywhere: true` marks the strongest claim shapes, checked across the WHOLE
+ * renderer so a claim cannot simply move to another component.
  */
-const FORBIDDEN_CLAIMS: Array<{ pattern: RegExp; asserts: string }> = [
-  { pattern: /including scanned/i, asserts: 'every page is read, including scanned pages' },
-  { pattern: /scanned pages? via ocr/i, asserts: 'OCR reads scanned pages' },
+const FORBIDDEN_CLAIMS: Array<{ pattern: RegExp; asserts: string; anywhere?: boolean }> = [
+  {
+    pattern: /including scanned/i,
+    asserts: 'every page is read, including scanned pages',
+    anywhere: true,
+  },
+  { pattern: /scanned pages? via ocr/i, asserts: 'OCR reads scanned pages', anywhere: true },
   { pattern: /via ocr/i, asserts: 'OCR is performed' },
-  { pattern: /\bocr\s+step\b/i, asserts: 'an OCR step runs in the app' },
+  { pattern: /\bocr\s+step\b/i, asserts: 'an OCR step runs in the app', anywhere: true },
   { pattern: /handles? them automatically/i, asserts: 'scanned pages need no manual review' },
   { pattern: /reads? every page/i, asserts: 'every page is read' },
+  {
+    pattern: UNIVERSAL_TEXT_LAYER_CLAIM,
+    asserts: 'the text layer of every page is extracted, so no page is skipped',
+    anywhere: true,
+  },
+  { pattern: /reads? the text layer/i, asserts: "the app reads a page's text layer" },
 ]
 
-/**
- * The strongest claim phrasings, checked across the WHOLE renderer so a claim
- * cannot simply move to another component.
- */
-const FORBIDDEN_ANYWHERE = [FORBIDDEN_CLAIMS[0], FORBIDDEN_CLAIMS[1], FORBIDDEN_CLAIMS[3]]
+/** The strongest claim phrasings, checked across the WHOLE renderer. */
+const FORBIDDEN_ANYWHERE = FORBIDDEN_CLAIMS.filter((claim) => claim.anywhere)
 
 /** A surface that names scanned / image-only pages must also state the outcome. */
 const SCANNED_MENTION = /scanned|image-only|saved as images/i
@@ -111,6 +138,32 @@ describe('OCR honesty copy (WP-7 alpha)', () => {
         )
       }
     }
+  })
+
+  it('the universal text-layer claim pattern still has teeth', () => {
+    // The phrasing that shipped and slipped the old blocklist must match...
+    expect(
+      UNIVERSAL_TEXT_LAYER_CLAIM.test('Zanostack Tenders extracts the text layer of every page.'),
+    ).toBe(true)
+    // ...while the honest qualified phrasing that replaced it must not, so the
+    // lookahead cannot be widened until the pattern catches nothing at all.
+    expect(
+      UNIVERSAL_TEXT_LAYER_CLAIM.test(
+        'Zanostack Tenders extracts the text layer of every page that has one.',
+      ),
+    ).toBe(false)
+  })
+
+  it('the consequence check has teeth on every surface that names scanned pages', () => {
+    // The badge exactly as it shipped before the fix: a count, no outcome. The
+    // consequence check must reject it, otherwise folding `TenderList` into
+    // `COPY_SURFACES` proves nothing.
+    const badgeWithoutConsequence = '3 scanned pages'
+    expect(SCANNED_MENTION.test(badgeWithoutConsequence)).toBe(true)
+    expect(HONEST_CONSEQUENCE.test(badgeWithoutConsequence)).toBe(false)
+    // ...and the surface that carries it must stay in the checked list: moving it
+    // back out to an exemption is the defect, not a refactor.
+    expect(COPY_SURFACES).toContain('components/TenderList.tsx')
   })
 
   it('keeps the per-page review copy honest', () => {

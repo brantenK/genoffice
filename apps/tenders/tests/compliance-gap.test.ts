@@ -17,12 +17,7 @@ import {
   signatureRuleKeys,
   SIGNATURE_RULE_KEYS,
 } from '../src/renderer/src/readiness'
-import type {
-  CompanyProfile,
-  RequirementRecord,
-  TenderRecord,
-  VaultDoc,
-} from '../src/shared/types'
+import type { CompanyProfile, RequirementRecord, TenderRecord, VaultDoc } from '../src/shared/types'
 import { MOCK_COMPANY } from '../src/renderer/src/mock/company'
 import { MOCK_VAULT } from '../src/renderer/src/mock/vault'
 
@@ -143,7 +138,9 @@ describe('Compliance Gap Analysis & Document Health Evaluation', () => {
       expect(report.health).toBe('STALE_CERTIFICATION')
       expect(report.daysSinceCertified).toBe(95)
       expect(report.stampDaysLeft).toBe(-5)
-      expect(healthSummary(doc, report)).toContain('Police stamp 95 days old — exceeds 90-day window')
+      expect(healthSummary(doc, report)).toContain(
+        'Police stamp 95 days old — exceeds 90-day window',
+      )
     })
 
     it('flags EXPIRED ahead of STALE_CERTIFICATION if both expiry and stamp have lapsed', () => {
@@ -251,6 +248,74 @@ describe('Compliance Gap Analysis & Document Health Evaluation', () => {
       expect(updated.suggestedVaultDocIds).toHaveLength(0)
       expect(updated.status).toBe('OUTSTANDING')
       expect(updated.reason).toBe('No matching document found in the company vault.')
+    })
+
+    it('never auto-fulfils a requirement for a document with no expiry date when the rule needs one', () => {
+      const now = new Date('2026-09-01T00:00:00Z')
+      const req = createMockReq({ ruleKey: 'tax_pin' }) // EXPIRY_REQUIRED
+      const vault: VaultDoc[] = [
+        createMockDoc({
+          id: 'v-tax-no-expiry',
+          title: 'SARS Tax Clearance Certificate',
+          category: 'COMPLIANCE',
+          expiryDate: null,
+          isCertified: false,
+          certifiedDate: null,
+        }),
+      ]
+
+      const updated = applyGapToRequirement(req, vault, now)
+
+      // Gap and readiness must reach the SAME verdict: readiness reports UNKNOWN
+      // for an EXPIRY_REQUIRED document with no expiry date and blocks, so gap
+      // cannot stamp the requirement green next to a blocked gate.
+      expect(updated.linkedVaultDocId).toBe('v-tax-no-expiry')
+      expect(updated.status).toBe('ACTION_REQUIRED')
+      expect(updated.reason).toContain('unknown')
+      expect(updated.status).not.toBe('FULFILLED')
+
+      const report = assessReadiness(
+        {
+          id: 'tender-gap-agreement',
+          title: 'Municipal Works',
+          referenceNumber: 'RFP-01',
+          issuingBody: 'City',
+          closingDate: '2026-12-18',
+          submissionMethod: 'PHYSICAL',
+          submissionAddress: 'City Hall',
+          signatureChecks: {},
+          status: 'IN_PROGRESS',
+          createdAt: '2026-08-01',
+          fileName: 'rfp.pdf',
+          fileUrl: 'documents/rfp.pdf',
+          numPages: 10,
+          ocrPages: 0,
+          requirements: [updated],
+        },
+        vault,
+        MOCK_COMPANY,
+        now,
+      )
+      expect(report.ready).toBe(false)
+      expect(report.checks.find((check) => check.id === 'docs-at-closing')?.passed).toBe(false)
+    })
+
+    it('still fulfils a permanent-evidence requirement whose document has no expiry date', () => {
+      const now = new Date('2026-09-01T00:00:00Z')
+      const req = createMockReq({ ruleKey: 'cipc' }) // PERMANENT
+      const vault: VaultDoc[] = [
+        createMockDoc({
+          id: 'v-cipc',
+          title: 'CIPC Registration Certificate',
+          category: 'GOVERNANCE',
+          expiryDate: null,
+          certifiedDate: null,
+        }),
+      ]
+
+      const updated = applyGapToRequirement(req, vault, now)
+
+      expect(updated.status).toBe('FULFILLED')
     })
 
     it('marks requirement as ACTION_REQUIRED if linked document is EXPIRED or STALE_CERTIFICATION', () => {

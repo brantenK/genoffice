@@ -14,9 +14,13 @@ import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { app, ipcMain, shell, WebContentsView, type WebContents } from 'electron'
+import { app, dialog, ipcMain, shell, WebContentsView, type WebContents } from 'electron'
+import type { BrowserWindow } from 'electron'
 import {
   MAX_TENDERS_DOCUMENT_UPLOAD_BYTES,
+  MAX_TENDERS_MATRIX_EXPORT_BYTES,
+  MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS,
+  MAX_TENDERS_MATRIX_EXPORT_ROWS,
   TENDERS_CHANNELS,
   type BillMilestoneRequest,
   type BillMilestoneResult,
@@ -39,10 +43,12 @@ import {
   type RestoreRecoveryCandidateResponse,
   type SaveDocumentRequest,
   type SaveDocumentResponse,
+  type TendersCloseFlushResult,
 } from '../shared/ipc'
 import type {
   CompanyWorkspace,
   ContractMilestone,
+  TenderReadinessSnapshot,
   TenderRecord,
   TendersData,
   TendersDataV2,
@@ -50,6 +56,7 @@ import type {
 import {
   MAX_TENDERS_DOCUMENT_BYTES,
   MAX_TENDERS_IPC_PAYLOAD_BYTES,
+  MAX_TENDERS_STORE_FILE_BYTES,
 } from '../shared/tenders-persistence'
 import type {
   ManagedFileLink,
@@ -70,6 +77,8 @@ import {
 } from './document-store'
 import { buildCanonicalReadinessReport } from './readiness-binding'
 import { milestonesAllowed } from '../shared/lifecycle'
+import { assessReadiness } from '../shared/readiness'
+import { validateTendersDataV2 } from '../shared/tenders-schema'
 import {
   resolveTendersIntegrations,
   setInjectedTendersIntegrations,
@@ -340,23 +349,73 @@ function getAuthoritativeTendersStore(): TendersStore {
   const directory = resolve(getTendersBaseDir())
   const existing = authoritativeTendersStores.get(directory)
   if (existing) return existing
-  const store = createTendersStore({
-    directory,
-    onCommitted: async (document: TendersDataV2) => {
-      const failures: string[] = []
-      for (const wc of getActiveTendersWebContents()) {
-        if (!isTrustedTendersWebContents(wc)) continue
-        try {
-          wc.send(TENDERS_CHANNELS.storeChangedV2, structuredClone(document))
-        } catch (error: unknown) {
-          failures.push(error instanceof Error ? error.message : String(error))
+  const store = gateTendersCommits(
+    createTendersStore({
+      directory,
+      onCommitted: async (document: TendersDataV2) => {
+        const failures: string[] = []
+        for (const wc of getActiveTendersWebContents()) {
+          if (!isTrustedTendersWebContents(wc)) continue
+          try {
+            wc.send(TENDERS_CHANNELS.storeChangedV2, structuredClone(document))
+          } catch (error: unknown) {
+            failures.push(error instanceof Error ? error.message : String(error))
+          }
         }
-      }
-      if (failures.length > 0) throw new Error(failures.join('; '))
-    },
-  })
+        if (failures.length > 0) throw new Error(failures.join('; '))
+      },
+    }),
+  )
   authoritativeTendersStores.set(directory, store)
   return store
+}
+
+/**
+ * Wrap the authoritative store so the submission-readiness gate is part of its
+ * commit rather than the prelude of one IPC caller. `saveStoreV2` and the legacy
+ * `saveStoredData` channel — plus the internal `mutate` used by CRM sync and
+ * milestone billing — all commit through here, so a forged `ready: true`
+ * receipt can no longer ride a sibling channel into the store.
+ *
+ * `restoreRecoveryCandidate` is deliberately not gated: its input is a
+ * main-authored backup of a document that already committed through this gate,
+ * never a renderer payload.
+ */
+function gateTendersCommits(store: TendersStore): TendersStore {
+  const gate = async (document: unknown, previous: TendersDataV2 | null): Promise<void> => {
+    if (!isRecord(document) || !claimsClearSubmissionReadiness(document)) return
+    try {
+      const repaired = repairSubmissionReadinessSnapshots(
+        document as unknown as TendersDataV2,
+        previous,
+        new Date(),
+      )
+      if (repaired > 0) {
+        console.warn(
+          `tenders-main: recomputed ${repaired} submission readiness checkpoint(s) that contradicted canonical readiness.`,
+        )
+      }
+    } catch {
+      // A document malformed enough to break the recomputation cannot commit
+      // either: the store validates the document before it writes.
+    }
+  }
+  return {
+    ...store,
+    save: async (request) => {
+      // The previously committed document is the baseline the carried-over
+      // exemption compares against; read it only when a claim needs checking.
+      const previous = claimsClearSubmissionReadiness(request?.document) ? await store.load() : null
+      await gate(request?.document, previous?.ok ? previous.data : null)
+      return store.save(request)
+    },
+    mutate: (expectedRevision, mutator) =>
+      store.mutate(expectedRevision, async (document) => {
+        const proposed = await mutator(document)
+        await gate(proposed, document)
+        return proposed
+      }),
+  }
 }
 
 const managedDocumentStores = new Map<string, ManagedDocumentStore>()
@@ -626,9 +685,21 @@ export function writeTendersStore(baseDirOrPath: string, data: unknown): void {
   }
 
   const validated = migrateAndValidateTenders(data)
+  const serialized = JSON.stringify(validated, null, 2)
+  // The store this file is read back through refuses anything above
+  // `MAX_TENDERS_STORE_FILE_BYTES`, and what is written here is the same document
+  // pretty-printed — indentation can push it past that ceiling (measured up to
+  // 3.57x for arrays of empty strings). Checked before the temp file exists, so a
+  // refused write leaves neither a temp file nor a primary the loader rejects.
+  const serializedBytes = Buffer.byteLength(serialized, 'utf8')
+  if (serializedBytes > MAX_TENDERS_STORE_FILE_BYTES) {
+    throw new Error(
+      `Serialized Tenders document would be ${serializedBytes} bytes on disk, above the ${MAX_TENDERS_STORE_FILE_BYTES}-byte store file limit.`,
+    )
+  }
   const tmp = `${filePath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
   try {
-    writeFileSync(tmp, JSON.stringify(validated, null, 2), 'utf8')
+    writeFileSync(tmp, serialized, 'utf8')
     renameSync(tmp, filePath)
     broadcastTendersData(validated)
   } catch (e) {
@@ -866,20 +937,46 @@ export async function openDocumentFile(
  * Soft-delete a managed document: the file is MOVED to the Tenders trash (never
  * hard-unlinked) and can be restored across a restart. Returns the records that
  * still reference it so the UI can warn/confirm.
+ *
+ * The managed record id is preferred over the path (see `DeleteDocumentRequest`):
+ * when an id is supplied it is resolved against the managed index, and a
+ * `storedPath` that names a different document is rejected rather than silently
+ * deleting the wrong file.
  */
 export async function deleteDocumentFile(
   req: DeleteDocumentRequest,
   overrideUserData?: string,
 ): Promise<DeleteDocumentResponse> {
   try {
-    if (!req || typeof req !== 'object' || !req.storedPath) {
+    if (!req || typeof req !== 'object') {
+      return { ok: false, error: 'Invalid request payload' }
+    }
+    const requestedId = typeof req.id === 'string' && req.id.length > 0 ? req.id : ''
+    if (!requestedId && !req.storedPath) {
       return { ok: false, error: 'Stored path is required' }
     }
-    const relativePath = toManagedRelativePath(req.storedPath)
+    const store = getManagedDocumentStore(overrideUserData)
+    let relativePath: string | null
+    if (requestedId) {
+      if (requestedId.length > 512) return { ok: false, error: 'Invalid managed document id' }
+      const record = (await store.listRecords()).find((candidate) => candidate.id === requestedId)
+      if (!record) return { ok: false, error: `Unknown managed document id: ${requestedId}` }
+      relativePath = record.relativePath
+      if (req.storedPath) {
+        const claimed = toManagedRelativePath(req.storedPath)
+        if (claimed !== relativePath) {
+          return {
+            ok: false,
+            error: 'The supplied id and storedPath refer to different documents.',
+          }
+        }
+      }
+    } else {
+      relativePath = toManagedRelativePath(req.storedPath)
+    }
     if (!relativePath) {
       return { ok: false, error: 'Invalid or unsafe path' }
     }
-    const store = getManagedDocumentStore(overrideUserData)
     const trashed = await store.trash(relativePath)
 
     // Link-aware warnings (best-effort; a lookup failure never blocks the move).
@@ -1101,12 +1198,163 @@ export const TENDERS_DEMO_WRITE_ERROR =
 export const tendersNotWonBillingError = (status: string): string =>
   `Milestone billing is only allowed for a won tender. Current status: ${status}.`
 
+/** The checkpoints of a committed document, keyed by tender id. */
+function indexReadinessSnapshots(
+  document: TendersDataV2 | null,
+): Map<string, TenderReadinessSnapshot> {
+  const snapshots = new Map<string, TenderReadinessSnapshot>()
+  for (const workspace of document?.workspaces ?? []) {
+    for (const tender of workspace.tenders ?? []) {
+      const snapshot = tender.submission?.readiness
+      if (snapshot) snapshots.set(tender.id, snapshot)
+    }
+  }
+  return snapshots
+}
+
+function sameReadinessSnapshot(a: TenderReadinessSnapshot, b: TenderReadinessSnapshot): boolean {
+  const sameList = (left: string[], right: string[]): boolean =>
+    left.length === right.length && left.every((value, index) => value === right[index])
+  return (
+    a.ready === b.ready &&
+    a.score === b.score &&
+    a.capturedAt === b.capturedAt &&
+    sameList(a.failedCheckIds, b.failedCheckIds) &&
+    sameList(a.blockingCheckIds, b.blockingCheckIds)
+  )
+}
+
+/** True when any tender claims a blockers-free readiness checkpoint. */
+export function claimsClearSubmissionReadiness(document: unknown): boolean {
+  if (!isRecord(document) || !Array.isArray(document.workspaces)) return false
+  return document.workspaces.some(
+    (workspace) =>
+      isRecord(workspace) &&
+      Array.isArray(workspace.tenders) &&
+      workspace.tenders.some(
+        (tender) =>
+          isRecord(tender) &&
+          isRecord(tender.submission) &&
+          isRecord(tender.submission.readiness) &&
+          tender.submission.readiness.ready === true,
+      ),
+  )
+}
+
+/**
+ * Recompute the readiness checkpoints this commit introduces or changes,
+ * returning how many main corrected.
+ *
+ * A checkpoint is a renderer-authored claim about the moment a bid was
+ * submitted, and the product's core promise is that its readiness receipt never
+ * lies, so main lets a clear claim into the store only when it can attribute it
+ * to a document canonical readiness agreed with:
+ *
+ *  - A checkpoint byte-identical (including `capturedAt`) to the one in the
+ *    previously committed document is a CARRIED-OVER historical record: main
+ *    accepted that exact value when it entered the store — every write path
+ *    commits through `gateTendersCommits` — and it is not a claim about the
+ *    document as it stands now, so later edits must not rewrite it.
+ *  - Any other clear claim is new or changed and is accepted only when canonical
+ *    readiness of the document being committed agrees with it AT THE COMMIT
+ *    INSTANT, over every check. Excluding the wall-clock-dependent checks was
+ *    the hole that let a renderer persist `ready: true` for a tender whose only
+ *    blocker was a lapsed or absent closing date.
+ *
+ * A contradicted claim is REPLACED with the canonical verdict rather than
+ * rejected (rejecting would let a contradicting renderer wedge the workspace),
+ * and the renderer receives the corrected document, so the receipt it renders
+ * matches what is on disk.
+ *
+ * Deliberate residual: a checkpoint already on disk that main never committed
+ * (a store file written before this gate existed, or by a process outside main)
+ * is trusted as a carried-over record. Corroborating a carried-over checkpoint
+ * against the previous document instead was rejected: a checkpoint that was
+ * truthful when recorded is contradicted by every later edit that blocks the
+ * tender, so that rule would rewrite true history from the second such edit on.
+ */
+export function repairSubmissionReadinessSnapshots(
+  incoming: TendersDataV2,
+  previous: TendersDataV2 | null,
+  now: Date = new Date(),
+): number {
+  const previousSnapshots = indexReadinessSnapshots(previous)
+
+  let repaired = 0
+  for (const workspace of incoming.workspaces ?? []) {
+    for (const tender of workspace.tenders ?? []) {
+      const submission = tender.submission
+      const snapshot = submission?.readiness
+      if (!submission || !snapshot || snapshot.ready !== true) continue
+      const before = previousSnapshots.get(tender.id)
+      if (before && sameReadinessSnapshot(before, snapshot)) continue
+
+      // The gate runs on the raw payload, before the store's schema validation,
+      // so a tender malformed enough to break the canonical assessment must not
+      // abort the repair for the whole document (which would leave every other
+      // claim unchecked too).
+      const report = ((): ReturnType<typeof assessReadiness> | null => {
+        try {
+          return assessReadiness(tender, workspace.vault ?? [], workspace.company, now)
+        } catch {
+          return null
+        }
+      })()
+      if (!report) {
+        // No canonical verdict exists, so the clearance cannot be verified: it is
+        // downgraded (never left as a claim of readiness) while the renderer's own
+        // capture instant survives on the record.
+        submission.readiness = {
+          ready: false,
+          score: 0,
+          failedCheckIds: [...snapshot.failedCheckIds],
+          blockingCheckIds: [...snapshot.blockingCheckIds],
+          capturedAt: snapshot.capturedAt,
+        }
+        repaired += 1
+        continue
+      }
+      if (report.ready) continue
+
+      submission.readiness = {
+        ready: false,
+        score: report.score,
+        failedCheckIds: report.checks.filter((check) => !check.passed).map((check) => check.id),
+        blockingCheckIds: report.checks
+          .filter((check) => check.blocking && !check.passed)
+          .map((check) => check.id),
+        capturedAt: snapshot.capturedAt,
+      }
+      repaired += 1
+    }
+  }
+  return repaired
+}
+
+/**
+ * Is the process running under a test runner? `resetTendersIpcForTests` deletes
+ * the real `documents/`, `vault/`, `.trash`, `backups/` and
+ * `managed-documents.json` under the user's Tenders directory, so it must never
+ * run outside tests. Evaluated per call so a test can prove the refusal.
+ */
+function tendersTestModeActive(): boolean {
+  return process.env.VITEST === 'true' || process.env.NODE_ENV === 'test'
+}
+
+/** Test-only reset of the Tenders IPC surface and the on-disk fixtures. */
 export function resetTendersIpcForTests(): void {
+  if (!tendersTestModeActive()) {
+    throw new Error(
+      'resetTendersIpcForTests() is test-only and refuses to delete the user Tenders data.',
+    )
+  }
   for (const channel of Object.values(TENDERS_CHANNELS)) ipcMain.removeHandler(channel)
   stopTendersStoreWatcher()
   activeTendersWebContents.clear()
   authoritativeTendersStores.clear()
   managedDocumentStores.clear()
+  pendingCloseFlushes.clear()
+  closeFlushWaiters.clear()
   const baseDirectory = getTendersBaseDir()
   try {
     rmSync(join(baseDirectory, 'documents'), { recursive: true, force: true })
@@ -1169,6 +1417,11 @@ export function registerTendersIpc(): void {
         },
       }
     }
+    // A submission readiness checkpoint is a renderer-authored claim; the
+    // authoritative store recomputes the ones a commit introduces or changes
+    // against canonical readiness (see `gateTendersCommits`), so no write path —
+    // this one or the legacy `saveStoredData` channel — can persist a clear
+    // receipt for a blocked tender.
     const result = await getAuthoritativeTendersStore().save(request)
     if (result.ok) return result
     // Compact conflict payload: never ship the full authoritative document over
@@ -1183,6 +1436,35 @@ export function registerTendersIpc(): void {
       },
       currentRevision: result.current?.revision ?? result.error.current?.revision,
     }
+  })
+
+  // Shell dirty-close guard reply: the renderer reports whether its debounced
+  // edit was committed. The reply is accepted only from the very view the
+  // request was sent to — a sender that cannot identify itself is not that view.
+  ipcMain.handle(TENDERS_CHANNELS.closeFlushResult, async (_e, payload: unknown) => {
+    if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+    const reply = isRecord(payload) ? payload : null
+    const requestId = typeof reply?.requestId === 'number' ? reply.requestId : null
+    const waiter = requestId === null ? undefined : closeFlushWaiters.get(requestId)
+    const senderId = (_e.sender as { id?: unknown } | undefined)?.id
+    const fromGuardedView =
+      waiter !== undefined && typeof senderId === 'number' && senderId === waiter.webContentsId
+    if (!waiter || requestId === null || !fromGuardedView) {
+      return {
+        ok: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'No close-flush request is outstanding for this reply.',
+        },
+      }
+    }
+    closeFlushWaiters.delete(requestId)
+    waiter.settle({
+      dirty: reply?.dirty === true,
+      ok: reply?.ok === true,
+      error: typeof reply?.error === 'string' && reply.error.length > 0 ? reply.error : null,
+    })
+    return { ok: true }
   })
 
   // Persistence in userData/tenders/
@@ -1200,32 +1482,34 @@ export function registerTendersIpc(): void {
     }
   })
 
-  ipcMain.handle(TENDERS_CHANNELS.saveStoredData, (_e, json: string) => {
+  // Legacy write channel — v2 documents only. The shipping renderer persists
+  // exclusively through `saveStoreV2`; this channel is kept for caller
+  // compatibility but no longer writes outside the authoritative store. A v2
+  // document commits through the same lock, revision check and atomic write
+  // path, and a v1/legacy payload is rejected, so it can never re-seed demo
+  // company/vault/tender data into (or overwrite) the user's store.
+  ipcMain.handle(TENDERS_CHANNELS.saveStoredData, async (_e, json: string) => {
     if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
     try {
-      const p = getStoragePath()
-      if (existsSync(p)) {
-        try {
-          const existing = JSON.parse(readFileSync(p, 'utf8'))
-          if (
-            existing &&
-            typeof existing === 'object' &&
-            typeof existing.schemaVersion === 'number' &&
-            Number.isFinite(existing.schemaVersion) &&
-            existing.schemaVersion >= 2
-          ) {
-            return {
-              ok: false,
-              error: 'Legacy persistence cannot overwrite an authoritative v2 store.',
-            }
-          }
-        } catch (error: any) {
-          return { ok: false, error: error?.message || 'Failed to inspect existing Tenders store' }
+      let parsed: unknown
+      try {
+        parsed = typeof json === 'string' ? JSON.parse(json) : json
+      } catch (error: any) {
+        return { ok: false, error: error?.message || 'Failed to parse Tenders payload' }
+      }
+      const validated = validateTendersDataV2(parsed)
+      if (!validated.ok) {
+        return {
+          ok: false,
+          error: `Legacy persistence accepts only a schema-v2 document: ${validated.error.message}`,
         }
       }
-      const parsed = typeof json === 'string' ? JSON.parse(json) : json
-      writeTendersStore(p, parsed)
-      return { ok: true }
+      const result = await getAuthoritativeTendersStore().save({
+        expectedRevision: validated.data.revision,
+        document: validated.data,
+      })
+      if (result.ok) return { ok: true }
+      return { ok: false, error: result.error.message }
     } catch (err: any) {
       return { ok: false, error: err?.message || 'Failed to save stored data' }
     }
@@ -1332,6 +1616,54 @@ export function registerTendersIpc(): void {
     (_e, _tenderId: string, tenderTitle: string, matrixRows: any[]) => {
       if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
       try {
+        // Bounded before any CSV work: the export writes a temp file, so an
+        // unbounded row/cell count would let a caller allocate an arbitrarily
+        // large file from a single IPC message.
+        if (_tenderId !== undefined && (typeof _tenderId !== 'string' || _tenderId.length > 200)) {
+          return { ok: false, error: 'A valid tender id is required.' }
+        }
+        if (
+          tenderTitle !== undefined &&
+          (typeof tenderTitle !== 'string' || tenderTitle.length > 500)
+        ) {
+          return { ok: false, error: 'A valid tender title is required.' }
+        }
+        if (matrixRows !== undefined && !Array.isArray(matrixRows)) {
+          return { ok: false, error: 'matrixRows must be an array.' }
+        }
+        const matrixRowList = matrixRows ?? []
+        if (matrixRowList.length > MAX_TENDERS_MATRIX_EXPORT_ROWS) {
+          return {
+            ok: false,
+            error: `Compliance matrix export is limited to ${MAX_TENDERS_MATRIX_EXPORT_ROWS} rows.`,
+          }
+        }
+        for (const row of matrixRowList) {
+          const cells: unknown[] = isRecord(row) ? Object.values(row) : [row]
+          for (const value of cells) {
+            if (typeof value === 'string' && value.length > MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS) {
+              return {
+                ok: false,
+                error: `A compliance matrix cell exceeds ${MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS} characters.`,
+              }
+            }
+          }
+        }
+        try {
+          const payloadBytes = Buffer.byteLength(
+            JSON.stringify({ tenderTitle: tenderTitle ?? '', matrixRows: matrixRowList }),
+            'utf8',
+          )
+          if (payloadBytes > MAX_TENDERS_MATRIX_EXPORT_BYTES) {
+            return {
+              ok: false,
+              error: `Compliance matrix export exceeds ${MAX_TENDERS_MATRIX_EXPORT_BYTES} bytes.`,
+            }
+          }
+        } catch {
+          return { ok: false, error: 'The compliance matrix payload cannot be serialized.' }
+        }
+
         const BOM = '\uFEFF'
         const header =
           'Requirement ID,Category,Requirement Text,Mandatory / Disqualifier,Fulfillment Status,Linked Document,Health Status,Notes\n'
@@ -1512,7 +1844,7 @@ export function registerTendersIpc(): void {
           ? `Tender Ref: ${refNum}\nIssuing Authority: ${companyName}`
           : `Issuing Authority: ${companyName}`)
 
-      // Race fix (contracts §6.2): resolve the tender revision and commit the
+      // Race fix (contracts §6 item 2): resolve the tender revision and commit the
       // back-link FIRST. A revision conflict therefore aborts before the CRM
       // write, so a conflict can never leave a deal that the tender does not
       // reference. The CRM upsert is idempotent (deterministic id), so a retry
@@ -1641,8 +1973,6 @@ export function registerTendersIpc(): void {
         let tenderId: string
         let milestoneId: string
         let tenderReference: string | undefined
-        let issuingAuthority: string | undefined
-        let milestoneTitle: string | undefined
         let customAmount: number | undefined
         let customNotes: string | undefined
         let expectedRevision: number | undefined
@@ -1651,8 +1981,6 @@ export function registerTendersIpc(): void {
           tenderId = tenderIdOrPayload.tenderId
           milestoneId = tenderIdOrPayload.milestoneId
           tenderReference = tenderIdOrPayload.tenderReference
-          issuingAuthority = tenderIdOrPayload.issuingAuthority
-          milestoneTitle = tenderIdOrPayload.milestoneTitle
           customAmount = tenderIdOrPayload.amount
           customNotes = tenderIdOrPayload.notes
           expectedRevision = tenderIdOrPayload.expectedRevision
@@ -1731,7 +2059,21 @@ export function registerTendersIpc(): void {
           return { ok: false, error: tendersNotWonBillingError(foundTender.status) }
         }
 
-        const billAmount = Number(customAmount ?? foundMilestone.amount ?? 0)
+        // The invoice amount is derived from the canonical milestone only, so a
+        // caller cannot raise an invoice for an arbitrary amount on a won
+        // tender. A supplied `amount` is a compatibility echo and must match the
+        // milestone exactly; a mismatch is rejected rather than billed.
+        const canonicalAmount = Number(foundMilestone.amount ?? 0)
+        if (customAmount !== undefined) {
+          const requestedAmount = Number(customAmount)
+          if (!Number.isFinite(requestedAmount) || requestedAmount !== canonicalAmount) {
+            return {
+              ok: false,
+              error: `The requested billing amount (${String(customAmount)}) does not match the milestone amount (${canonicalAmount}); the milestone amount is authoritative.`,
+            }
+          }
+        }
+        const billAmount = canonicalAmount
         if (billAmount <= 0) {
           return {
             ok: false,
@@ -1739,9 +2081,12 @@ export function registerTendersIpc(): void {
           }
         }
 
-        // Reservation: validate the revision BEFORE posting. A conflict here
-        // posts no invoice (contracts §6.1 / F4), so a stale caller cannot cause
-        // a stray invoice.
+        // Pre-post revision validation: `mutate` with an unchanged document is a
+        // revision check, not a write (the store returns ok without committing),
+        // so this is NOT a reservation. It does guarantee that a stale caller
+        // posts zero invoices; a competing writer that moves the revision between
+        // this check and the link commit is reconciled below, and the Books
+        // idempotency key keeps it to at most one invoice.
         const reservationRevision = expectedRevision ?? tendersData.revision
         const reservation = await authoritativeStore.mutate(
           reservationRevision,
@@ -1755,13 +2100,15 @@ export function registerTendersIpc(): void {
           }
         }
 
-        const issuer = issuingAuthority || foundTender.issuingBody || 'Municipal Water Authority'
+        // Invoice identity comes from the canonical tender/milestone, never from
+        // the caller: the party, the reference and the line description must not
+        // be settable from a renderer payload.
+        const issuer = foundTender.issuingBody || 'Issuing authority not recorded'
         const today = new Date().toISOString().split('T')[0]
         const dueDate =
           foundMilestone.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-        const ref = tenderReference || foundTender.referenceNumber || 'RFP-WTR-2026-04'
-        const mName =
-          milestoneTitle || foundMilestone.name || foundMilestone.title || 'Delivery Milestone'
+        const ref = foundTender.referenceNumber || foundTender.id
+        const mName = foundMilestone.name || foundMilestone.title || 'Delivery Milestone'
         const itemDescription = `${mName} per ${ref}`
 
         // Single posting path via the typed port; Books owns party resolution,
@@ -1879,6 +2226,40 @@ export function registerTendersIpc(): void {
   ipcRegistered = true
 }
 
+/**
+ * Is this navigation target safe for the privileged Tenders view? Only the
+ * configured trusted renderer origin/file and in-session `blob:` object URLs are
+ * allowed; the origin check fails closed when no trusted renderer is configured.
+ */
+function allowedTendersNavigation(url: string): boolean {
+  if (typeof url !== 'string' || url.length === 0) return false
+  // `blob:` URLs are created by the trusted renderer from a file the user picked
+  // in this session; their origin is the renderer itself.
+  if (url.startsWith('blob:')) return true
+  return trustedRendererUrl(url)
+}
+
+/**
+ * Deny-by-default navigation for the Tenders view (contracts §6 item 9). Values
+ * like `VaultDoc.fileUrl` / `TenderRecord.fileUrl` are store data, so without
+ * this a `window.open(doc.fileUrl, '_blank')` would follow an `http(s):` URL read
+ * from the store, and any link or injected script could navigate the privileged
+ * view away from the trusted renderer.
+ */
+export function applyTendersNavigationPolicy(wc: WebContents): void {
+  if (!wc) return
+  if (typeof wc.setWindowOpenHandler === 'function') {
+    wc.setWindowOpenHandler(({ url }) => ({
+      action: allowedTendersNavigation(url) ? 'allow' : 'deny',
+    }))
+  }
+  if (typeof wc.on === 'function') {
+    wc.on('will-navigate', (event, url) => {
+      if (!allowedTendersNavigation(url)) event.preventDefault()
+    })
+  }
+}
+
 export function createTendersView(): WebContentsView {
   registerTendersIpc()
 
@@ -1892,6 +2273,7 @@ export function createTendersView(): WebContentsView {
   })
 
   registerTendersWebContents(view.webContents)
+  applyTendersNavigationPolicy(view.webContents)
 
   if (runtime.rendererUrl) {
     void view.webContents.loadURL(runtime.rendererUrl)
@@ -1900,4 +2282,123 @@ export function createTendersView(): WebContentsView {
   }
 
   return view
+}
+
+// ── shell dirty-close guard ──────────────────────────────────────────────────
+// Tenders autosaves behind a 300 ms debounce and holds the only copy of an edit
+// until that save commits, so a window close inside the debounce window used to
+// drop the edit silently. The shell therefore asks the view to flush before it
+// closes (see the `win.on('close')` guard in apps/shell/src/main/index.ts).
+
+/** In-flight close-guard flushes, keyed by the WebContents being guarded. */
+const pendingCloseFlushes = new Map<number, Promise<TendersCloseFlushResult | null>>()
+/** Resolvers for flush requests main has sent and not yet heard back about,
+ *  keyed by the request id the requesting view was given. */
+const closeFlushWaiters = new Map<
+  number,
+  { webContentsId: number; settle: (result: TendersCloseFlushResult | null) => void }
+>()
+let closeFlushRequestSeq = 0
+
+/**
+ * How long the close guard waits for the renderer's flush reply. A renderer that
+ * does not answer cannot prove the edit is durable, so the guard prompts instead
+ * of closing silently (same fail-closed shape as the docs close check).
+ */
+const CLOSE_FLUSH_TIMEOUT_MS = 10_000
+
+/**
+ * Ask the Tenders renderer to commit its debounced edit and report the outcome.
+ * Resolves `null` when no reply arrives in time (a wedged or unloaded renderer).
+ */
+function requestCloseFlush(contents: WebContents): Promise<TendersCloseFlushResult | null> {
+  const pending = pendingCloseFlushes.get(contents.id)
+  if (pending) return pending
+  const request = new Promise<TendersCloseFlushResult | null>((resolve) => {
+    const requestId = (closeFlushRequestSeq += 1)
+    const timer = setTimeout(() => {
+      closeFlushWaiters.delete(requestId)
+      resolve(null)
+    }, CLOSE_FLUSH_TIMEOUT_MS)
+    closeFlushWaiters.set(requestId, {
+      webContentsId: contents.id,
+      settle: (result) => {
+        clearTimeout(timer)
+        resolve(result)
+      },
+    })
+    try {
+      contents.send(TENDERS_CHANNELS.closeFlushRequest, requestId)
+    } catch {
+      // A send failure is a renderer that cannot answer — the same as a timeout.
+      closeFlushWaiters.delete(requestId)
+      clearTimeout(timer)
+      resolve(null)
+    }
+  }).finally(() => {
+    pendingCloseFlushes.delete(contents.id)
+  })
+  pendingCloseFlushes.set(contents.id, request)
+  return request
+}
+
+/**
+ * Last resort before uncommitted work is discarded: ask, never assume. A dialog
+ * that cannot be shown fails closed (the window stays open).
+ */
+async function confirmDiscardingTendersChanges(
+  parent: BrowserWindow | null | undefined,
+  detail: string,
+): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    message: 'Close Zanostack with unsaved Tenders changes?',
+    detail,
+    buttons: ['Close anyway', 'Keep Zanostack open'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  }
+  try {
+    const { response } =
+      parent && typeof parent.isDestroyed === 'function' && !parent.isDestroyed()
+        ? await dialog.showMessageBox(parent, options)
+        : await dialog.showMessageBox(options)
+    return response === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Close guard for the Tenders view: `true` means the caller may close.
+ * A clean renderer (nothing uncommitted) passes straight through; otherwise the
+ * pending edit is committed first, and a flush that could not commit prompts
+ * instead of dropping the edit.
+ */
+export async function requestTendersClose(
+  contents: WebContents,
+  parent?: BrowserWindow | null,
+): Promise<boolean> {
+  if (!contents || (typeof contents.isDestroyed === 'function' && contents.isDestroyed())) {
+    return true
+  }
+  // A view that has not finished loading holds no renderer state at all (the
+  // store hydrates from disk after load), so there is nothing to flush and no
+  // reply to wait for.
+  if (typeof contents.isLoading === 'function' && contents.isLoading()) return true
+  const outcome = await requestCloseFlush(contents)
+  if (outcome === null) {
+    return confirmDiscardingTendersChanges(
+      parent,
+      'Tenders did not respond to the close check, so its latest changes may not be saved.',
+    )
+  }
+  if (outcome.ok || !outcome.dirty) return true
+  return confirmDiscardingTendersChanges(
+    parent,
+    outcome.error
+      ? `Your latest Tenders changes could not be saved: ${outcome.error}`
+      : 'Your latest Tenders changes could not be saved.',
+  )
 }

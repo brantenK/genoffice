@@ -3,14 +3,17 @@
  *
  * Task 2B cut the renderer over to the authoritative on-disk v2 store and
  * intentionally removed demo seeding: a fresh profile is now an EMPTY workspace
- * (`FirstRunEmpty`), not the old demo company/tender. This spec drives the same
+ * (`FirstUsePage`), not the old demo company/tender. This spec drives the same
  * real product flows through the new semantics against the built shell:
  *
  *   1. open Tenders from the shell Business Apps nav
- *   2. fresh profile renders FirstRunEmpty (no demo data, no store file)
+ *   2. fresh profile renders FirstUsePage (no demo data, no store file)
  *   3. create a company workspace through the UI
- *   4. shred the existing sample RFP fixture -> requirements appear AND persist
- *      to the authoritative v2 store (the regression the cutover journey caught)
+ *   4. click the real "Load demo RFP" control -> requirements appear AND persist
+ *      to the authoritative v2 store (the regression the cutover journey caught).
+ *      The control fetches the demo asset from the renderer's own output, so this
+ *      is also what proves the demo assets actually ship in the build — driving
+ *      the file input from the repo fixture hid that.
  *   5. change a requirement status -> persists across restart
  *   6. upload + save a vault document -> persists across restart
  *   7. export the compliance matrix (Sheets) and generate Draft Docs
@@ -40,7 +43,6 @@ import {
 } from './helpers'
 
 const TENDERS_DEMO_DIR = resolve(SHELL_DIR, '..', 'tenders', 'public', 'demo')
-const SAMPLE_RFP = join(TENDERS_DEMO_DIR, 'sample-rfp.pdf')
 const VAULT_PDF = join(TENDERS_DEMO_DIR, 'vault', 'tax-clearance.pdf')
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
@@ -273,13 +275,37 @@ async function ensureTenderWorkspace(tenders: Page, title: string): Promise<void
   await expect(matrix).toBeVisible({ timeout: 20_000 })
 }
 
+/**
+ * The tender under test is genuinely blocked (the readiness drawer shows
+ * blocking checks and "Mark ready to submit" is disabled). Because the preload
+ * projection forwards `id`, main can build the canonical readiness report, so
+ * the proposal is now *bound* to it: instead of the old "not independently
+ * verified" fallback it must carry the canonical failure and its enumerated
+ * blocking checks. Both are fail-closed; the assertions below are strictly
+ * stronger than the fallback wording they replace — a proposal for a blocked
+ * tender can never claim to be ready.
+ */
 function assertConservativeProposal(content: string): void {
-  expect(content).toMatch(/READINESS NOT INDEPENDENTLY VERIFIED/)
+  // Status, in both places the generator states it, is a hard DRAFT — not
+  // "DRAFT" with a hedge, and never the ready wording.
+  expect(content).toMatch(/\*\*Proposal Status:\*\* \*\*DRAFT — SUBMISSION BLOCKED\*\*/)
+  expect(content).toMatch(/\*\*Audit Gate Status\*\*: \*\*DRAFT — SUBMISSION BLOCKED\*\*/)
+  // The document names the canonical readiness failure and its remedy.
+  expect(content).toMatch(
+    /\*\*Readiness Verification:\*\* Canonical readiness report failed; resolve its blocking checks before submission\./,
+  )
   expect(content).not.toMatch(/READY FOR SUBMISSION/)
   expect(content).not.toMatch(/CLEARED/)
   expect(content).not.toMatch(/Confirmed Total Bid Valuation/)
   expect(content).toMatch(/Pricing:\*\* Not provided or unconfirmed/)
-  expect(content).toMatch(/\*\*Total Blockers:\*\*/)
+  // The canonical blocking checks must be enumerated, not merely summarised:
+  // a blocked proposal always accounts for at least one blocker.
+  const totalBlockers = /\*\*Total Blockers:\*\* (\d+)/.exec(content)
+  expect(totalBlockers, 'the proposal must report a blocker count').not.toBeNull()
+  expect(
+    Number(totalBlockers![1]),
+    'a blocked proposal must enumerate at least one blocker',
+  ).toBeGreaterThan(0)
   expect(content).toMatch(/\*\*Condition ID:\*\*/)
   expect(content).toMatch(/\*\*Blockers:\*\*/)
 }
@@ -358,7 +384,7 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         await expect(tendersPage!.getByText('RFP-WTR-2026-04')).toHaveCount(0)
         expect(await readStore(userDataDir), 'not-found must not write a store file').toBeNull()
         await shot(tendersPage!, 'tenders-fresh-empty-workspace')
-        return 'FirstRunEmpty rendered; no demo data seeded; no store file yet'
+        return 'FirstUsePage rendered; no demo data seeded; no store file yet'
       })
 
       // Gated read-only probe: both the v2 load and the legacy read channel are
@@ -425,10 +451,37 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
       })
 
       // ── Phase B3: shred the sample RFP -> requirements persist ──────────────
-      await step('shred-demo-rfp-creates-requirements', async () => {
+      // Driven through the real "Load demo RFP" control, which fetches the asset
+      // from the renderer's own output directory. Feeding the repo fixture
+      // straight into the file input (the previous shape of this flow) bypassed
+      // the fetch entirely, which is why the suite stayed green while the button
+      // was dead in every build: the demo assets never reached out/renderer.
+      await step('load-demo-rfp-button-creates-requirements', async () => {
         await gotoInternalTendersPage(tendersPage!)
-        const input = tendersPage!.locator('input[type="file"][accept*="pdf"]').first()
-        await input.setInputFiles(SAMPLE_RFP)
+        // Probe the exact first URL the button's loader tries, and accept it on
+        // the same terms the loader does (`response.ok`). Asserting this before
+        // clicking means a build that dropped the demo assets reports the URL and
+        // status instead of an opaque "compliance matrix never appeared".
+        const demoAsset = await tendersPage!.evaluate(async () => {
+          const url = new URL('./demo/sample-rfp.pdf', document.baseURI).href
+          try {
+            const res = await fetch('./demo/sample-rfp.pdf')
+            const bytes = res.ok ? (await res.blob()).size : 0
+            return { url, ok: res.ok, status: res.status, bytes }
+          } catch (error) {
+            return { url, ok: false, status: 0, bytes: 0, error: String(error) }
+          }
+        })
+        diagnostics.demoAsset = demoAsset
+        expect(
+          demoAsset.ok,
+          `the demo RFP must be served from the renderer output: ${JSON.stringify(demoAsset)}`,
+        ).toBe(true)
+        expect(demoAsset.bytes).toBeGreaterThan(1000)
+
+        const loadDemo = tendersPage!.getByRole('button', { name: 'Load demo RFP' })
+        await expect(loadDemo).toBeVisible({ timeout: 15_000 })
+        await loadDemo.click()
         await expect(tendersPage!.getByRole('heading', { name: 'Compliance matrix' })).toBeVisible({
           timeout: 90_000,
         })
@@ -676,7 +729,7 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         expect(generated, 'generated proposal still present after restart').not.toBeNull()
         proposalContent = generated!.content
         assertConservativeProposal(proposalContent)
-        return `proposal ${generated!.path} still carries READINESS NOT INDEPENDENTLY VERIFIED + blockers`
+        return `proposal ${generated!.path} still carries DRAFT — SUBMISSION BLOCKED + the canonical readiness failure and its blockers`
       })
     } catch (error) {
       record('aborted', 'FAIL', undefined, error instanceof Error ? error.message : String(error))

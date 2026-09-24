@@ -82,6 +82,13 @@ Remaining:
 - Optional diagnostic export: versions, counts, failure codes, redacted paths — never
   tender text.
 
+Status at the Phase 5 gate: items 2–5 are **closed** — see §6 items 4–6 and 8 of
+`contracts-and-invariants.md` — as is item 6 (CSV formula neutralisation in the matrix export,
+pinned by `tests/ipc-handlers.test.ts`); item 7 is addressed on the persistence and billing
+paths (`SaveStatus` / inline errors). Item 1 (centralize authorization) is **still open**: the
+privileged handler set grew to **23** channels and the guard is hand-written at every site.
+Item 8 (diagnostic export) was not built.
+
 Files: `shared/ipc.ts`, `main/tenders-main.ts`, `shared/validation.ts` (if added),
 `main/ipc-handlers.ts` (if the main file is split), tests.
 

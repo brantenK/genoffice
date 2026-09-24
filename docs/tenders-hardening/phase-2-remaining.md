@@ -24,7 +24,7 @@ Read `contracts-and-invariants.md` first.
 
 ## Task 2A — Live regression smoke (was cancelled)
 
-Why: F1–F4 made **all 14 privileged handlers** require a registered Tenders WebContents
+Why: F1–F4 made **all 23 privileged handlers** require a registered Tenders WebContents
 with a trusted top-frame origin. If origin matching is wrong, the live renderer breaks
 before the cutover even starts.
 
@@ -74,7 +74,10 @@ Required behaviour:
    width/mode, zoom, onboarding-seen) under a UI-only key. Do not store workspaces,
    tenders, customers, or vault records in localStorage.
 6. Stop using the legacy `getStoredData` / `saveStoredData` channels once cut over. Keep
-   them in main only as a transitional guard (they already reject `schemaVersion >= 2`).
+   them in main only as a transitional guard — `saveStoredData` now accepts **only** a
+   schema-v2 document and commits it through the authoritative store at its own revision
+   (v1, `schemaVersion: 3` and non-integer versions are all rejected), so it can never
+   re-seed demo company/vault/tender data into, or overwrite, the user's store.
 7. Debounce/queue saves sensibly; never fire concurrent saves with the same
    `expectedRevision` (the store serialises, but the UI should still avoid churn).
 

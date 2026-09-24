@@ -32,7 +32,7 @@ const SLIDES: Slide[] = [
     body: (
       <>
         <p>
-          Your tender compliance workspace. Zanostack Tenders shreds RFP documents in your browser,
+          Your tender compliance workspace. Zanostack Tenders shreds RFP documents on this machine,
           builds a compliance matrix of every requirement, and cross-references your company vault
           to show exactly what you have — and what's missing.
         </p>
@@ -87,8 +87,8 @@ const SLIDES: Slide[] = [
       <>
         <p>
           Open <strong>Tenders</strong> and drag an RFP PDF onto the dropzone (or load the demo
-          RFP). Zanostack Tenders reads the text layer of every page and extracts requirements,
-          closing dates, submission logistics and the issuing authority.
+          RFP). Zanostack Tenders extracts the text layer of every page that has one and lifts out
+          requirements, closing dates, submission logistics and the issuing authority.
         </p>
         <p className="mt-3">
           Pages saved as images have no text layer, so the text on them is not extracted. Tenders
@@ -114,7 +114,12 @@ const SLIDES: Slide[] = [
         </p>
         <ul className="mt-3 list-disc space-y-1 pl-5">
           <li>
-            <strong>Company vault</strong> — link or unlink vault documents per requirement.
+            <strong>Company vault</strong> — every vault document with its health, and which
+            requirements use it (read-only).
+          </li>
+          <li>
+            <strong>Link a document</strong> — each requirement row has its own vault-document
+            picker: choose a document to link it, or “— no vault doc —” to unlink.
           </li>
           <li>
             <strong>Bid readiness</strong> — a weighted 0–100 score with your biggest gains

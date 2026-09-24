@@ -458,6 +458,22 @@ test.describe('Tenders lifecycle (WP-11)', () => {
 
       await openTenderWorkspace(tenders, TENDER_REF_A)
       await expectTenderStatus(tenders, 'IN_PROGRESS')
+
+      // The tender title must stay readable next to the action toolbar.
+      // `responsive.css` zeroes `min-width` on every toolbar child, and the
+      // workspace header keeps a floor inline for exactly that reason: without
+      // it the buttons squeeze the title to a single character (`S…`) and the
+      // countdown badge spills under the save chip. The floor is width- and
+      // zoom-independent, so this holds in wide and compact layouts alike.
+      const titleBox = await tenders
+        .locator('[data-testid="workspace-context-header"] h1')
+        .first()
+        .boundingBox()
+      expect(
+        titleBox?.width ?? 0,
+        'the tender title keeps a readable floor beside the toolbar',
+      ).toBeGreaterThanOrEqual(120)
+
       await clickPrimary(tenders, 'IN_PROGRESS')
       await expectTenderStatus(tenders, 'READY_TO_ASSEMBLE')
 
@@ -649,10 +665,11 @@ test.describe('Tenders lifecycle (WP-11)', () => {
         expect(await toolbarMilestones.count(), 'won tender exposes the Milestones toolbar').toBe(1)
         await wonMilestonesButton.click()
         await expect(tenders.getByText(/Contract Milestones/)).toBeVisible({ timeout: 15_000 })
-        // The drawer's own close control is occluded by the sticky workspace
-        // toolbar (toolbar z-index 30 vs drawer z-index 20, both anchored at the
-        // top of <main> — see e2e/tenders-intake-review.spec.ts for the measured
-        // geometry), so use the drawer's documented Escape close and verify it.
+        // The drawer's own close control is hit-testable: the drawer's box starts
+        // at the bottom edge of the sticky workspace toolbar, so nothing paints
+        // over its title row (components/Drawer.tsx `toolbarBottomOffset`).
+        // Escape is the drawer's documented close gesture and the close is
+        // verified rather than assumed.
         const closeMilestones = tenders.getByRole('button', { name: 'Close Milestones' })
         await tenders.keyboard.press('Escape')
         await expect(closeMilestones).toHaveCount(0, { timeout: 15_000 })

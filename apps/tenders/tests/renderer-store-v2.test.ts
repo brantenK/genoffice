@@ -16,11 +16,16 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// The real store state is the contract this file asserts against: `TendersState`
+// and `TendersSaveSizeCheck` come from the store module, so a field or action the
+// tests use must exist on the real type. The module itself is re-imported per
+// test (`vi.resetModules`) through a cast, so this binding is documentation plus
+// the shape the assertions read — it is not type-enforced by a compiler: the
+// workspace typecheck covers `src` only (`apps/tenders/tsconfig.json`).
+import type { TendersSaveSizeCheck, TendersState } from '../src/renderer/src/store'
 import type {
-  AppPage,
   CompanyProfile,
   Customer,
-  IssuerTemplate,
   RequirementRecord,
   TenderRecord,
   TendersDataV2,
@@ -33,50 +38,15 @@ import type {
   TendersLoadResult,
   TendersPersistenceErrorCode,
 } from '../src/shared/tenders-persistence'
+import {
+  MAX_TENDERS_DOCUMENT_BYTES,
+  MAX_TENDERS_STORE_FILE_BYTES,
+} from '../src/shared/tenders-persistence'
 
-// ── frozen target store surface ───────────────────────────────────────────────
-
-type HydrationStatus = 'loading' | 'ready' | 'error'
-type SaveStatus = 'loading' | 'saving' | 'saved' | 'error' | 'conflict'
-
-/**
- * The store state the GREEN lane must provide. Existing domain slices are
- * included so assertions read like the real store; the v2 additions are the
- * hydration/save status fields and the three new actions.
- */
-interface V2StoreState {
-  workspaces: TendersWorkspaceV2[]
-  activeCompanyId: string | null
-  company: CompanyProfile
-  customers: Customer[]
-  vault: VaultDoc[]
-  tenders: TenderRecord[]
-  issuerTemplates: IssuerTemplate[]
-
-  hydrationStatus: HydrationStatus
-  hydrationError: string | null
-  saveStatus: SaveStatus
-  saveError: string | null
-  hasWorkspaces: boolean
-
-  hydrateFromMain: () => Promise<void>
-  reloadCommittedFromMain: () => Promise<void>
-  retrySave: () => void
-
-  addCompany: (company: CompanyProfile) => string
-  addCustomer: (customer: Customer) => void
-  addVaultDoc: (doc: VaultDoc) => void
-  updateTender: (id: string, patch: Partial<TenderRecord>) => void
-  updateRequirement: (tenderId: string, reqId: string, patch: Partial<RequirementRecord>) => void
-
-  setPage: (page: AppPage) => void
-  setView: (view: string) => void
-  setZoom: (zoom: number) => void
-  setOnboardingDone: () => void
-}
+// ── store surface ─────────────────────────────────────────────────────────────
 
 interface StoreApi {
-  getState: () => V2StoreState
+  getState: () => TendersState
 }
 
 const STORE_MODULE = '../src/renderer/src/store'
@@ -123,12 +93,21 @@ afterEach(() => {
   storeChangedCallback = null
 })
 
-async function importStore(): Promise<StoreApi> {
-  const mod = (await import(STORE_MODULE)) as unknown as { useTendersStore: StoreApi }
-  return mod.useTendersStore
+type StoreModule = {
+  useTendersStore: StoreApi
+  checkTendersSaveSize: (document: TendersDataV2) => TendersSaveSizeCheck
+  flushSaveToMain: () => Promise<{ dirty: boolean; ok: boolean; error: string | null }>
 }
 
-function state(store: StoreApi): V2StoreState {
+async function importStoreModule(): Promise<StoreModule> {
+  return (await import(STORE_MODULE)) as unknown as StoreModule
+}
+
+async function importStore(): Promise<StoreApi> {
+  return (await importStoreModule()).useTendersStore
+}
+
+function state(store: StoreApi): TendersState {
   return store.getState()
 }
 
@@ -722,6 +701,222 @@ describe('Tenders renderer store v2 cutover', () => {
       expect(state(store).saveError).toBeTruthy()
       expect(state(store).saveError).toContain('workspaces.0.tenders.0.closingDate')
       expect(state(store).saveError).toContain('closing date')
+    })
+  })
+
+  describe('save size pre-check', () => {
+    /** A document padded to an exact serialized byte length (measurement only). */
+    function documentAtBytes(target: number): TendersDataV2 {
+      const document = documentV2(0, [workspace('ws-1', 'Loaded Co')])
+      document.workspaces[0].company.description = ''
+      const baseBytes = new TextEncoder().encode(JSON.stringify(document)).length
+      document.workspaces[0].company.description = 'x'.repeat(target - baseBytes)
+      return document
+    }
+
+    it('flags a document one byte over the ceiling and clears exactly at it', async () => {
+      const module = await importStoreModule()
+
+      const atLimit = module.checkTendersSaveSize(documentAtBytes(MAX_TENDERS_DOCUMENT_BYTES))
+      expect(atLimit.documentBytes).toBe(MAX_TENDERS_DOCUMENT_BYTES)
+      expect(atLimit.overLimit).toBe(false)
+      expect(atLimit.error).toBeNull()
+
+      const over = module.checkTendersSaveSize(documentAtBytes(MAX_TENDERS_DOCUMENT_BYTES + 1))
+      expect(over.documentBytes).toBe(MAX_TENDERS_DOCUMENT_BYTES + 1)
+      expect(over.overLimit).toBe(true)
+      expect(over.error).toMatch(/save limit is 4\.0 MB/)
+      // Actionable, not just a limit: the user is told the change is safe and what
+      // to delete.
+      expect(over.error).toContain('Nothing was lost')
+      expect(over.error).toMatch(/Delete tenders/)
+    })
+
+    it('warns while still saving once a ceiling is nearly reached', async () => {
+      const module = await importStoreModule()
+
+      const near = module.checkTendersSaveSize(
+        documentAtBytes(Math.ceil(MAX_TENDERS_DOCUMENT_BYTES * 0.8)),
+      )
+      expect(near.overLimit).toBe(false)
+      expect(near.nearLimit).toBe(true)
+      expect(near.warning).toMatch(/save limit/)
+      expect(near.error).toBeNull()
+
+      const small = module.checkTendersSaveSize(documentV2(0, [workspace('ws-1', 'Loaded Co')]))
+      expect(small.overLimit).toBe(false)
+      expect(small.nearLimit).toBe(false)
+      expect(small.warning).toBeNull()
+    })
+
+    it('flags a document whose pretty-printed file would exceed the store-file ceiling', async () => {
+      const module = await importStoreModule()
+      const document = documentV2(1, [workspace('ws-1', 'Loaded Co')])
+      // Empty strings in an array are the worst indentation shape measured: three
+      // compact bytes each, a full indented line each (ratio 3.57).
+      document.workspaces[0].tenders[0].intakeVerification = {
+        fields: {},
+        requirements: {},
+        conflicts: Array.from({ length: 700_000 }, () => ''),
+        contactEmail: null,
+        createdAt: LOADED_AT,
+        updatedAt: LOADED_AT,
+      }
+
+      const check = module.checkTendersSaveSize(document)
+
+      expect(check.documentBytes).toBeLessThanOrEqual(MAX_TENDERS_DOCUMENT_BYTES)
+      expect(check.fileBytes).toBeGreaterThan(MAX_TENDERS_STORE_FILE_BYTES)
+      expect(check.overLimit).toBe(true)
+      expect(check.error).toMatch(/store file limit/)
+    })
+
+    it('refuses an over-size document locally instead of failing every autosave round trip', async () => {
+      api.loadStoreV2.mockResolvedValue(loadOk('loaded', makeLoadedDoc(7), false))
+      useSuccessfulSave()
+
+      const store = await importStore()
+      await hydrate(store)
+
+      // Three tenders at the requirement cap (~5 MB, and deliberately also
+      // schema-invalid so the precedence is observable): the size pre-check runs
+      // first, so the reported reason is the ceiling and never a field path.
+      const huge = Array.from({ length: 5_000 }, (_, index) => requirement(`big-${index}`, index))
+      state(store).updateTender('tender-ws-1', { requirements: huge })
+      state(store).addTender(tender('tender-big-2', { requirements: huge }))
+      state(store).addTender(tender('tender-big-3', { requirements: huge }))
+      await settle()
+
+      expect(api.saveStoreV2).not.toHaveBeenCalled()
+      const failed = state(store)
+      expect(failed.saveStatus).toBe('error')
+      expect(failed.saveError).toMatch(/save limit is 4\.0 MB/)
+      expect(failed.saveError).toMatch(/Delete tenders/)
+      expect(failed.saveError).not.toMatch(/workspaces\./)
+      expect(failed.saveSizeWarning).toBeNull()
+      // The over-size edit is still on screen, never silently dropped.
+      expect(failed.tenders).toHaveLength(3)
+
+      // Shrinking the document lets the next autosave through at the same revision.
+      state(store).removeTender('tender-big-2')
+      state(store).removeTender('tender-big-3')
+      state(store).updateTender('tender-ws-1', { requirements: [requirement('req-1', 1)] })
+      await settle()
+
+      expect(saveCallCount()).toBeGreaterThanOrEqual(1)
+      expect(saveCall(0).expectedRevision).toBe(7)
+      expect(state(store).saveStatus).toBe('saved')
+      expect(state(store).saveError).toBeNull()
+      expect(state(store).saveSizeWarning).toBeNull()
+    })
+
+    it('surfaces the headroom warning while saves still succeed', async () => {
+      api.loadStoreV2.mockResolvedValue(loadOk('loaded', makeLoadedDoc(7), false))
+      useSuccessfulSave()
+
+      const store = await importStore()
+      await hydrate(store)
+
+      // Two tenders at the requirement cap (3.79 MB measured): inside both
+      // ceilings, above the 80% headroom threshold. `numPages` must cover the
+      // requirement page numbers or the schema rejects the document instead.
+      const big = Array.from({ length: 5_000 }, (_, index) =>
+        requirement(`big-${index}`, index + 1),
+      )
+      state(store).updateTender('tender-ws-1', { requirements: big, numPages: 5_000 })
+      state(store).addTender(tender('tender-big-2', { requirements: big, numPages: 5_000 }))
+      await settle()
+
+      expect(saveCallCount()).toBeGreaterThanOrEqual(1)
+      const savedDocument = findSavedDocument(saveCallCount() - 1)
+      const check = (await importStoreModule()).checkTendersSaveSize(savedDocument)
+      expect(check.overLimit).toBe(false)
+      expect(check.nearLimit).toBe(true)
+
+      expect(state(store).saveStatus).toBe('saved')
+      expect(state(store).saveSizeWarning).toMatch(/save limit/)
+    })
+
+    it('names the ceiling that is actually about to bind in the warning', async () => {
+      const module = await importStoreModule()
+      // An indentation-heavy document: empty strings in an array cost three compact
+      // bytes each and a full indented line each, so the store-file ceiling binds
+      // long before the document ceiling. Measured ratio 3.8x for this shape.
+      const build = (count: number): TendersDataV2 => {
+        const document = documentV2(1, [workspace('ws-1', 'Loaded Co')])
+        document.workspaces[0].tenders[0].intakeVerification = {
+          fields: {},
+          requirements: {},
+          conflicts: Array.from({ length: count }, () => ''),
+          contactEmail: null,
+          createdAt: LOADED_AT,
+          updatedAt: LOADED_AT,
+        }
+        return document
+      }
+      // Scale a measured anchor to land inside the file ceiling but above the
+      // warning threshold, without hard-coding a count that depends on JSON layout.
+      const anchor = module.checkTendersSaveSize(build(500_000))
+      const count = Math.floor(500_000 * ((MAX_TENDERS_STORE_FILE_BYTES * 0.9) / anchor.fileBytes))
+      const check = module.checkTendersSaveSize(build(count))
+
+      expect(check.overLimit).toBe(false)
+      expect(check.nearLimit).toBe(true)
+      expect(check.documentBytes).toBeLessThan(MAX_TENDERS_DOCUMENT_BYTES * 0.8)
+      expect(check.fileBytes).toBeGreaterThan(MAX_TENDERS_STORE_FILE_BYTES * 0.8)
+      // The file ceiling is the nearer one, so the advisory must name it instead of
+      // quoting a document figure that is not what is about to block the save.
+      expect(check.warning).toMatch(/store file limit/)
+      expect(check.warning).not.toMatch(/of the 4\.0 MB save limit/)
+    })
+
+    it('applies the same pre-check to the v1 migration commit path', async () => {
+      // The migration commit calls `saveStoreV2` directly (it owns the revision
+      // while it runs), so without the shared pre-check an over-size legacy store
+      // surfaces main's raw refusal here — a message that names no field and no way
+      // forward, the class this fix removes.
+      const migrated = documentV2(0, [workspace('ws-1', 'Migrated Co')])
+      migrated.workspaces[0].company.description = 'x'.repeat(MAX_TENDERS_DOCUMENT_BYTES + 1)
+      api.loadStoreV2.mockResolvedValue(loadOk('migrated', migrated, true))
+      useSuccessfulSave()
+
+      const store = await importStore()
+      await hydrate(store)
+
+      expect(api.saveStoreV2).not.toHaveBeenCalled()
+      const failed = state(store)
+      expect(failed.saveStatus).toBe('error')
+      expect(failed.saveError).toMatch(/save limit is 4\.0 MB/)
+      expect(failed.saveError).toMatch(/Delete tenders/)
+      // Not main's raw ceiling wording.
+      expect(failed.saveError).not.toMatch(/exceeds limit of/)
+      expect(failed.saveSizeWarning).toBeNull()
+      // The migrated workspace is still on screen, never silently dropped.
+      expect(failed.workspaces).toHaveLength(1)
+      expect(failed.workspaces[0].company.description).toHaveLength(MAX_TENDERS_DOCUMENT_BYTES + 1)
+    })
+
+    it('reports the close-guard flush as not durable while the document is over a ceiling', async () => {
+      api.loadStoreV2.mockResolvedValue(loadOk('loaded', makeLoadedDoc(7), false))
+      useSuccessfulSave()
+
+      const store = await importStore()
+      const module = await importStoreModule()
+      await hydrate(store)
+
+      const huge = Array.from({ length: 5_000 }, (_, index) => requirement(`big-${index}`, index))
+      state(store).updateTender('tender-ws-1', { requirements: huge })
+      state(store).addTender(tender('tender-big-2', { requirements: huge }))
+      state(store).addTender(tender('tender-big-3', { requirements: huge }))
+
+      // The close guard flushes through the same path as every other save, so it
+      // must report uncommitted work rather than claiming the edit is durable.
+      const result = await module.flushSaveToMain()
+
+      expect(api.saveStoreV2).not.toHaveBeenCalled()
+      expect(result.dirty).toBe(true)
+      expect(result.ok).toBe(false)
+      expect(state(store).saveStatus).toBe('error')
     })
   })
 

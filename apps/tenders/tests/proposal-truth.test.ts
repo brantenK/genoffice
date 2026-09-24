@@ -44,6 +44,7 @@ import {
   unregisterTendersWebContents,
 } from '../src/main/tenders-main'
 import { TENDERS_CHANNELS } from '../src/shared/ipc'
+import { parseMoney } from '../src/shared/money'
 import type { ReadinessReport } from '../src/shared/readiness'
 
 type ProposalRequirement = {
@@ -527,6 +528,32 @@ describe('proposal generation tells the truth about submission readiness and sup
     expect(content).toContain('**Document Date:** 13 September 2026')
     expect(content).toContain(`**Confirmed Total Bid Valuation:** ${expectedMoney}`)
     expect(content).toContain(`**${expectedMoney}**`)
+  })
+
+  it('prints a confirmed valuation the shared rand parser reads back exactly', () => {
+    // The confirmed total is the number the extraction-review step persisted
+    // through `shared/money`. Printing it in a form that parser cannot read
+    // back would let the document and the record drift apart.
+    const valuation = 1_200_000
+    const content = generateWithTrustedContext(
+      apparentlyReadyTender({
+        estimatedValue: valuation,
+        milestones: [{ name: 'Delivery', amount: valuation, dueDate: '2026-11-30' }],
+      }),
+      { readinessReport: readinessReport(true) },
+    )
+    const valuationLine =
+      content.split('\n').find((line) => line.includes('Confirmed Total Bid Valuation')) ?? ''
+    const printed = valuationLine
+      .slice(valuationLine.indexOf(':**') + 3, valuationLine.indexOf(' (amount supplied'))
+      .trim()
+    const scheduleTotal = content.match(/\| \*\*TOTAL\*\* \| \| \*\*(.+?)\*\* \|/)?.[1] ?? ''
+
+    expect(printed).not.toBe('')
+    expect(parseMoney(printed)).toBe(valuation)
+    expect(parseMoney(scheduleTotal)).toBe(valuation)
+    // The 100x mis-read the audit found would print "R 120 000 000,00" here.
+    expect(parseMoney(printed)).not.toBe(120_000_000)
   })
 
   it('uses Not supplied for a missing reference instead of fabricating a plausible identifier', () => {

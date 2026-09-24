@@ -2,9 +2,9 @@
 // and project track record, all editable (Phase 4, WP-8).
 //
 // The page is also where the workspace lifecycle lives: archiving and permanent
-// deletion are shown honestly — the affordances exist, explain what they would
-// touch, and stay disabled until the store's archive/restore actions (and the
-// deferred managed-file/trash semantics) land.
+// deletion are shown honestly — archive/restore are real actions, and the
+// destructive path is explained (there is no permanent workspace delete in the
+// store) instead of being rendered as a permanently-disabled button.
 import { useState } from 'react'
 import {
   Archive,
@@ -67,6 +67,10 @@ export function ProfilePage() {
     workspaces.find((ws) => ws.id === activeCompanyId) ?? null,
   )
   const archived = Boolean(company.archivedAt)
+  // Deliberately not pinned to a time zone: `archivedAt` is a real instant (the
+  // store stamps it with `new Date().toISOString()`), not a civil date someone
+  // typed, so it is shown on the reader's own clock like every other instant the
+  // app prints. Only user-entered civil dates are pinned to SAST.
   const archivedLabel =
     company.archivedAt && !isNaN(new Date(company.archivedAt).getTime())
       ? new Date(company.archivedAt).toLocaleDateString('en-ZA', {
@@ -474,7 +478,7 @@ export function ProfilePage() {
                   type="button"
                   onClick={() => setDeleteOpen((open) => !open)}
                   aria-expanded={deleteOpen}
-                  title="See what a permanent delete would affect"
+                  title="See what deleting this workspace would affect — Tenders offers archive instead"
                   className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--surface)] px-3.5 py-2 text-sm font-medium text-[var(--danger)] transition-colors hover:bg-[var(--danger-bg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
                 >
                   <Trash2 size={13} aria-hidden="true" /> Delete this workspace…
@@ -492,8 +496,10 @@ export function ProfilePage() {
                     Permanent deletion is not available yet
                   </p>
                   <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-                    Deleting “{company.tradingName || 'this workspace'}” would remove every record
-                    it owns:
+                    Tenders has no permanent workspace delete, so this panel offers no delete
+                    control. Archiving is the supported route — nothing is lost, and you can restore
+                    the workspace at any time. Deleting “{company.tradingName || 'this workspace'}”
+                    would remove every record it owns:
                   </p>
                   <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[11px] text-[var(--text-secondary)]">
                     <li>
@@ -512,13 +518,25 @@ export function ProfilePage() {
                     </li>
                   </ul>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="danger"
-                      disabled
-                      title="Permanent deletion is not offered — archive the workspace instead, or remove individual documents (they move to Trash and can be restored)"
-                    >
-                      <Trash2 size={13} /> Delete permanently
-                    </Button>
+                    {archived ? (
+                      <Button
+                        variant="primary"
+                        disabled={!activeCompanyId}
+                        onClick={() => activeCompanyId && restoreCompany(activeCompanyId)}
+                        title="Make this workspace active again"
+                      >
+                        <RotateCcw size={13} /> Restore workspace
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="default"
+                        disabled={!activeCompanyId}
+                        onClick={() => activeCompanyId && archiveCompany(activeCompanyId)}
+                        title="Set this workspace aside without deleting anything"
+                      >
+                        <Archive size={13} /> Archive this workspace
+                      </Button>
+                    )}
                     <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
                       Keep this workspace
                     </Button>

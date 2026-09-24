@@ -44,6 +44,7 @@ import { assessReadiness } from '../readiness'
 import { selectActiveTender, useTendersStore } from '../store'
 import { SUBMISSION_METHOD_LABEL, type ContractMilestone } from '../../shared/types'
 import { milestonesAllowed } from '../../../shared/lifecycle'
+import { formatRandAmount } from '../../../shared/money'
 import { PdfViewer } from './PdfViewer'
 import {
   ExtractionReview,
@@ -78,6 +79,37 @@ const MIN_MATRIX_PX = 300
 const MIN_PDF_PX = 340
 const HANDLE_PX = 6
 const SPLIT_STORAGE_KEY = 'zanostack-tenders-workspace-split-v1'
+/**
+ * Readable floor (CSS px) for the tender-title container. `responsive.css`
+ * zeroes `min-width` on every toolbar child so the toolbar can wrap at large
+ * text sizes; without an explicit floor the toolbar's buttons squeeze the title
+ * down to a single character (measured: `S…` at a 1359px viewport), and the
+ * countdown badge spills under the save chip.
+ *
+ * Applied inline because a class-level floor loses to that stylesheet rule.
+ * Deliberately in px, not `rem`: the toolbar's buttons scale with the text too,
+ * so a text-relative floor would grow at exactly the zoom level where the row
+ * has the least room to give, turning a wrapping toolbar into a starved one.
+ */
+const TITLE_MIN_WIDTH = 240
+
+/** Cross-app actions whose failure is surfaced in the workspace header. */
+type CrossAppAction = 'sheets' | 'docs' | 'crm' | 'books'
+
+/** One surfaced cross-app failure: what failed, why, and how to repeat it. */
+interface ToolError {
+  action: CrossAppAction
+  message: string
+  /** Re-open target for the CRM action, so Retry repeats the same request. */
+  dealId?: string
+}
+
+const TOOL_ERROR_TITLE: Record<CrossAppAction, string> = {
+  sheets: 'Export to Sheets failed',
+  docs: 'Draft proposal failed',
+  crm: 'Open CRM deal failed',
+  books: 'Open Books failed',
+}
 
 function clampFraction(value: number): number {
   return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, value))
@@ -144,10 +176,14 @@ export function Workspace() {
   const company = useTendersStore((s) => s.company)
   const saveStatus = useTendersStore((s) => s.saveStatus)
   const saveError = useTendersStore((s) => s.saveError)
+  const saveSizeWarning = useTendersStore((s) => s.saveSizeWarning)
   const retrySave = useTendersStore((s) => s.retrySave)
   const reloadCommittedFromMain = useTendersStore((s) => s.reloadCommittedFromMain)
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
   const [docError, setDocError] = useState<string | null>(null)
+  // Bumped by the error state's "Try again" so the load effect re-runs without
+  // the user having to change the tender.
+  const [pdfReloadToken, setPdfReloadToken] = useState(0)
   // Visible (role="alert") notice when a re-attached PDF could not be persisted.
   const [pdfSaveError, setPdfSaveError] = useState<string | null>(null)
   const [vaultOpen, setVaultOpen] = useState(false)
@@ -158,12 +194,12 @@ export function Workspace() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [crmBusy, setCrmBusy] = useState(false)
   const [crmError, setCrmError] = useState<string | null>(null)
-  // Cross-app export/proposal writes: a failed or rejected call is surfaced
-  // visibly (role=alert) with a retry, exactly like CRM sync and billing.
-  const [toolError, setToolError] = useState<{
-    action: 'sheets' | 'docs'
-    message: string
-  } | null>(null)
+  // Every cross-app call — Sheets export, Docs draft, opening the linked CRM
+  // deal, opening Books — surfaces a failed, refused or unavailable bridge
+  // visibly (role=alert) with a retry, exactly like CRM sync and billing. A
+  // discarded `{ok:false}` / `false` would leave the user believing the other
+  // app had opened.
+  const [toolError, setToolError] = useState<ToolError | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [activePane, setActivePane] = useState<CompactPane>('requirements')
   const [matrixFraction, setMatrixFraction] = useState<number>(() => readStoredFraction())
@@ -181,11 +217,74 @@ export function Workspace() {
     crossAppWritesBlocked(s.workspaces, s.activeCompanyId),
   )
 
+  // Opening the linked CRM deal is a cross-app call like any other: the main
+  // handler answers `{ok:false}` when no CRM window can be opened, and a
+  // rejection must not vanish either.
+  const openCrmDeal = useCallback(async (dealId: string) => {
+    setToolError(null)
+    try {
+      const res = await window.tendersApi?.openInCrm(dealId)
+      if (!res) {
+        setToolError({
+          action: 'crm',
+          message: 'The CRM bridge is unavailable in this build.',
+          dealId,
+        })
+        return
+      }
+      if (!res.ok) {
+        // The main handler adds a message on a refused request (an unauthorized
+        // sender); the plain `{ok:false}` case means no CRM window to open.
+        const detail = (res as { error?: { message?: string } }).error?.message
+        setToolError({
+          action: 'crm',
+          message: detail
+            ? `Zanostack CRM refused to open the linked deal: ${detail}`
+            : 'Zanostack CRM did not open the linked deal. Retry when the CRM app is available.',
+          dealId,
+        })
+      }
+    } catch (err) {
+      setToolError({
+        action: 'crm',
+        message: err instanceof Error ? err.message : String(err),
+        dealId,
+      })
+    }
+  }, [])
+
+  // Same contract for the Books window: `false` means it did not open.
+  const openBooksTab = useCallback(async () => {
+    setToolError(null)
+    try {
+      const opened = await window.tendersApi?.openBooks?.()
+      if (opened === undefined) {
+        setToolError({
+          action: 'books',
+          message: 'The Books bridge is unavailable in this build.',
+        })
+        return
+      }
+      if (!opened) {
+        setToolError({
+          action: 'books',
+          message: 'Zanostack Books did not open. Retry once the Books app is available.',
+        })
+      }
+    } catch (err) {
+      setToolError({
+        action: 'books',
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, [])
+
   const syncCrm = useCallback(async () => {
     if (!tender) return
     setCrmError(null)
     setCrmBusy(true)
     const deterministicDealId = `deal-tender-${tender.id}`
+    let dealId: string | undefined
     try {
       const res = await window.tendersApi?.syncWithCrm({
         id: deterministicDealId,
@@ -203,14 +302,19 @@ export function Workspace() {
         setCrmError(res?.error || 'CRM sync failed. Retry when the CRM app is available.')
         return
       }
+      dealId = res.dealId || deterministicDealId
       if (res.dealId) updateTender(tender.id, { linkedCrmDealId: res.dealId })
-      await window.tendersApi?.openInCrm(res.dealId || deterministicDealId)
     } catch (err) {
       setCrmError(err instanceof Error ? err.message : String(err))
+      return
     } finally {
       setCrmBusy(false)
     }
-  }, [tender, updateTender])
+    // Opening the deal is a separate cross-app call, made only after the sync
+    // has been persisted: a failure here is reported as "the deal did not open",
+    // never as a failed sync, and it is never silently discarded.
+    if (dealId) await openCrmDeal(dealId)
+  }, [tender, updateTender, openCrmDeal])
 
   // Export the compliance matrix to Sheets. A missing bridge, `{ok:false}` or a
   // thrown rejection is reported instead of being discarded.
@@ -269,9 +373,12 @@ export function Workspace() {
   }, [tender])
 
   const retryToolAction = useCallback(() => {
-    if (toolError?.action === 'docs') void runDraftProposal()
-    else void runExportMatrix()
-  }, [toolError, runExportMatrix, runDraftProposal])
+    if (!toolError) return
+    if (toolError.action === 'docs') void runDraftProposal()
+    else if (toolError.action === 'sheets') void runExportMatrix()
+    else if (toolError.action === 'crm') void openCrmDeal(toolError.dealId ?? '')
+    else void openBooksTab()
+  }, [toolError, runExportMatrix, runDraftProposal, openCrmDeal, openBooksTab])
 
   const review = tender ? tenderReviews[tender.id] : undefined
   const reviewSummary = useMemo(
@@ -457,6 +564,10 @@ export function Workspace() {
     setDocError(null)
     ;(async () => {
       let buf: ArrayBuffer | null = null
+      // A stored-path read failure is terminal: the fallback `fetch` below
+      // cannot resolve a filesystem path, and letting it run would overwrite
+      // the specific diagnostic with a generic one.
+      let storedReadFailed = false
       if (
         typeof window !== 'undefined' &&
         window.tendersApi?.readDocument &&
@@ -470,26 +581,29 @@ export function Workspace() {
             buf = res.buffer
           } else if (res && !res.ok) {
             // A user-triggered read failure must be visible, not console-only.
+            storedReadFailed = true
             if (!cancelled) {
               setDocError(
-                `Could not read the stored tender PDF: ${res.error || 'the document store refused the request.'} Re-attach the file to keep working.`,
+                `Could not read the stored tender PDF: ${res.error || 'the document store refused the request.'}`,
               )
             }
           }
         } catch (readErr) {
+          storedReadFailed = true
           if (!cancelled) {
             setDocError(
               `Could not read the stored tender PDF: ${
                 readErr instanceof Error ? readErr.message : String(readErr)
-              }. Re-attach the file to keep working.`,
+              }`,
             )
           }
         }
       }
-      if (!buf) {
+      if (!buf && !storedReadFailed) {
         const res = await fetch(tender.fileUrl)
         buf = await res.arrayBuffer()
       }
+      if (!buf) return
       loaded = await loadPdfDocument(buf)
       if (!cancelled) setDoc(loaded)
     })().catch(() => {
@@ -500,13 +614,16 @@ export function Workspace() {
       // PDFDocumentProxy has no destroy() in pdfjs v6; cleanup releases memory.
       void loaded?.cleanup().catch(() => {})
     }
-  }, [tender?.id, tender?.fileUrl])
+  }, [tender?.id, tender?.fileUrl, pdfReloadToken])
 
   if (!tender) {
     return (
-      <main className="flex flex-1 items-center justify-center text-sm text-[var(--text-tertiary)]">
+      <section
+        aria-label="Tender workspace"
+        className="flex flex-1 items-center justify-center text-sm text-[var(--text-tertiary)]"
+      >
         No tender selected.
-      </main>
+      </section>
     )
   }
 
@@ -562,7 +679,11 @@ export function Workspace() {
   }
 
   return (
-    <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <section
+      aria-label="Tender workspace"
+      data-workspace-root
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+    >
       {/* tender header bar */}
       <div
         data-testid="workspace-context-header"
@@ -578,15 +699,19 @@ export function Workspace() {
         >
           <ArrowLeft size={14} /> Tenders
         </Button>
-        <div className="min-w-0 flex-1">
+        {/* The title keeps a readable floor (`TITLE_MIN_WIDTH`): without it the
+            toolbar's buttons squeeze the title to one character and the
+            countdown badge spills under the save chip. The toolbar still wraps,
+            so the action buttons move onto more rows instead of clipping. */}
+        <div className="min-w-0 flex-1" style={{ minWidth: TITLE_MIN_WIDTH }}>
           <h1 className="truncate text-sm font-bold text-[var(--text)]" title={tender.title}>
             {tender.title}
           </h1>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-tertiary)]">
             {dl.date && (
               <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${urgencyClasses(dl.urgency)}`}
-                title={`${dl.formatted}${dl.submitBy ? ` · target submit by ${dl.submitBy.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${urgencyClasses(dl.urgency)}`}
+                title={`${dl.formatted}${dl.submitByLabel ? ` · target submit by ${dl.submitByLabel}` : ''}`}
               >
                 <Clock size={11} /> {dl.countdownLabel}
               </span>
@@ -602,6 +727,7 @@ export function Workspace() {
           <SaveStatus
             status={saveStatus}
             message={saveError}
+            warning={saveSizeWarning}
             onRetry={retrySave}
             onReload={reloadCommittedFromMain}
           />
@@ -671,11 +797,9 @@ export function Workspace() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={async () => {
-                    await window.tendersApi?.openInCrm(
-                      tender.linkedCrmDealId || `deal-tender-${tender.id}`,
-                    )
-                  }}
+                  onClick={() =>
+                    void openCrmDeal(tender.linkedCrmDealId || `deal-tender-${tender.id}`)
+                  }
                   title="Open linked deal in Zanostack CRM"
                 >
                   <Building2 size={13} /> CRM Deal
@@ -746,16 +870,7 @@ export function Workspace() {
                     <MetaRow label="Reference">{tender.referenceNumber || 'Not stated'}</MetaRow>
                     <MetaRow label="Issuing body">{tender.issuingBody || 'Not stated'}</MetaRow>
                     <MetaRow label="Closing">{dl.formatted || 'Not stated'}</MetaRow>
-                    <MetaRow label="Submit by">
-                      {dl.submitBy
-                        ? dl.submitBy.toLocaleString('en-ZA', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })
-                        : 'Not stated'}
-                    </MetaRow>
+                    <MetaRow label="Submit by">{dl.submitByLabel ?? 'Not stated'}</MetaRow>
                     <MetaRow label="Submission">
                       {tender.submissionMethod
                         ? `${SUBMISSION_METHOD_LABEL[tender.submissionMethod]}${tender.submissionAddress ? ` · ${tender.submissionAddress}` : ''}`
@@ -810,11 +925,12 @@ export function Workspace() {
                         <MenuItem
                           testId="overflow-action-crm"
                           icon={<Building2 size={13} aria-hidden="true" />}
-                          onClick={closeMenuThen(() => {
-                            void window.tendersApi?.openInCrm(
-                              tender.linkedCrmDealId || `deal-tender-${tender.id}`,
-                            )
-                          })}
+                          onClick={closeMenuThen(
+                            () =>
+                              void openCrmDeal(
+                                tender.linkedCrmDealId || `deal-tender-${tender.id}`,
+                              ),
+                          )}
                         >
                           Open CRM deal
                         </MenuItem>
@@ -898,8 +1014,8 @@ export function Workspace() {
         </div>
       )}
 
-      {/* Cross-app export/proposal failure: surfaced with a retry instead of
-          an unhandled rejection or a silently discarded {ok:false}. */}
+      {/* Cross-app failure: surfaced with a retry instead of an unhandled
+          rejection or a silently discarded `{ok:false}` / `false`. */}
       {toolError && (
         <div
           role="alert"
@@ -907,8 +1023,7 @@ export function Workspace() {
           className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-2 text-[11px]"
         >
           <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--danger-text)]">
-            <AlertTriangle size={12} aria-hidden="true" />{' '}
-            {toolError.action === 'sheets' ? 'Export to Sheets failed' : 'Draft proposal failed'}
+            <AlertTriangle size={12} aria-hidden="true" /> {TOOL_ERROR_TITLE[toolError.action]}
           </span>
           <span className="text-[var(--text-secondary)]">{toolError.message}</span>
           <div className="ml-auto flex items-center gap-2">
@@ -1090,6 +1205,14 @@ export function Workspace() {
                   )}
                   <div className="flex-1">
                     <div>{billingFeedback.message}</div>
+                    {/* A warning rides on a successful post (the invoice exists;
+                        something after it did not). Rendering it keeps the
+                        success claim honest instead of hiding the caveat. */}
+                    {billingFeedback.warning && (
+                      <div className="mt-1 font-medium text-[var(--text-tertiary)]">
+                        {billingFeedback.warning}
+                      </div>
+                    )}
                     {billingFeedback.kind === 'error' &&
                       billingFeedback.retryable &&
                       billingId === null && (
@@ -1136,7 +1259,7 @@ export function Workspace() {
                             {m.name || m.title}
                           </div>
                           <div className="text-[10px] text-[var(--text-tertiary)]">
-                            R {Number(m.amount).toLocaleString()} · Ready to Bill
+                            {formatRandAmount(Number(m.amount))} · Ready to Bill
                           </div>
                         </div>
                         <button
@@ -1168,17 +1291,19 @@ export function Workspace() {
                             {m.name || m.title}
                           </div>
                           <div className="text-[10px] text-[var(--text-tertiary)]">
-                            R {Number(m.amount).toLocaleString()}
+                            {formatRandAmount(Number(m.amount))}
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => window.tendersApi?.openBooks?.()}
+                          onClick={() => void openBooksTab()}
                           className="shrink-0 inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent-dark)] hover:bg-[var(--hover)] cursor-pointer"
                           title="Open invoice in Zano Books"
                         >
                           <FileText size={11} aria-hidden="true" />{' '}
-                          {m.billedInvoiceNumber || 'INV-2026'}
+                          {/* Never invent an invoice reference: when Books did
+                              not return a number, say what the control does. */}
+                          {m.billedInvoiceNumber || 'Open in Books'}
                         </button>
                       </div>
                     )
@@ -1201,17 +1326,17 @@ export function Workspace() {
                             </span>
                           </div>
                           <div className="text-[10px] text-[var(--text-secondary)] font-medium">
-                            R {Number(m.amount).toLocaleString()} · Paid {paidDateStr}
+                            {formatRandAmount(Number(m.amount))} · Paid {paidDateStr}
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => window.tendersApi?.openBooks?.()}
+                          onClick={() => void openBooksTab()}
                           className="shrink-0 inline-flex items-center gap-1 rounded border border-[var(--success-border)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--accent-dark)] hover:bg-[var(--hover)] cursor-pointer transition-colors"
                           title="Open settled invoice in Zano Books"
                         >
                           <FileText size={11} aria-hidden="true" />{' '}
-                          {m.billedInvoiceNumber || 'View Invoice'}
+                          {m.billedInvoiceNumber || 'Open in Books'}
                         </button>
                       </div>
                     )
@@ -1266,6 +1391,22 @@ export function Workspace() {
           data-active={!compact || activePane === 'pdf'}
           className="workspace-pane relative min-w-0 flex-1"
         >
+          {/* One hidden file input serves every unreadable-PDF state. It lives
+              outside the branches because the re-attach affordance must exist
+              wherever the PDF cannot be shown — not only when `fileUrl` is
+              missing (the stored-PDF read-failure state had no control at all). */}
+          <input
+            ref={reattachRef}
+            type="file"
+            accept="application/pdf"
+            data-testid="pdf-reattach-input"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleReattach(file)
+              e.target.value = ''
+            }}
+          />
           {!tender.fileUrl ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-[var(--warn-bg)] text-[var(--warn)] ring-1 ring-[var(--warn-border)]">
@@ -1278,17 +1419,6 @@ export function Workspace() {
                   it here — your compliance matrix is untouched.
                 </p>
               </div>
-              <input
-                ref={reattachRef}
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) handleReattach(file)
-                  e.target.value = ''
-                }}
-              />
               <Button size="sm" variant="primary" onClick={() => reattachRef.current?.click()}>
                 <FileUp size={14} /> Choose PDF
               </Button>
@@ -1301,8 +1431,41 @@ export function Workspace() {
               activationToken={pdfActivation}
             />
           ) : docError ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-[var(--danger)]">
-              {docError}
+            /* Actionable failure: the same re-attach control as the missing-link
+               state, plus a retry of the read itself — never a dead end that
+               tells the user to re-attach with no way to do it. */
+            <div
+              role="alert"
+              className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+            >
+              <span className="flex size-11 items-center justify-center rounded-full bg-[var(--danger-bg)] text-[var(--danger)] ring-1 ring-[var(--danger-border)]">
+                <AlertTriangle size={20} aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-[var(--text)]">
+                  The tender PDF could not be opened
+                </p>
+                <p className="mt-1 max-w-sm text-xs leading-relaxed text-[var(--text-secondary)]">
+                  {docError}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button size="sm" variant="primary" onClick={() => reattachRef.current?.click()}>
+                  <FileUp size={14} /> Re-attach the PDF
+                </Button>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => setPdfReloadToken((n) => n + 1)}
+                  title="Read the stored tender PDF again"
+                >
+                  <RefreshCw size={14} /> Try again
+                </Button>
+              </div>
+              <p className="max-w-sm text-[11px] text-[var(--text-tertiary)]">
+                Re-attaching replaces the link on this tender; your compliance matrix and review
+                decisions are untouched.
+              </p>
             </div>
           ) : (
             <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--text-tertiary)]">
@@ -1320,7 +1483,7 @@ export function Workspace() {
         {/* contract milestones drawer — won tenders only */}
         {milestonesOpen && canBill && <MilestonesDrawer onClose={() => setMilestonesOpen(false)} />}
       </div>
-    </main>
+    </section>
   )
 }
 

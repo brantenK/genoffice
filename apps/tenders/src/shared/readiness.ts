@@ -202,7 +202,7 @@ export function unprovenOcrPageCount(
 }
 
 const DAY_MS = 86_400_000
-const POLICE_STAMP_WINDOW_DAYS = 90
+export const POLICE_STAMP_WINDOW_DAYS = 90
 export type ReadinessDocHealth = DocHealth | 'UNKNOWN' | 'INVALID_DATE'
 
 export interface DocHealthReport {
@@ -235,6 +235,21 @@ export function daysBetween(a: Date, b: Date): number {
   return Math.round((a.getTime() - b.getTime()) / DAY_MS)
 }
 
+/**
+ * Human "3d 4h" / "4h 15m" / "12m" delta. Shared so the readiness deadline
+ * detail and the countdown badge can never describe the same instant
+ * differently.
+ */
+export function formatDeadlineDelta(ms: number): string {
+  const abs = Math.abs(ms)
+  const mins = Math.floor(abs / 60_000)
+  const hours = Math.floor(mins / 60)
+  const days = Math.floor(hours / 24)
+  if (days > 0) return `${days}d ${hours % 24}h`
+  if (hours > 0) return `${hours}h ${mins % 60}m`
+  return `${mins}m`
+}
+
 interface CivilDate {
   year: number
   month: number
@@ -264,9 +279,43 @@ function parseIsoCivilDate(raw: string): CivilDate | null {
     : null
 }
 
+/**
+ * The UTC-midnight instant of a civil date-only vault value (`YYYY-MM-DD`), or
+ * `null` when it is not a real date. Day maths over civil vault dates must use
+ * this — never raw `new Date(value)`, which yields an Invalid Date (and a NaN
+ * day count) for a typo like `2026-99-99`.
+ */
+export function parseCivilDay(raw: string | null | undefined): Date | null {
+  const civil = raw ? parseIsoCivilDate(raw.trim()) : null
+  return civil ? new Date(Date.UTC(civil.year, civil.month - 1, civil.day)) : null
+}
+
+/**
+ * Civil closing values in a South African RFP are wall-clock times in South
+ * Africa: "30 November 2026 at 11:00" means 11:00 SAST, i.e. 09:00Z. Anchoring
+ * them to this fixed offset — never to the machine's zone and never to UTC — is
+ * what keeps the readiness gate, the countdown badge, the renewal runway, the
+ * `.ics` export and the proposal on one and the same instant, and keeps a bidder
+ * from believing they have until 11:00 when the deadline actually passed at
+ * 09:00Z.
+ */
+const SAST_OFFSET_MS = 2 * 3_600_000
+
+/** The SAST instant of a civil date + wall-clock time. */
+function civilInstant(civil: CivilDate, hours: number, minutes: number): Date {
+  return new Date(Date.UTC(civil.year, civil.month - 1, civil.day, hours, minutes) - SAST_OFFSET_MS)
+}
+
 function civilDateFromDate(date: Date): CivilDate | null {
   if (isNaN(date.getTime())) return null
-  return validCivilDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate())
+  // "Today" is the South African civil day: vault dates are SA civil dates, so
+  // the day count must not shift with the machine's timezone.
+  const southAfrican = new Date(date.getTime() + SAST_OFFSET_MS)
+  return validCivilDate(
+    southAfrican.getUTCFullYear(),
+    southAfrican.getUTCMonth() + 1,
+    southAfrican.getUTCDate(),
+  )
 }
 
 function civilDayNumber(date: CivilDate): number {
@@ -277,21 +326,121 @@ function civilDaysBetween(a: CivilDate, b: CivilDate): number {
   return civilDayNumber(a) - civilDayNumber(b)
 }
 
-function parseTimeSuffix(raw: string): { hours: number; minutes: number } | null {
-  const suffix = raw.trim()
-  if (!suffix) return { hours: 23, minutes: 59 }
-  const match = suffix.match(/^(?:at\s+)?(\d{1,2})\s*[:.h]\s*(\d{2})(?:\s*(am|pm))?$/i)
-  if (!match) return null
+const MONTHS: Record<string, number> = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11,
+}
+
+/** A capitalised month name in trailing text may be a competing deadline. */
+const CAPITALISED_MONTH_RE = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/
+
+/** A spelled-out clock time is time information, not noise ("… at noon"). */
+const WORD_TIME_RE = /\b(?:noon|midday|midnight)\b/i
+
+/**
+ * Can a trailing fragment after the date/time be ignored as noise?
+ *
+ * Only when it carries no date/time information at all: any digit could be a
+ * clock time, a year or a numeric date ("… at 11:00", "… extended to 15
+ * December 2026"), a spelled-out clock word states a time the parser does not
+ * represent ("… at noon"), and a named month could be a competing deadline.
+ * Those are ambiguous, so the whole string is rejected rather than silently
+ * swallowing the date that decides whether the bid is closed.
+ */
+function tailIsIgnorable(tail: string): boolean {
+  if (/\d/.test(tail)) return false
+  if (WORD_TIME_RE.test(tail)) return false
+  return !CAPITALISED_MONTH_RE.test(tail)
+}
+
+/**
+ * Consume an optional leading clock time from trailing text.
+ *
+ * `null` = no clock time here, `'invalid'` = time-like but impossible
+ * ("24h00", "14:60", "25:30"), which must reject the whole string rather than
+ * fall back to end of day.
+ */
+function consumeLeadingTime(
+  text: string,
+): { hours: number; minutes: number; rest: string } | 'invalid' | null {
+  if (!/^(?:at\s+)?\d{1,2}\s*[:.h]\s*\d{1,2}/i.test(text)) return null
+  const match = text.match(
+    /^(?:at\s+)?(\d{1,2})\s*[:.h]\s*(\d{1,2})(?::\d{2}(?:\.\d+)?)?\s*(am|pm)?/i,
+  )
+  if (!match) return 'invalid'
   let hours = parseInt(match[1], 10)
   const minutes = parseInt(match[2], 10)
   const meridian = match[3]?.toLowerCase()
-  if (minutes > 59 || (meridian ? hours < 1 || hours > 12 : hours > 23)) return null
+  if (minutes > 59 || (meridian ? hours < 1 || hours > 12 : hours > 23)) return 'invalid'
   if (meridian === 'pm' && hours < 12) hours += 12
   if (meridian === 'am' && hours === 12) hours = 0
-  return { hours, minutes }
+  return { hours, minutes, rest: text.slice(match[0].length).trim() }
 }
 
-/** Strict closing-date parser. Dates are returned in UTC to represent civil dates. */
+/**
+ * Time of day for a closing date whose trailing text is pure noise. A missing
+ * time means end of day (23:59) — the latest civil instant the stated date can
+ * still mean — and `null` means the tail was ambiguous, so the caller rejects.
+ */
+function resolveClosingTail(tail: string): { hours: number; minutes: number } | null {
+  const parentheticals = [...tail.matchAll(/\(([^)]*)\)/g)].map((match) => match[1])
+  const outside = tail
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  const time = consumeLeadingTime(outside)
+  if (time === 'invalid') return null
+  if (parentheticals.some((content) => !tailIsIgnorable(content))) return null
+  if (!time) return tailIsIgnorable(outside) ? { hours: 23, minutes: 59 } : null
+  return tailIsIgnorable(time.rest) ? { hours: time.hours, minutes: time.minutes } : null
+}
+
+/**
+ * THE closing-date parser — the single gate shared by readiness, the countdown
+ * badge, the renewal runway, gap analysis, the shredder and the v2 schema.
+ *
+ * Semantics:
+ *  - A full RFC 3339 timestamp with an explicit offset is the exact instant.
+ *  - Every other supported form is a South African civil date/time and is
+ *    anchored to SAST (+02:00): "30 November 2026 at 11:00" → the 09:00Z instant
+ *    at which an 11:00 SAST deadline actually passes. A fixed offset — rather
+ *    than UTC or the machine's zone — is what keeps every consumer (the gate,
+ *    the countdown badge, the runway, the `.ics` export, the proposal) on the
+ *    same instant and reading the same wall clock the RFP states.
+ *  - A missing time means end of day (23:59 SAST) — the latest civil instant the
+ *    stated date can still mean.
+ *  - Supported civil forms: ISO civil `YYYY-MM-DD`, day-first named month
+ *    (incl. `11h00` and ordinal suffixes), month-first named month, and
+ *    day-first slash dates — each optionally followed by a clock time.
+ *  - Trailing noise (a parenthetical note, a timezone abbreviation, free text
+ *    without digits) is tolerated so realistic RFP lines import. Trailing text
+ *    that carries any date/time information — a clock time, a year, a numeric
+ *    date, a named month — is ambiguous and rejects the whole string, so a
+ *    competing or amended deadline can never be swallowed into a wrong date.
+ *  - Impossible, ambiguous or timezone-less values return null.
+ */
 export function parseClosingDate(raw: string | null | undefined): Date | null {
   if (!raw) return null
   const s = raw.trim()
@@ -324,33 +473,6 @@ export function parseClosingDate(raw: string | null | undefined): Date | null {
     return isNaN(parsed.getTime()) ? null : parsed
   }
 
-  const months: Record<string, number> = {
-    jan: 0,
-    january: 0,
-    feb: 1,
-    february: 1,
-    mar: 2,
-    march: 2,
-    apr: 3,
-    april: 3,
-    may: 4,
-    jun: 5,
-    june: 5,
-    jul: 6,
-    july: 6,
-    aug: 7,
-    august: 7,
-    sep: 8,
-    sept: 8,
-    september: 8,
-    oct: 9,
-    october: 9,
-    nov: 10,
-    november: 10,
-    dec: 11,
-    december: 11,
-  }
-
   let match = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(.*))?$/)
   if (match) {
     const civil = validCivilDate(
@@ -358,46 +480,38 @@ export function parseClosingDate(raw: string | null | undefined): Date | null {
       parseInt(match[2], 10),
       parseInt(match[3], 10),
     )
-    const time = parseTimeSuffix(match[4] ?? '')
-    return civil && time
-      ? new Date(Date.UTC(civil.year, civil.month - 1, civil.day, time.hours, time.minutes))
-      : null
+    const time = resolveClosingTail(match[4] ?? '')
+    return civil && time ? civilInstant(civil, time.hours, time.minutes) : null
   }
 
   match = clean.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?\s*,?\s*(\d{4})(?:\s+(.*))?$/)
-  if (match && months[match[2].toLowerCase()] !== undefined) {
+  if (match && MONTHS[match[2].toLowerCase()] !== undefined) {
     const civil = validCivilDate(
       parseInt(match[3], 10),
-      months[match[2].toLowerCase()] + 1,
+      MONTHS[match[2].toLowerCase()] + 1,
       parseInt(match[1], 10),
     )
-    const time = parseTimeSuffix(match[4] ?? '')
-    return civil && time
-      ? new Date(Date.UTC(civil.year, civil.month - 1, civil.day, time.hours, time.minutes))
-      : null
+    const time = resolveClosingTail(match[4] ?? '')
+    return civil && time ? civilInstant(civil, time.hours, time.minutes) : null
   }
 
   match = clean.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})(?:\s+(.*))?$/)
-  if (match && months[match[1].toLowerCase()] !== undefined) {
+  if (match && MONTHS[match[1].toLowerCase()] !== undefined) {
     const civil = validCivilDate(
       parseInt(match[3], 10),
-      months[match[1].toLowerCase()] + 1,
+      MONTHS[match[1].toLowerCase()] + 1,
       parseInt(match[2], 10),
     )
-    const time = parseTimeSuffix(match[4] ?? '')
-    return civil && time
-      ? new Date(Date.UTC(civil.year, civil.month - 1, civil.day, time.hours, time.minutes))
-      : null
+    const time = resolveClosingTail(match[4] ?? '')
+    return civil && time ? civilInstant(civil, time.hours, time.minutes) : null
   }
 
   match = clean.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(.*))?$/)
   if (match) {
     const year = parseInt(match[3].length === 2 ? `20${match[3]}` : match[3], 10)
     const civil = validCivilDate(year, parseInt(match[2], 10), parseInt(match[1], 10))
-    const time = parseTimeSuffix(match[4] ?? '')
-    return civil && time
-      ? new Date(Date.UTC(civil.year, civil.month - 1, civil.day, time.hours, time.minutes))
-      : null
+    const time = resolveClosingTail(match[4] ?? '')
+    return civil && time ? civilInstant(civil, time.hours, time.minutes) : null
   }
   return null
 }
@@ -596,7 +710,11 @@ export function docsAtClosing(tender: TenderRecord, vault: VaultDoc[]): DocAtClo
   return [...byDoc.values()]
 }
 
-function healthWillFail(health: ReadinessDocHealth): boolean {
+/**
+ * Health states that fail the "valid on the closing date" check. Exported so
+ * gap analysis escalates to the same verdict instead of keeping its own list.
+ */
+export function healthWillFail(health: ReadinessDocHealth): boolean {
   return ['EXPIRED', 'STALE_CERTIFICATION', 'UNKNOWN', 'INVALID_DATE'].includes(health)
 }
 
@@ -715,17 +833,23 @@ export function assessReadiness(
   })
 
   const closing = parseClosingDate(tender.closingDate)
-  const daysLeft = closing ? daysBetween(closing, now) : null
+  // The gate compares INSTANTS, not rounded days: a bid is not closed until the
+  // closing instant has actually passed, so the closing day itself stays open
+  // until its closing time. This is the same comparison the countdown badge
+  // (`deadlineStatus`) and the proposal generator use, so the three can never
+  // disagree about whether a tender is still open.
+  const closingOpen = closing !== null && now.getTime() < closing.getTime()
+  const closingDelta = closing === null ? 0 : closing.getTime() - now.getTime()
   checks.push({
     id: 'deadline',
     label: 'Closing date known and still in the future',
     detail:
       closing === null
         ? 'No closing date was lifted from the RFP — confirm the deadline manually.'
-        : daysLeft !== null && daysLeft <= 0
-          ? `This tender closed ${Math.abs(daysLeft)} day(s) ago.`
-          : `${daysLeft} day(s) until closing.`,
-    passed: closing !== null && (daysLeft ?? 0) > 0,
+        : closingOpen
+          ? `Closes in ${formatDeadlineDelta(closingDelta)}.`
+          : `This tender closed ${formatDeadlineDelta(closingDelta)} ago.`,
+    passed: closingOpen,
     blocking: true,
   })
 
@@ -786,7 +910,7 @@ export function assessReadiness(
         : 1 - docProblems / (docs.length + missingEvidence.length),
     signatures: sigKeys.length === 0 ? 1 : (sigKeys.length - sigMissing.length) / sigKeys.length,
     'company-details': Math.max(0, 1 - mismatches.length / 5),
-    deadline: closing === null ? 0.5 : (daysLeft ?? 0) > 0 ? 1 : 0,
+    deadline: closing === null ? 0.5 : closingOpen ? 1 : 0,
   }
   let score = 0
   let biggestLoss = { check: null as ReadinessCheck | null, lost: 0 }

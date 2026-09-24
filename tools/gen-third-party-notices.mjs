@@ -26,8 +26,14 @@ const BUILTIN = new Set(builtinModules)
  * Source trees whose imports end up in a shipped bundle. Deliberately only
  * `src/` — vite configs and scripts pull in the whole build toolchain, which
  * is not distributed.
+ *
+ * Every module packed into resources/modules must be listed: the fork-only apps
+ * (books, crm, tenders) were absent, so libraries that ship inside app.asar —
+ * lucide-react (ISC) and zustand (MIT) among them — had no notice entry at all.
  */
 const SRC_GLOBS = [
+  'apps/books/src',
+  'apps/crm/src',
   'apps/docs/src',
   'apps/html/src',
   'apps/markdown/src',
@@ -35,6 +41,7 @@ const SRC_GLOBS = [
   'apps/sheets/src',
   'apps/shell/src',
   'apps/slides/src',
+  'apps/tenders/src',
   ...readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => `packages/${e.name}/src`),

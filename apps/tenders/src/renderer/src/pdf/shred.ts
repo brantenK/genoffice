@@ -554,17 +554,7 @@ export function extractClosingDateCandidates(ex: PageExtraction): ValueCandidate
     for (const raw of page.lines) {
       index += 1
       const text = normalizePdfText(raw.text)
-      const rawCandidates: string[] = []
-      const closingMatch = text.match(CLOSING_RE)
-      if (closingMatch) rawCandidates.push(closingMatch[1])
-      if (/closing|submission|amend|extend|postpon|revis/i.test(text)) {
-        for (const pattern of CLOSING_AMENDMENT_PATTERNS) {
-          const match = text.match(pattern)
-          if (match) rawCandidates.push(match[1])
-        }
-      }
-
-      for (const rawCandidate of rawCandidates) {
+      for (const rawCandidate of closingDateRawCandidates(text)) {
         const candidate = normalizeClosingCandidate(rawCandidate)
         if (!candidate || !parseStrictClosingDate(candidate)) continue
         const key = candidate.toLowerCase()
@@ -576,6 +566,51 @@ export function extractClosingDateCandidates(ex: PageExtraction): ValueCandidate
   }
   out.sort((a, b) => a.firstIndex - b.firstIndex)
   return out
+}
+
+/**
+ * Closing-date lines the strict parser refuses, in document order and deduped.
+ *
+ * These are NOT values: the strict gate for `closingDate` is unchanged and a
+ * rejected line still stores `null`. They are returned so the failure is
+ * visible — the review UI tells the user the document carried a closing line
+ * the app could not read, and shows the raw text to retype or confirm — instead
+ * of the deadline vanishing into a bare "confirm manually" prompt.
+ */
+export function extractUnparsedClosingDates(ex: PageExtraction): ValueCandidate[] {
+  const seen = new Set<string>()
+  const out: ValueCandidate[] = []
+  let index = 0
+  for (const page of ex.pages) {
+    for (const raw of page.lines) {
+      index += 1
+      const text = normalizePdfText(raw.text)
+      for (const rawCandidate of closingDateRawCandidates(text)) {
+        const candidate = normalizeClosingCandidate(rawCandidate)
+        if (!candidate || parseStrictClosingDate(candidate)) continue
+        const key = candidate.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push({ value: candidate, pageNumber: page.pageNumber, firstIndex: index })
+      }
+    }
+  }
+  out.sort((a, b) => a.firstIndex - b.firstIndex)
+  return out
+}
+
+/** Raw closing-date fragments on one normalised line, before the strict gate. */
+function closingDateRawCandidates(text: string): string[] {
+  const rawCandidates: string[] = []
+  const closingMatch = text.match(CLOSING_RE)
+  if (closingMatch) rawCandidates.push(closingMatch[1])
+  if (/closing|submission|amend|extend|postpon|revis/i.test(text)) {
+    for (const pattern of CLOSING_AMENDMENT_PATTERNS) {
+      const match = text.match(pattern)
+      if (match) rawCandidates.push(match[1])
+    }
+  }
+  return rawCandidates
 }
 
 function normalizeClosingCandidate(raw: string): string {
@@ -596,6 +631,7 @@ function normalizeClosingCandidate(raw: string): string {
 export function extractTenderMeta(ex: PageExtraction, fallbackTitle: string): TenderMeta {
   const references = extractReferenceCandidates(ex)
   const dates = extractClosingDateCandidates(ex)
+  const unparsedDates = extractUnparsedClosingDates(ex)
   const issuers = selectCompetingIssuers(
     extractIssuerCandidates(ex).filter((c) => c.score >= ISSUER_MIN_SCORE),
   )
@@ -635,6 +671,18 @@ export function extractTenderMeta(ex: PageExtraction, fallbackTitle: string): Te
     conflicts.push(`Multiple reference numbers found: ${referenceValues.slice(0, 4).join(' | ')}`)
   if (dateValues.length > 1)
     conflicts.push(`Multiple closing dates found: ${dateValues.slice(0, 4).join(' | ')}`)
+  // A closing line the strict parser refuses is still shown to the user: the
+  // raw text is what they need to retype or confirm the deadline, and silence
+  // here is how a deadline went missing with no explanation.
+  if (unparsedDates.length > 0) {
+    const shown = unparsedDates
+      .slice(0, 3)
+      .map((candidate) => `“${candidate.value}” (p.${candidate.pageNumber})`)
+      .join(' | ')
+    conflicts.push(
+      `Closing date could not be read from the document: ${shown} — confirm or enter the closing date manually.`,
+    )
+  }
   if (methodCandidates.length > 1)
     conflicts.push(`Multiple submission methods found: ${methodCandidates.join(' | ')}`)
   if (addressCandidates.length > 1)

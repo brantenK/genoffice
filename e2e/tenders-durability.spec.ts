@@ -37,8 +37,12 @@
  * UI contract (landed by the wiring lane; testids asserted directly):
  *  - Documents page: `getByRole('heading', { name: 'Documents' })`,
  *    button 'Upload document', DocCard buttons (accessible name has the title),
- *    detail-panel button 'Delete'; `documents-save-error` (role=alert) for a
- *    failed save.
+ *    detail-panel button 'Delete'.
+ *  - Upload / edit form: a `Dialog` (role=dialog, labelled 'Add company
+ *    document' / 'Edit document') with the submit control
+ *    `vault-doc-submit`. A refused upload keeps the form OPEN and shows the
+ *    reason inside it as `documents-save-error` (role=alert); a successful
+ *    upload closes the form.
  *  - Delete confirmation: `delete-document-dialog` (role=dialog) with a
  *    recoverable/trash copy; confirm via `delete-document-confirm`. The
  *    referencing records are listed AFTER the move in `documents-notice`
@@ -57,7 +61,7 @@
  * `finally`; artifacts (JSON + screenshots) land under e2e/artifacts.
  */
 import { test, expect } from '@playwright/test'
-import type { ElectronApplication, Page } from '@playwright/test'
+import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -82,6 +86,7 @@ const TENDER_REF = 'E2E/DUR/2026/01'
 const TENDER_ID = 't-dur'
 const VAULT_DOC_ID = 'vd-dur'
 const VAULT_TITLE = 'E2E Durability Vault Cert'
+const REPLACE_VAULT_TITLE = 'E2E Durability Replace Cert'
 const CUSTOMER_NAME = 'E2E Durability Client'
 
 /** Seed-only relative paths (files exist on disk but are untracked). */
@@ -537,6 +542,26 @@ async function shot(page: Page, name: string): Promise<string> {
   return target
 }
 
+/**
+ * Is this element the thing actually painted at its own centre?
+ *
+ * `toBeVisible()` ignores occlusion, so it cannot tell an error rendered BEHIND
+ * a modal's scrim from one the user can read — which is exactly the defect this
+ * asserts against (a page-level save error under the upload form's overlay).
+ */
+async function isTopmostAtOwnCentre(locator: Locator): Promise<boolean> {
+  // Playwright's visibility does not require the element to be in the viewport,
+  // and an off-screen element has no `elementFromPoint` hit — scroll first so
+  // the probe measures occlusion, not scrolling.
+  await locator.scrollIntoViewIfNeeded().catch(() => undefined)
+  return locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return false
+    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return Boolean(top && (top === element || element.contains(top) || top.contains(element)))
+  })
+}
+
 interface JourneyResult {
   journey: string
   status: 'PASS' | 'FAIL'
@@ -591,6 +616,12 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
       await tenders.getByRole('button', { name: 'Upload document' }).click()
       const uploadHeading = tenders.getByRole('heading', { name: 'Add company document' })
       await expect(uploadHeading).toBeVisible({ timeout: 15_000 })
+      // The upload form must be a real modal dialog (role + aria-modal), not a
+      // bare overlay div: Escape/Tab-trap/initial focus/focus restore all come
+      // from the shared Dialog primitive.
+      const uploadForm = tenders.getByRole('dialog').filter({ hasText: 'Add company document' })
+      await expect(uploadForm, 'the upload form must be a modal dialog').toBeVisible()
+      await expect(uploadForm).toHaveAttribute('aria-modal', 'true')
       await tenders.locator('input[type="file"][accept*="pdf"]').first().setInputFiles(uploadSource)
       await tenders
         .getByPlaceholder(/SARS Tax Clearance Certificate/i)
@@ -599,6 +630,12 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
       await expect(
         tenders.getByRole('button', { name: /E2E Durability Upload Cert/ }).first(),
       ).toBeVisible({ timeout: 20_000 })
+      // A successful upload closes the form (the modal must not stay open over
+      // the page the way a failure keeps it).
+      await expect(
+        tenders.getByRole('heading', { name: 'Add company document' }),
+        'a successful upload must close the form',
+      ).toHaveCount(0)
       screenshots.push(await shot(tenders, 'durability-j1-uploaded'))
 
       const indexAfterUpload = await readManagedIndex(userDataDir)
@@ -1287,6 +1324,25 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
       await expect(alert, 'the save failure must surface as an alert').toBeVisible({
         timeout: 15_000,
       })
+      // The reason must be visible to the user, not just present in the DOM:
+      // a page-level alert renders BEHIND the form's own scrim, and
+      // `toBeVisible()` cannot see that. Assert the form is still open, that the
+      // error belongs to the form, and that it is the top element at its centre.
+      await expect(
+        tenders.getByRole('heading', { name: 'Add company document' }),
+        'a refused upload must leave the form open with the reason shown',
+      ).toBeVisible()
+      await expect(
+        tenders.locator('[data-testid="documents-save-error"]'),
+        'the save error must be the form-owned error surface',
+      ).toBeVisible()
+      expect(
+        await isTopmostAtOwnCentre(alert),
+        'the save error must not be painted behind the form overlay',
+      ).toBe(true)
+      // Submit is disabled only while a save is in flight, so the user can fix
+      // the upload and retry after a refusal.
+      await expect(tenders.locator('[data-testid="vault-doc-submit"]')).toBeEnabled()
       await expect(
         tenders.getByRole('button', { name: /E2E Durability Failed Upload/ }),
         'nothing may be added as a stored document',
@@ -1308,8 +1364,14 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
         journey: '6: forced saveDocument failure → alert, no blob fallback, no durable write',
         status: 'PASS',
         detail:
-          'the alert carried the main-process error; the document list gained nothing; no blob: URL was presented; the vault dir is byte-identical',
-        evidence: { userDataDir, vaultBefore, trashCount: trashBefore.length },
+          'the form stayed open and showed the main-process error as the top element at its own centre (documents-save-error); the document list gained nothing; no blob: URL was presented; the vault dir is byte-identical',
+        evidence: {
+          userDataDir,
+          vaultBefore,
+          trashCount: trashBefore.length,
+          errorTopmost: true,
+          submitReenabled: true,
+        },
         screenshots,
       }
       await writeResult('tenders-durability-journey-6', result)
@@ -1487,6 +1549,149 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
       await writeResult('tenders-durability-journey-8', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j8').catch(() => undefined)
+      if (userDataDir)
+        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test('9: re-attaching a PDF in the vault form replaces the file and trashes the previous one', async () => {
+    const screenshots: string[] = []
+    let run: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      const v1Source = join(tmpdir(), `e2e-dur-vault-v1-${Date.now()}.pdf`)
+      await generatePdf(v1Source, 'E2E VAULT REPLACE V1', 1)
+      const v2Source = join(tmpdir(), `e2e-dur-vault-v2-${Date.now()}.pdf`)
+      await generatePdf(v2Source, 'E2E VAULT REPLACE V2 — CONTENT CHANGED', 2)
+
+      const booted = await bootDocuments('tenders-durability-j9')
+      run = booted.run
+      userDataDir = booted.userDataDir
+      const tenders = booted.tenders
+      await requireBridge(tenders, [
+        'saveDocument',
+        'replaceDocument',
+        'listDocumentTrash',
+        'reconcileDocuments',
+      ])
+      await gotoDocuments(tenders)
+
+      // Upload the first PDF through the real form.
+      await tenders.getByRole('button', { name: 'Upload document' }).click()
+      await expect(tenders.getByRole('heading', { name: 'Add company document' })).toBeVisible({
+        timeout: 15_000,
+      })
+      await tenders.locator('input[type="file"][accept*="pdf"]').first().setInputFiles(v1Source)
+      await tenders.getByPlaceholder(/SARS Tax Clearance Certificate/i).fill(REPLACE_VAULT_TITLE)
+      await tenders.getByRole('button', { name: 'Add to vault' }).click()
+      await expect(
+        tenders.getByRole('button', { name: new RegExp(REPLACE_VAULT_TITLE) }).first(),
+      ).toBeVisible({ timeout: 20_000 })
+
+      const afterUpload = await readManagedIndex(userDataDir)
+      const original = afterUpload?.records.find(
+        (record) => record.fileName === basename(v1Source) && record.state === 'active',
+      )
+      expect(original, 'the upload must create a managed record').toBeTruthy()
+      const originalPath = original!.relativePath
+      expect(sha256Hex(await readFile(join(tendersBaseDir(userDataDir), originalPath)))).toBe(
+        sha256Hex(await readFile(v1Source)),
+      )
+
+      // Re-attach a different PDF through the same form (edit mode).
+      await tenders
+        .getByRole('button', { name: new RegExp(REPLACE_VAULT_TITLE) })
+        .first()
+        .click()
+      const editDetails = tenders.getByRole('button', { name: 'Edit details' })
+      await expect(editDetails).toBeVisible({ timeout: 10_000 })
+      await editDetails.click()
+      const form = tenders.getByRole('dialog').filter({ hasText: 'Edit document' })
+      await expect(form, 'the edit form must be a dialog').toBeVisible({ timeout: 10_000 })
+      await form.locator('input[type="file"]').setInputFiles(v2Source)
+      await form.getByRole('button', { name: 'Save changes' }).click()
+      await expect(
+        tenders.getByRole('heading', { name: 'Edit document' }),
+        'a successful replacement must close the form',
+      ).toHaveCount(0)
+      screenshots.push(await shot(tenders, 'durability-j9-replaced'))
+
+      // Disk truth first: main writes the managed index synchronously with the
+      // replacement, while the renderer's store save is debounced.
+      await expect
+        .poll(
+          async () => {
+            const index = await readManagedIndex(userDataDir)
+            return index?.records.find((record) => record.id === original!.id)?.state ?? 'no-record'
+          },
+          { timeout: 15_000, message: 'the replaced record must be soft-deleted' },
+        )
+        .toBe('trashed')
+
+      const afterReplace = await readManagedIndex(userDataDir)
+      const previous = afterReplace!.records.find((record) => record.id === original!.id)!
+      expect(previous.state, 'the replaced file must be soft-deleted').toBe('trashed')
+      expect(previous.replacedBy, 'the replaced record must point at its replacement').toBeTruthy()
+      const replacement = afterReplace!.records.find((record) => record.id === previous.replacedBy)!
+      expect(replacement.state).toBe('active')
+      expect(
+        sha256Hex(await readFile(join(tendersBaseDir(userDataDir), replacement.relativePath))),
+      ).toBe(sha256Hex(await readFile(v2Source)))
+      expect(existsSync(join(tendersBaseDir(userDataDir), originalPath))).toBe(false)
+
+      // The vault document must converge on the NEW managed file.
+      await expect
+        .poll(
+          async () => {
+            const doc = await tenders.evaluate(async (title) => {
+              const api = (window as unknown as { tendersApi: any }).tendersApi
+              const res = await api.loadStoreV2()
+              const vault = res?.data?.workspaces?.[0]?.vault ?? []
+              return (
+                (vault.find((entry: { title?: string }) => entry.title === title) ?? null)
+                  ?.fileUrl ?? null
+              )
+            }, REPLACE_VAULT_TITLE)
+            return doc
+          },
+          { timeout: 15_000, message: 'the vault document must point at the replacement file' },
+        )
+        .toBe(replacement.relativePath)
+      expect(replacement.relativePath, 'the replacement must live under vault/').toMatch(/^vault\//)
+      expect(replacement.relativePath, 'the replacement must be a NEW file').not.toBe(originalPath)
+
+      // The previous file is TRASHED, not orphaned on disk.
+      expect(
+        (await listTrash(tenders)).some((entry) => entry.deletedFrom === originalPath),
+        'the previous file must have a restorable trash entry',
+      ).toBe(true)
+      const post = await reconcile(tenders)
+      expect(
+        post.orphaned,
+        'the replaced file must not be reported orphaned on disk',
+      ).not.toContain(originalPath)
+      expect(
+        post.missing.some((entry) => entry.relativePath === originalPath),
+        'the replaced file must never be reported missing',
+      ).toBe(false)
+
+      const result: JourneyResult = {
+        journey: '9: vault re-attach replaces the managed file and trashes the previous one',
+        status: 'PASS',
+        detail: `re-attached through the form: ${originalPath} -> ${replacement.relativePath} (previous record trashed, replacedBy=${replacement.id}, no orphan, no missing)`,
+        evidence: {
+          userDataDir,
+          originalPath,
+          replacementPath: replacement.relativePath,
+          previousRecordId: original!.id,
+          replacementRecordId: replacement.id,
+          reconcile: post,
+        },
+        screenshots,
+      }
+      await writeResult('tenders-durability-journey-9', result)
+    } finally {
+      if (run) await closeAndSaveVideo(run, 'tenders-durability-j9').catch(() => undefined)
       if (userDataDir)
         await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
     }

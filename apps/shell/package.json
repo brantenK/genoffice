@@ -3,9 +3,8 @@
   "productName": "Zanostack",
   "version": "0.10.0",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/genspark-ai/genoffice",
   "private": true,
-  "description": "Unified Zanostack shell: one app hosting the docs and sheets modules behind a home/launcher window",
+  "description": "Unified Zanostack shell: one app hosting the Docs, Sheets, Slides, PDF, Markdown, HTML, CRM, Books and Tenders modules behind a home/launcher window",
   "main": "out/main/index.js",
   "desktopName": "genoffice.desktop",
   "scripts": {

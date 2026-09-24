@@ -124,11 +124,15 @@ vi.mock('../../slides/src/main/slides-main', () => ({
   slidesIsDirty: (...args: unknown[]) => slidesIsDirty(...(args as [])),
 }))
 
-import {
-  HOME_TAB_TITLE,
-  TabManager,
-  UNTITLED_DOCS_TAB_TITLE,
-} from '../src/main/tab-manager'
+const createTendersView = vi.fn(() => makeFakeView())
+const requestTendersClose = vi.fn(() => Promise.resolve(true))
+
+vi.mock('../../tenders/src/main/tenders-main', () => ({
+  createTendersView: (...args: unknown[]) => createTendersView(...(args as [])),
+  requestTendersClose: (...args: unknown[]) => requestTendersClose(...(args as [])),
+}))
+
+import { HOME_TAB_TITLE, TabManager, UNTITLED_DOCS_TAB_TITLE } from '../src/main/tab-manager'
 
 const TAB_STRIP_HEIGHT = 40
 const WINDOW_WIDTH = 800
@@ -174,6 +178,7 @@ beforeEach(() => {
   pdfIsDirty.mockImplementation(() => false)
   sheetsPendingEditCount.mockImplementation(() => 0)
   slidesIsDirty.mockImplementation(() => false)
+  requestTendersClose.mockImplementation(() => Promise.resolve(true))
   shellWindow = makeShellWindow()
   onChanged = vi.fn()
   applyMenuFor = vi.fn()
@@ -562,6 +567,95 @@ describe('closing tabs', () => {
     await Promise.all([first, second])
     expect(requestSheetsClose).toHaveBeenCalledTimes(1)
     expect(manager.list()).toHaveLength(1)
+  })
+})
+
+/**
+ * Tenders keeps no main-side dirty flag: its unsaved work lives renderer-side
+ * behind a 300 ms autosave debounce, so the guard *is* the flush
+ * (`requestTendersClose`). Both close paths must therefore wait for it — a close
+ * that removed the tab first would drop a debounced edit silently.
+ */
+describe('closing a tenders tab (autosave flush guard)', () => {
+  function pendingFlush(): (mayClose: boolean) => void {
+    let resolveFlush!: (mayClose: boolean) => void
+    requestTendersClose.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveFlush = resolve
+        }),
+    )
+    return (mayClose: boolean) => resolveFlush(mayClose)
+  }
+
+  it('flushes before removing the tab, and removes it only when the flush allows', async () => {
+    const resolveFlush = pendingFlush()
+    const id = manager.openTendersTab()
+    const view = lastCreatedView(createTendersView)
+
+    const closing = manager.closeTab(id)
+    expect(requestTendersClose).toHaveBeenCalledWith(view.webContents, shellWindow)
+    // The tab is still listed while the debounced edit is being committed.
+    expect(manager.list().map((t) => t.id)).toEqual(['home', id])
+
+    resolveFlush(true)
+    await closing
+    expect(manager.list()).toHaveLength(1)
+    expect(shellWindow.contentView.removeChildView).toHaveBeenCalledWith(view)
+    expect(view.webContents.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the tenders tab and destroys nothing when the flush refuses the close', async () => {
+    requestTendersClose.mockImplementation(() => Promise.resolve(false))
+    const id = manager.openTendersTab()
+    const view = lastCreatedView(createTendersView)
+
+    await manager.closeTab(id)
+
+    expect(manager.list().map((t) => t.id)).toEqual(['home', id])
+    expect(shellWindow.contentView.removeChildView).not.toHaveBeenCalled()
+    expect(view.webContents.close).not.toHaveBeenCalled()
+  })
+
+  it('closeTabWithoutPrompt returns true, then removes the tab once the flush resolves true', async () => {
+    const resolveFlush = pendingFlush()
+    const id = manager.openTendersTab()
+    const view = lastCreatedView(createTendersView)
+
+    expect(manager.closeTabWithoutPrompt(id)).toBe(true)
+    expect(requestTendersClose).toHaveBeenCalledWith(view.webContents, shellWindow)
+    // Accepted, but still listed until the flush settles.
+    expect(manager.list().map((t) => t.id)).toEqual(['home', id])
+
+    resolveFlush(true)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(manager.list()).toHaveLength(1)
+    expect(view.webContents.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('closeTabWithoutPrompt keeps the tab and its live view when the flush resolves false', async () => {
+    requestTendersClose.mockImplementation(() => Promise.resolve(false))
+    const id = manager.openTendersTab()
+    const view = lastCreatedView(createTendersView)
+
+    expect(manager.closeTabWithoutPrompt(id)).toBe(true)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(manager.list().map((t) => t.id)).toEqual(['home', id])
+    expect(shellWindow.contentView.removeChildView).not.toHaveBeenCalled()
+    expect(view.webContents.close).not.toHaveBeenCalled()
+  })
+
+  it('does not start a second flush while one is still pending', async () => {
+    const resolveFlush = pendingFlush()
+    const id = manager.openTendersTab()
+    expect(manager.closeTabWithoutPrompt(id)).toBe(true)
+    expect(manager.closeTabWithoutPrompt(id)).toBe(false)
+
+    resolveFlush(false)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(requestTendersClose).toHaveBeenCalledTimes(1)
+    expect(manager.list().map((t) => t.id)).toEqual(['home', id])
   })
 })
 

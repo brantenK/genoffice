@@ -3,8 +3,9 @@
 // (Phase 4, WP-8).
 //
 // Deliberately tender-focused: no activities, pipelines, campaigns or enrichment.
-// Customer lifecycle is soft-archive only; the destructive path is shown but
-// disabled until managed-file/trash semantics exist.
+// Customer lifecycle is soft-archive only. The destructive path is explained
+// where it is triggered (the store exposes no confirmed permanent customer
+// delete), and no permanently-disabled delete button is rendered.
 import { useState } from 'react'
 import {
   Archive,
@@ -344,7 +345,7 @@ function CustomerDetail({
               type="button"
               onClick={() => setRemoveOpen((open) => !open)}
               aria-expanded={removeOpen}
-              title="See what a permanent delete would affect"
+              title="See what removing this customer would affect — Tenders offers archive instead"
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--danger)] transition-colors hover:bg-[var(--danger-bg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             >
               <Trash2 size={13} aria-hidden="true" /> Remove…
@@ -358,9 +359,12 @@ function CustomerDetail({
               Removing a customer is not available yet
             </p>
             <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-              Archive the customer instead — the record is kept and can be restored. Nothing here
-              erases files: removing a vault document moves it to Trash, where you can restore it. A
-              permanent delete would affect:
+              Tenders has no permanent customer delete, so this panel offers no delete control.{' '}
+              {archived
+                ? 'Restore the customer to put it back in the active list.'
+                : 'Archive the customer instead — the record and its document requirements are kept.'}{' '}
+              Nothing on disk is erased: a vault document you remove is moved to Trash, where you
+              can restore it. This customer holds:
             </p>
             <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[11px] text-[var(--text-secondary)]">
               <li>
@@ -373,13 +377,23 @@ function CustomerDetail({
               <li>No tenders reference a customer directly.</li>
             </ul>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button
-                variant="danger"
-                disabled
-                title="Permanent deletion is not offered — archive the customer instead; vault files removed elsewhere move to Trash and can be restored"
-              >
-                <Trash2 size={13} /> Delete permanently
-              </Button>
+              {archived ? (
+                <Button
+                  variant="primary"
+                  onClick={onRestore}
+                  title="Make this customer active again"
+                >
+                  <RotateCcw size={13} /> Restore customer
+                </Button>
+              ) : (
+                <Button
+                  variant="default"
+                  onClick={onArchive}
+                  title="Set this customer aside without deleting anything"
+                >
+                  <Archive size={13} /> Archive this customer
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => setRemoveOpen(false)}>
                 Keep customer
               </Button>

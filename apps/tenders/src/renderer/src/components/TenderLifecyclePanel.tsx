@@ -42,6 +42,7 @@ import {
   milestonesAllowed,
   submissionEvidenceState,
 } from '../../../shared/lifecycle'
+import { formatRandAmount } from '../../../shared/money'
 import { validateTendersDataV2 } from '../../../shared/tenders-schema'
 import { isSampleWorkspace } from '../mock/sample-workspace'
 import { assessReadiness } from '../readiness'
@@ -96,16 +97,34 @@ function formatInstant(value: string | null | undefined): string {
   })
 }
 
+/**
+ * A civil date — the notice date the user typed into the outcome dialog — is
+ * not an instant, so it must not be rendered on the reader's own clock. The
+ * persisted value is anchored at UTC midnight by `civilDateToRfc3339`, and an
+ * unpinned format turned a notice date of 2026-08-14 into "13 Aug" for a reader
+ * west of UTC. SAST is the civil-display convention the closing-date runway
+ * already uses (`deadline.ts`), and against a UTC-midnight anchor it prints the
+ * calendar day that was typed, on every machine.
+ */
 function formatCivilDate(value: string | null | undefined): string {
   if (!value) return 'Not stated'
   const date = new Date(`${value.slice(0, 10)}T00:00:00Z`)
   if (isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
+  return date.toLocaleDateString('en-ZA', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Africa/Johannesburg',
+  })
 }
 
-function formatMoney(value: number | null | undefined): string {
+/**
+ * The awarded value, printed by the one rand formatter so it agrees with the
+ * proposal document (`R 850 000,50`, not `R 850 000.5`).
+ */
+export function formatMoney(value: number | null | undefined): string {
   if (value == null) return 'Not stated'
-  return `R ${value.toLocaleString('en-ZA')}`
+  return formatRandAmount(value)
 }
 
 /**

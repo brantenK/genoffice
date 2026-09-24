@@ -30,10 +30,20 @@ const QUARANTINE_FILE = /^primary-corrupt-(\d+)\.json$/
 /** Keep at most this many quarantined corrupt primaries; oldest are pruned. */
 const MAX_QUARANTINE_FILES = 5
 
+export interface TendersStoreHooks {
+  /**
+   * Test seam: awaited inside the commit lock, after validation and the revision
+   * check but before anything is written. Lets a test occupy one store's path
+   * lock deterministically (mirrors `ManagedDocumentStoreHooks.beforeIndexWrite`).
+   */
+  beforeCommit?: () => void | Promise<void>
+}
+
 export interface TendersStoreOptions {
   directory: string
   now?: () => Date
   onCommitted?: (document: TendersDataV2) => void | Promise<void>
+  hooks?: TendersStoreHooks
 }
 
 export type TendersStoreMutator = (
@@ -400,6 +410,26 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
         ),
       }
     }
+    // The compact document ceiling is measured before the schema walk so an
+    // over-size document is refused with the ceiling the UI mirrors and reports
+    // with a way forward — otherwise the walk's aggregate-text check (which runs
+    // first, `tenders-schema.ts`) answers with a limit that names no field and no
+    // way forward. Unmeasurable input (a cyclic document) falls through to the
+    // walk, which reports it as INVALID_DATA.
+    try {
+      const compactBytes = Buffer.byteLength(JSON.stringify(request.document), 'utf8')
+      if (compactBytes > MAX_TENDERS_DOCUMENT_BYTES) {
+        return {
+          ok: false,
+          error: persistenceError(
+            'INVALID_DATA',
+            `Serialized Tenders document size exceeds limit of ${MAX_TENDERS_DOCUMENT_BYTES} bytes.`,
+          ),
+        }
+      }
+    } catch {
+      // Not serializable — let schema validation describe it.
+    }
     const validated = validateTendersDataV2(request.document)
     if (!validated.ok) {
       const code =
@@ -434,6 +464,10 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
         current,
       }
     }
+
+    // Test seam: awaited inside the commit lock, so a test can occupy this store's
+    // path lock deterministically. Undefined in production.
+    await options.hooks?.beforeCommit?.()
 
     let updatedAt: string
     try {
@@ -471,6 +505,21 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
         error: persistenceError(
           'INVALID_DATA',
           `Serialized Tenders document size exceeds limit of ${MAX_TENDERS_DOCUMENT_BYTES} bytes.`,
+        ),
+      }
+    }
+    // The committed file is the same document pretty-printed, so indentation can
+    // push it past the store-file ceiling that `readState` enforces on load. Check
+    // before writing: a document the loader would refuse must never replace a
+    // readable primary (a post-rename read-back failure would leave an unloadable
+    // file behind).
+    const serializedBytes = Buffer.byteLength(serialized, 'utf8')
+    if (serializedBytes > MAX_TENDERS_STORE_FILE_BYTES) {
+      return {
+        ok: false,
+        error: persistenceError(
+          'INVALID_DATA',
+          `Serialized Tenders document would be ${serializedBytes} bytes on disk, above the ${MAX_TENDERS_STORE_FILE_BYTES}-byte store file limit.`,
         ),
       }
     }

@@ -31,6 +31,11 @@ import type {
   VaultDoc,
 } from '../../shared/types'
 import { validateTendersDataV2 } from '../../shared/tenders-schema'
+import type { TendersCloseFlushResult } from '../../shared/ipc'
+import {
+  MAX_TENDERS_DOCUMENT_BYTES,
+  MAX_TENDERS_STORE_FILE_BYTES,
+} from '../../shared/tenders-persistence'
 import type { TendersRecoveryCandidate } from '../../shared/tenders-persistence'
 import {
   appendLifecycleEvent,
@@ -218,6 +223,20 @@ let isSaveInFlight = false
 let isSavePending = false
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let storeChangedUnsub: (() => void) | null = null
+let closeFlushUnsub: (() => void) | null = null
+/**
+ * The save attempt currently running (if any). The shell's close guard awaits
+ * this instead of starting a second save against the same `expectedRevision`,
+ * which the store would reject as a false conflict.
+ */
+let activeSave: Promise<void> | null = null
+/**
+ * True while the in-memory document holds an edit the authoritative store has
+ * not committed. Set when an edit schedules a save and cleared only by a commit
+ * that adopted the authoritative snapshot (or by adopting one from main), so a
+ * failed or refused save keeps reporting uncommitted work.
+ */
+let hasUncommittedEdits = false
 
 /** Legacy v1 localStorage key that used to hold the full domain payload. */
 const LEGACY_LOCAL_STORAGE_KEY = 'zanostack-tenders-v1'
@@ -247,6 +266,23 @@ function purgeLegacyLocalStorage(): void {
 }
 
 purgeLegacyLocalStorage()
+
+/**
+ * Subscribe to main's pre-close flush request (the shell's dirty-close guard) as
+ * soon as the renderer bundle loads, not at first hydration: a window closed
+ * while the view is still starting up must be answered rather than timing out
+ * into a prompt. Flushing before hydration is harmless — it commits whatever the
+ * store currently holds, which is nothing.
+ */
+function installCloseFlushGuard(): void {
+  if (typeof window === 'undefined' || !window.tendersApi?.onCloseFlushRequest) return
+  if (closeFlushUnsub) return
+  closeFlushUnsub = window.tendersApi.onCloseFlushRequest((requestId: number) => {
+    void respondToCloseFlushRequest(requestId)
+  })
+}
+
+installCloseFlushGuard()
 
 /**
  * Project the authoritative `TenderRecord.intakeVerification` slices into the
@@ -363,9 +399,113 @@ export function cancelPendingSave(): void {
   }
 }
 
+/** Fraction of a size ceiling at which the save indicator starts warning. */
+const SAVE_SIZE_WARNING_RATIO = 0.8
+
+function megabyteLabel(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Renderer-side size pre-check for one save attempt, mirroring the two ceilings
+ * main enforces: the compact document (`MAX_TENDERS_DOCUMENT_BYTES`) and the
+ * pretty-printed file `tenders-store` writes (`MAX_TENDERS_STORE_FILE_BYTES`).
+ *
+ * Without it an over-size workspace fails the whole `saveStoreV2` round trip on
+ * every autosave with no way for the user to know what to do. This measures bytes
+ * only — schema validation stays in `validateTendersDataV2` and still runs after
+ * it (it is what reports a field-level problem), so the pre-check is an
+ * *addition* to that walk, not a replacement: measured, the two serializations
+ * cost ~108 ms for a 5.4 MB document, and the schema walk runs on top.
+ */
+export interface TendersSaveSizeCheck {
+  /** Bytes of the compact JSON document, as main measures it. */
+  documentBytes: number
+  documentLimitBytes: number
+  /** Bytes of the pretty-printed file a commit would write. */
+  fileBytes: number
+  fileLimitBytes: number
+  /** True when `saveStoreV2` would be rejected on size. */
+  overLimit: boolean
+  /** True when a ceiling is close but not reached. */
+  nearLimit: boolean
+  /** Actionable message while `overLimit`; null otherwise. */
+  error: string | null
+  /** Early heads-up while `nearLimit`; null otherwise. */
+  warning: string | null
+}
+
+export function checkTendersSaveSize(document: TendersDataV2): TendersSaveSizeCheck {
+  const encoder = new TextEncoder()
+  const documentBytes = encoder.encode(JSON.stringify(document)).length
+  // Exactly what the authoritative store writes: the same document, 2-space
+  // indented, so indentation-driven growth cannot slip past this check.
+  const fileBytes = encoder.encode(JSON.stringify(document, null, 2)).length
+  const overDocument = documentBytes > MAX_TENDERS_DOCUMENT_BYTES
+  const overFile = fileBytes > MAX_TENDERS_STORE_FILE_BYTES
+  const overLimit = overDocument || overFile
+  const nearLimit =
+    !overLimit &&
+    (documentBytes >= MAX_TENDERS_DOCUMENT_BYTES * SAVE_SIZE_WARNING_RATIO ||
+      fileBytes >= MAX_TENDERS_STORE_FILE_BYTES * SAVE_SIZE_WARNING_RATIO)
+  // The advisory must name the ceiling that is actually about to bind: an
+  // indentation-heavy document can sit at 97% of the store-file ceiling while its
+  // compact form is only at 60% of the document ceiling, and quoting the document
+  // ceiling there would send the user looking at the wrong number.
+  const documentShare = documentBytes / MAX_TENDERS_DOCUMENT_BYTES
+  const fileShare = fileBytes / MAX_TENDERS_STORE_FILE_BYTES
+  const remedy =
+    'Nothing was lost — this change is still only on screen. Delete tenders, vault documents or customers you no longer need, then retry.'
+  return {
+    documentBytes,
+    documentLimitBytes: MAX_TENDERS_DOCUMENT_BYTES,
+    fileBytes,
+    fileLimitBytes: MAX_TENDERS_STORE_FILE_BYTES,
+    overLimit,
+    nearLimit,
+    error: overDocument
+      ? `Tenders data is ${megabyteLabel(documentBytes)} and the save limit is ${megabyteLabel(
+          MAX_TENDERS_DOCUMENT_BYTES,
+        )}. ${remedy}`
+      : overFile
+        ? `Tenders data would write a ${megabyteLabel(fileBytes)} file, above the ${megabyteLabel(
+            MAX_TENDERS_STORE_FILE_BYTES,
+          )} store file limit. ${remedy}`
+        : null,
+    warning: nearLimit
+      ? fileShare > documentShare
+        ? `Tenders data would write a ${megabyteLabel(fileBytes)} file, approaching the ${megabyteLabel(
+            MAX_TENDERS_STORE_FILE_BYTES,
+          )} store file limit. Delete anything you no longer need before saving is blocked.`
+        : `Tenders data is ${megabyteLabel(documentBytes)} of the ${megabyteLabel(
+            MAX_TENDERS_DOCUMENT_BYTES,
+          )} save limit. Delete anything you no longer need before saving is blocked.`
+      : null,
+  }
+}
+
+/**
+ * `checkTendersSaveSize`, or `null` when the document cannot be measured (for
+ * example a cyclic reference). Every save path uses this so an unmeasurable
+ * document falls through to schema validation and the authoritative store's own
+ * guards instead of failing with a serialization error.
+ */
+function measureTendersSaveSize(document: TendersDataV2): TendersSaveSizeCheck | null {
+  try {
+    return checkTendersSaveSize(document)
+  } catch {
+    return null
+  }
+}
+
 export function scheduleSaveToMain(): void {
   if (isSyncingFromMain) return
   if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) return
+
+  // An edit that reaches here is uncommitted work even when the save itself is
+  // deferred (a save in flight) or refused (a conflict): the shell's close guard
+  // must never treat such an edit as already durable.
+  hasUncommittedEdits = true
 
   const currentStatus = useTendersStore.getState().saveStatus
   if (currentStatus === 'conflict') {
@@ -391,7 +531,17 @@ export function scheduleSaveToMain(): void {
   }, 300)
 }
 
-async function runSaveToMain(): Promise<void> {
+/** Run (or join) one save attempt, tracking it so the close guard can await it. */
+function runSaveToMain(): Promise<void> {
+  if (activeSave) return activeSave
+  const run = performSaveToMain().finally(() => {
+    if (activeSave === run) activeSave = null
+  })
+  activeSave = run
+  return run
+}
+
+async function performSaveToMain(): Promise<void> {
   if (isSaveInFlight || isMigrating) {
     isSavePending = true
     return
@@ -411,6 +561,21 @@ async function runSaveToMain(): Promise<void> {
     activeCompanyId: s.activeCompanyId,
     workspaces: s.workspaces,
     issuerTemplates: s.issuerTemplates || [],
+  }
+
+  // Size pre-check first: it mirrors main's ceilings and takes precedence over
+  // schema issues exactly as main's IPC-boundary payload check does. An over-size
+  // workspace must report what to do instead of failing every autosave silently.
+  const size = measureTendersSaveSize(document)
+  if (size?.overLimit) {
+    isSaveInFlight = false
+    isSavePending = false
+    useTendersStore.setState({
+      saveStatus: 'error',
+      saveError: size.error,
+      saveSizeWarning: null,
+    })
+    return
   }
 
   // Belt-and-braces: never hand an invalid document to the authoritative
@@ -434,7 +599,11 @@ async function runSaveToMain(): Promise<void> {
     return
   }
 
-  useTendersStore.setState({ saveStatus: 'saving', saveError: null })
+  useTendersStore.setState({
+    saveStatus: 'saving',
+    saveError: null,
+    saveSizeWarning: size?.warning ?? null,
+  })
 
   try {
     const result = await window.tendersApi.saveStoreV2({
@@ -448,6 +617,9 @@ async function runSaveToMain(): Promise<void> {
       // this save was in flight; otherwise the newer local edits must survive.
       const hasNewerWork = isSavePending || saveTimer !== null
       if (!hasNewerWork) {
+        // The committed snapshot is now the whole document; nothing local is
+        // left uncommitted (the shell's close guard relies on this).
+        hasUncommittedEdits = false
         isSyncingFromMain = true
         try {
           const activeId = result.data.activeCompanyId || (result.data.workspaces[0]?.id ?? null)
@@ -486,6 +658,78 @@ async function runSaveToMain(): Promise<void> {
       isSavePending = false
       scheduleSaveToMain()
     }
+  }
+}
+
+/**
+ * Does the in-memory document hold anything the authoritative store does not?
+ * Only an adopting commit (or an adoption from main) clears the edit flag, so a
+ * failed or refused save keeps reporting uncommitted work.
+ */
+function hasUncommittedWork(): boolean {
+  return hasUncommittedEdits || isSaveInFlight || isSavePending || saveTimer !== null || isMigrating
+}
+
+/**
+ * A v1→v2 migration commit owns the revision while it runs, so a save started
+ * against it would be a false conflict. Bounded: a migration that never settles
+ * must not hang the close guard (main's own timeout is the outer bound).
+ */
+async function waitForMigrationToSettle(timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (isMigrating && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
+/**
+ * Commit any debounced edit right now and report whether everything is durable.
+ * This is the renderer half of the shell's dirty-close guard: the window is about
+ * to close, so the 300 ms debounce must not be waited out, and a save already in
+ * flight is awaited rather than raced with a second one against the same
+ * `expectedRevision`.
+ */
+export async function flushSaveToMain(): Promise<TendersCloseFlushResult> {
+  const wasDirty = hasUncommittedWork()
+  cancelPendingSave()
+  if (isMigrating) await waitForMigrationToSettle()
+  if (activeSave) await activeSave
+  // An edit that arrived during the first attempt queues a follow-up; flush it
+  // too (bounded — a save that keeps failing reports `ok: false` and prompts).
+  for (let attempt = 0; attempt < 3 && hasUncommittedWork(); attempt += 1) {
+    cancelPendingSave()
+    await runSaveToMain()
+    if (activeSave) await activeSave
+  }
+  return {
+    dirty: wasDirty,
+    ok: !hasUncommittedWork(),
+    error: useTendersStore.getState().saveError,
+  }
+}
+
+/**
+ * Answer main's pre-close flush request (the shell's window close guard). A reply
+ * that cannot be delivered leaves main's guard to time out and prompt; nothing
+ * here can make the edit durable, and a silent drop is the defect being fixed.
+ */
+export async function respondToCloseFlushRequest(requestId: number): Promise<void> {
+  let result: TendersCloseFlushResult
+  try {
+    result = await flushSaveToMain()
+  } catch (error: unknown) {
+    // Conservative: an unexpected failure cannot prove the edit is on disk, so
+    // report it as uncommitted work and let main ask the user.
+    result = {
+      dirty: true,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+  try {
+    await window.tendersApi?.reportCloseFlush?.(requestId, result)
+  } catch {
+    // Nothing further the renderer can do; main prompts on its own timeout.
   }
 }
 
@@ -615,6 +859,13 @@ export interface TendersState {
   hydrationError: string | null
   saveStatus: SaveStatus
   saveError: string | null
+  /**
+   * Advisory heads-up set on each save attempt while the document is approaching
+   * a save ceiling (`checkTendersSaveSize`). Never an error and never blocks a
+   * save — it exists so the workspace is visibly filling up before saving is
+   * blocked. `null` while there is headroom or while a size error is showing.
+   */
+  saveSizeWarning: string | null
   hasWorkspaces: boolean
 
   // ── explicit recovery (Phase 5 WP-2) ───────────────────────────────────────
@@ -1182,6 +1433,7 @@ export const useTendersStore = create<TendersState>()(
         hydrationError: null,
         saveStatus: 'saved',
         saveError: null,
+        saveSizeWarning: null,
         hasWorkspaces: false,
         // Explicit recovery: never auto-substitute a candidate or empty doc.
         recoveryRequired: false,
@@ -1231,6 +1483,16 @@ export const useTendersStore = create<TendersState>()(
             })
           }
 
+          // Shell dirty-close guard: main asks for a flush before the window
+          // closes; the renderer answers on `reportCloseFlush`. Registered at
+          // bundle load already — this is the second chance when the bridge was
+          // not ready then.
+          if (!closeFlushUnsub && window.tendersApi?.onCloseFlushRequest) {
+            closeFlushUnsub = window.tendersApi.onCloseFlushRequest((requestId: number) => {
+              void respondToCloseFlushRequest(requestId)
+            })
+          }
+
           if (isHydrating) return
           isHydrating = true
           set({ hydrationStatus: 'loading', hydrationError: null })
@@ -1272,6 +1534,8 @@ export const useTendersStore = create<TendersState>()(
             }
 
             if (res.status === 'not-found') {
+              // The document was replaced by the authoritative (empty) one.
+              hasUncommittedEdits = false
               isSyncingFromMain = true
               try {
                 set({
@@ -1296,6 +1560,8 @@ export const useTendersStore = create<TendersState>()(
             }
 
             if (res.status === 'loaded') {
+              // The document was replaced by the authoritative one.
+              hasUncommittedEdits = false
               isSyncingFromMain = true
               try {
                 const activeId = res.data.activeCompanyId || (res.data.workspaces[0]?.id ?? null)
@@ -1336,21 +1602,45 @@ export const useTendersStore = create<TendersState>()(
               if (res.needsSave && !isMigrating && !migrationCommitted) {
                 isMigrating = true
                 try {
-                  const saveRes = await window.tendersApi.saveStoreV2({
-                    expectedRevision: 0,
-                    document: res.data,
-                  })
-                  if (saveRes.ok) {
-                    committedRevision = saveRes.data.revision
-                    // Latch the successful commit exactly once; a later
-                    // hydrate must not re-commit the same migration.
-                    migrationCommitted = true
-                    set({ saveStatus: 'saved', saveError: null })
-                  } else {
+                  // The same size pre-check every other save path runs: a v1 store
+                  // that migrates into a document over a ceiling would otherwise
+                  // fail here with main's raw refusal, which names no field and no
+                  // way forward — the non-actionable class the pre-check removes.
+                  const migratedSize = measureTendersSaveSize(res.data)
+                  if (migratedSize?.overLimit) {
+                    // The migrated document is not durable, so the shell's close
+                    // guard must still see uncommitted work.
+                    hasUncommittedEdits = true
                     set({
-                      saveStatus: saveRes.error.code === 'REVISION_CONFLICT' ? 'conflict' : 'error',
-                      saveError: saveRes.error.message,
+                      saveStatus: 'error',
+                      saveError: migratedSize.error,
+                      saveSizeWarning: null,
                     })
+                  } else {
+                    const saveRes = await window.tendersApi.saveStoreV2({
+                      expectedRevision: 0,
+                      document: res.data,
+                    })
+                    if (saveRes.ok) {
+                      committedRevision = saveRes.data.revision
+                      // Latch the successful commit exactly once; a later
+                      // hydrate must not re-commit the same migration.
+                      migrationCommitted = true
+                      // The migrated document is now the authoritative one; a save
+                      // deferred by the migration latch re-marks the edit below.
+                      hasUncommittedEdits = false
+                      set({
+                        saveStatus: 'saved',
+                        saveError: null,
+                        saveSizeWarning: migratedSize?.warning ?? null,
+                      })
+                    } else {
+                      set({
+                        saveStatus:
+                          saveRes.error.code === 'REVISION_CONFLICT' ? 'conflict' : 'error',
+                        saveError: saveRes.error.message,
+                      })
+                    }
                   }
                 } catch (saveErr) {
                   set({
@@ -1385,7 +1675,9 @@ export const useTendersStore = create<TendersState>()(
 
         reloadCommittedFromMain: async () => {
           if (typeof window === 'undefined' || !window.tendersApi?.loadStoreV2) return
+          // The user explicitly chose the committed document over the local one.
           cancelPendingSave()
+          hasUncommittedEdits = false
           set({ saveStatus: 'loading', saveError: null })
           try {
             const res = await window.tendersApi.loadStoreV2()
@@ -1455,6 +1747,7 @@ export const useTendersStore = create<TendersState>()(
             // Adopt the restored document directly, exactly as a load would; the
             // main process has already written it as the new authoritative file.
             committedRevision = res.currentRevision ?? res.data.revision
+            hasUncommittedEdits = false
             isSyncingFromMain = true
             try {
               const activeId = res.data.activeCompanyId || (res.data.workspaces[0]?.id ?? null)

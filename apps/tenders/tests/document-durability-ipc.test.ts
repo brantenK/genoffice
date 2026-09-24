@@ -205,6 +205,59 @@ describe('managed-file + recovery IPC', () => {
     expect(traversal).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
   })
 
+  it('deletes by managed record id, which takes precedence over the stored path', async () => {
+    const saved = await handler(TENDERS_CHANNELS.saveDocument)(trustedEvent(), {
+      fileName: 'by-id.pdf',
+      buffer: Buffer.from('by id'),
+      category: 'rfp',
+    })
+    const other = await handler(TENDERS_CHANNELS.saveDocument)(trustedEvent(), {
+      fileName: 'other.pdf',
+      buffer: Buffer.from('other'),
+      category: 'rfp',
+    })
+    const remove = handler(TENDERS_CHANNELS.deleteDocument)
+
+    // An unknown id is refused rather than silently deleting a path.
+    expect(await remove(trustedEvent(), { id: 'mf-does-not-exist' })).toMatchObject({ ok: false })
+    // An id and a path that disagree are refused too.
+    expect(
+      await remove(trustedEvent(), { id: saved.id, storedPath: other.storedPath }),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/different documents/i) })
+    expect(existsSync(join(tendersBaseDir(), other.storedPath))).toBe(true)
+
+    // The id alone is enough (the preferred form), and it trashes that document.
+    const deleted = await remove(trustedEvent(), { id: saved.id })
+    expect(deleted.ok).toBe(true)
+    expect(deleted.trashId).toBe(saved.id)
+    expect(existsSync(join(tendersBaseDir(), saved.storedPath))).toBe(false)
+    const trash = await handler(TENDERS_CHANNELS.listDocumentTrash)(trustedEvent())
+    expect(trash.entries.map((entry: any) => entry.recordId)).toEqual([saved.id])
+  })
+
+  it('refuses the test reset outside a test runner without deleting user data', async () => {
+    mkdirSync(join(tendersBaseDir(), 'documents'), { recursive: true })
+    const sentinel = join(tendersBaseDir(), 'documents', 'keep-me.pdf')
+    writeFileSync(sentinel, 'user data', 'utf8')
+
+    const savedVitest = process.env.VITEST
+    const savedNodeEnv = process.env.NODE_ENV
+    process.env.VITEST = ''
+    process.env.NODE_ENV = 'production'
+    try {
+      expect(() => resetTendersIpcForTests()).toThrow(/test-only/i)
+    } finally {
+      if (savedVitest === undefined) delete process.env.VITEST
+      else process.env.VITEST = savedVitest
+      if (savedNodeEnv === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = savedNodeEnv
+    }
+
+    expect(existsSync(sentinel)).toBe(true)
+    // The refusal happens before the handlers are removed.
+    expect(handler(TENDERS_CHANNELS.loadStoreV2)).toBeDefined()
+  })
+
   it('surfaces recovery candidates and restores them explicitly', async () => {
     const saveStore = handler(TENDERS_CHANNELS.saveStoreV2)
     const first = await saveStore(trustedEvent(), { expectedRevision: 0, document: validV2(0) })

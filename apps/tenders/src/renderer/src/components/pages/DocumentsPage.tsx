@@ -17,15 +17,15 @@ import {
   ShieldAlert,
   Trash2,
   Upload,
-  X,
   XCircle,
 } from 'lucide-react'
 import type { DocCategory, DocHealth, VaultDoc } from '../../../shared/types'
 import type { DocumentReconciliation } from '../../../../shared/tenders-persistence'
-import { DOC_CATEGORY_LABEL } from '../../../shared/types'
+import { DOC_CATEGORY_LABEL, isDemoAssetUrl } from '../../../shared/types'
+import { openDemoAsset } from '../../mock/vault'
 import { assessDocHealth, healthSummary, POLICE_STAMP_WINDOW_DAYS } from '../../gap'
 import { newVaultDocId, useTendersStore } from '../../store'
-import { Badge, Button } from '../ui'
+import { Badge, Button, FormField, FormSelect, FORM_CHECKBOX_CLASS, Spinner } from '../ui'
 import { Dialog } from '../Dialog'
 import { TrashDrawer } from '../TrashDrawer'
 
@@ -88,14 +88,11 @@ export function DocumentsPage() {
   // Soft-delete confirmation is an in-app dialog (native window.confirm is not
   // accepted by the durability E2E spec). Escape/backdrop/Cancel are no-ops.
   const [pendingDelete, setPendingDelete] = useState<VaultDoc | null>(null)
-  // Save failures get their own alert so the E2E spec can target them precisely
-  // (documents-save-error) without catching unrelated delete/reconcile errors.
-  const [saveError, setSaveError] = useState<string | null>(null)
 
   /** A workspace-relative managed file path (not a blob/http/demo URL). */
   const managedPath = (url: string | null): string | null => {
     if (!url) return null
-    if (url.startsWith('blob:') || url.startsWith('http') || url.startsWith('/demo')) return null
+    if (url.startsWith('blob:') || url.startsWith('http') || isDemoAssetUrl(url)) return null
     return url
   }
 
@@ -124,14 +121,12 @@ export function DocumentsPage() {
   const openCreate = () => {
     setEditDoc(null)
     setError(null)
-    setSaveError(null)
     setFormOpen(true)
   }
 
   const openEdit = (d: VaultDoc) => {
     setEditDoc(d)
     setError(null)
-    setSaveError(null)
     setFormOpen(true)
   }
 
@@ -193,40 +188,103 @@ export function DocumentsPage() {
     setSelected(null)
   }
 
-  const handleSubmit = async (data: VaultFormData) => {
+  /**
+   * Persist the form. Failures are RETURNED rather than parked in page state:
+   * the page-level alert sat behind the modal's own scrim, so a refused upload
+   * looked like nothing happening. The modal shows the reason inline and only
+   * closes on success.
+   */
+  const handleSubmit = async (
+    data: VaultFormData,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
     setError(null)
-    setSaveError(null)
+    setNotice(null)
+    const api = typeof window === 'undefined' ? undefined : window.tendersApi
+    // Only a managed relative path is accepted by replaceDocument/deleteDocument.
+    const previousPath = editDoc ? managedPath(editDoc.fileUrl) : null
+
     let savedPath: string | null = null
-    if (data.file && typeof window !== 'undefined' && !window.tendersApi?.saveDocument) {
-      // Never present a session blob as durable: without the managed-file bridge
-      // the upload cannot be persisted, so fail closed and say so.
-      setSaveError('Saving documents to disk is unavailable in this build. Nothing was added.')
-      return
-    }
-    if (data.file && typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
+    if (data.file) {
+      let buffer: ArrayBuffer
       try {
-        const buffer = await data.file.arrayBuffer()
-        const saveRes = await window.tendersApi.saveDocument({
-          fileName: data.file.name,
-          buffer,
-          category: 'vault',
-        })
-        if (saveRes?.ok && saveRes.storedPath) {
-          savedPath = saveRes.storedPath
-        } else {
-          // Fail closed and surface the reason: never silently fall back to a
-          // session blob URL that would disappear on restart.
-          setSaveError(saveRes?.error || 'Could not save the document to disk. Nothing was added.')
-          return
-        }
+        buffer = await data.file.arrayBuffer()
       } catch (err) {
-        console.warn('tenders: failed to persist vault document via IPC', err)
-        setSaveError(
-          err instanceof Error
-            ? `Could not save the document to disk: ${err.message}`
-            : 'Could not save the document to disk. Nothing was added.',
-        )
-        return
+        return {
+          ok: false,
+          error: `Could not read the chosen file: ${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+
+      if (editDoc && previousPath) {
+        // Replacing a stored PDF goes through the managed replace path: main
+        // commits the new file first and only then moves the previous one to
+        // Trash, so the old file is never orphaned on disk.
+        if (!api?.replaceDocument) {
+          return {
+            ok: false,
+            error: 'Replacing a stored PDF is unavailable in this build; nothing was changed.',
+          }
+        }
+        try {
+          const res = await api.replaceDocument({
+            storedPath: previousPath,
+            fileName: data.file.name,
+            buffer,
+          })
+          if (!res?.ok || !res.storedPath) {
+            return {
+              ok: false,
+              error: res?.error || 'Could not replace the stored PDF. Nothing was changed.',
+            }
+          }
+          savedPath = res.storedPath
+          if (res.warning || res.previousTrashed === false) {
+            setNotice(
+              `The new PDF was saved, but the previous file could not be moved to Trash${
+                res.warning ? `: ${res.warning}` : '.'
+              }`,
+            )
+          }
+        } catch (err) {
+          return {
+            ok: false,
+            error: `Could not replace the stored PDF: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          }
+        }
+      } else {
+        // Never present a session blob as durable: without the managed-file
+        // bridge the upload cannot be persisted, so fail closed and say so.
+        if (!api?.saveDocument) {
+          return {
+            ok: false,
+            error: 'Saving documents to disk is unavailable in this build. Nothing was added.',
+          }
+        }
+        try {
+          const saveRes = await api.saveDocument({
+            fileName: data.file.name,
+            buffer,
+            category: 'vault',
+          })
+          if (!saveRes?.ok || !saveRes.storedPath) {
+            return {
+              ok: false,
+              error: saveRes?.error || 'Could not save the document to disk. Nothing was added.',
+            }
+          }
+          savedPath = saveRes.storedPath
+        } catch (err) {
+          console.warn('tenders: failed to persist vault document via IPC', err)
+          return {
+            ok: false,
+            error:
+              err instanceof Error
+                ? `Could not save the document to disk: ${err.message}`
+                : 'Could not save the document to disk. Nothing was added.',
+          }
+        }
       }
     }
 
@@ -271,6 +329,7 @@ export function DocumentsPage() {
     }
     setFormOpen(false)
     setEditDoc(null)
+    return { ok: true }
   }
 
   const docs = useMemo(
@@ -344,24 +403,6 @@ export function DocumentsPage() {
         </div>
       </div>
 
-      {saveError && (
-        <div
-          role="alert"
-          data-testid="documents-save-error"
-          className="mx-8 mt-4 flex items-start gap-2 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-text)]"
-        >
-          <XCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1">{saveError}</span>
-          <button
-            type="button"
-            onClick={() => setSaveError(null)}
-            className="shrink-0 cursor-pointer text-xs font-semibold text-[var(--danger-text)] hover:underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
       {error && (
         <div
           role="alert"
@@ -414,8 +455,9 @@ export function DocumentsPage() {
           </p>
           {reconcile.missing.length > 0 && (
             <p className="mt-1 text-[12px] text-[var(--warn)]">
-              Missing: {reconcile.missing.map((entry) => entry.fileName).join(', ')}. Re-attach the
-              file to restore it.
+              Missing: {reconcile.missing.map((entry) => entry.fileName).join(', ')}. Re-attaching a
+              PDF stores a fresh copy under a new name — the missing record stays listed until that
+              original file itself is back on disk.
             </p>
           )}
           {reconcile.orphaned.length > 0 && (
@@ -533,8 +575,9 @@ export function DocumentsPage() {
 
         <p className="mt-6 text-center text-[11px] text-[var(--text-tertiary)]">
           Certified stamps older than {POLICE_STAMP_WINDOW_DAYS} days are flagged as stale (SA
-          police-stamp rule). Uploaded PDFs are saved on this machine — if the file link ever goes
-          missing, "Re-attach PDF" restores it.
+          police-stamp rule). Uploaded PDFs are saved on this machine — re-attaching a PDF to a
+          document stores a fresh copy of the file; it does not recreate the document's dates, notes
+          or requirement links.
         </p>
       </div>
 
@@ -580,7 +623,8 @@ export function DocumentsPage() {
             <p className="px-5 py-4 text-sm leading-relaxed text-[var(--text-secondary)]">
               The file is moved to Trash and can be restored. This deletes the vault entry for “
               {pendingDelete.title}” and, if the document is referenced, lists the referencing
-              records afterwards.
+              records afterwards. Undo restores the file only — the vault entry, its dates, notes
+              and requirement links are not restored.
             </p>
           </Dialog>
         </div>
@@ -591,7 +635,7 @@ export function DocumentsPage() {
           onClose={() => setTrashOpen(false)}
           onRestored={(storedPath) =>
             setNotice(
-              `Restored a managed file to ${storedPath}. Re-attach it to a document if needed.`,
+              `Restored a managed file to ${storedPath}. Only the file is back — re-attach it to a document and re-link any requirements.`,
             )
           }
         />
@@ -685,6 +729,42 @@ function DocDetailPanel({
   onDelete: () => void
 }) {
   const rep = useMemo(() => assessDocHealth(doc), [doc])
+  // A user-triggered open failure is shown here, not just console.warn'd.
+  const [openError, setOpenError] = useState<string | null>(null)
+
+  const openDocument = async (): Promise<void> => {
+    const url = doc.fileUrl
+    if (!url) return
+    setOpenError(null)
+    if (isDemoAssetUrl(url)) {
+      // A bundled demonstration asset is read-only and lives outside the managed
+      // store, so it is opened by its own helper rather than by path.
+      try {
+        await openDemoAsset(url)
+      } catch (err) {
+        setOpenError(
+          `Could not open this document: ${err instanceof Error ? err.message : String(err)}.`,
+        )
+      }
+      return
+    }
+    if (
+      typeof window !== 'undefined' &&
+      window.tendersApi?.openDocument &&
+      !url.startsWith('blob:') &&
+      !url.startsWith('http')
+    ) {
+      const res = await window.tendersApi.openDocument({ storedPath: url })
+      if (!res?.ok) {
+        setOpenError(
+          `Could not open this document: ${res?.error || 'the shell refused the request.'}`,
+        )
+      }
+      return
+    }
+    window.open(url, '_blank')
+  }
+
   return (
     <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -746,24 +826,7 @@ function DocDetailPanel({
         {doc.fileUrl ? (
           <button
             type="button"
-            onClick={async () => {
-              const url = doc.fileUrl
-              if (!url) return
-              if (
-                typeof window !== 'undefined' &&
-                window.tendersApi?.openDocument &&
-                !url.startsWith('blob:') &&
-                !url.startsWith('http') &&
-                !url.startsWith('/demo')
-              ) {
-                const res = await window.tendersApi.openDocument({ storedPath: url })
-                if (!res?.ok) {
-                  console.warn('tenders: failed to open document via shell', res?.error)
-                }
-              } else {
-                window.open(url, '_blank')
-              }
-            }}
+            onClick={() => void openDocument()}
             className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-2 text-sm font-medium text-[var(--accent-dark)] hover:bg-[var(--hover)]"
           >
             <ExternalLink size={14} aria-hidden="true" /> Open PDF
@@ -794,9 +857,23 @@ function DocDetailPanel({
           <Trash2 size={14} aria-hidden="true" /> Delete
         </button>
       </div>
+
+      {openError && (
+        <div
+          role="alert"
+          data-testid="open-document-error"
+          className="mt-3 flex items-start gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-[12px] text-[var(--danger-text)]"
+        >
+          <XCircle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 leading-relaxed">{openError}</span>
+        </div>
+      )}
     </div>
   )
 }
+
+/** Stable no-op: keeps Escape/backdrop inert while a save is in flight. */
+const NOOP = () => undefined
 
 function VaultDocFormModal({
   editDoc,
@@ -806,7 +883,8 @@ function VaultDocFormModal({
   /** null = create (upload) mode; doc = edit / re-attach mode */
   editDoc: VaultDoc | null
   onClose: () => void
-  onSubmit: (data: VaultFormData) => void
+  /** Resolves with the failure reason so the form can show it inline. */
+  onSubmit: (data: VaultFormData) => Promise<{ ok: true } | { ok: false; error: string }>
 }) {
   const [title, setTitle] = useState(editDoc?.title ?? '')
   const [category, setCategory] = useState<DocCategory>(editDoc?.category ?? 'COMPLIANCE')
@@ -817,6 +895,9 @@ function VaultDocFormModal({
   const [note, setNote] = useState(editDoc?.metadata['Note'] ?? '')
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState('')
+  // A save is in flight: submit is disabled so a double-click cannot store the
+  // same PDF twice.
+  const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const pickFile = (f: File | null) => {
@@ -828,7 +909,8 @@ function VaultDocFormModal({
     setFile(f)
   }
 
-  const submit = () => {
+  const submit = async () => {
+    if (saving) return
     if (!title.trim()) {
       setError('Give the document a title.')
       return
@@ -838,57 +920,75 @@ function VaultDocFormModal({
       return
     }
     setError('')
-    onSubmit({
-      title: title.trim(),
-      category,
-      issueDate: issueDate || null,
-      expiryDate: expiryDate || null,
-      isCertified,
-      certifiedDate: isCertified ? certifiedDate || null : null,
-      note: note.trim(),
-      file,
-    })
+    setSaving(true)
+    try {
+      const result = await onSubmit({
+        title: title.trim(),
+        category,
+        issueDate: issueDate || null,
+        expiryDate: expiryDate || null,
+        isCertified,
+        certifiedDate: isCertified ? certifiedDate || null : null,
+        note: note.trim(),
+        file,
+      })
+      // On success the parent closes (unmounts) this modal; `saving` stays set
+      // so the controls remain inert for the frames before it goes away.
+      if (!result.ok) {
+        setError(result.error)
+        setSaving(false)
+      }
+    } catch (err) {
+      setError(`Could not save the document: ${err instanceof Error ? err.message : String(err)}`)
+      setSaving(false)
+    }
   }
 
-  const inputCls =
-    'w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]'
-  const labelCls = 'mb-1 block text-xs font-medium text-[var(--text-secondary)]'
-
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--color-bg-overlay)] p-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-[var(--surface)] p-6 shadow-[var(--shadow-modal-strong)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-1 flex items-start justify-between gap-4">
-          <h2 className="text-base font-bold text-[var(--text)]">
-            {editDoc ? 'Edit document' : 'Add company document'}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close document form"
-            className="cursor-pointer text-[var(--text-tertiary)] hover:text-[var(--text)]"
+    <Dialog
+      title={editDoc ? 'Edit document' : 'Add company document'}
+      subtitle={
+        editDoc
+          ? undefined
+          : 'Store your CIPC registration, SARS tax clearance, B-BBEE certificate, COIDA letter of good standing, VAT registration or any other company document in the vault — it then feeds tender gap analysis automatically.'
+      }
+      icon={<Paperclip size={16} aria-hidden="true" />}
+      size="md"
+      // Escape/backdrop/close must not dismiss a save that is already running:
+      // the failure reason is only visible inside this form.
+      onClose={saving ? NOOP : onClose}
+      bodyClassName="overflow-y-auto"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            data-testid="vault-doc-submit"
+            disabled={saving}
+            onClick={() => void submit()}
           >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-        {!editDoc && (
-          <p className="mb-4 text-xs leading-relaxed text-[var(--text-secondary)]">
-            Store your CIPC registration, SARS tax clearance, B-BBEE certificate, COIDA letter of
-            good standing, VAT registration or any other company document in the vault — it then
-            feeds tender gap analysis automatically.
-          </p>
-        )}
-
+            {saving ? (
+              <>
+                <Spinner /> Saving…
+              </>
+            ) : editDoc ? (
+              'Save changes'
+            ) : (
+              'Add to vault'
+            )}
+          </Button>
+        </>
+      }
+    >
+      <div className="px-5 py-4">
         {/* file picker */}
         <input
           ref={fileInputRef}
           type="file"
           accept="application/pdf"
+          aria-label="Choose a PDF file"
           className="hidden"
           onChange={(e) => {
             pickFile(e.target.files?.[0] ?? null)
@@ -898,7 +998,7 @@ function VaultDocFormModal({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="mb-4 flex w-full cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-[var(--border)] px-3 py-2.5 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent-dark)]"
+          className="mb-3 flex w-full cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-[var(--border)] px-3 py-2.5 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent-dark)]"
         >
           <Paperclip size={15} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">
@@ -907,114 +1007,75 @@ function VaultDocFormModal({
           {file && <Badge tone="green">Ready</Badge>}
         </button>
 
-        {/* title */}
-        <label className={labelCls}>Title</label>
-        <input
-          className={`${inputCls} mb-3`}
+        <FormField
+          label="Title"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={setTitle}
           placeholder="e.g. SARS Tax Clearance Certificate"
+          className="mb-3"
+          autoFocus
         />
 
-        {/* category */}
-        <label className={labelCls}>Category</label>
-        <select
-          className={`${inputCls} mb-3 cursor-pointer`}
+        <FormSelect
+          label="Category"
           value={category}
-          onChange={(e) => setCategory(e.target.value as DocCategory)}
-        >
-          {ALL_CATS.map((c) => (
-            <option key={c} value={c}>
-              {DOC_CATEGORY_LABEL[c]}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => setCategory(value as DocCategory)}
+          options={ALL_CATS.map((c) => ({ value: c, label: DOC_CATEGORY_LABEL[c] }))}
+          className="mb-3"
+        />
 
-        {/* dates */}
         <div className="mb-3 grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls}>Issue date</label>
-            <input
-              type="date"
-              className={inputCls}
-              value={issueDate}
-              onChange={(e) => setIssueDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Expiry date</label>
-            <input
-              type="date"
-              className={inputCls}
-              value={expiryDate}
-              onChange={(e) => setExpiryDate(e.target.value)}
-            />
-          </div>
+          <FormField label="Issue date" type="date" value={issueDate} onChange={setIssueDate} />
+          <FormField label="Expiry date" type="date" value={expiryDate} onChange={setExpiryDate} />
         </div>
 
-        {/* certification */}
         <div className="mb-3 flex items-center gap-2">
           <input
-            id="is-certified"
+            id="vault-doc-is-certified"
             type="checkbox"
             checked={isCertified}
             onChange={(e) => setIsCertified(e.target.checked)}
-            className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
+            className={FORM_CHECKBOX_CLASS}
           />
           <label
-            htmlFor="is-certified"
+            htmlFor="vault-doc-is-certified"
             className="cursor-pointer text-sm text-[var(--text-secondary)]"
           >
             Certified (SA police stamp / commissioner of oaths)
           </label>
         </div>
         {isCertified && (
-          <div className="mb-3">
-            <label className={labelCls}>Certified on</label>
-            <input
-              type="date"
-              className={inputCls}
-              value={certifiedDate}
-              onChange={(e) => setCertifiedDate(e.target.value)}
-            />
-            <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-              Stamps older than {POLICE_STAMP_WINDOW_DAYS} days are flagged as stale.
-            </p>
-          </div>
+          <FormField
+            label="Certified on"
+            type="date"
+            value={certifiedDate}
+            onChange={setCertifiedDate}
+            hint={`Stamps older than ${POLICE_STAMP_WINDOW_DAYS} days are flagged as stale.`}
+            className="mb-3"
+          />
         )}
 
-        {/* note */}
-        <label className={labelCls}>Note (optional)</label>
-        <input
-          className={inputCls}
+        <FormField
+          label="Note (optional)"
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={setNote}
           placeholder="e.g. Pin valid until submission date"
         />
 
+        {/* Save failures render here, inside the dialog: the page-level alert sat
+            behind the modal's own scrim, so a refused upload looked like nothing
+            happening. */}
         {error && (
-          <p role="alert" className="mt-3 text-xs font-medium text-[var(--danger)]">
-            {error}
+          <p
+            role="alert"
+            data-testid="documents-save-error"
+            className="mt-3 flex items-start gap-1.5 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs font-medium text-[var(--danger-text)]"
+          >
+            <XCircle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">{error}</span>
           </p>
         )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            className="cursor-pointer rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-contrast)] shadow-sm hover:bg-[var(--accent-dark)]"
-          >
-            {editDoc ? 'Save changes' : 'Add to vault'}
-          </button>
-        </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

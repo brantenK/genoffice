@@ -6,14 +6,22 @@
  * false "Copied" success).
  * D2: the outcome dialog collects a civil date but the persisted field is an
  * RFC3339 instant; conversion must produce a schema-valid value or fail closed.
+ * D3: the submission-method inference ran a `/g` regex through `.test()`, so its
+ * `lastIndex` survived between calls and the same source line could be read as
+ * two different submission methods.
  */
 import { describe, expect, it } from 'vitest'
 import { cleanCopiedTender } from '../src/renderer/src/components/TenderLifecyclePanel'
 import { civilDateToRfc3339 } from '../src/renderer/src/components/OutcomeDialog'
+import {
+  deriveTenderReview,
+  inferMethodFromText,
+} from '../src/renderer/src/components/ExtractionReview'
 import { validateTendersDataV2 } from '../src/shared/tenders-schema'
 import { makeLifecycleEvent } from '../src/shared/lifecycle'
 import type {
   CompanyProfile,
+  PageExtraction,
   RequirementRecord,
   TenderRecord,
   TendersDataV2,
@@ -266,5 +274,60 @@ describe('D2 — outcome notice date conversion', () => {
         '2026-10-01T00:00:00.000Z',
       )
     }
+  })
+})
+
+function extractionWith(lines: string[]): PageExtraction {
+  return {
+    numPages: 1,
+    textPages: 1,
+    ocrPages: 0,
+    pages: [
+      {
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        text: lines.join('\n'),
+        needsOcr: false,
+        lines: lines.map((text, index) => ({
+          pageNumber: 1,
+          text,
+          box: { top: index * 12, left: 0, width: 500, height: 12 },
+        })),
+      },
+    ],
+  }
+}
+
+describe('D3 — submission-method inference is stateless', () => {
+  // One destination line that carries both an e-mail address and the word
+  // "portal". Reading the e-mail is the correct answer; the /g regex used to
+  // leave `lastIndex` behind, so a second read of the same line skipped the
+  // e-mail check and fell through to "ELECTRONIC".
+  const mixedLine =
+    'Submit your bid by email to tenders@example.gov.za or upload it on the portal at portal.example.gov.za before the closing date.'
+
+  it('answers the same way on consecutive calls for the same line', () => {
+    expect(inferMethodFromText(mixedLine)).toBe('EMAIL')
+    expect(inferMethodFromText(mixedLine)).toBe('EMAIL')
+    expect(inferMethodFromText(mixedLine)).toBe('EMAIL')
+  })
+
+  it('does not turn one destination line into two competing methods', () => {
+    const review = deriveTenderReview({
+      meta: {
+        title: 'Supply and delivery of pumps',
+        referenceNumber: null,
+        issuingBody: null,
+        closingDate: null,
+        submissionMethod: null,
+        submissionAddress: null,
+        candidates: { submissionAddress: ['tenders@example.gov.za', 'portal.example.gov.za'] },
+      },
+      extraction: extractionWith([mixedLine]),
+    })
+    expect((review.fields.submissionMethod?.candidates ?? []).map((c) => c.value)).toEqual([
+      'EMAIL',
+    ])
   })
 })

@@ -11,11 +11,12 @@
 // index), so the strict v2 authority document schema is untouched.
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { TendersDataV2 } from '../shared/types'
 import { MAX_TENDERS_DOCUMENT_UPLOAD_BYTES } from '../shared/ipc'
 import {
+  MAX_TENDERS_MANAGED_FILE_NAME_CHARS,
   MAX_TENDERS_MANAGED_FILES,
   MAX_TENDERS_MANAGED_INDEX_BYTES,
   MAX_TENDERS_TRASH_ENTRIES,
@@ -30,6 +31,9 @@ export const MANAGED_DOCUMENTS_INDEX_FILE = 'managed-documents.json' as const
 export const MANAGED_DOCUMENTS_TRASH_DIR = '.trash' as const
 
 const MANAGED_SUBDIRS = new Set<string>(['documents', 'vault'])
+
+/** Longest trailing extension worth preserving when a name is clamped. */
+const MANAGED_EXTENSION_MAX_CHARS = 20
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf',
@@ -82,13 +86,32 @@ function toManagedTrashRelativePath(storedPath: unknown): string | null {
   return `${directory}/${name}`
 }
 
+/**
+ * Clean one caller-supplied file name and clamp its length. The clamp is what
+ * keeps the derived record budget true (see
+ * `MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD`) and keeps the derived paths
+ * inside the filesystem's 255-character component limit, so a long name can
+ * neither break the record arithmetic nor make a later soft-delete fail.
+ */
 export function sanitizeManagedFileName(fileName: unknown, category: ManagedFileCategory): string {
   const raw = typeof fileName === 'string' && fileName.length > 0 ? basename(fileName) : ''
   const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, '_')
   if (!cleaned || cleaned.replace(/[._-]/g, '').length === 0) {
     return category === 'rfp' ? 'tender.pdf' : 'document.pdf'
   }
-  return cleaned
+  return clampManagedFileName(cleaned)
+}
+
+/** Truncate to the documented limit, keeping a plausible extension. */
+function clampManagedFileName(cleaned: string): string {
+  if (cleaned.length <= MAX_TENDERS_MANAGED_FILE_NAME_CHARS) return cleaned
+  const dot = cleaned.lastIndexOf('.')
+  // A trailing "extension" longer than any real one is part of the name, not an
+  // extension to preserve.
+  const extension =
+    dot > 0 && cleaned.length - dot <= MANAGED_EXTENSION_MAX_CHARS ? cleaned.slice(dot) : ''
+  const keep = MAX_TENDERS_MANAGED_FILE_NAME_CHARS - extension.length
+  return `${cleaned.slice(0, keep)}${extension}`
 }
 
 function sha256Hex(bytes: Buffer): string {
@@ -192,6 +215,44 @@ function isManagedRecord(raw: unknown): raw is ManagedFileRecord {
   return true
 }
 
+/**
+ * Serialize one record for the on-disk index. Null-valued optional fields are
+ * omitted: they carry no information and cost roughly a third of the index,
+ * which is the binding limit long before the record-count caps are reached.
+ * `normalizeRecord` restores them on read, so every caller still sees the
+ * documented `ManagedFileRecord` shape.
+ */
+function toIndexRecord(record: ManagedFileRecord): Record<string, unknown> {
+  const compact: Record<string, unknown> = {
+    id: record.id,
+    category: record.category,
+    relativePath: record.relativePath,
+    fileName: record.fileName,
+    mimeType: record.mimeType,
+    size: record.size,
+    hash: record.hash,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    state: record.state,
+  }
+  if (record.trashedAt) compact.trashedAt = record.trashedAt
+  if (record.trashedPath) compact.trashedPath = record.trashedPath
+  if (record.missingAt) compact.missingAt = record.missingAt
+  if (record.replacedBy) compact.replacedBy = record.replacedBy
+  return compact
+}
+
+/** Restore the documented shape for fields `toIndexRecord` may have omitted. */
+function normalizeRecord(record: ManagedFileRecord): ManagedFileRecord {
+  return {
+    ...record,
+    trashedAt: record.trashedAt ?? null,
+    trashedPath: record.trashedPath ?? null,
+    missingAt: record.missingAt ?? null,
+    replacedBy: record.replacedBy ?? null,
+  }
+}
+
 function toTrashEntry(record: ManagedFileRecord): ManagedFileTrashEntry {
   return {
     id: record.id,
@@ -264,6 +325,21 @@ export function createManagedDocumentStore(
     const temporary = `${path}.${randomUUID()}.tmp`
     try {
       await writeFile(temporary, data, { flag: 'wx', mode: 0o600 })
+      // Flush the bytes to the device before the rename publishes them at the
+      // final path. Without this a power loss can leave a record that says
+      // `active` pointing at a zero-length file. Best-effort: a filesystem that
+      // refuses fsync must not turn an otherwise successful write into a failed
+      // save (the bytes are already written; the rename is still atomic).
+      try {
+        const handle = await open(temporary, 'r+')
+        try {
+          await handle.sync()
+        } finally {
+          await handle.close()
+        }
+      } catch {
+        // fsync unavailable — the write itself succeeded
+      }
       await rename(temporary, path)
     } catch (error: unknown) {
       try {
@@ -285,7 +361,9 @@ export function createManagedDocumentStore(
     }
     try {
       const parsed = JSON.parse(raw) as { records?: unknown; updatedAt?: unknown }
-      const records = Array.isArray(parsed.records) ? parsed.records.filter(isManagedRecord) : []
+      const records = Array.isArray(parsed.records)
+        ? parsed.records.filter(isManagedRecord).map(normalizeRecord)
+        : []
       return {
         version: 1,
         updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : clockIso(),
@@ -304,13 +382,34 @@ export function createManagedDocumentStore(
     }
   }
 
-  async function writeIndex(index: ManagedIndexFile): Promise<void> {
+  async function writeIndex(index: ManagedIndexFile, previousRecordCount: number): Promise<void> {
     await options.hooks?.beforeIndexWrite?.()
     index.version = 1
     index.updatedAt = clockIso()
-    const serialized = JSON.stringify(index, null, 2)
-    if (Buffer.byteLength(serialized, 'utf8') > MAX_TENDERS_MANAGED_INDEX_BYTES) {
-      throw new Error('Managed-document metadata index exceeds its size limit.')
+    const serialized = JSON.stringify({
+      version: index.version,
+      updatedAt: index.updatedAt,
+      records: index.records.map(toIndexRecord),
+    })
+    const serializedBytes = Buffer.byteLength(serialized, 'utf8')
+    // The byte cap bounds GROWTH of the metadata collection. Lifecycle
+    // transitions that do not add a record (trash / restore / cleanup) stay
+    // allowed, so a full index can never wedge the user out of deleting a
+    // document — deleting and emptying the trash are exactly how the collection
+    // shrinks again. Every record the store writes now fits
+    // `MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD` (file names are clamped to
+    // `MAX_TENDERS_MANAGED_FILE_NAME_CHARS`), so `MAX_TENDERS_MANAGED_FILES`
+    // records always fit inside this ceiling and the record-count cap binds
+    // first by construction; this check is therefore only reachable with an index
+    // written by an older build or edited outside the app — the second reason it
+    // must not block the lifecycle transitions above.
+    if (
+      serializedBytes > MAX_TENDERS_MANAGED_INDEX_BYTES &&
+      index.records.length > previousRecordCount
+    ) {
+      throw new Error(
+        `Managed-document metadata index is full (${serializedBytes} bytes > ${MAX_TENDERS_MANAGED_INDEX_BYTES} bytes); remove documents or empty the trash before adding more.`,
+      )
     }
     await mkdir(baseDir, { recursive: true })
     await atomicWrite(indexPath, serialized)
@@ -336,6 +435,10 @@ export function createManagedDocumentStore(
       }
       const cleanName = sanitizeManagedFileName(input.fileName, input.category)
       const index = await readIndex()
+      const recordsBefore = index.records.length
+      // The record cap is derived to stay reachable inside the index byte
+      // ceiling, so a full store refuses here — with a limit the user can count —
+      // rather than from the byte check in `writeIndex`.
       if (index.records.length >= MAX_TENDERS_MANAGED_FILES) {
         return { ok: false, error: 'Managed-document metadata limit reached.' }
       }
@@ -368,7 +471,7 @@ export function createManagedDocumentStore(
       }
       index.records.push(record)
       try {
-        await writeIndex(index)
+        await writeIndex(index, recordsBefore)
       } catch (error: unknown) {
         // Roll the file back so a failed metadata commit never leaves an
         // untracked document behind.
@@ -389,6 +492,7 @@ export function createManagedDocumentStore(
   ): Promise<ManagedTrashResult> =>
     withLock(async () => {
       const index = await readIndex()
+      const recordsBefore = index.records.length
       const existing = index.records.find(
         (record) => record.relativePath === relativePath && record.state === 'active',
       )
@@ -402,10 +506,12 @@ export function createManagedDocumentStore(
         existing.state = 'missing'
         existing.missingAt = now
         existing.updatedAt = now
-        await writeIndex(index)
+        await writeIndex(index, recordsBefore)
         return { ok: false, error: 'File not found on disk.' }
       }
 
+      // Checked before the adopt-untracked-file branch below, so a full trash
+      // cannot grow the record collection on its way to refusing.
       const trashCount = index.records.filter((record) => record.state === 'trashed').length
       if (trashCount >= MAX_TENDERS_TRASH_ENTRIES) {
         return { ok: false, error: 'Trash limit reached; clean up trash before deleting more.' }
@@ -413,6 +519,18 @@ export function createManagedDocumentStore(
 
       let record = existing
       if (!record) {
+        // Adopting an untracked file adds a record, so the record cap binds here
+        // too: the check in `save` never sees this path, and without it the
+        // collection could grow past `MAX_TENDERS_MANAGED_FILES` through
+        // soft-deletes alone — the user would be shown a count above the
+        // documented capacity, refused only by the invisible byte ceiling.
+        if (index.records.length >= MAX_TENDERS_MANAGED_FILES) {
+          return {
+            ok: false,
+            error:
+              'Managed-document metadata limit reached; the file was not deleted. Empty the trash before deleting more.',
+          }
+        }
         // Adopt an untracked file rather than risk an unrecoverable unlink.
         const category: ManagedFileCategory = relativePath.startsWith('vault/') ? 'vault' : 'rfp'
         let size = 0
@@ -429,7 +547,9 @@ export function createManagedDocumentStore(
           id: `mf-${randomUUID()}`,
           category,
           relativePath,
-          fileName: basename(relativePath).replace(/^\d+_/, ''),
+          // Clamped like every other stored name, so an externally-placed long
+          // name cannot push the record past its documented serialized budget.
+          fileName: sanitizeManagedFileName(basename(relativePath).replace(/^\d+_/, ''), category),
           mimeType: managedMimeType(relativePath),
           size,
           hash,
@@ -460,7 +580,7 @@ export function createManagedDocumentStore(
       record.missingAt = null
       if (replacedBy) record.replacedBy = replacedBy
       try {
-        await writeIndex(index)
+        await writeIndex(index, recordsBefore)
       } catch (error: unknown) {
         // Roll the move back so a failed metadata commit cannot lose the file.
         try {
@@ -476,6 +596,7 @@ export function createManagedDocumentStore(
   const restore = (idOrPath: string): Promise<ManagedRestoreResult> =>
     withLock(async () => {
       const index = await readIndex()
+      const recordsBefore = index.records.length
       const record = index.records.find(
         (candidate) =>
           candidate.state === 'trashed' &&
@@ -492,7 +613,7 @@ export function createManagedDocumentStore(
         record.state = 'missing'
         record.missingAt = now
         record.updatedAt = now
-        await writeIndex(index)
+        await writeIndex(index, recordsBefore)
         return { ok: false, error: 'Trashed file is missing.' }
       }
       let targetRelative = record.relativePath
@@ -514,7 +635,7 @@ export function createManagedDocumentStore(
       record.missingAt = null
       record.updatedAt = now
       try {
-        await writeIndex(index)
+        await writeIndex(index, recordsBefore)
       } catch (error: unknown) {
         try {
           await rename(join(baseDir, targetRelative), trashedFull)
@@ -571,11 +692,26 @@ export function createManagedDocumentStore(
     reconcile: () =>
       withLock(async (): Promise<DocumentReconciliation> => {
         const index = await readIndex()
+        const recordsBefore = index.records.length
         const missing: DocumentReconciliation['missing'] = []
         let changed = false
         for (const record of index.records) {
-          if (record.state !== 'active') continue
-          if (!existsSync(join(baseDir, record.relativePath))) {
+          if (record.state === 'trashed') continue
+          const present = existsSync(join(baseDir, record.relativePath))
+          if (record.state === 'missing') {
+            // Symmetric heal: a file that comes back (restored from a backup, an
+            // undelete, a sync that caught up) returns its record to `active`
+            // instead of leaving it permanently `missing` — otherwise the record
+            // could never be cleared and the file would also be reported
+            // orphaned.
+            if (!present) continue
+            record.state = 'active'
+            record.missingAt = null
+            record.updatedAt = clockIso()
+            changed = true
+            continue
+          }
+          if (!present) {
             const now = clockIso()
             record.state = 'missing'
             record.missingAt = now
@@ -602,7 +738,7 @@ export function createManagedDocumentStore(
             if (!activePaths.has(relative)) orphaned.push(relative)
           }
         }
-        if (changed) await writeIndex(index)
+        if (changed) await writeIndex(index, recordsBefore)
         return {
           missing,
           orphaned: orphaned.sort(),
@@ -613,6 +749,7 @@ export function createManagedDocumentStore(
     cleanupTrash: (cleanupOptions) =>
       withLock(async () => {
         const index = await readIndex()
+        const recordsBefore = index.records.length
         const olderThanMs = cleanupOptions?.olderThanMs
         const purgeAll = cleanupOptions?.all === true
         const keep: ManagedFileRecord[] = []
@@ -638,7 +775,7 @@ export function createManagedDocumentStore(
           keep.push(record)
         }
         index.records = keep
-        await writeIndex(index)
+        await writeIndex(index, recordsBefore)
         return { ok: true, removed }
       }),
   }

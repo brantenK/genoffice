@@ -53,8 +53,16 @@ export const TENDERS_CHANNELS = {
   loadStoreV2: 'tenders:load-store-v2',
   saveStoreV2: 'tenders:save-store-v2',
   storeChangedV2: 'tenders:store-changed-v2',
-  // Managed-document lifecycle (Phase 5 WP-9) — main-side only for now; the
-  // preload bridge is wired in a follow-up lane.
+  /**
+   * Shell dirty-close guard. Tenders autosaves behind a 300 ms debounce, so the
+   * shell cannot know whether an edit is still only in renderer memory: main
+   * sends `closeFlushRequest` to the view before the window closes, and the
+   * renderer commits whatever is pending and answers on `closeFlushResult`.
+   */
+  closeFlushRequest: 'tenders:close-flush-request',
+  closeFlushResult: 'tenders:close-flush-result',
+  // Managed-document lifecycle (Phase 5 WP-9). Main-side handlers plus the
+  // preload bridge (`preload/index.ts`) that exposes them to the renderer.
   listDocumentTrash: 'tenders:list-document-trash',
   restoreDocument: 'tenders:restore-document',
   replaceDocument: 'tenders:replace-document',
@@ -89,11 +97,53 @@ export interface SaveDocumentResponse {
 export const MAX_TENDERS_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024
 
 /**
+ * Bounds for the compliance-matrix export (`exportMatrixToSheets`). The matrix is
+ * written to a temp CSV, so an unbounded row/cell count would let a renderer
+ * allocate an arbitrarily large file. Mirrors `MAX_TENDERS_REQUIREMENTS_PER_TENDER`
+ * (5000 rows) and `MAX_TENDERS_SINGLE_STRING_CHARS` (32768 chars per cell).
+ */
+export const MAX_TENDERS_MATRIX_EXPORT_ROWS = 5000
+export const MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS = 32768
+
+/**
+ * Ceiling for one serialized `exportMatrixToSheets` payload — the compliance
+ * matrix the handler turns into a CSV in `tmpdir()` before handing the file to
+ * the OS. Checked before any CSV work, so an over-bound request never allocates
+ * the file.
+ *
+ * Its own bound, deliberately not the IPC envelope's (`MAX_TENDERS_IPC_PAYLOAD_BYTES`
+ * in `tenders-persistence.ts`, which the `saveStoreV2` request uses): a raised
+ * envelope once loosened this export for a reason that had nothing to do with it,
+ * and nothing then reported the change. What this number bounds is the export, so
+ * the export states it. A legitimate payload is one tender's requirement list —
+ * the rows the renderer reads out of the workspace document — which is a strict
+ * subset of the document the store already accepts (`MAX_TENDERS_DOCUMENT_BYTES`,
+ * 4 MiB), so a payload above this ceiling exceeds the whole workspace document and
+ * no export read from the store can reach it. Held *below* the envelope on
+ * purpose: the export then answers for itself, and a payload between the two is
+ * refused by this check (pinned by `tests/tenders-main-write-bounds.test.ts`).
+ */
+export const MAX_TENDERS_MATRIX_EXPORT_BYTES = 4 * 1024 * 1024
+
+/**
  * `saveStoreV2` reply. Conflict replies are COMPACT: they carry
  * `currentRevision`, never the full authoritative `current` document (that
  * document is only ever read back through `loadStoreV2`).
  */
 export type SaveTendersIpcResult = SaveTendersResult & { currentRevision?: number }
+
+/**
+ * Renderer's answer to a `closeFlushRequest` (shell dirty-close guard).
+ * `dirty` is the state the renderer was in when the flush started; `ok` is the
+ * state after it — an uncommitted edit left behind (a failed or refused save)
+ * reports `ok: false` and main must not close silently on it.
+ */
+export interface TendersCloseFlushResult {
+  dirty: boolean
+  ok: boolean
+  /** Renderer-side save error when the flush could not commit. */
+  error: string | null
+}
 
 export interface ReadDocumentRequest {
   storedPath: string
@@ -215,6 +265,13 @@ export interface BillMilestoneRequest {
   tenderReference?: string
   issuingAuthority?: string
   milestoneTitle?: string
+  /**
+   * Compatibility echo only. The invoice amount is ALWAYS derived from the
+   * canonical milestone in the authoritative document; a value that does not
+   * match it is rejected rather than billed. Main ignores the descriptive
+   * fields (`tenderReference`, `issuingAuthority`, `milestoneTitle`) for the
+   * invoice and resolves them from the canonical tender.
+   */
   amount?: number
   notes?: string
 }
@@ -286,6 +343,10 @@ export interface TendersApiBridge {
 }
 
 export interface TendersApi extends TendersApiBridge {
+  /** Subscribe to main's pre-close flush request; returns an unsubscribe function. */
+  onCloseFlushRequest: (handler: (requestId: number) => void) => () => void
+  /** Answer a `closeFlushRequest`; main resolves its close guard on this reply. */
+  reportCloseFlush: (requestId: number, result: TendersCloseFlushResult) => Promise<void>
   getStoredData: () => Promise<string | null>
   saveStoredData: (json: string) => Promise<{ ok: boolean; error?: string }>
   onDataChanged: (callback: (data: TendersData) => void) => () => void

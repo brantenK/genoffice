@@ -95,7 +95,7 @@ export function TrashDrawer({
         setNotice(
           `Restored ${res.record?.fileName ?? entry.fileName}${
             res.storedPath ? ` to ${res.storedPath}` : ''
-          }.`,
+          }. Undo restores the file only — the vault entry or tender record it belonged to, its dates and notes, the compliance matrix and any requirement links are not restored.`,
         )
         if (res.storedPath) onRestored?.(res.storedPath)
         await load()
@@ -161,7 +161,7 @@ export function TrashDrawer({
                   Trashed documents
                 </h2>
                 <p className="text-[11px] text-[var(--text-tertiary)]">
-                  Recoverable — restore or empty explicitly
+                  Restores the file only — records are not restored
                 </p>
               </div>
             </div>

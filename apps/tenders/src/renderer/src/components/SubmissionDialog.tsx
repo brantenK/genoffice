@@ -61,13 +61,6 @@ export function browserTimeZone(): string {
   }
 }
 
-function parseMoney(raw: string): number | null {
-  const digits = raw.replace(/[^\d.]/g, '')
-  if (!digits) return null
-  const value = Number(digits)
-  return Number.isFinite(value) && value >= 0 ? value : null
-}
-
 export interface SubmissionDialogProps {
   tender: TenderRecord
   /** Readiness computed from the tender's current state; captured with the record. */

@@ -228,11 +228,17 @@ needs to `e2e/env.d.ts`, never a cast.
 records failing test **IDs**, not counts, because a count can match while the set
 of failures changes underneath it.
 
-Refresh it after a fix lands:
+Refresh it after a fix lands (`--repeat 2` files genuinely flaky tests under "(flaky)" so
+they stop reappearing as new failures):
 
 ```bash
-node fork/tools/baseline.mjs --write --with-e2e
+node fork/tools/baseline.mjs --write --with-e2e --repeat 2
 ```
+
+Both lanes are stale right now. The Tenders hardening fix set adds 7 test files, modifies a
+dozen more, and modifies 8 e2e specs, so `check:baseline` reports both lanes as changed until
+it is re-recorded. The Tenders unit suite is green (1011 passed / 0 failed / 7 skipped);
+re-record once the Tenders e2e lane is green too.
 
 Before the _next_ sync, re-record it at the pre-merge commit. That comparison is
 the single highest-value thing this runbook asks for: in the 2026-09-22 sync it

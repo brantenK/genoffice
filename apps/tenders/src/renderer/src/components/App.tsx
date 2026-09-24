@@ -103,6 +103,7 @@ export function App() {
   const hasWorkspaces = useTendersStore((s) => s.hasWorkspaces)
   const saveStatus = useTendersStore((s) => s.saveStatus)
   const saveError = useTendersStore((s) => s.saveError)
+  const saveSizeWarning = useTendersStore((s) => s.saveSizeWarning)
   const retrySave = useTendersStore((s) => s.retrySave)
   const reloadCommittedFromMain = useTendersStore((s) => s.reloadCommittedFromMain)
 
@@ -150,7 +151,7 @@ export function App() {
         style={{ background: 'var(--gs-panel-bg)' }}
       >
         <div className="flex flex-col items-center gap-3">
-          <Spinner className="size-6 border-slate-300 border-t-indigo-600" />
+          <Spinner className="size-6" />
           <p className="text-sm font-medium text-[var(--text-secondary)]">
             Loading Tenders workspace…
           </p>
@@ -207,6 +208,7 @@ export function App() {
           <SaveStatus
             status={saveStatus}
             message={saveError}
+            warning={saveSizeWarning}
             onRetry={retrySave}
             onReload={reloadCommittedFromMain}
           />
@@ -235,36 +237,49 @@ export function App() {
     <div className="flex h-full min-h-0">
       {/* ── Sidebar ────────────────────────────────────────────────────────── */}
       <aside
-        className={`relative flex shrink-0 flex-col border-r border-slate-200 bg-[var(--surface)] transition-all duration-200 ${
+        className={`relative flex shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] transition-all duration-200 ${
           collapsed ? 'w-[60px]' : 'w-[220px]'
         }`}
       >
         {/* logo */}
-        <div className={`flex h-14 shrink-0 items-center border-b border-slate-100 px-3 gap-2.5`}>
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
+        <div
+          className={`flex h-14 shrink-0 items-center border-b border-[var(--border-subtle)] px-3 gap-2.5`}
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)]">
             <ShieldCheck size={16} />
           </span>
           {!collapsed && (
             <span className="min-w-0">
-              <span className="block truncate text-[13px] font-bold tracking-tight text-[var(--text)]">
+              <span
+                className="block truncate text-[13px] font-bold tracking-tight text-[var(--text)]"
+                title="Zanostack Tenders"
+              >
                 Zanostack Tenders
               </span>
-              <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
-                Bids & RFP Workspace
+              <span
+                className="block truncate text-[10px] text-[var(--text-tertiary)]"
+                title="Bids & RFP Workspace"
+              >
+                Bids &amp; RFP Workspace
               </span>
             </span>
           )}
         </div>
 
-        {/* save status */}
+        {/* save status — the collapsed sidebar is 60px wide, so the full pill
+            would be clipped to its first letters; the compact variant keeps the
+            status (and any retry/reload action) inside the rail. A size
+            advisory survives the collapse through the glyph's title. */}
         <div
-          className={`border-b border-slate-100 py-2 flex items-center ${collapsed ? 'justify-center px-1' : 'px-3'}`}
+          className={`border-b border-[var(--border-subtle)] py-2 flex items-center ${collapsed ? 'justify-center px-1' : 'px-3'}`}
         >
           <SaveStatus
             status={saveStatus}
             message={saveError}
+            warning={saveSizeWarning}
             onRetry={retrySave}
             onReload={reloadCommittedFromMain}
+            compact={collapsed}
           />
         </div>
 
@@ -282,7 +297,7 @@ export function App() {
                 onClick={() => setPage(item.page)}
                 data-tour={item.tour}
                 aria-label={item.label}
-                title={collapsed ? item.label : undefined}
+                title={item.label}
                 className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm font-medium transition-colors ${
                   active
                     ? 'bg-[var(--accent-soft)] text-[var(--accent-dark)]'
@@ -301,7 +316,10 @@ export function App() {
         </nav>
 
         {/* help + onboarding shortcuts */}
-        <div className="relative shrink-0 border-t border-slate-100" data-tour="tour-help">
+        <div
+          className="relative shrink-0 border-t border-[var(--border-subtle)]"
+          data-tour="tour-help"
+        >
           <button
             type="button"
             onClick={() => setHelpOpen((v) => !v)}
@@ -368,7 +386,7 @@ export function App() {
 
         {/* company identity footer + switcher */}
         <div
-          className="relative shrink-0 border-t border-slate-100"
+          className="relative shrink-0 border-t border-[var(--border-subtle)]"
           data-tour="tour-company-switcher"
         >
           <button

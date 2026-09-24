@@ -24,6 +24,21 @@
  *  - Split proportion persists in `localStorage['zanostack-tenders-workspace-split-v1']`
  *    as `{ matrixFraction }`.
  *
+ * Truncation policy (tightened): single-line `text-overflow: ellipsis` is the
+ * design's affordance and is recorded as evidence only — EXCEPT inside `nav`,
+ * where a truncated label must still expose the full value through `title` /
+ * `aria-label` (200% text zoom truncates nav labels; the sidebar items do expose
+ * both). A nav label cut off with no full value is a clipping failure.
+ *
+ * The audit ignores content that is deliberately removed from the visual layer
+ * while staying in the accessibility tree (`sr-only` / visually-hidden): a clip
+ * to nothing (`clip-path: inset(50%)` in Tailwind v4's `sr-only`, or the classic
+ * `clip: rect(0,0,0,0)`), a 1×1 px absolutely positioned `overflow: hidden` box,
+ * or `display: none`. Such content is *supposed* to be clipped, so it is not a
+ * clipping failure. `visibility: hidden` hides only the element's own text —
+ * descendants that re-declare `visible` are still audited. Visible truncation is
+ * still reported exactly as above.
+ *
  * Fixture: seeded, schema-valid v2 store + a real 3-page PDF written to the
  * tender documents dir, so the PDF pane renders and the viewer can locate a
  * requirement on page 2 (the compact pane-switch journey depends on it).
@@ -381,10 +396,62 @@ function workspaceAudit(tenders: Page): Promise<AuditReport> {
       Array.from(el.childNodes).some(
         (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim().length > 0,
       )
+    /**
+     * True when the element (or one of its four nearest ancestors) still exposes
+     * the full value to the user/AT via `title` or `aria-label`.
+     */
+    const exposesFullText = (el: Element): boolean => {
+      let node: Element | null = el
+      for (let depth = 0; node && depth < 4; depth += 1) {
+        if ((node.getAttribute('title') ?? '').trim() !== '') return true
+        if ((node.getAttribute('aria-label') ?? '').trim() !== '') return true
+        node = node.parentElement
+      }
+      return false
+    }
+    /**
+     * True when the element (or one of its four nearest ancestors) is removed
+     * from the visual layer for its whole subtree: `display: none`, a clip to
+     * nothing (Tailwind v4's `sr-only` uses `clip-path: inset(50%)`; the classic
+     * visually-hidden rule uses `clip: rect(0,0,0,0)`), or a 1×1 px absolutely
+     * positioned `overflow: hidden` box. No descendant can escape any of those,
+     * so nothing inside is visible and nothing inside can be a clipping failure.
+     * Detected from computed style, never from a class name.
+     *
+     * `visibility: hidden` is deliberately NOT part of this test: it is
+     * inherited, so a descendant that re-declares `visible` is on screen again.
+     * It is handled per element by the `invisibleText` guards instead.
+     */
+    const subtreeClippedAway = (el: Element): boolean => {
+      let node: Element | null = el
+      for (let depth = 0; node && depth < 4; depth += 1) {
+        const style = getComputedStyle(node)
+        if (style.display === 'none') return true
+        if (
+          /^inset\(\s*50%(\s+50%){0,3}\s*\)$/.test(style.clipPath) ||
+          /^rect\(\s*(0(px)?[,\s]+){3}0(px)?\s*\)$/.test(style.clip)
+        ) {
+          return true
+        }
+        if (
+          node.clientWidth <= 1 &&
+          node.clientHeight <= 1 &&
+          style.position === 'absolute' &&
+          style.overflowX === 'hidden' &&
+          style.overflowY === 'hidden'
+        ) {
+          return true
+        }
+        node = node.parentElement
+      }
+      return false
+    }
     const fieldTags = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'IMG'])
     for (const element of Array.from(document.querySelectorAll('body *'))) {
       const rect = element.getBoundingClientRect()
       if (rect.width === 0 || rect.height === 0) continue
+      // Screen-reader-only content is clipped by design, not by a layout defect.
+      if (subtreeClippedAway(element)) continue
       const overflow = element.scrollWidth - element.clientWidth
       if (overflow <= 1) continue
       const style = getComputedStyle(element)
@@ -392,14 +459,34 @@ function workspaceAudit(tenders: Page): Promise<AuditReport> {
       // a scrollbar can never reveal is a clipping problem. `visible` spills.
       if (style.overflowX === 'auto' || style.overflowX === 'scroll') continue
       if (style.overflowX === 'visible') continue
+      // The element's own text is off-screen, so it cannot be a clip failure —
+      // but its children are still audited, because `visibility` is inherited
+      // and a descendant may re-declare `visible`.
+      const invisibleText = style.visibility === 'hidden'
       const record = { tag: element.tagName, cls: String(element.className).slice(0, 90), overflow }
-      if (style.textOverflow === 'ellipsis') {
-        // Deliberate single-line truncation is the design's affordance; keep it
-        // as evidence, never as a failure.
-        truncated.push(record)
+      if (!invisibleText && style.textOverflow === 'ellipsis') {
+        // Outside the primary navigation, single-line truncation is the design's
+        // affordance; keep it as evidence, never as a failure.
+        //
+        // In the navigation it is only acceptable while the full label stays
+        // reachable (title / aria-label on the item): a nav item a user cannot
+        // read in full — the case 200% text zoom produces — is a real failure,
+        // not a design choice.
+        if (!element.closest('nav') || exposesFullText(element)) {
+          truncated.push(record)
+          continue
+        }
+        clipOffenders.push({
+          ...record,
+          reason: 'nav label truncated with no full value exposed (no title/aria-label)',
+        })
         continue
       }
-      if (ownText(element) && (style.whiteSpace === 'nowrap' || style.whiteSpace === 'pre')) {
+      if (
+        !invisibleText &&
+        ownText(element) &&
+        (style.whiteSpace === 'nowrap' || style.whiteSpace === 'pre')
+      ) {
         // Nowrap text inside a clipping container is cut with no affordance.
         clipOffenders.push({ ...record, reason: 'nowrap text cut without ellipsis' })
         continue
@@ -410,8 +497,14 @@ function workspaceAudit(tenders: Page): Promise<AuditReport> {
       const cut: string[] = []
       const consider = (el: Element): void => {
         if (el.hasAttribute('aria-hidden')) return
-        const ellipsis = getComputedStyle(el).textOverflow === 'ellipsis'
-        if (!ellipsis && (ownText(el) || fieldTags.has(el.tagName))) {
+        if (subtreeClippedAway(el)) return
+        const elStyle = getComputedStyle(el)
+        const ellipsis = elStyle.textOverflow === 'ellipsis'
+        if (
+          elStyle.visibility !== 'hidden' &&
+          !ellipsis &&
+          (ownText(el) || fieldTags.has(el.tagName))
+        ) {
           const r = el.getBoundingClientRect()
           if (r.right > contentRight + 1) {
             cut.push(`${el.tagName}.${String(el.className).slice(0, 40)}`)

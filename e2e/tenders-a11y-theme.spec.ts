@@ -31,12 +31,35 @@
  *    "Trashed documents"), SubmissionDialog, OutcomeDialog, GuidedTour.
  *  - Icon-only controls carry an accessible name; interactive targets are at
  *    least 24x24 CSS px.
+ *  - A Drawer-based aside (ReadinessDrawer, VaultDrawer, MilestonesDrawer) is
+ *    placed against the workspace root (`<section data-workspace-root>`, the
+ *    drawer's containing block), which also hosts the sticky workspace toolbar
+ *    at z-index 30. The drawer therefore starts at or below the toolbar's bottom
+ *    edge: pinned to `inset-y-0` its title row — including its only close
+ *    control — painted underneath the toolbar, where `elementFromPoint` at the
+ *    X returned the toolbar's own controls and a pointer click could never land
+ *    (test 6 hit-tests every such drawer, then closes it with a real click).
+ *  - A save failure is announced in the collapsed 60px rail too (test 8). There
+ *    the compact SaveStatus renders its action branch (the app shell always
+ *    passes Retry/Reload), so the rail control *is* the action: the announcement
+ *    is carried by a wrapper that owns the live region (`role="alert"` plus the
+ *    failure text as its name and its visually hidden text) and the Retry /
+ *    Reload button sits inside it, keeping the button role and the same
+ *    accessible name. `role="alert"` on the button itself is not an allowed role
+ *    and replaces the button role, which is exactly the regression this test
+ *    pins. The failure is forced at the `tenders:save-store-v2` `ipcMain`
+ *    handler — the same seam `tenders-persistence-cutover.spec.ts` uses —
+ *    because nothing in the renderer can make its own save fail.
  *
  * AXE: `axe-core` is a devDependency; the scan injects `axe-core/axe.min.js`
  * from node_modules and fails loudly on a failed injection or a no-op engine
  * (window.axe version check + a knowingly-broken sentinel fixture must be
  * detected) — it can never report a vacuous pass. The scan only skips itself
- * when axe cannot be resolved at all (run `npm install`).
+ * when axe cannot be resolved at all (run `npm install`). The bundle is
+ * evaluated through `page.evaluate` (the debugger protocol), not
+ * `page.addScriptTag`: the renderer ships a strict `script-src 'self'
+ * 'wasm-unsafe-eval'` CSP and rightly refuses an inline script, so the harness
+ * injects CSP-compatibly rather than the CSP being relaxed for the test.
  *
  * Scratch `userData` under `%LOCALAPPDATA%\Temp\opencode`; cleaned in `finally`.
  */
@@ -65,6 +88,9 @@ const TENDER_REF = 'E2E/A11Y/2026/01'
 const TENDER_WON_REF = 'E2E/A11Y/2026/02'
 const TENDER_READY_REF = 'E2E/A11Y/2026/03'
 const TENDER_SUBMITTED_REF = 'E2E/A11Y/2026/04'
+/** Forced save-failure message; test 8 asserts it reaches the rail's alert. */
+const FORCED_SAVE_FAILURE =
+  'E2E forced save failure: the workspace store could not be written (a11y test 8)'
 
 const TOKENS = ['--surface', '--text', '--text-secondary', '--border', '--gs-panel-bg'] as const
 
@@ -539,6 +565,24 @@ interface AxeViolation {
 }
 
 /**
+ * Inject an axe bundle into the page without an inline `<script>`.
+ *
+ * The renderer ships a strict CSP (`script-src 'self' 'wasm-unsafe-eval'`,
+ * `src/renderer/index.html`) and it is doing its job: `page.addScriptTag({
+ * content })` compiles an inline script and Chromium refuses it with
+ * "Executing inline script violates the following Content Security Policy
+ * directive 'script-src 'self' 'wasm-unsafe-eval''". `page.evaluate` is
+ * delivered over the debugger protocol (`Runtime.evaluate`), which is not
+ * subject to the page's `script-src`, so the bundle is evaluated there instead
+ * — the CSP stays strict (no `unsafe-inline`, no hash or nonce carve-out for a
+ * test asset). Both callers still verify `window.axe.version`, so an injection
+ * that silently did nothing fails the scan instead of reporting a vacuous pass.
+ */
+async function injectAxe(page: Page, source: string): Promise<void> {
+  await page.evaluate(source)
+}
+
+/**
  * Run axe against the whole document. Throws when axe cannot be injected or
  * reports no version — a failed injection must fail the scan, never be coerced
  * into an empty (clean-looking) violation list.
@@ -550,7 +594,7 @@ async function runAxe(page: Page): Promise<AxeViolation[]> {
     )
   }
   const source = await readFile(AXE_SOURCE, 'utf8')
-  await page.addScriptTag({ content: source })
+  await injectAxe(page, source)
   return page.evaluate(async () => {
     const axe = (
       window as unknown as {
@@ -592,7 +636,7 @@ async function runAxeSentinel(page: Page): Promise<AxeSentinel> {
     )
   }
   const source = await readFile(AXE_SOURCE, 'utf8')
-  await page.addScriptTag({ content: source })
+  await injectAxe(page, source)
   return page.evaluate(async () => {
     const axe = (
       window as unknown as {
@@ -628,6 +672,114 @@ function seriousViolations(
   violations: Array<{ id: string; impact: string | null }>,
 ): Array<{ id: string; impact: string | null }> {
   return violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')
+}
+
+interface DrawerCloseHit {
+  drawer: { top: number; right: number; width: number; height: number }
+  toolbar: { top: number; bottom: number } | null
+  close: { cx: number; cy: number; width: number; height: number }
+  hit: { tag: string; isClose: boolean; insideDrawer: boolean }
+}
+
+/**
+ * Pointer hit-test for the open Drawer-based aside's own close control.
+ *
+ * The drawer can never out-rank the workspace toolbar: the toolbar is
+ * `position: sticky; z-index: 30` (styles/responsive.css) because it owns the
+ * overflow menu, whose popup must paint above the pane headers, so the menu's
+ * z-50 is trapped in that stacking context. With the drawer pinned to
+ * `inset-y-0` its title row sat underneath the toolbar — the X was laid out and
+ * "visible", but `document.elementFromPoint` at its centre returned the
+ * toolbar's own controls, so a pointer click on it retried forever. The drawer's
+ * box must therefore START at or below the toolbar's bottom edge.
+ */
+function drawerCloseHitTest(tenders: Page, closeName: string): Promise<DrawerCloseHit> {
+  return tenders.evaluate((name) => {
+    const drawer = document.querySelector<HTMLElement>('aside[role="dialog"][aria-modal="true"]')
+    if (!drawer) throw new Error('no open drawer: aside[role="dialog"][aria-modal="true"]')
+    const close = Array.from(drawer.querySelectorAll<HTMLElement>('button')).find(
+      (button) => (button.getAttribute('aria-label') ?? '') === name,
+    )
+    if (!close) throw new Error(`the open drawer has no close control named "${name}"`)
+
+    const closeRect = close.getBoundingClientRect()
+    const cx = closeRect.left + closeRect.width / 2
+    const cy = closeRect.top + closeRect.height / 2
+    const hit = document.elementFromPoint(cx, cy)
+    const toolbar = document.querySelector<HTMLElement>('[data-testid="workspace-context-header"]')
+    const toolbarRect = toolbar?.getBoundingClientRect() ?? null
+    const drawerRect = drawer.getBoundingClientRect()
+    const describe = (element: Element | null): string => {
+      if (!element) return 'none'
+      const name = element.getAttribute('aria-label') ?? element.getAttribute('data-testid') ?? ''
+      return `${element.tagName}${name ? `[${name}]` : ''}`
+    }
+
+    return {
+      drawer: {
+        top: Math.round(drawerRect.top),
+        right: Math.round(drawerRect.right),
+        width: Math.round(drawerRect.width),
+        height: Math.round(drawerRect.height),
+      },
+      toolbar: toolbarRect
+        ? { top: Math.round(toolbarRect.top), bottom: Math.round(toolbarRect.bottom) }
+        : null,
+      close: {
+        cx: Math.round(cx),
+        cy: Math.round(cy),
+        width: Math.round(closeRect.width),
+        height: Math.round(closeRect.height),
+      },
+      hit: {
+        tag: describe(hit),
+        isClose: Boolean(hit) && (hit === close || close.contains(hit)),
+        insideDrawer: Boolean(hit && drawer.contains(hit)),
+      },
+    }
+  }, closeName)
+}
+
+// ── main-process save-failure control ────────────────────────────────────────
+
+const SAVE_CHANNEL = 'tenders:save-store-v2'
+
+type InvokeHandler = (...args: unknown[]) => unknown
+
+/**
+ * Make every `tenders:save-store-v2` call report WRITE_FAILED.
+ *
+ * A save failure cannot be induced from the renderer — the store owns its own
+ * payload checks, `window.tendersApi` is a frozen contextBridge object, and
+ * nothing in the UI can write an invalid document — so the failure is forced at
+ * the same seam `tenders-persistence-cutover.spec.ts` uses for its forced
+ * WRITE_FAILED / REVISION_CONFLICT journeys: the registered `ipcMain` invoke
+ * handler. The store treats a failure as terminal until the user retries, so
+ * the state stays on screen instead of being papered over by a queued autosave.
+ */
+function forceSaveFailure(app: ElectronApplication, message: string): Promise<void> {
+  return app.evaluate(({ ipcMain }, msg) => {
+    const map = (ipcMain as unknown as { _invokeHandlers: Map<string, InvokeHandler> })
+      ._invokeHandlers
+    const channel = 'tenders:save-store-v2'
+    const original = map.get(channel)
+    if (!original) throw new Error(`${channel} handler is not registered`)
+    ;(globalThis as unknown as Record<string, unknown>).__e2eTendersSaveHandler = original
+    map.set(channel, async () => ({
+      ok: false,
+      error: { code: 'WRITE_FAILED', message: msg },
+    }))
+  }, message)
+}
+
+/** Put the real save handler back, so the retry below can commit. */
+function restoreSaveHandler(app: ElectronApplication): Promise<void> {
+  return app.evaluate(({ ipcMain }, channel) => {
+    const map = (ipcMain as unknown as { _invokeHandlers: Map<string, InvokeHandler> })
+      ._invokeHandlers
+    const original = (globalThis as unknown as Record<string, unknown>).__e2eTendersSaveHandler
+    if (map && typeof original === 'function') map.set(channel, original as InvokeHandler)
+  }, SAVE_CHANNEL)
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -865,7 +1017,8 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
     test.skip(
       !AXE_AVAILABLE,
       'axe-core is a devDependency but is not resolvable in this checkout — run `npm install`. ' +
-        'The scan injects `axe-core/axe.min.js` from node_modules with page.addScriptTag and fails ' +
+        'The scan injects `axe-core/axe.min.js` from node_modules with a CSP-safe ' +
+        '`page.evaluate` (an inline `addScriptTag` is refused by the renderer CSP) and fails ' +
         'loudly (injection version check + sentinel fixture) instead of reporting a vacuous pass. ' +
         'Looked for: ' +
         [
@@ -1460,6 +1613,494 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       await writeResult('tenders-a11y-theme-journey-5', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j5').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test('6: every Drawer-based aside starts below the workspace toolbar, so its close control is hit-testable', async () => {
+    const screenshots: string[] = []
+    let run: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      await writeSeededStore(userDataDir)
+      run = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-a11y-theme-j6',
+      })
+      const tenders = await openTendersFromNav(run.app, run.page)
+      await dismissTendersOnboarding(tenders)
+
+      const drawers: Array<{ label: string; close: string; open: () => Promise<void> }> = [
+        {
+          label: 'readiness drawer',
+          close: 'Close readiness',
+          open: async () => {
+            await openTender(tenders, TENDER_REF)
+            await tenders.getByRole('button', { name: 'Bid readiness' }).click()
+          },
+        },
+        {
+          label: 'vault drawer',
+          close: 'Close vault',
+          open: async () => {
+            await openTender(tenders, TENDER_REF)
+            await tenders.getByRole('button', { name: 'Company vault' }).click()
+          },
+        },
+        {
+          label: 'milestones drawer',
+          close: 'Close Milestones',
+          open: async () => {
+            await openTender(tenders, TENDER_WON_REF)
+            await tenders
+              .getByRole('button', { name: /^Milestones/ })
+              .first()
+              .click()
+          },
+        },
+      ]
+
+      const outcomes: Array<Record<string, unknown>> = []
+      const failures: string[] = []
+      for (const drawer of drawers) {
+        const record: Record<string, unknown> = { label: drawer.label }
+        try {
+          await drawer.open()
+          const close = tenders.getByRole('button', { name: drawer.close })
+          await expect(
+            close,
+            `${drawer.label}: the drawer must expose its own close control`,
+          ).toBeVisible({ timeout: 15_000 })
+
+          const hit = await drawerCloseHitTest(tenders, drawer.close)
+          record.hit = hit
+          expect(
+            hit.toolbar,
+            `${drawer.label}: the workspace toolbar must be present`,
+          ).not.toBeNull()
+          expect(
+            hit.drawer.top,
+            `${drawer.label}: the drawer's box must start at or below the toolbar's bottom edge ` +
+              `(drawer.top=${hit.drawer.top}, toolbar.bottom=${hit.toolbar?.bottom})`,
+          ).toBeGreaterThanOrEqual((hit.toolbar?.bottom ?? 0) - 1)
+          expect(
+            hit.hit.isClose,
+            `${drawer.label}: elementFromPoint at the close control's centre ` +
+              `(${hit.close.cx},${hit.close.cy}) must return the close control, not "${hit.hit.tag}"`,
+          ).toBe(true)
+
+          // The same claim through the real input path: a pointer click only
+          // lands if the browser hit-tests the X at that point (Playwright
+          // retries — and fails — while the element is covered).
+          await close.click({ timeout: 10_000 })
+          await expect(close, `${drawer.label}: the close click must close the drawer`).toHaveCount(
+            0,
+            { timeout: 10_000 },
+          )
+          record.clickClosed = true
+        } catch (error) {
+          record.error = error instanceof Error ? error.message : String(error)
+          failures.push(`${drawer.label}: ${record.error}`)
+          await tenders.keyboard.press('Escape').catch(() => {})
+        }
+        outcomes.push(record)
+      }
+      screenshots.push(await shot(tenders, 'a11y-theme-j6-drawer-close-hit'))
+
+      expect(failures, `drawer close hit-test failures:\n${failures.join('\n')}`).toEqual([])
+      const result: JourneyResult = {
+        journey: '6: drawer close control is hit-testable (drawer starts below the toolbar)',
+        status: 'PASS',
+        detail: `${outcomes.length} Drawer-based asides opened; each close control hit-tested at its centre and closed by a real pointer click`,
+        evidence: { userDataDir, outcomes },
+        screenshots,
+      }
+      await writeResult('tenders-a11y-theme-journey-6', result)
+    } finally {
+      if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j6').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test('7: sidebar chrome is theme-token driven in dark, the collapsed rail keeps its save chip, and nav labels keep their full text', async () => {
+    const screenshots: string[] = []
+    let run: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      await writeSeededStore(userDataDir)
+      run = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-a11y-theme-j7',
+      })
+      const tenders = await openTendersFromNav(run.app, run.page)
+      await dismissTendersOnboarding(tenders)
+
+      const sidebarChrome = (): Promise<{
+        theme: string | null
+        tokens: Record<string, string>
+        sidebar: { borderRightWidth: string; borderRightColor: string; clientWidth: number }
+        rows: Array<{ cls: string; side: string; width: string; color: string }>
+        logo: { background: string; color: string }
+        chip: { width: number; right: number; name: string; railRight: number } | null
+        nav: Array<{ label: string; title: string; truncated: boolean }>
+      }> =>
+        tenders.evaluate(async () => {
+          const toggle = document.querySelector<HTMLElement>(
+            '[aria-label="Collapse sidebar"], [aria-label="Expand sidebar"]',
+          )
+          const aside =
+            toggle?.closest<HTMLElement>('aside') ?? document.querySelector<HTMLElement>('aside')
+          if (!aside) throw new Error('the sidebar aside was not found')
+
+          // Settle the sidebar's own chrome before sampling it. The aside
+          // carries `transition-all duration-200`, so a theme flip animates its
+          // border-color and a collapse animates its width: a sample taken while
+          // that runs returns an intermediate blend of the two token values —
+          // this test measured rgb(194, 193, 188), exactly 17% of the way from
+          // the light --border (#e2dfda) to the dark one (#2c332c) and equal to
+          // neither token — or a mid-collapse clientWidth. Reading a computed
+          // style forces the style recalc that creates a pending transition, so
+          // loop until the aside has nothing running left to animate.
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            void getComputedStyle(aside).borderRightColor
+            const running = aside.getAnimations().filter((a) => a.playState === 'running')
+            if (running.length === 0) break
+            await Promise.race([
+              Promise.all(running.map((a) => a.finished.catch(() => undefined))),
+              new Promise((resolve) => setTimeout(resolve, 1_000)),
+            ])
+          }
+
+          // Resolve a token to its computed colour through a throwaway probe, so
+          // the assertions compare rendered values with the theme's own values
+          // rather than with a hard-coded rgb() literal.
+          const probe = document.createElement('span')
+          document.body.appendChild(probe)
+          const resolve = (value: string): string => {
+            probe.style.color = value
+            return getComputedStyle(probe).color
+          }
+          const root = getComputedStyle(document.documentElement)
+          const tokens: Record<string, string> = {}
+          for (const name of [
+            '--border',
+            '--border-subtle',
+            '--accent',
+            '--accent-contrast',
+            '--surface',
+          ]) {
+            tokens[name] = resolve(root.getPropertyValue(name).trim())
+          }
+
+          const rows: Array<{ cls: string; side: string; width: string; color: string }> = []
+          for (const row of Array.from(aside.querySelectorAll<HTMLElement>(':scope > div'))) {
+            const style = getComputedStyle(row)
+            for (const [side, width, color] of [
+              ['top', style.borderTopWidth, style.borderTopColor],
+              ['bottom', style.borderBottomWidth, style.borderBottomColor],
+            ] as const) {
+              if (width !== '0px') {
+                rows.push({ cls: String(row.className).slice(0, 48), side, width, color })
+              }
+            }
+          }
+
+          // The logo tile is the only span in the aside's first (logo) row.
+          const tile = aside.querySelector<HTMLElement>(':scope > div:first-child span')
+          const chipElement = aside.querySelector<HTMLElement>('[role="status"], [role="alert"]')
+          const chipRect = chipElement?.getBoundingClientRect() ?? null
+          const asideStyle = getComputedStyle(aside)
+          const asideRect = aside.getBoundingClientRect()
+          const logo = {
+            background: tile ? getComputedStyle(tile).backgroundColor : '',
+            color: tile ? getComputedStyle(tile).color : '',
+          }
+          const sidebar = {
+            borderRightWidth: asideStyle.borderRightWidth,
+            borderRightColor: asideStyle.borderRightColor,
+            clientWidth: aside.clientWidth,
+          }
+          probe.remove()
+
+          return {
+            theme: document.documentElement.getAttribute('data-theme'),
+            tokens,
+            sidebar,
+            rows,
+            logo,
+            chip:
+              chipElement && chipRect
+                ? {
+                    width: Math.round(chipRect.width),
+                    right: Math.round(chipRect.right),
+                    name:
+                      chipElement.getAttribute('aria-label') ??
+                      chipElement.getAttribute('title') ??
+                      '',
+                    railRight: Math.round(asideRect.right),
+                  }
+                : null,
+            nav: Array.from(document.querySelectorAll<HTMLElement>('nav button')).map((button) => {
+              const label = button.querySelector<HTMLElement>('span:last-child')
+              return {
+                label: button.getAttribute('aria-label') ?? '',
+                title: button.getAttribute('title') ?? '',
+                truncated: label ? label.scrollWidth > label.clientWidth + 1 : false,
+              }
+            }),
+          }
+        })
+
+      // ── (1) every chrome rule in the sidebar comes from the theme tokens ───
+      await applyThemeAttribute(tenders, 'dark')
+      await expect
+        .poll(() => themeSignature(tenders).then((s) => s.attr), {
+          message: 'the dark theme must be stamped before the chrome colours are read',
+        })
+        .toBe('dark')
+      const dark = await sidebarChrome()
+      expect(dark.theme).toBe('dark')
+      expect(
+        dark.sidebar.borderRightWidth,
+        'the sidebar must still carry its divider rule',
+      ).not.toBe('0px')
+      expect(
+        dark.sidebar.borderRightColor,
+        'the sidebar divider must be the --border token, not a light palette hairline',
+      ).toBe(dark.tokens['--border'])
+      expect(
+        dark.rows.length,
+        'the sidebar chrome rows must carry their separators',
+      ).toBeGreaterThanOrEqual(4)
+      for (const row of dark.rows) {
+        expect(
+          row.color,
+          `sidebar row "${row.cls}" (border-${row.side}) must use the --border-subtle token, ` +
+            `not a light palette hairline (got ${row.color})`,
+        ).toBe(dark.tokens['--border-subtle'])
+      }
+      expect(
+        dark.logo.background,
+        'the logo tile must be the --accent token, not a fixed indigo',
+      ).toBe(dark.tokens['--accent'])
+      expect(dark.logo.color, 'the logo glyph must be the --accent-contrast token').toBe(
+        dark.tokens['--accent-contrast'],
+      )
+
+      // ── (2) nav labels keep their full text in both sidebar states ─────────
+      expect(dark.nav.length, 'the sidebar nav must render its items').toBeGreaterThan(0)
+      for (const item of dark.nav) {
+        expect(
+          item.title,
+          `nav item "${item.label}" must expose its full label as a title ` +
+            '(at 200% text zoom the 220px rail truncates the visible label)',
+        ).toBe(item.label)
+      }
+
+      // 200% text-only zoom (the same approximation the responsive lane uses):
+      // the visible label truncates, the tooltip still carries the whole label.
+      await tenders.evaluate(() => {
+        document.documentElement.style.fontSize = '200%'
+      })
+      const zoomed = await sidebarChrome()
+      for (const item of zoomed.nav) expect(item.title).toBe(item.label)
+
+      // Back to 100% text for the rail measurement below: the chrome is rem-based,
+      // so the compact chip's own size scales with the text (the 60px rail is not).
+      await tenders.evaluate(() => {
+        document.documentElement.style.fontSize = ''
+      })
+
+      // ── (3) the collapsed 60px rail does not clip the save chip ───────────
+      await tenders.getByRole('button', { name: 'Collapse sidebar' }).click()
+      await expect(tenders.getByRole('button', { name: 'Expand sidebar' })).toBeVisible({
+        timeout: 10_000,
+      })
+      const collapsed = await sidebarChrome()
+      expect(
+        collapsed.sidebar.clientWidth,
+        'the rail must be the collapsed 60px width',
+      ).toBeLessThan(70)
+      expect(collapsed.chip, 'the collapsed rail must still show the save state').not.toBeNull()
+      // At 100% text the compact chip is a single 24px glyph; the full pill would
+      // be capped at the rail's inner width (~51px) with its label spilling out.
+      expect(
+        collapsed.chip?.width ?? 0,
+        `the collapsed rail must render the compact save chip, not the full pill ` +
+          `(got ${collapsed.chip?.width}px in a ${collapsed.sidebar.clientWidth}px rail)`,
+      ).toBeLessThanOrEqual(28)
+      expect(
+        collapsed.chip?.right ?? 0,
+        'the compact save chip must stay inside the rail',
+      ).toBeLessThanOrEqual((collapsed.chip?.railRight ?? 0) + 1)
+      expect(
+        (collapsed.chip?.name ?? '').trim().length,
+        'the compact save chip must keep an accessible name for the state it shows',
+      ).toBeGreaterThan(0)
+      screenshots.push(await shot(tenders, 'a11y-theme-j7-sidebar-chrome'))
+
+      const result: JourneyResult = {
+        journey: '7: sidebar chrome tokens + collapsed rail save chip + nav label tooltips',
+        status: 'PASS',
+        detail:
+          `dark: ${dark.rows.length} chrome rules on --border/--border-subtle, logo on --accent; ` +
+          `${zoomed.nav.filter((i) => i.truncated).length}/${zoomed.nav.length} nav labels truncated at 200% text zoom with the full label kept as the tooltip; ` +
+          `collapsed rail ${collapsed.sidebar.clientWidth}px with a ${collapsed.chip?.width}px save chip`,
+        evidence: { userDataDir, dark, zoomed, collapsed },
+        screenshots,
+      }
+      await writeResult('tenders-a11y-theme-journey-7', result)
+    } finally {
+      if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j7').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test('8: a save failure in the collapsed rail is announced as an alert carrying the failure detail', async () => {
+    const screenshots: string[] = []
+    let run: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      await writeSeededStore(userDataDir)
+      run = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-a11y-theme-j8',
+      })
+      const tenders = await openTendersFromNav(run.app, run.page)
+      await dismissTendersOnboarding(tenders)
+
+      // Fail every save from here on: the store is terminal on a failure, so the
+      // alert cannot be replaced by a queued autosave succeeding behind it.
+      await forceSaveFailure(run.app, FORCED_SAVE_FAILURE)
+
+      // A real mutation through the real UI path (the same requirement status
+      // control the keyboard journey drives; the select only renders once the
+      // clause details are expanded).
+      await openTender(tenders, TENDER_REF)
+      const row = tenders.locator('main li', { hasText: 'E2E requirement one' }).first()
+      await expect(row).toBeVisible({ timeout: 20_000 })
+      await row.locator('button[title="Show clause details"]').first().click()
+      const select = row.locator('select:has(option[value="FULFILLED"])').first()
+      await expect(select).toBeVisible()
+      const before = await select.inputValue()
+      await select.selectOption(before === 'FULFILLED' ? 'ACTION_REQUIRED' : 'FULFILLED')
+
+      // Collapse to the 60px rail, where the compact SaveStatus renders the
+      // action branch instead of the pill.
+      const collapse = tenders.getByRole('button', { name: 'Collapse sidebar' })
+      if ((await collapse.count()) > 0) await collapse.click()
+      await expect(tenders.getByRole('button', { name: 'Expand sidebar' })).toBeVisible({
+        timeout: 10_000,
+      })
+
+      // The sidebar rail, resolved through its own toggle rather than by order.
+      const rail = tenders
+        .locator('aside')
+        .filter({ has: tenders.getByRole('button', { name: 'Expand sidebar' }) })
+      const railAlert = rail.getByRole('alert')
+      // Independent of the rail: the save really did fail, through the app's own
+      // save path (the workspace pill is the other SaveStatus on screen).
+      await expect(
+        tenders.locator('main').getByRole('alert').filter({ hasText: 'Save failed' }),
+        'the forced WRITE_FAILED must reach the save state the UI reports',
+      ).toBeVisible({ timeout: 25_000 })
+      await expect(
+        railAlert,
+        'the collapsed rail must expose the save failure as an alert, not as a bare button',
+      ).toHaveCount(1, { timeout: 25_000 })
+      await expect(railAlert).toBeVisible()
+      await expect(railAlert).toHaveAttribute('role', 'alert')
+
+      // The announcement is the live region's own text. It must carry the state,
+      // the failure detail and the action — the detail is the part that actually
+      // reaches the user, and the action label is what tells them the control
+      // below recovers the save.
+      const announcement = ((await railAlert.textContent()) ?? '').trim()
+      expect(
+        announcement,
+        `the rail alert must announce the save state (got "${announcement}")`,
+      ).toContain('Save failed')
+      expect(
+        announcement,
+        `the rail alert must carry the failure message (got "${announcement}")`,
+      ).toContain(FORCED_SAVE_FAILURE)
+      expect(
+        announcement,
+        `the rail alert must name the action it exposes (got "${announcement}")`,
+      ).toContain('Retry')
+
+      // `role="alert"` on a `<button>` is not an allowed role: it replaces the
+      // button role, so the control must live *inside* the announced region and
+      // keep its own role and name. Reachable, operable and named as a button —
+      // not merely present as an alert.
+      const railRetry = rail.getByRole('button', { name: /Retry/ })
+      await expect(
+        railRetry,
+        'the announced region must still expose exactly one Retry control',
+      ).toHaveCount(1)
+      await expect(railRetry).toBeVisible()
+      await expect(railRetry).toBeEnabled()
+      await expect(
+        railRetry,
+        'the retry control must still be exposed as a button (role="alert" must not replace it)',
+      ).toHaveAccessibleName(/Save failed/)
+      await expect(
+        railRetry,
+        'the retry control must name the action it performs',
+      ).toHaveAccessibleName(/Retry$/)
+      const name = (await railRetry.getAttribute('aria-label')) ?? ''
+      expect(name, 'the retry control must keep the announcement as its accessible name').toBe(
+        announcement,
+      )
+
+      // It is the compact rail chip, not the workspace pill (which is the other,
+      // already-announced SaveStatus on screen): the announced region hugs the
+      // 24px control it wraps.
+      const chip = await railAlert.boundingBox()
+      expect(
+        chip?.width ?? 0,
+        `the announced region must be the compact rail chip (got ${chip?.width}px)`,
+      ).toBeLessThanOrEqual(28)
+      const railBox = await rail.boundingBox()
+      const chipRight = (chip?.x ?? 0) + (chip?.width ?? 0)
+      expect(
+        chipRight,
+        `the announced chip must stay inside the rail (chip right ${Math.round(chipRight)}, ` +
+          `rail right ${Math.round((railBox?.x ?? 0) + (railBox?.width ?? 0))})`,
+      ).toBeLessThanOrEqual((railBox?.x ?? 0) + (railBox?.width ?? 0) + 1)
+      screenshots.push(await shot(tenders, 'a11y-theme-j8-rail-save-alert'))
+
+      // The announcement must not cost the control its operability: with the real
+      // handler back, the button inside the announced region retries and the rail
+      // settles on "Saved" (a settled status, so the region becomes role=status).
+      await restoreSaveHandler(run.app)
+      await railRetry.click({ timeout: 10_000 })
+      await expect(rail.getByRole('status')).toContainText('Saved', { timeout: 25_000 })
+      screenshots.push(await shot(tenders, 'a11y-theme-j8-rail-save-recovered'))
+
+      const result: JourneyResult = {
+        journey: '8: collapsed-rail save failure is announced (WCAG 4.1.3)',
+        status: 'PASS',
+        detail:
+          'a forced WRITE_FAILED reached the collapsed rail as a role="alert" region carrying the failure text and the retry action; the named button inside the region retried successfully once the handler was restored',
+        evidence: {
+          userDataDir,
+          forcedMessage: FORCED_SAVE_FAILURE,
+          announcement,
+          accessibleName: name,
+          chipWidth: chip?.width ?? null,
+        },
+        screenshots,
+      }
+      await writeResult('tenders-a11y-theme-journey-8', result)
+    } finally {
+      if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j8').catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
     }
   })

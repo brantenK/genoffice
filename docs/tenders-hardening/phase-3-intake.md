@@ -82,7 +82,8 @@ Acceptance:
 
 Decision from the Oracle pressure-test: **do not** build a huge OCR stack before
 measuring corpus need, and **do not** claim scanned support while doing only
-`needsOcr` detection (current state).
+`needsOcr` detection (the state when the decision was taken — superseded by the alpha
+behaviour below, which classifies every page and blocks readiness on the unread ones).
 
 Alpha behaviour (do immediately, cheap):
 
@@ -114,6 +115,12 @@ Files: `pdf/extract.ts`, new `pdf/ocr.ts`, `components/PdfViewer.tsx`,
   Planner's candidate envelope: native/mixed PDF up to 100 MB or 500 pages; OCR-heavy up
   to 50 MB or 150 scanned pages; 250 active tenders; 1000 vault documents; 10 000
   requirements. **Reduce and publish if not met.**
+  Published outcome: the PDF envelope was met as written (`PDF_PREFLIGHT_LIMITS` in
+  `renderer/src/pdf/extract.ts` — 100 MB / 500 pages, both stress-measured); the OCR
+  envelope is not claimed at all (OCR-Beta deferred — scanned pages are flagged, never
+  read); the record caps are published in `contracts-and-invariants.md` §1 as **5 000**
+  tenders per workspace, **10 000** vault documents per workspace and **5 000**
+  requirements per tender — the 10 000-requirement candidate was **reduced**.
 - Preflight size limits before reading large buffers; page-level progress; cancellation;
   bounded OCR concurrency.
 - Virtualise/evict off-screen PDF canvases (currently every viewed canvas is retained).

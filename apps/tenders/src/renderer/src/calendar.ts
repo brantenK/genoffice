@@ -1,15 +1,20 @@
 // Expiry runway + calendar export: a chronological renewal timeline of the
 // company vault (documents + tenders with deadlines), plus one-click .ics
 // download generated entirely client-side via a Blob.
+//
+// Deadlines and document health come from the canonical shared implementations
+// (`shared/readiness`), so the runway cannot call a document valid or a tender
+// open that the readiness gate blocks. Every `date` is the real UTC instant of
+// the event, so the `.ics` export carries the instant the RFP actually means.
 import type { TenderRecord, VaultDoc } from '../shared/types'
+import { parseCivilDay, parseClosingDate } from '../../shared/readiness'
 import { assessDocHealth, daysBetween, type DocHealthReport } from './gap'
-import { parseClosingDate } from './deadline'
 
 export interface RunwayItem {
   id: string
   /** what needs action, e.g. "COIDA letter of good standing" */
   title: string
-  /** ISO date of the event */
+  /** ISO instant of the event, in UTC */
   date: string
   /** days from today (negative = overdue) */
   daysAway: number
@@ -39,12 +44,18 @@ export function buildRunway(
   for (const doc of vault) {
     const rep: DocHealthReport = assessDocHealth(doc, now)
 
-    if (doc.expiryDate) {
-      const days = daysBetween(new Date(doc.expiryDate), now)
+    // Vault dates are civil date-only values, so they go through the canonical
+    // civil parse: `new Date('2026-99-99')` is an Invalid Date, and the runway
+    // used to render "Expires in NaN day(s)" for it. A value that is not a real
+    // date has no expiry event to schedule — readiness already reports it as
+    // INVALID_DATE and blocks — so it is left out of the timeline.
+    const expiry = parseCivilDay(doc.expiryDate)
+    if (doc.expiryDate && expiry) {
+      const days = daysBetween(expiry, now)
       items.push({
         id: `exp-${doc.id}`,
         title: doc.title,
-        date: doc.expiryDate,
+        date: expiry.toISOString(),
         daysAway: days,
         kind: 'VAULT_EXPIRY',
         note:
@@ -77,6 +88,9 @@ export function buildRunway(
     if (!closing) continue
     const days = daysBetween(closing, now)
     if (days >= -30) {
+      // `closing` is the real UTC instant of the RFP's SAST wall-clock deadline
+      // (11:00 SAST → 09:00Z), so the ISO value below is both the instant the
+      // `.ics` export must carry and the day the SA civil calendar shows.
       items.push({
         id: `close-${t.id}`,
         title: t.title,
@@ -106,6 +120,12 @@ function icsEscape(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n')
 }
 
+/**
+ * RFC 5545 UTC form of an instant. Runway dates are already real UTC instants
+ * (a civil "11:00" closing is anchored to 11:00 SAST = 09:00Z by
+ * `parseClosingDate`), so writing the UTC fields with a `Z` suffix puts the
+ * event at the moment the RFP means — never 2 h late on the user's calendar.
+ */
 function icsStamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return (

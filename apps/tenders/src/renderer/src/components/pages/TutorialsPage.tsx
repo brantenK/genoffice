@@ -87,7 +87,7 @@ const GROUPS: Group[] = [
         title: 'How to shred a tender RFP',
         minutes: '~2 min',
         summary:
-          'Turn any RFP PDF into a compliance matrix — 100% in your browser, nothing is uploaded.',
+          'Turn any RFP PDF into a compliance matrix — processed locally on this machine, nothing is uploaded.',
         steps: [
           <>
             Open the <strong>Tenders</strong> page in the sidebar.
@@ -133,12 +133,16 @@ const GROUPS: Group[] = [
           </>,
           <>
             Requirements with a <strong>confidence badge</strong> show how strongly a vault document
-            matched. The <em>“Also found”</em> list under a requirement offers alternative vault
-            docs when the match is ambiguous.
+            matched; where the matcher ranked candidates but did not auto-link one, the row says how
+            many it found. <em>“Also found”</em> on a requirement lists its other source clauses —
+            more places in the PDF, not more vault documents.
           </>,
           <>
-            Open <strong>Company vault</strong> (top bar) to link or unlink vault documents for the
-            selected requirement, then press <strong>Re-run gap</strong> to recompute statuses.
+            <strong>Link a vault document</strong> on the requirement row itself — each row has a
+            vault-document picker (choose <em>“— no vault doc —”</em> to unlink), then press{' '}
+            <strong>Re-run gap</strong> to recompute statuses. The <strong>Company vault</strong>{' '}
+            drawer in the top bar is read-only: it shows every document, its health, and which
+            requirements use it.
           </>,
           <>
             Pages saved as images have no text layer, so their text is{' '}
@@ -160,8 +164,9 @@ const GROUPS: Group[] = [
             drawer.
           </>,
           <>
-            The <strong>score ring</strong> combines requirement completion, vault health, profile
-            completeness and signature checks with fixed weights (30 / 25 / 20 / 15 / 10).
+            The <strong>score ring</strong> combines five checks with fixed weights: requirements
+            30, linked documents valid on the closing date 25, the closing deadline 20, the
+            signature checklist 15 and company details 10.
           </>,
           <>
             The <strong>Biggest gain</strong> section names the single action that lifts your score

@@ -50,16 +50,6 @@ async function settleWithin<T>(promise: Promise<T>, timeoutMs = 750): Promise<T>
   }
 }
 
-async function isSettledWithin<T>(promise: Promise<T>, timeoutMs = 250): Promise<boolean> {
-  return Promise.race([
-    promise.then(
-      () => true,
-      () => true,
-    ),
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-  ])
-}
-
 async function uniqueDirectory(label: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), `tenders-store-${label}-${randomUUID()}-`))
   roots.push(root)
@@ -349,6 +339,29 @@ describe('Phase 2 authoritative Tenders store', () => {
       expect(onCommitted).not.toHaveBeenCalled()
     })
 
+    it('reports the actionable document ceiling, not the aggregate-text limit, for an over-size document', async () => {
+      const directory = await uniqueDirectory('size-before-schema')
+      const store = createTendersStore({ directory, now: () => FIXED_NOW })
+      // Over both ceilings at once: 130 × 32 KiB of text is 4 259 840 counted
+      // characters and ~4.26 MB compact. The schema walk's aggregate-text check runs
+      // first, so without the byte check ahead of it the caller is told about a limit
+      // that names no field and no way forward.
+      const document = validV2(0)
+      document.issuerTemplates = Array.from({ length: 130 }, (_, index) => ({
+        ...issuer(`issuer-${index}`),
+        name: 'A'.repeat(32_768),
+      }))
+
+      const result = await store.save({ expectedRevision: 0, document })
+
+      expectSaveFailure(result, 'INVALID_DATA')
+      if (result.ok) throw new Error('expected the document ceiling to refuse the save')
+      expect(result.error.message).toMatch(/size exceeds limit of 4194304/)
+      expect(result.error.message).not.toMatch(/Aggregate string content/)
+      // Refused before anything was written.
+      expect(await readdir(directory)).toEqual([])
+    })
+
     it('returns WRITE_FAILED for a deterministic impossible file target and preserves the blocking file', async () => {
       const root = await uniqueDirectory('write-failure')
       const blocker = join(root, 'not-a-directory')
@@ -499,22 +512,38 @@ describe('Phase 2 authoritative Tenders store', () => {
       const directoryA = await uniqueDirectory('path-lock-a')
       const directoryB = await uniqueDirectory('path-lock-b')
       await writeFile(storePath(directoryA), JSON.stringify(validV2(1, ['a'])), 'utf8')
-      const mutatorEntered = deferred()
-      const releaseMutator = deferred()
-      const storeA = createTendersStore({ directory: directoryA, now: () => FIXED_NOW })
-      const storeB = createTendersStore({ directory: directoryB, now: () => FIXED_NOW })
-      const blocked = storeA.mutate(1, async (document) => {
-        mutatorEntered.resolve()
-        await releaseMutator.promise
-        return document
+      const commitEntered = deferred()
+      const releaseCommit = deferred()
+      // The hook is awaited *inside* the commit lock, so directory A's lock is
+      // genuinely occupied for as long as this test wants it to be.
+      const storeA = createTendersStore({
+        directory: directoryA,
+        now: () => FIXED_NOW,
+        hooks: {
+          beforeCommit: () => {
+            commitEntered.resolve()
+            return releaseCommit.promise
+          },
+        },
       })
-      await settleWithin(mutatorEntered.promise)
+      const independentCommitted = deferred()
+      const storeB = createTendersStore({
+        directory: directoryB,
+        now: () => FIXED_NOW,
+        onCommitted: () => independentCommitted.resolve(),
+      })
+      const blocked = storeA.save({ expectedRevision: 1, document: validV2(1, ['a']) })
+      await settleWithin(commitEntered.promise)
 
       const independentSave = storeB.save({ expectedRevision: 0, document: validV2(0, ['b']) })
-      const settledIndependently = await isSettledWithin(independentSave)
-      releaseMutator.resolve()
+      // Deterministic signal instead of a wall-clock window: directory B's save
+      // must reach its commit notification while directory A's lock is still held.
+      // With one process-wide lock this wait only ends at the hang guard (verified
+      // RED by keying `pathLocks` on a constant), which is what makes the per-path
+      // keying this test is named for load-bearing.
+      await settleWithin(independentCommitted.promise, 5_000)
+      releaseCommit.resolve()
 
-      expect(settledIndependently).toBe(true)
       expectSaveSuccess(await settleWithin(independentSave))
       expectSaveSuccess(await settleWithin(blocked))
     })
@@ -577,34 +606,53 @@ describe('Phase 2 authoritative Tenders store', () => {
       const directory = await uniqueDirectory('readback-identity')
       const callbackEntered = deferred()
       const releaseCallback = deferred()
+      // Ordered event log: the second instance's commit notification must land
+      // while the first instance is still inside its `onCommitted` callback, which
+      // is what proves callbacks run outside the commit lock. An ordered log is
+      // deterministic, where the wall-clock window it replaces failed on a loaded
+      // machine (the second save's fsync+rename+read-back is not bounded by 250 ms).
+      const events: string[] = []
       let callbackDocument: TendersDataV2 | undefined
       const storeA = createTendersStore({
         directory,
         now: () => FIXED_NOW,
         onCommitted: async (document) => {
           callbackDocument = document
+          events.push('a:callback-entered')
           callbackEntered.resolve()
           await releaseCallback.promise
+          events.push('a:callback-released')
         },
       })
-      const storeB = createTendersStore({ directory, now: () => FIXED_NOW })
+      const secondNotified = deferred()
+      const storeB = createTendersStore({
+        directory,
+        now: () => FIXED_NOW,
+        onCommitted: () => {
+          events.push('b:committed')
+          secondNotified.resolve()
+        },
+      })
       const firstRequested = validV2(0, ['first-exact-payload'])
       const firstSave = storeA.save({ expectedRevision: 0, document: firstRequested })
       await settleWithin(callbackEntered.promise)
 
       const secondRequested = validV2(1, ['competing-next-payload'])
       const secondSave = storeB.save({ expectedRevision: 1, document: secondRequested })
-      const secondSettledBeforeRelease = await isSettledWithin(secondSave)
+      // Hang guard, not a timing assertion: this wait can only run out if storeA's
+      // callback were holding the commit lock (the regression this test guards).
+      await settleWithin(secondNotified.promise, 5_000)
+      expect(events).toEqual(['a:callback-entered', 'b:committed'])
       releaseCallback.resolve()
       const [first, second] = await settleWithin(Promise.all([firstSave, secondSave]))
 
-      expect(secondSettledBeforeRelease).toBe(true)
       expectSaveSuccess(first)
       expectSaveSuccess(second)
       expect(first.data).toEqual({ ...firstRequested, revision: 1, updatedAt: CLOCK_ISO })
       expect(callbackDocument).toEqual(first.data)
       expect(second.data).toEqual({ ...secondRequested, revision: 2, updatedAt: CLOCK_ISO })
       expect(await readDocument(directory)).toEqual(second.data)
+      expect(events).toEqual(['a:callback-entered', 'b:committed', 'a:callback-released'])
     })
   })
 

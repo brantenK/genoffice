@@ -5,9 +5,10 @@
 // theme. Document data (titles, dates, metadata) is never re-authored here.
 import { useMemo, useState } from 'react'
 import { AlertTriangle, FileText, X } from 'lucide-react'
-import { DOC_CATEGORY_LABEL } from '../../shared/types'
+import { DOC_CATEGORY_LABEL, isDemoAssetUrl } from '../../shared/types'
 import type { DocHealth, VaultDoc } from '../../shared/types'
 import { assessDocHealth, healthSummary, POLICE_STAMP_WINDOW_DAYS } from '../gap'
+import { openDemoAsset } from '../mock/vault'
 import { selectActiveTender, useTendersStore } from '../store'
 import { Drawer } from './Drawer'
 import { Badge, Button } from './ui'
@@ -141,12 +142,23 @@ function VaultDocCard({
     const url = doc.fileUrl
     if (!url) return
     setOpenError(null)
+    if (isDemoAssetUrl(url)) {
+      // A bundled demonstration asset is read-only and lives outside the managed
+      // store, so it is opened by its own helper rather than by path.
+      try {
+        await openDemoAsset(url)
+      } catch (err) {
+        setOpenError(
+          `Could not open this document: ${err instanceof Error ? err.message : String(err)}.`,
+        )
+      }
+      return
+    }
     if (
       typeof window !== 'undefined' &&
       window.tendersApi?.openDocument &&
       !url.startsWith('blob:') &&
-      !url.startsWith('http') &&
-      !url.startsWith('/demo')
+      !url.startsWith('http')
     ) {
       try {
         const res = await window.tendersApi.openDocument({ storedPath: url })

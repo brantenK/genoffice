@@ -61,6 +61,21 @@ const VAULT_PDF = join(TENDERS_DEMO_DIR, 'vault', 'tax-clearance.pdf')
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
 const SAVE_CHANNEL = 'tenders:save-store-v2'
 
+/**
+ * `store.ts` `scheduleSaveToMain` commits an edit 300 ms after it is applied.
+ * Journey 7 has to request the close inside that window, otherwise the debounce
+ * — not the shell's close guard — could be what commits the edit.
+ */
+const AUTOSAVE_DEBOUNCE_MS = 300
+
+/**
+ * Marker the renderer logs when the shell asks it to flush before closing. The
+ * shell sends that request only through the close guard, so the marker is the
+ * evidence that the guard ran (a `page.on('console')` listener records it while
+ * the window is still open, before the guard lets the close proceed).
+ */
+const CLOSE_FLUSH_MARKER = 'e2e:tenders-close-flush-request'
+
 const COMPANY_ONE = 'E2E Cutover Civils (Pty) Ltd'
 const COMPANY_TWO = 'E2E Second Company (Pty) Ltd'
 const COMPANY_THREE = 'E2E Third Company (Pty) Ltd'
@@ -1122,6 +1137,198 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
       await writeResult('tenders-persistence-cutover-journey-6', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-persistence-cutover-j6').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  /**
+   * Dirty-close durability (the last un-fixed audit defect). Tenders persists
+   * through a 300 ms debounce and has no `beforeunload`, so a window close inside
+   * that window used to drop the edit. The shell's window close guard now asks
+   * the renderer to flush and waits for the commit before the window closes.
+   *
+   * The edit is made and the quit requested inside the debounce window (no
+   * "Saved" wait), which is exactly the sequence that lost data before. Two
+   * things keep that claim honest rather than merely plausible: the close must be
+   * requested before the debounce elapses (measured, `closeRequestedMs`), and the
+   * guard's own flush request must be observed in the view. Without the guard the
+   * second never happens — the debounce alone would have to have committed the
+   * edit before the window died, which the first rules out.
+   */
+  test('journey 7: a close inside the autosave debounce still commits the edit', async () => {
+    const userDataDir = await scratchUserData()
+    const screenshots: string[] = []
+    const videos: string[] = []
+    let run1: LaunchedApp | undefined
+    let run2: LaunchedApp | undefined
+    try {
+      run1 = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-persistence-cutover-j7-run1',
+      })
+      const tenders = await openTendersFromNav(run1.app, run1.page)
+      await dismissTendersOnboarding(tenders)
+      await createFirstCompany(tenders, COMPANY_ONE)
+      await expectSaveState(tenders, 'Saved')
+
+      // Shred the demo RFP into a real tender + requirement matrix.
+      await tenders.locator('nav').getByRole('button', { name: 'Tenders' }).click()
+      await tenders.locator('input[type="file"][accept*="pdf"]').first().setInputFiles(SAMPLE_RFP)
+      await expect(tenders.getByRole('heading', { name: 'Compliance matrix' })).toBeVisible({
+        timeout: 90_000,
+      })
+      const seeded = await pollStore(
+        userDataDir,
+        (s) => allTenders(s).some((t: any) => (t.requirements ?? []).length > 0),
+        30_000,
+      )
+      expect(seeded, 'the shredded tender must commit before the close test').toBeTruthy()
+
+      const expand = tenders.locator('button[title="Show clause details"]').first()
+      await expect(expand).toBeVisible()
+      await expand.click()
+      const statusSelect = tenders.locator('select:has(option[value="FULFILLED"])').first()
+      await expect(statusSelect).toBeVisible()
+      const from = await statusSelect.inputValue()
+      const to = from === 'FULFILLED' ? 'ACTION_REQUIRED' : 'FULFILLED'
+      // Identify the edited requirement by its ID: the matrix's first row is not
+      // necessarily the first requirement in the store, so a status match could
+      // name a different requirement that already carried the target status.
+      const idsWithStatus = (store: any, status: string): string[] =>
+        allTenders(store).flatMap((t: any) =>
+          (t.requirements ?? [])
+            .filter((r: any) => r.status === status)
+            .map((r: any) => r.id as string),
+        )
+      const beforeIds = idsWithStatus(seeded, to)
+
+      screenshots.push(await shot(tenders, 'cutover-j7-matrix-before-edit'))
+
+      // Watch for the shell's pre-close flush request from inside the view. The
+      // guard is the only thing that sends it, so observing it is what proves the
+      // guard — and not the 300 ms autosave debounce — committed the edit.
+      // Console messages reach this process while the page is still open (the
+      // guard holds the close until the flush answers), so the record survives
+      // the window's death.
+      const closeFlushRequests: string[] = []
+      tenders.on('console', (msg) => {
+        const text = msg.text()
+        if (text.includes(CLOSE_FLUSH_MARKER)) closeFlushRequests.push(text)
+      })
+      await tenders.evaluate((marker) => {
+        window.tendersApi?.onCloseFlushRequest(() => {
+          console.log(`${marker} ${Date.now()}`)
+        })
+      }, CLOSE_FLUSH_MARKER)
+
+      // Edit, then quit with nothing else awaited in between: the close has to
+      // land inside the autosave debounce, or the debounce could be what commits
+      // the edit and the journey would prove nothing. The elapsed time is
+      // asserted below, not assumed — a full-page screenshot used to sit between
+      // these two lines and ate the whole 300 ms window on this disk.
+      const editStartedAt = Date.now()
+      await statusSelect.selectOption(to)
+      await expect(statusSelect).toHaveValue(to)
+      const quitAt = await run1.app.evaluate(({ app }) => {
+        const at = Date.now()
+        app.quit()
+        return at
+      })
+      const closeRequestedMs = quitAt - editStartedAt
+
+      const changedIds = (store: any): string[] =>
+        idsWithStatus(store, to).filter((id) => !beforeIds.includes(id))
+      const flushed = await pollStore(userDataDir, (s) => changedIds(s).length > 0, 20_000)
+      const persisted = findRequirement(flushed, (r) => r.id === changedIds(flushed)[0])
+      const committedRevision = flushed?.revision ?? null
+
+      await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j7-run1').catch(() => undefined)
+      run1 = undefined
+
+      const guardFailures: string[] = []
+      if (closeRequestedMs >= AUTOSAVE_DEBOUNCE_MS) {
+        guardFailures.push(
+          `the close was requested ${closeRequestedMs} ms after the edit, at or past the ${AUTOSAVE_DEBOUNCE_MS} ms autosave debounce, so the debounce may have been what committed it`,
+        )
+      }
+      if (closeFlushRequests.length === 0) {
+        guardFailures.push(
+          'no close-flush request reached the renderer, so the shell close guard never ran',
+        )
+      }
+      if (!persisted || persisted.status !== to) {
+        guardFailures.push(
+          `no requirement reached ${to} on disk after the window closed; the pending edit was dropped`,
+        )
+      }
+
+      if (guardFailures.length > 0) {
+        await writeResult('tenders-persistence-cutover-j7', {
+          journey: 'close inside the autosave debounce still commits the edit',
+          status: 'FAIL',
+          detail: guardFailures.join('; '),
+          evidence: {
+            userDataDir,
+            from,
+            to,
+            committedRevision,
+            closeRequestedMs,
+            closeFlushRequests: closeFlushRequests.length,
+          },
+          screenshots,
+          videos: videos.filter(Boolean),
+        })
+        throw new Error(
+          `The close guard did not flush the debounced edit: ${guardFailures.join('; ')}.`,
+        )
+      }
+
+      // Restart: the flushed edit must be the persisted one.
+      run2 = await launchShell({
+        userDataDir,
+        videoDir: 'tenders-persistence-cutover-j7-run2',
+      })
+      const tenders2 = await openTendersFromNav(run2.app, run2.page)
+      await dismissTendersOnboarding(tenders2)
+      await expectSaveState(tenders2, 'Saved')
+      await ensureTenderWorkspace(tenders2, allTenders(flushed)[0]?.title as string)
+      const row = tenders2.locator('li', { hasText: persisted.title }).first()
+      await expect(row).toBeVisible({ timeout: 20_000 })
+      const expand2 = row.locator('button[title="Show clause details"]')
+      if ((await expand2.count()) > 0) await expand2.first().click()
+      await expect(row.locator('select:has(option[value="FULFILLED"])').first()).toHaveValue(to)
+      screenshots.push(await shot(tenders2, 'cutover-j7-restart-persisted'))
+
+      const afterRestart = await readStore(userDataDir)
+      expect(
+        findRequirement(afterRestart, (r) => r.id === persisted.id)?.status,
+        'the flushed edit must survive the restart',
+      ).toBe(to)
+
+      await writeResult('tenders-persistence-cutover-j7', {
+        journey: 'close inside the autosave debounce still commits the edit',
+        status: 'PASS',
+        detail: `requirement "${persisted.title}" ${from} -> ${to} committed by the close guard (revision ${committedRevision}), survives restart`,
+        evidence: {
+          userDataDir,
+          workspace: COMPANY_ONE,
+          requirement: { id: persisted.id, title: persisted.title, from, to },
+          committedRevision,
+          // The two facts that make the claim above verifiable rather than
+          // assumed: the close was requested inside the debounce window, and the
+          // guard's flush request was the one the renderer answered.
+          closeRequestedMs,
+          closeFlushRequests: closeFlushRequests.length,
+        },
+        screenshots,
+        videos: videos.filter(Boolean),
+      })
+    } finally {
+      if (run1)
+        await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j7-run1').catch(() => undefined)
+      if (run2)
+        await closeAndSaveVideo(run2, 'tenders-persistence-cutover-j7-run2').catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
     }
   })
