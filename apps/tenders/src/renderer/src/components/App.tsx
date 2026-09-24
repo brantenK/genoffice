@@ -13,6 +13,7 @@ import {
   HelpCircle,
   LayoutDashboard,
   Plus,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -29,6 +30,7 @@ import { OnboardingModal } from './OnboardingModal'
 import { SaveStatus } from './SaveStatus'
 import { Button, Spinner } from './ui'
 import { CustomersPage } from './pages/CustomersPage'
+import { DiscoverPage } from './pages/DiscoverPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -36,11 +38,30 @@ import { RecoveryScreen } from './pages/RecoveryScreen'
 import { TendersPage } from './pages/TendersPage'
 import { TutorialsPage } from './pages/TutorialsPage'
 
+/**
+ * The discovery page's id in the sidebar.
+ *
+ * A plain string since `AppPage` (`shared/types.ts`) lists `'discover'` — no cast
+ * and no page union of this file's own, so the store's `AppPage` travels through
+ * the nav unchanged. It stays a named constant rather than an inline literal
+ * because `tests/discovery-pane.test.ts` pins the nav item as
+ * `page: DISCOVER_PAGE, label: 'Discover'`; the label itself is the part that
+ * matters there (see the note on the nav item below).
+ */
+const DISCOVER_PAGE = 'discover'
+
 const NAV_ITEMS: { page: AppPage; label: string; icon: React.ReactNode; tour?: string }[] = [
   { page: 'overview', label: 'Overview', icon: <LayoutDashboard size={18} /> },
   { page: 'customers', label: 'Customers', icon: <Users size={18} /> },
   { page: 'documents', label: 'Documents', icon: <FileText size={18} /> },
   { page: 'tenders', label: 'Tenders', icon: <BookOpen size={18} /> },
+  // "Discover" rather than "Find tenders": the page says "Find tenders", but a
+  // sidebar item whose name contains "Tenders" is ambiguous — for a reader
+  // looking at two items that both end in the word, and for every name-based
+  // locator in the e2e suite (`getByRole('button', { name: 'Tenders' })` matches
+  // a name case-insensitively as a substring, so it would resolve to two
+  // buttons). The destination is named here, the task is named on the page.
+  { page: DISCOVER_PAGE, label: 'Discover', icon: <Search size={18} /> },
   { page: 'profile', label: 'Company Profile', icon: <Building2 size={18} /> },
   {
     page: 'tutorials',
@@ -539,6 +560,7 @@ export function App() {
             </button>
           </div>
         )}
+        {page === 'discover' && <DiscoverPage />}
         {page === 'overview' && <OverviewPage />}
         {page === 'customers' && <CustomersPage />}
         {page === 'documents' && <DocumentsPage />}

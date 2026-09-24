@@ -152,11 +152,106 @@ describe('preload tenders bridge', () => {
       TENDERS_CHANNELS.restoreRecoveryCandidate,
       [{ id: 'backups/tenders-data.2.json' }],
     ],
+    [
+      'discoveryList',
+      TENDERS_CHANNELS.discoveryList,
+      [{ window: { from: '2026-09-01', to: '2026-09-07' }, pageSize: 25 }],
+    ],
+    [
+      'discoveryRefresh',
+      TENDERS_CHANNELS.discoveryRefresh,
+      [{ window: { from: '2026-09-01', to: '2026-09-07' } }],
+    ],
+    ['discoveryReadCache', TENDERS_CHANNELS.discoveryReadCache, [] as unknown[]],
+    ['discoveryFetchRelease', TENDERS_CHANNELS.discoveryRelease, [{ ocid: 'ocds-abc-1' }]],
+    [
+      'discoveryDownloadDocument',
+      TENDERS_CHANNELS.discoveryDownloadDocument,
+      [{ url: 'https://www.etenders.gov.za/Documents/RFP.pdf', fileName: 'RFP.pdf' }],
+    ],
+    ['getReminders', TENDERS_CHANNELS.remindersGet, [] as unknown[]],
+    ['setReminders', TENDERS_CHANNELS.remindersSet, [{ enabled: false }]],
+    ['checkReminders', TENDERS_CHANNELS.remindersCheck, [] as unknown[]],
   ])('exposes and forwards %s to its channel', async (method, channel, args) => {
     const fn = (exposed as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method]
     expect(typeof fn).toBe('function')
     await fn(...args)
     expect(invoke).toHaveBeenCalledWith(channel, ...args)
+  })
+})
+
+/**
+ * Tender discovery + deadline reminders. The bridge is a pure pass-through: main
+ * owns the trusted-sender check, the URL allow-list, the byte caps and the
+ * store, so what is pinned here is the wire contract the UI wave is written
+ * against — the exact channel names and the fact that a request object reaches
+ * main exactly as the renderer built it.
+ */
+describe('preload tenders bridge — discovery and reminders', () => {
+  it('names every new channel exactly as the main handlers register them', () => {
+    expect(TENDERS_CHANNELS.discoveryList).toBe('tenders:discovery-list')
+    expect(TENDERS_CHANNELS.discoveryRefresh).toBe('tenders:discovery-refresh')
+    expect(TENDERS_CHANNELS.discoveryReadCache).toBe('tenders:discovery-read-cache')
+    expect(TENDERS_CHANNELS.discoveryRelease).toBe('tenders:discovery-release')
+    expect(TENDERS_CHANNELS.discoveryDownloadDocument).toBe('tenders:discovery-download-document')
+    expect(TENDERS_CHANNELS.remindersGet).toBe('tenders:reminders-get')
+    expect(TENDERS_CHANNELS.remindersSet).toBe('tenders:reminders-set')
+    expect(TENDERS_CHANNELS.remindersCheck).toBe('tenders:reminders-check')
+  })
+
+  it('exposes all eight members as functions and leaks no transport', () => {
+    const members = [
+      'discoveryList',
+      'discoveryRefresh',
+      'discoveryReadCache',
+      'discoveryFetchRelease',
+      'discoveryDownloadDocument',
+      'getReminders',
+      'setReminders',
+      'checkReminders',
+    ]
+    for (const member of members) {
+      expect(typeof (exposed as unknown as Record<string, unknown>)[member], member).toBe(
+        'function',
+      )
+    }
+    for (const leaked of ['ipcRenderer', 'invoke', 'send', 'on', 'removeListener']) {
+      expect(Object.keys(exposed as unknown as Record<string, unknown>)).not.toContain(leaked)
+    }
+  })
+
+  it('forwards a discovery list request untouched', async () => {
+    const request = { window: { from: '2026-09-01', to: '2026-09-07' }, pageSize: 25 }
+    await exposed!.discoveryList(request)
+
+    expect(invoke).toHaveBeenCalledWith(TENDERS_CHANNELS.discoveryList, request)
+    // Same reference: main validates exactly what the renderer sent.
+    expect(invoke.mock.calls.at(-1)?.[1]).toBe(request)
+  })
+
+  it('forwards a document link untouched so main can check it against the allow-list', async () => {
+    const request = { url: 'https://www.etenders.gov.za/Documents/RFP.pdf' }
+    await exposed!.discoveryDownloadDocument(request)
+
+    expect(invoke).toHaveBeenCalledWith(TENDERS_CHANNELS.discoveryDownloadDocument, request)
+    expect(invoke.mock.calls.at(-1)?.[1]).toBe(request)
+  })
+
+  it('passes an omitted refresh window through as undefined rather than inventing one', async () => {
+    await exposed!.discoveryRefresh()
+
+    expect(invoke).toHaveBeenCalledWith(TENDERS_CHANNELS.discoveryRefresh, undefined)
+  })
+
+  it('forwards a settings patch untouched and takes no argument for a check', async () => {
+    const patch = { enabled: true, thresholds: [{ id: '1d', label: '1 day', leadMs: 86_400_000 }] }
+    await exposed!.setReminders(patch)
+    expect(invoke).toHaveBeenCalledWith(TENDERS_CHANNELS.remindersSet, patch)
+    expect(invoke.mock.calls.at(-1)?.[1]).toBe(patch)
+
+    await exposed!.checkReminders()
+    expect(invoke).toHaveBeenCalledWith(TENDERS_CHANNELS.remindersCheck)
+    expect(invoke).toHaveBeenLastCalledWith(TENDERS_CHANNELS.remindersCheck)
   })
 })
 

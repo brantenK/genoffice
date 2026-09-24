@@ -30,6 +30,29 @@ const QUARANTINE_FILE = /^primary-corrupt-(\d+)\.json$/
 /** Keep at most this many quarantined corrupt primaries; oldest are pruned. */
 const MAX_QUARANTINE_FILES = 5
 
+/**
+ * The store's own file-name stem — `tenders-data` for `tenders-data.json`.
+ * Everything this module writes beside the primary is named after it: the
+ * rotating backups `tenders-data.<revision>.json` and the write temp
+ * `tenders-data.json.<uuid>.tmp`.
+ */
+const STORE_FILE_STEM = TENDERS_PERSISTENCE_FILE_NAME.replace(/\.[^.]+$/, '')
+
+/**
+ * Is this the name of a temporary file THIS store could have left behind?
+ *
+ * A crashed commit leaves `<primary>.<uuid>.tmp` (`tenders-data.json.<uuid>.tmp`)
+ * in the store directory, and that leftover holds a complete, validated document,
+ * so it is a genuine recovery candidate. Other writers keep their own atomic
+ * temps in the same directory — the reminder scheduler commits
+ * `reminders.json.<uuid>.tmp` here — and those hold no tender document at all.
+ * Offering one as a recoverable copy of the user's tender data would be a
+ * misreport, so the scan is keyed on the store's own name and nothing else.
+ */
+function isStoreTemporaryFileName(name: string): boolean {
+  return name.startsWith(`${STORE_FILE_STEM}.`) && name.endsWith('.tmp')
+}
+
 export interface TendersStoreHooks {
   /**
    * Test seam: awaited inside the commit lock, after validation and the revision
@@ -281,7 +304,9 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
     }
     const leaf = normalized.split('/').pop() ?? ''
     if (normalized.startsWith(`${BACKUPS_DIR}/`) && BACKUP_FILE.test(leaf)) return normalized
-    if (/^[^/]+\.tmp$/.test(normalized)) return normalized
+    // Only the store's own temp files, never another writer's (see
+    // `isStoreTemporaryFileName`).
+    if (!normalized.includes('/') && isStoreTemporaryFileName(normalized)) return normalized
     return null
   }
 
@@ -334,7 +359,7 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
     }
     try {
       for (const name of await readdir(options.directory)) {
-        if (name.endsWith('.tmp')) await consider(name, 'temporary')
+        if (isStoreTemporaryFileName(name)) await consider(name, 'temporary')
       }
     } catch {
       // store directory unreadable

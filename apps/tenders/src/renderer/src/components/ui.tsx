@@ -229,9 +229,14 @@ export const FORM_CONTROL_CLASS =
 
 export const FORM_LABEL_CLASS = 'mb-1 block text-[11px] font-medium text-[var(--text-secondary)]'
 
-/** 16px visual box + 4px padding = a 24x24 pointer target. */
+/**
+ * 16px visual box + a 4px transparent border = a 24x24 pointer target, the
+ * minimum the a11y lane enforces. The border is used rather than padding
+ * because the UA stylesheet computes `padding: 0` on a checkbox, so a `p-*`
+ * utility there silently leaves a 16x16 target.
+ */
 export const FORM_CHECKBOX_CLASS =
-  'size-4 box-content cursor-pointer rounded p-1 accent-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none'
+  'size-4 box-content border-4 border-transparent cursor-pointer rounded accent-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none'
 
 export interface FormFieldProps {
   label: string

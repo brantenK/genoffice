@@ -11,6 +11,14 @@ import type {
   TendersLoadResult,
   TendersRecoveryCandidate,
 } from './tenders-persistence'
+import type {
+  DiscoveryCacheEnvelope,
+  DiscoveryParseIssue,
+  DiscoverySource,
+  DiscoveryWindow,
+  Opportunity,
+} from './discovery'
+import type { DueReminder, ReminderLedger, ReminderSettings } from './reminders'
 
 /**
  * Canonical AI types live in `@genoffice/ai-provider` (shared with docs / pdf /
@@ -108,6 +116,21 @@ export const TENDERS_CHANNELS = {
   // Rotating backups + explicit recovery (Phase 5 WP-2 remainder).
   listRecoveryCandidates: 'tenders:list-recovery-candidates',
   restoreRecoveryCandidate: 'tenders:restore-recovery-candidate',
+  // Tender discovery (National Treasury's eTenders open data). Additive and
+  // optional: the local rule engine stays the offline, always-available default,
+  // and nothing here is reachable without an explicit user action. The handlers
+  // live in `main/tenders-main.ts` and pass every call through to the injected
+  // discovery client (`main/discovery-client.ts`).
+  discoveryList: 'tenders:discovery-list',
+  discoveryRefresh: 'tenders:discovery-refresh',
+  discoveryReadCache: 'tenders:discovery-read-cache',
+  discoveryRelease: 'tenders:discovery-release',
+  discoveryDownloadDocument: 'tenders:discovery-download-document',
+  // Deadline reminders (the app's only notification path). The schedule is
+  // computed on this machine from the authoritative store; nothing is networked.
+  remindersGet: 'tenders:reminders-get',
+  remindersSet: 'tenders:reminders-set',
+  remindersCheck: 'tenders:reminders-check',
 } as const
 
 export interface SaveDocumentRequest {
@@ -161,6 +184,194 @@ export const MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS = 32768
  * refused by this check (pinned by `tests/tenders-main-write-bounds.test.ts`).
  */
 export const MAX_TENDERS_MATRIX_EXPORT_BYTES = 4 * 1024 * 1024
+
+// ── Tender discovery (National Treasury eTenders open data) ──────────────────
+//
+// The wire contract for the five discovery channels. The shapes mirror the
+// results of `main/discovery-client.ts` (which is where the allow-list, the byte
+// caps, the retries and the cache actually live) so the renderer can branch on
+// `ok` exactly as the client does, and every failure carries the client's own
+// plain-language message — the renderer shows it, it does not re-word it.
+
+/**
+ * A refused call on the discovery / reminder channels. `message` is
+ * plain-language and safe to show verbatim — the renderer shows it, it does not
+ * re-word it.
+ *
+ * `code` is a string rather than a union on purpose: the unions belong to the
+ * engines (the discovery client's `DiscoveryErrorCode`, the store's
+ * `TendersPersistenceErrorCode`), and a renderer must treat an unrecognised code
+ * as a failure (it branches on `ok`), so restating a union here would be a
+ * second source of truth that could drift.
+ */
+export interface TendersIpcError {
+  code: string
+  message: string
+  /** The URL that was refused or failed, when the failure was about one. */
+  url?: string
+  /** The HTTP status, when the failure was about one. */
+  status?: number
+  /** Attempts made, when the engine retried. */
+  attempts?: number
+}
+
+/** The shape every discovery / reminder refusal takes, trusted-sender rejections included. */
+export interface TendersIpcFailure {
+  ok: false
+  error: TendersIpcError
+}
+
+export interface DiscoveryListRequest {
+  /** A publication window of at most seven days (see `splitWindow`). */
+  window: DiscoveryWindow
+  /** Records per page. Bounded by the handler before it reaches the wire. */
+  pageSize?: number
+}
+
+/** Mirrors the client's `ListOpportunitiesSuccess`. */
+export type DiscoveryListResponse =
+  | {
+      ok: true
+      opportunities: Opportunity[]
+      issues: DiscoveryParseIssue[]
+      warnings: string[]
+      pages: number
+      failedPages: number
+      source: DiscoverySource
+      /** True when the walk stopped before the source ran out — read `warnings`. */
+      truncated: boolean
+    }
+  | TendersIpcFailure
+
+export interface DiscoveryRefreshRequest {
+  /** Defaults to the client's documented lookback window. */
+  window?: DiscoveryWindow
+}
+
+/** Mirrors the client's `RefreshCacheSuccess`. */
+export type DiscoveryRefreshResponse =
+  | {
+      ok: true
+      cache: DiscoveryCacheEnvelope
+      /** False when a window or the fallback failed, so the list is partial. */
+      complete: boolean
+      warnings: string[]
+    }
+  | TendersIpcFailure
+
+/** Mirrors the client's `ReadCacheSuccess`. `cache` is null before a first fetch. */
+export type DiscoveryReadCacheResponse =
+  | { ok: true; cache: DiscoveryCacheEnvelope | null; stale: boolean; warnings: string[] }
+  | TendersIpcFailure
+
+export interface DiscoveryReleaseRequest {
+  /** The OCDS ocid, from a listed opportunity. */
+  ocid: string
+}
+
+/** Mirrors the client's `FetchReleaseSuccess`. */
+export type DiscoveryReleaseResponse =
+  | {
+      ok: true
+      opportunity: Opportunity | null
+      issues: DiscoveryParseIssue[]
+      warnings: string[]
+    }
+  | TendersIpcFailure
+
+export interface DiscoveryDownloadDocumentRequest {
+  /**
+   * The document link from the feed. It is NOT fetched as given: the handler
+   * re-checks it with the discovery allow-list (https, exact Treasury host, no
+   * embedded credentials) and refuses anything else before any request is made.
+   */
+  url: string
+  /** Optional stored name. Defaults to the last segment of the link. */
+  fileName?: string
+}
+
+/**
+ * A document the app downloaded into its own managed document store, so the
+ * renderer can run the ordinary intake on it. `record`/`storedPath` are the
+ * durable handle (`readDocument` / `openDocument` / `deleteDocument` all accept
+ * them); `buffer` is the same bytes, so the intake can run without a second
+ * round trip.
+ */
+export type DiscoveryDownloadDocumentResponse =
+  | {
+      ok: true
+      record: ManagedFileRecord
+      /** Managed relative path, e.g. `documents/1789_etender.pdf`. */
+      storedPath: string
+      /** The name the document was stored under (sanitized and clamped). */
+      fileName: string
+      mimeType: string
+      byteLength: number
+      buffer: ArrayBuffer
+    }
+  | TendersIpcFailure
+
+/**
+ * Ceiling on one downloaded tender document, enforced while the body is read.
+ * Deliberately the same number the managed store refuses to save above
+ * (`MAX_TENDERS_DOCUMENT_UPLOAD_BYTES`): a document larger than that cannot be
+ * stored, so downloading it would spend the user's bandwidth to reach a
+ * refusal.
+ */
+export const MAX_DISCOVERY_DOWNLOAD_BYTES = MAX_TENDERS_DOCUMENT_UPLOAD_BYTES
+
+/** Longest document link accepted from the renderer. */
+export const MAX_DISCOVERY_DOCUMENT_URL_CHARS = 2048
+
+/** Longest stored name accepted for a downloaded document. */
+export const MAX_DISCOVERY_DOCUMENT_FILE_NAME_CHARS = 512
+
+// ── Deadline reminders ──────────────────────────────────────────────────────
+
+/**
+ * Bounds on a settings patch from the renderer. `normalizeReminderSettings`
+ * drops unusable entries rather than refusing them, which is right for a file
+ * this app wrote and wrong for a payload it was handed: silently dropping a
+ * threshold would let a user believe a lead time was set when it was not, so the
+ * handler refuses the whole patch instead (and says so).
+ */
+export const MAX_TENDERS_REMINDER_THRESHOLDS = 12
+export const MAX_TENDERS_REMINDER_LABEL_CHARS = 64
+/** Longest lead time accepted: one year before closing. */
+export const MAX_TENDERS_REMINDER_LEAD_MS = 365 * 24 * 60 * 60 * 1000
+
+/** The persisted settings and dedupe ledger, plus the limitation sentence. */
+export type RemindersStateResponse =
+  | {
+      ok: true
+      settings: ReminderSettings
+      ledger: ReminderLedger
+      /**
+       * `REMINDERS_RUNTIME_LIMITATION` from `main/reminders-scheduler.ts`: the one
+       * sentence stating that reminders are checked only while the app runs. It
+       * travels on this response so the settings surface can show the real reach
+       * of a notification without importing a main-process module.
+       */
+      limitation: string
+    }
+  | TendersIpcFailure
+
+/** A partial settings write: what it names changes, nothing else. */
+export interface RemindersSetRequest {
+  enabled?: boolean
+  thresholds?: Array<{ id: string; label?: string; leadMs: number }>
+}
+
+export type RemindersSetResponse =
+  { ok: true; settings: ReminderSettings; limitation: string } | TendersIpcFailure
+
+/**
+ * One check's outcome. The dedupe ledger is deliberately NOT returned: it is
+ * main's memory of what has already been shown, not something a renderer should
+ * be able to write back.
+ */
+export type RemindersCheckResponse =
+  { ok: true; fired: number; reminders: DueReminder[] } | TendersIpcFailure
 
 /**
  * `saveStoreV2` reply. Conflict replies are COMPACT: they carry
@@ -438,6 +649,32 @@ export interface TendersApi extends TendersApiBridge {
   aiStreamCancel: (requestId: string) => Promise<void>
   /** Subscribe to this view's stream chunks; returns an unsubscribe function. */
   onAiStream: (handler: (chunk: AiStreamChunk) => void) => () => void
+  // ── Tender discovery + deadline reminders ─────────────────────────────────
+  // Thin pass-throughs to the handlers in `main/tenders-main.ts`. The bridge
+  // validates nothing: the allow-list, the byte caps, the trusted-sender check
+  // and the store all stay in main.
+  /** List opportunities published in a window (at most seven days wide). */
+  discoveryList: (request: DiscoveryListRequest) => Promise<DiscoveryListResponse>
+  /** Refresh the saved list. Optional window; defaults to the documented lookback. */
+  discoveryRefresh: (request?: DiscoveryRefreshRequest) => Promise<DiscoveryRefreshResponse>
+  /** Read the saved list. Available with no network at all; null before a first fetch. */
+  discoveryReadCache: () => Promise<DiscoveryReadCacheResponse>
+  /** Read one canonical Treasury record by ocid. */
+  discoveryFetchRelease: (request: DiscoveryReleaseRequest) => Promise<DiscoveryReleaseResponse>
+  /**
+   * Download a tender document into the app's own document store. The URL is
+   * re-checked against the discovery allow-list in main, so only an https link
+   * on a Treasury host is ever fetched.
+   */
+  discoveryDownloadDocument: (
+    request: DiscoveryDownloadDocumentRequest,
+  ) => Promise<DiscoveryDownloadDocumentResponse>
+  /** The reminder settings and dedupe ledger, plus the honest runtime limitation. */
+  getReminders: () => Promise<RemindersStateResponse>
+  /** Merge a partial settings change and persist it. */
+  setReminders: (settings: RemindersSetRequest) => Promise<RemindersSetResponse>
+  /** Run one reminder check now (the settings surface's "check now"). */
+  checkReminders: () => Promise<RemindersCheckResponse>
 }
 
 declare global {

@@ -182,6 +182,21 @@ const tendersApi: TendersApi = {
       ipcRenderer.removeListener(AI_CHANNELS.streamChunk, listener)
     }
   },
+  // ── Tender discovery + deadline reminders ─────────────────────────────────
+  // Thin pass-throughs: every one forwards its request untouched, and main owns
+  // the trusted-sender check, the URL allow-list, the byte caps and the store.
+  // `discoveryReadCache`, `getReminders` and `checkReminders` take no argument,
+  // so a renderer cannot put a path or a clock into them.
+  discoveryList: (request) => ipcRenderer.invoke(TENDERS_CHANNELS.discoveryList, request),
+  discoveryRefresh: (request) => ipcRenderer.invoke(TENDERS_CHANNELS.discoveryRefresh, request),
+  discoveryReadCache: () => ipcRenderer.invoke(TENDERS_CHANNELS.discoveryReadCache),
+  discoveryFetchRelease: (request) =>
+    ipcRenderer.invoke(TENDERS_CHANNELS.discoveryRelease, request),
+  discoveryDownloadDocument: (request) =>
+    ipcRenderer.invoke(TENDERS_CHANNELS.discoveryDownloadDocument, request),
+  getReminders: () => ipcRenderer.invoke(TENDERS_CHANNELS.remindersGet),
+  setReminders: (settings) => ipcRenderer.invoke(TENDERS_CHANNELS.remindersSet, settings),
+  checkReminders: () => ipcRenderer.invoke(TENDERS_CHANNELS.remindersCheck),
 }
 
 contextBridge.exposeInMainWorld('tendersApi', tendersApi)

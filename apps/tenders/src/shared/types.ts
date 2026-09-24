@@ -1,7 +1,8 @@
 // Zanostack Tenders shared types — desktop RFP shredder & compliance system
 
 // ── App navigation ────────────────────────────────────────────────────────────
-export type AppPage = 'overview' | 'customers' | 'documents' | 'tenders' | 'profile' | 'tutorials'
+export type AppPage =
+  'overview' | 'customers' | 'documents' | 'tenders' | 'discover' | 'profile' | 'tutorials'
 
 // ── Customer types ─────────────────────────────────────────────────────────────
 export type CustomerStatus = 'ACTIVE' | 'PROSPECT' | 'INACTIVE'

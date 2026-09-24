@@ -17,10 +17,16 @@ import { randomUUID } from 'node:crypto'
 import { app, dialog, ipcMain, shell, WebContentsView, type WebContents } from 'electron'
 import type { BrowserWindow } from 'electron'
 import {
+  MAX_DISCOVERY_DOCUMENT_FILE_NAME_CHARS,
+  MAX_DISCOVERY_DOCUMENT_URL_CHARS,
+  MAX_DISCOVERY_DOWNLOAD_BYTES,
   MAX_TENDERS_DOCUMENT_UPLOAD_BYTES,
   MAX_TENDERS_MATRIX_EXPORT_BYTES,
   MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS,
   MAX_TENDERS_MATRIX_EXPORT_ROWS,
+  MAX_TENDERS_REMINDER_LABEL_CHARS,
+  MAX_TENDERS_REMINDER_LEAD_MS,
+  MAX_TENDERS_REMINDER_THRESHOLDS,
   TENDERS_CHANNELS,
   type BillMilestoneRequest,
   type BillMilestoneResult,
@@ -28,6 +34,15 @@ import {
   type CleanupDocumentTrashResponse,
   type DeleteDocumentRequest,
   type DeleteDocumentResponse,
+  type DiscoveryDownloadDocumentRequest,
+  type DiscoveryDownloadDocumentResponse,
+  type DiscoveryListRequest,
+  type DiscoveryListResponse,
+  type DiscoveryReadCacheResponse,
+  type DiscoveryRefreshRequest,
+  type DiscoveryRefreshResponse,
+  type DiscoveryReleaseRequest,
+  type DiscoveryReleaseResponse,
   type ListDocumentTrashResponse,
   type ListRecoveryCandidatesResponse,
   type OpenDocumentRequest,
@@ -35,6 +50,10 @@ import {
   type ReadDocumentRequest,
   type ReadDocumentResponse,
   type ReconcileDocumentsResponse,
+  type RemindersCheckResponse,
+  type RemindersSetRequest,
+  type RemindersSetResponse,
+  type RemindersStateResponse,
   type ReplaceDocumentRequest,
   type ReplaceDocumentResponse,
   type RestoreDocumentRequest,
@@ -44,6 +63,7 @@ import {
   type SaveDocumentRequest,
   type SaveDocumentResponse,
   type TendersCloseFlushResult,
+  type TendersIpcFailure,
 } from '../shared/ipc'
 import type {
   CompanyWorkspace,
@@ -85,6 +105,25 @@ import {
   type TendersIntegrations,
 } from './integrations'
 import type { ReadinessBinding, ReadinessReport } from '../shared/readiness'
+import {
+  createDiscoveryClient,
+  discoveryCacheDir,
+  type DiscoveryClient,
+  type DiscoveryClientOptions,
+  type DiscoveryFetch,
+  type DiscoveryFetchInit,
+  type DiscoveryHttpResponse,
+} from './discovery-client'
+import {
+  createRemindersScheduler,
+  REMINDERS_RUNTIME_LIMITATION,
+  type ReminderLog,
+  type ReminderNotifier,
+  type RemindersScheduler,
+  type RemindersSchedulerOptions,
+} from './reminders-scheduler'
+import { isAllowedDiscoveryUrl, DISCOVERY_ALLOWED_HOSTS } from '../shared/discovery'
+import type { ReminderSettings, ReminderTender } from '../shared/reminders'
 import { MOCK_COMPANY } from '../renderer/src/mock/company'
 import { MOCK_CUSTOMERS } from '../renderer/src/mock/customers'
 import { MOCK_VAULT } from '../renderer/src/mock/vault'
@@ -1350,6 +1389,11 @@ export function resetTendersIpcForTests(): void {
   }
   for (const channel of Object.values(TENDERS_CHANNELS)) ipcMain.removeHandler(channel)
   stopTendersStoreWatcher()
+  // A pending reminder timer must not outlive the reset: `start()` schedules a
+  // real interval, and a test that left one running would keep the process (and
+  // the next test's schedule) alive. The engine seams go with it, so the next
+  // registration builds its client and schedule from whatever the test sets.
+  setTendersEngineOverrides(null)
   activeTendersWebContents.clear()
   authoritativeTendersStores.clear()
   managedDocumentStores.clear()
@@ -1378,6 +1422,508 @@ export function isTendersIpcRegisteredForTests(): boolean {
   return ipcRegistered
 }
 
+// ── Tender discovery + deadline reminders (the two wired engines) ────────────
+//
+// Both engines are complete and tested on their own; what this section adds is
+// the transport and the lifecycle. Three rules shape it:
+//
+//  * **The renderer never names a network target.** The discovery client is
+//    built here with the app's own cache directory, and a document link from the
+//    feed is re-checked with the client's allow-list (`isAllowedDiscoveryUrl`)
+//    before anything is requested.
+//  * **A downloaded document becomes an ordinary managed document.** It is
+//    written through the same managed-document store the RFP upload path uses
+//    (`saveDocumentFile`), so it lands in `documents/` with durable metadata and
+//    the renderer can read, open and delete it with the channels that already
+//    exist. There is deliberately no second storage location.
+//  * **Every side effect is injectable.** `setTendersEngineOverrides` swaps the
+//    client factory, the scheduler factory, the download's fetch, the clock and
+//    the notifier, so the whole IPC surface is provable with no network, no disk
+//    and no waiting. Production never calls it.
+
+/** The slice of a `Response` the document download uses (a superset of the client's). */
+export interface DiscoveryDocumentResponse extends DiscoveryHttpResponse {
+  /** Present on a real `Response`: the byte-exact fallback for a streamless one. */
+  arrayBuffer?(): Promise<ArrayBuffer>
+}
+
+export type DiscoveryDocumentFetch = (
+  url: string,
+  init?: DiscoveryFetchInit,
+) => Promise<DiscoveryDocumentResponse>
+
+/** The real network, assignable to `DiscoveryDocumentFetch` (the typecheck proves it). */
+const defaultDiscoveryDocumentFetch: DiscoveryDocumentFetch = (url, init) =>
+  globalThis.fetch(url, init)
+
+/** How long one document download may take. Mirrors the client's per-request bound. */
+export const DISCOVERY_DOWNLOAD_TIMEOUT_MS = 45_000
+
+/** Redirect hops followed while downloading, each re-checked against the allow-list. */
+export const DISCOVERY_DOWNLOAD_MAX_REDIRECTS = 3
+
+/**
+ * The injected seams for the two engines. Every field is optional and the
+ * defaults are the real thing, so production passes nothing and the tests can
+ * replace exactly what they need to observe.
+ */
+export interface TendersEngineOverrides {
+  /** The network the discovery client uses. */
+  discoveryFetch?: DiscoveryFetch
+  /** The network the document download uses. */
+  documentFetch?: DiscoveryDocumentFetch
+  /** Builds the discovery client (defaults to `createDiscoveryClient`). */
+  createDiscoveryClient?: (options: DiscoveryClientOptions) => DiscoveryClient
+  /** Builds the reminder scheduler (defaults to `createRemindersScheduler`). */
+  createRemindersScheduler?: (options: RemindersSchedulerOptions) => RemindersScheduler
+  /** Replaces the OS notifier (defaults to the Electron `Notification`). */
+  reminderNotifier?: ReminderNotifier
+  /** Replaces the reminder log hook (defaults to this app's console log). */
+  reminderLog?: ReminderLog
+  /** The clock the client and the scheduler read (defaults to the real one). */
+  now?: () => Date
+  /** Where the discovery client keeps its cache (defaults to the app's userData). */
+  discoveryCacheDir?: string
+  /** The scheduler's `userDataDir` (defaults to the app's userData). */
+  remindersUserDataDir?: string
+}
+
+let engineOverrides: TendersEngineOverrides = {}
+const discoveryClients = new Map<string, DiscoveryClient>()
+let remindersScheduler: RemindersScheduler | null = null
+
+/**
+ * Replace (or clear) the engine seams. A client or a schedule built from the
+ * previous seams is dropped rather than reused: mixing them would make the
+ * transport unreproducible in exactly the tests this seam exists for.
+ */
+export function setTendersEngineOverrides(overrides: TendersEngineOverrides | null): void {
+  engineOverrides = overrides ?? {}
+  discoveryClients.clear()
+  stopTendersReminders()
+  remindersScheduler = null
+}
+
+/**
+ * The app's reminder log. The scheduler reports every dropped notification and
+ * every unreadable state file through this hook, so passing it is what keeps
+ * "the platform could not show this" visible instead of silent.
+ */
+const defaultReminderLog: ReminderLog = (event) => {
+  const subject = [event.tenderId, event.thresholdId].filter(Boolean).join(' ')
+  const line = `tenders-main: reminders: ${event.message}${subject ? ` (${subject})` : ''}`
+  if (event.level === 'warn') console.warn(line)
+  else console.info(line)
+}
+
+/** The discovery client for this app's data directory (memoised per cache dir). */
+function getDiscoveryClient(): DiscoveryClient {
+  const cacheDir = engineOverrides.discoveryCacheDir ?? discoveryCacheDir(app.getPath('userData'))
+  const existing = discoveryClients.get(cacheDir)
+  if (existing) return existing
+  const build = engineOverrides.createDiscoveryClient ?? createDiscoveryClient
+  const client = build({
+    cacheDir,
+    ...(engineOverrides.discoveryFetch ? { fetchImpl: engineOverrides.discoveryFetch } : {}),
+    ...(engineOverrides.now ? { now: engineOverrides.now } : {}),
+  })
+  discoveryClients.set(cacheDir, client)
+  return client
+}
+
+/**
+ * The authoritative tender list the schedule reads — resolved from the store
+ * main owns, never from a renderer payload or a caller-supplied path. A load
+ * that fails throws, so the scheduler reports "the tender list could not be
+ * read" rather than mistaking an unreadable store for an empty one.
+ */
+async function readReminderTenders(): Promise<ReminderTender[]> {
+  const loaded = await getAuthoritativeTendersStore().load()
+  if (!loaded.ok) throw new Error(loaded.error.message)
+  const tenders: ReminderTender[] = []
+  for (const workspace of loaded.data.workspaces) {
+    for (const tender of workspace.tenders) {
+      tenders.push({
+        id: tender.id,
+        title: tender.title,
+        closingDate: tender.closingDate,
+        status: tender.status,
+      })
+    }
+  }
+  return tenders
+}
+
+function getRemindersScheduler(): RemindersScheduler {
+  if (remindersScheduler) return remindersScheduler
+  const build = engineOverrides.createRemindersScheduler ?? createRemindersScheduler
+  remindersScheduler = build({
+    userDataDir: engineOverrides.remindersUserDataDir ?? app.getPath('userData'),
+    readTenders: readReminderTenders,
+    log: engineOverrides.reminderLog ?? defaultReminderLog,
+    ...(engineOverrides.reminderNotifier ? { notify: engineOverrides.reminderNotifier } : {}),
+    ...(engineOverrides.now ? { now: engineOverrides.now } : {}),
+  })
+  return remindersScheduler
+}
+
+let remindersQuitHookRegistered = false
+
+/**
+ * Stop the schedule when the process is really going away, so no timer outlives
+ * the app. `will-quit` rather than `before-quit`: the shell's dirty-document
+ * close flow can cancel `before-quit`, and a cancelled quit must not silently
+ * end reminders.
+ */
+function registerRemindersQuitHook(): void {
+  if (remindersQuitHookRegistered) return
+  if (typeof (app as { on?: unknown }).on !== 'function') return
+  remindersQuitHookRegistered = true
+  app.on('will-quit', () => stopTendersReminders())
+}
+
+/**
+ * Start the deadline schedule. Called from `registerTendersIpc` — the same hook
+ * that starts the store watcher — so the store is available before the first
+ * check reads it. `start()` is idempotent and runs one check immediately, which
+ * is what surfaces a deadline that fell due while the app was closed.
+ *
+ * The schedule is tied to the PROCESS, not to a window: it keeps running while
+ * the app runs even if the user closes the Tenders tab, which is what lets a
+ * deadline warning arrive while they are working elsewhere. `will-quit` is what
+ * ends it (see `registerRemindersQuitHook`), and closing the app is the one
+ * thing that does stop it — the scheduler's own `REMINDERS_RUNTIME_LIMITATION`
+ * sentence states that to the user.
+ */
+export function startTendersReminders(): void {
+  registerRemindersQuitHook()
+  getRemindersScheduler().start()
+}
+
+/** Stop the schedule. Idempotent; safe to call when nothing was ever started. */
+export function stopTendersReminders(): void {
+  remindersScheduler?.stop()
+}
+
+// ── the document download ────────────────────────────────────────────────────
+
+type DocumentBodyRead =
+  { ok: true; bytes: Buffer } | { ok: false; reason: 'too-large' | 'unreadable' }
+
+/**
+ * Read a document body, refusing it the moment it passes `maxBytes` rather than
+ * after it has all been buffered — a cap that only measures is not a cap. The
+ * stream is preferred (a real `Response` always exposes one); a streamless
+ * response falls back to its own bytes, and one with neither is refused rather
+ * than decoded as text, because decoding a PDF as text would corrupt it.
+ */
+async function readCappedDocumentBody(
+  response: DiscoveryDocumentResponse,
+  maxBytes: number,
+): Promise<DocumentBodyRead> {
+  const reader = response.body?.getReader?.()
+  if (reader) {
+    const chunks: Uint8Array[] = []
+    let total = 0
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value || value.byteLength === 0) continue
+        total += value.byteLength
+        if (total > maxBytes) {
+          try {
+            await reader.cancel?.()
+          } catch {
+            // A body already being refused needs no polite close.
+          }
+          return { ok: false, reason: 'too-large' }
+        }
+        chunks.push(value)
+      }
+    } finally {
+      reader.releaseLock?.()
+    }
+    const merged = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      merged.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return { ok: true, bytes: Buffer.from(merged) }
+  }
+  if (typeof response.arrayBuffer === 'function') {
+    const buffer = await response.arrayBuffer()
+    if (buffer.byteLength > maxBytes) return { ok: false, reason: 'too-large' }
+    return { ok: true, bytes: Buffer.from(buffer) }
+  }
+  return { ok: false, reason: 'unreadable' }
+}
+
+/** Resolve a `Location` header against the URL that sent it, or null. */
+function resolveDocumentRedirect(base: string, location: string): string | null {
+  try {
+    return new URL(location, base).toString()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The name a downloaded document is stored under. The caller's name wins when it
+ * gave a usable one; otherwise the last segment of the link. Either way the
+ * managed store sanitizes and clamps it (`sanitizeManagedFileName`), so nothing
+ * here can put a path or an over-long name on disk.
+ */
+export function discoveryDocumentFileName(url: string, provided?: string): string {
+  const claimed = typeof provided === 'string' ? provided.trim() : ''
+  if (claimed) return claimed
+  try {
+    const segments = new URL(url).pathname.split('/').filter((segment) => segment.length > 0)
+    const last = segments.length > 0 ? decodeURIComponent(segments[segments.length - 1]).trim() : ''
+    if (last) return last
+  } catch {
+    // The link was validated before this point; an unreadable one has no name.
+  }
+  return 'tender-document'
+}
+
+function discoveryFailure(
+  code: string,
+  message: string,
+  extra: { url?: string; status?: number } = {},
+): TendersIpcFailure {
+  return { ok: false, error: { code, message, ...extra } }
+}
+
+const tooLargeDocumentMessage = (): string =>
+  `The tender document is larger than the ${MAX_DISCOVERY_DOWNLOAD_BYTES} bytes this app will store, so it was not downloaded.`
+
+/**
+ * Download one tender document from the feed and store it as a managed document.
+ *
+ * The link comes from the renderer, so it is treated as hostile input: it is
+ * re-checked against the discovery allow-list (https, exact Treasury host, no
+ * embedded credentials) BEFORE any request, redirects are followed manually and
+ * re-checked one hop at a time, the body is capped while it is read, and the
+ * whole request has a timeout. What lands on disk is an ordinary managed
+ * document, saved through the same store the RFP upload path uses.
+ */
+export async function downloadDiscoveryDocument(
+  req: DiscoveryDownloadDocumentRequest,
+  overrideUserData?: string,
+): Promise<DiscoveryDownloadDocumentResponse> {
+  if (!isRecord(req)) {
+    return discoveryFailure(
+      'INVALID_REQUEST',
+      'A document download needs the tender document link to fetch.',
+    )
+  }
+  const url = typeof req.url === 'string' ? req.url.trim() : ''
+  if (!url || url.length > MAX_DISCOVERY_DOCUMENT_URL_CHARS) {
+    return discoveryFailure(
+      'INVALID_REQUEST',
+      'A document download needs the tender document link to fetch.',
+    )
+  }
+  const claimedName = typeof req.fileName === 'string' ? req.fileName.trim() : ''
+  if (claimedName.length > MAX_DISCOVERY_DOCUMENT_FILE_NAME_CHARS) {
+    return discoveryFailure(
+      'INVALID_REQUEST',
+      `A stored document name may be at most ${MAX_DISCOVERY_DOCUMENT_FILE_NAME_CHARS} characters.`,
+    )
+  }
+  // Before the network, and before any disk work: the renderer may name a link,
+  // but only an https URL on a Treasury host this app already reads is ever
+  // requested. A plain-http link, a `file:` URL, a look-alike host such as
+  // `ocds-api.etenders.gov.za.evil.example`, and a URL carrying credentials are
+  // all refused here with nothing fetched.
+  if (!isAllowedDiscoveryUrl(url)) {
+    return discoveryFailure(
+      'BLOCKED_URL',
+      `Only tender documents on ${DISCOVERY_ALLOWED_HOSTS.join(', ')} can be downloaded, so that address was not requested.`,
+      { url },
+    )
+  }
+
+  const fetchImpl = engineOverrides.documentFetch ?? defaultDiscoveryDocumentFetch
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, DISCOVERY_DOWNLOAD_TIMEOUT_MS)
+
+  try {
+    let target = url
+    let redirects = 0
+    for (;;) {
+      const response = await fetchImpl(target, {
+        signal: controller.signal,
+        headers: { accept: 'application/pdf, application/octet-stream, */*' },
+        redirect: 'manual',
+      })
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers?.get?.('location') ?? null
+        const next = location === null ? null : resolveDocumentRedirect(target, location)
+        if (
+          next === null ||
+          !isAllowedDiscoveryUrl(next) ||
+          redirects >= DISCOVERY_DOWNLOAD_MAX_REDIRECTS
+        ) {
+          return discoveryFailure(
+            'BLOCKED_URL',
+            'The eTenders host redirected this document somewhere this app is not allowed to read, so nothing was downloaded.',
+            { url: target, status: response.status },
+          )
+        }
+        redirects += 1
+        target = next
+        continue
+      }
+      if (!(response.status >= 200 && response.status < 300)) {
+        return discoveryFailure(
+          'HTTP_STATUS',
+          `The eTenders host refused this document with status ${response.status}.`,
+          { url: target, status: response.status },
+        )
+      }
+      const declared = Number(response.headers?.get?.('content-length') ?? Number.NaN)
+      if (Number.isFinite(declared) && declared > MAX_DISCOVERY_DOWNLOAD_BYTES) {
+        return discoveryFailure('RESPONSE_TOO_LARGE', tooLargeDocumentMessage(), { url: target })
+      }
+      const body = await readCappedDocumentBody(response, MAX_DISCOVERY_DOWNLOAD_BYTES)
+      if (!body.ok) {
+        return body.reason === 'too-large'
+          ? discoveryFailure('RESPONSE_TOO_LARGE', tooLargeDocumentMessage(), { url: target })
+          : discoveryFailure(
+              'NETWORK',
+              'The eTenders host sent a document this app could not read, so nothing was saved.',
+              { url: target },
+            )
+      }
+      if (body.bytes.byteLength === 0) {
+        return discoveryFailure(
+          'MALFORMED_BODY',
+          'The eTenders host answered this document link with nothing, so no document was saved.',
+          { url: target },
+        )
+      }
+      const bytes = body.bytes
+      const saved = await getManagedDocumentStore(overrideUserData).save({
+        fileName: discoveryDocumentFileName(target, claimedName),
+        buffer: bytes,
+        category: 'rfp',
+      })
+      if (!saved.ok) {
+        return discoveryFailure(
+          'CACHE_WRITE',
+          `The document was downloaded but could not be saved into the tender document store: ${saved.error}`,
+          { url: target },
+        )
+      }
+      return {
+        ok: true,
+        record: saved.record,
+        storedPath: saved.record.relativePath,
+        fileName: saved.record.fileName,
+        mimeType: saved.record.mimeType,
+        byteLength: bytes.byteLength,
+        buffer: bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer,
+      }
+    }
+  } catch {
+    return timedOut
+      ? discoveryFailure(
+          'TIMEOUT',
+          `The eTenders host did not answer within ${Math.round(DISCOVERY_DOWNLOAD_TIMEOUT_MS / 1000)} seconds, so nothing was saved.`,
+          { url },
+        )
+      : discoveryFailure(
+          'NETWORK',
+          'The eTenders host could not be reached, so nothing was saved.',
+          { url },
+        )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ── the reminder settings patch ──────────────────────────────────────────────
+
+type ReminderSettingsPatch =
+  { ok: true; patch: Partial<ReminderSettings> } | { ok: false; error: string }
+
+/**
+ * Validate a settings patch from the renderer. `normalizeReminderSettings` drops
+ * unusable entries rather than refusing them, which is right for a file this app
+ * wrote and wrong for a payload it was handed: a silently dropped threshold
+ * would let a user believe a lead time was set when it was not. So an unusable
+ * patch is refused whole, with a reason. Unknown keys are ignored, exactly as
+ * `writeSettings` ignores them: a partial write changes what it names.
+ */
+export function validateReminderSettingsPatch(value: unknown): ReminderSettingsPatch {
+  if (!isRecord(value)) {
+    return { ok: false, error: 'A reminder settings change must be an object.' }
+  }
+  const patch: Partial<ReminderSettings> = {}
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== 'boolean') {
+      return { ok: false, error: 'Reminders can only be switched on or off with true or false.' }
+    }
+    patch.enabled = value.enabled
+  }
+  if (value.thresholds !== undefined) {
+    if (!Array.isArray(value.thresholds)) {
+      return { ok: false, error: 'The reminder lead times must be a list.' }
+    }
+    if (value.thresholds.length > MAX_TENDERS_REMINDER_THRESHOLDS) {
+      return {
+        ok: false,
+        error: `At most ${MAX_TENDERS_REMINDER_THRESHOLDS} reminder lead times can be set.`,
+      }
+    }
+    const thresholds: ReminderSettings['thresholds'] = []
+    for (const candidate of value.thresholds) {
+      if (!isRecord(candidate)) {
+        return { ok: false, error: 'Every reminder lead time needs an id and a lead time.' }
+      }
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : ''
+      if (!id || id.length > MAX_TENDERS_REMINDER_LABEL_CHARS) {
+        return {
+          ok: false,
+          error: `Every reminder lead time needs an id of at most ${MAX_TENDERS_REMINDER_LABEL_CHARS} characters.`,
+        }
+      }
+      const leadMs = candidate.leadMs
+      if (
+        typeof leadMs !== 'number' ||
+        !Number.isFinite(leadMs) ||
+        leadMs <= 0 ||
+        leadMs > MAX_TENDERS_REMINDER_LEAD_MS
+      ) {
+        return {
+          ok: false,
+          error: `A reminder lead time must be more than zero and at most ${MAX_TENDERS_REMINDER_LEAD_MS} milliseconds before closing.`,
+        }
+      }
+      const label = typeof candidate.label === 'string' ? candidate.label.trim() : ''
+      if (label.length > MAX_TENDERS_REMINDER_LABEL_CHARS) {
+        return {
+          ok: false,
+          error: `A reminder label may be at most ${MAX_TENDERS_REMINDER_LABEL_CHARS} characters.`,
+        }
+      }
+      thresholds.push({ id, label: label || id, leadMs })
+    }
+    patch.thresholds = thresholds
+  }
+  return { ok: true, patch }
+}
+
 export function registerTendersIpc(): void {
   if (ipcRegistered) return
 
@@ -1389,6 +1935,12 @@ export function registerTendersIpc(): void {
   void getManagedDocumentStore()
     .reconcile()
     .catch(() => {})
+
+  // Deadline reminders start with the same hook as the store watcher, so the
+  // store is available before the first check reads it. `start()` is idempotent
+  // and runs one check immediately; `will-quit` stops the timer (see
+  // `registerRemindersQuitHook`).
+  startTendersReminders()
 
   ipcMain.handle(TENDERS_CHANNELS.loadStoreV2, async (_e) => {
     if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
@@ -1609,6 +2161,180 @@ export function registerTendersIpc(): void {
       return restoreRecoveryCandidateFile(req)
     },
   )
+
+  // ── Tender discovery ───────────────────────────────────────────────────────
+  // Every handler is behind the same trusted-sender gate as the rest of this
+  // file, validates the request's SHAPE (never its meaning — the client owns
+  // what a window, an ocid or a document link means), and passes the client's
+  // own result straight back, so the renderer sees exactly the message the
+  // engine produced rather than a re-worded one.
+
+  ipcMain.handle(
+    TENDERS_CHANNELS.discoveryList,
+    async (_e, request: DiscoveryListRequest): Promise<DiscoveryListResponse> => {
+      if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+      if (!isRecord(request) || !isRecord(request.window)) {
+        return discoveryFailure(
+          'INVALID_REQUEST',
+          'A discovery request needs a window with two dates in YYYY-MM-DD form, ending no earlier than it starts.',
+        )
+      }
+      const from = request.window.from
+      const to = request.window.to
+      if (typeof from !== 'string' || typeof to !== 'string') {
+        return discoveryFailure(
+          'INVALID_REQUEST',
+          'A discovery request needs a window with two dates in YYYY-MM-DD form, ending no earlier than it starts.',
+        )
+      }
+      const pageSize = typeof request.pageSize === 'number' ? request.pageSize : undefined
+      if (request.pageSize !== undefined && typeof request.pageSize !== 'number') {
+        return discoveryFailure('INVALID_REQUEST', 'A discovery page size must be a number.')
+      }
+      if (
+        pageSize !== undefined &&
+        (!Number.isFinite(pageSize) || pageSize < 1 || pageSize > 100)
+      ) {
+        return discoveryFailure('INVALID_REQUEST', 'A discovery page size must be from 1 to 100.')
+      }
+      // The dates' meaning (a real civil date, a window the feed can answer) is
+      // the client's own check, and its refusal is the one the user is shown.
+      return getDiscoveryClient().listOpportunities({
+        window: { from, to },
+        ...(pageSize === undefined ? {} : { pageSize: Math.floor(pageSize) }),
+      })
+    },
+  )
+
+  ipcMain.handle(
+    TENDERS_CHANNELS.discoveryRefresh,
+    async (_e, request: DiscoveryRefreshRequest): Promise<DiscoveryRefreshResponse> => {
+      if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+      if (request !== undefined && !isRecord(request)) {
+        return discoveryFailure(
+          'INVALID_REQUEST',
+          'A discovery refresh takes no arguments but a window.',
+        )
+      }
+      const window = isRecord(request) ? request.window : undefined
+      if (window !== undefined) {
+        if (!isRecord(window) || typeof window.from !== 'string' || typeof window.to !== 'string') {
+          return discoveryFailure(
+            'INVALID_REQUEST',
+            'A discovery refresh needs a window with two dates in YYYY-MM-DD form, ending no earlier than it starts.',
+          )
+        }
+        return getDiscoveryClient().refreshCache({ window: { from: window.from, to: window.to } })
+      }
+      return getDiscoveryClient().refreshCache()
+    },
+  )
+
+  ipcMain.handle(
+    TENDERS_CHANNELS.discoveryReadCache,
+    async (_e): Promise<DiscoveryReadCacheResponse> => {
+      if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+      // Reads the last successful fetch from disk; no network, so the list is
+      // available offline exactly as the local rule engine is.
+      return getDiscoveryClient().readCache()
+    },
+  )
+
+  ipcMain.handle(
+    TENDERS_CHANNELS.discoveryRelease,
+    async (_e, request: DiscoveryReleaseRequest): Promise<DiscoveryReleaseResponse> => {
+      if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+      const ocid = isRecord(request) && typeof request.ocid === 'string' ? request.ocid.trim() : ''
+      if (!ocid || ocid.length > 128) {
+        return discoveryFailure('INVALID_REQUEST', 'A release lookup needs the tender’s ocid.')
+      }
+      return getDiscoveryClient().fetchRelease(ocid)
+    },
+  )
+
+  ipcMain.handle(
+    TENDERS_CHANNELS.discoveryDownloadDocument,
+    async (_e, request: DiscoveryDownloadDocumentRequest) => {
+      if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+      return downloadDiscoveryDocument(request)
+    },
+  )
+
+  // ── Deadline reminders ─────────────────────────────────────────────────────
+  // The schedule itself runs in main (`startTendersReminders`); these three
+  // channels are the settings surface and a manual check. `writeSettings` rejects
+  // when it could not persist, so that rejection is turned into an honest
+  // `ok: false` here rather than being allowed to surface as an opaque IPC error;
+  // `readState`/`checkNow` are documented never to reject, and their guards exist
+  // so that if one ever did the renderer would still get an answer.
+
+  ipcMain.handle(TENDERS_CHANNELS.remindersGet, async (_e): Promise<RemindersStateResponse> => {
+    if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+    try {
+      const state = await getRemindersScheduler().readState()
+      return {
+        ok: true,
+        settings: state.settings,
+        ledger: state.ledger,
+        limitation: REMINDERS_RUNTIME_LIMITATION,
+      }
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        error: {
+          code: 'READ_FAILED',
+          message:
+            error instanceof Error ? error.message : 'The reminder settings could not be read.',
+        },
+      }
+    }
+  })
+
+  ipcMain.handle(
+    TENDERS_CHANNELS.remindersSet,
+    async (_e, settings: RemindersSetRequest): Promise<RemindersSetResponse> => {
+      if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+      const validated = validateReminderSettingsPatch(settings)
+      if (!validated.ok) {
+        return { ok: false, error: { code: 'INVALID_REQUEST', message: validated.error } }
+      }
+      try {
+        const written = await getRemindersScheduler().writeSettings(validated.patch)
+        return { ok: true, settings: written, limitation: REMINDERS_RUNTIME_LIMITATION }
+      } catch (error: unknown) {
+        // `writeSettings` rejects when it could not persist, so a caller is never
+        // told a lead time was saved when the next check would not honour it.
+        return {
+          ok: false,
+          error: {
+            code: 'WRITE_FAILED',
+            message: `The reminder settings could not be saved: ${
+              error instanceof Error ? error.message : 'the write failed'
+            }`,
+          },
+        }
+      }
+    },
+  )
+
+  ipcMain.handle(TENDERS_CHANNELS.remindersCheck, async (_e): Promise<RemindersCheckResponse> => {
+    if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+    try {
+      const result = await getRemindersScheduler().checkNow()
+      // The ledger stays in main: it is the memory that makes each reminder
+      // once-only, not something a renderer should be able to write back.
+      return { ok: true, fired: result.fired, reminders: result.reminders }
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        error: {
+          code: 'CHECK_FAILED',
+          message:
+            error instanceof Error ? error.message : 'The reminder check could not be completed.',
+        },
+      }
+    }
+  })
 
   // Cross-App: Export Compliance Matrix to Sheets
   ipcMain.handle(

@@ -7,9 +7,11 @@
 // The parser itself is NOT here: there is exactly one closing-date parser, the
 // shared `parseClosingDate` in `shared/readiness.ts`, re-exported below so the
 // badge, the readiness gate, the runway and the store can never disagree about
-// what a closing-date string means.
+// what a closing-date string means. The closing-instant FORMATTER is not here
+// either — `formatClosing` below delegates to the shared `formatClosingInstant`
+// in that same module, so the badge and the reminder copy cannot drift apart.
 import { useEffect, useState } from 'react'
-import { formatDeadlineDelta, parseClosingDate } from '../../shared/readiness'
+import { formatClosingInstant, formatDeadlineDelta, parseClosingDate } from '../../shared/readiness'
 
 export { parseClosingDate }
 
@@ -43,24 +45,12 @@ export function formatDelta(ms: number): string {
  * is rendered in `Africa/Johannesburg`: that shows the closing time exactly as
  * the RFP states it, on every machine, and keeps the countdown and the readiness
  * gate describing the same instant. An RFC 3339 value with an explicit offset is
- * a real instant instead, so it is rendered on the reader's own clock.
+ * a real instant instead, so it is rendered on the reader's own clock. Both the
+ * rendering and the timezone decision are the shared `formatClosingInstant`, so
+ * this module carries no second copy of either.
  */
-const CIVIL_DISPLAY_TIMEZONE = 'Africa/Johannesburg'
-
-function displayTimeZone(raw: string | null | undefined): string | undefined {
-  return /(?:Z|[+-]\d{2}:?\d{2})$/.test((raw ?? '').trim()) ? undefined : CIVIL_DISPLAY_TIMEZONE
-}
-
 function formatClosing(date: Date, raw: string | null | undefined): string {
-  return date.toLocaleString('en-ZA', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: displayTimeZone(raw),
-  })
+  return formatClosingInstant(date, raw)
 }
 
 export function deadlineStatus(

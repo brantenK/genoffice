@@ -18,6 +18,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { deadlineStatus, urgencyClasses, useNow } from '../deadline'
 import {
   assertPdfBytesWithinLimit,
@@ -29,6 +30,13 @@ import {
   PdfImportCancelledError,
   PdfPreflightError,
 } from '../pdf/extract'
+import {
+  assertDocxBytesWithinLimit,
+  DOCX_PREFLIGHT_LIMITS,
+  DocxImportCancelledError,
+  DocxPreflightError,
+  extractDocxIntake,
+} from '../intake/docx'
 import { extractIssuerInfo, extractTenderMeta, shredExtraction } from '../pdf/shred'
 import {
   applyGapToRequirementsIndexed,
@@ -41,15 +49,22 @@ import {
   isDemoAssetUrl,
   SUBMISSION_METHOD_LABEL,
   TENDER_OUTCOME_LABEL,
+  type PageExtraction,
   type RequirementRecord,
   type TenderDataOrigin,
   type TenderRecord,
 } from '../../shared/types'
-import { deriveTenderReview, gateConflictingMeta, summarizeReview } from './ExtractionReview'
+import {
+  deriveTenderReview,
+  gateConflictingMeta,
+  isWordDocumentName,
+  summarizeReview,
+} from './ExtractionReview'
 import { lifecycleCardSummary } from './TenderLifecyclePanel'
 import { Badge, Button, Spinner } from './ui'
 import { Dialog } from './Dialog'
 import type { ExtractionRejection } from '../../../shared/ai-extraction'
+import { MAX_TENDERS_REVIEW_CONFLICTS } from '../../../shared/tenders-persistence'
 import {
   AI_EXTRACTION_RULES,
   adaptAiExtraction,
@@ -59,7 +74,9 @@ import {
   mergeAiIntoReview,
   runTenderAiPass,
   settingsSupportVision,
+  type AiPageImage,
   type AiPassProgress,
+  type AiVisionCompletion,
   type DuplicateReferenceCheck,
   type TenderAiPassVision,
 } from '../ai/extract-with-ai'
@@ -222,6 +239,95 @@ interface AiRunProgress {
  */
 const IMAGE_READING_UNAVAILABLE_MESSAGE =
   'The model you configured cannot be used to read an image.'
+
+/**
+ * Shown when the source is a Word .docx and the pass reaches the pages the local
+ * extractor flagged.
+ *
+ * A .docx has no rendered pages, so there is no page image for a model to read —
+ * whatever the configured model can do. Those pages are then cleared the only
+ * way left: a person compares each one against the original document and marks
+ * it reviewed, which is what the review step offers.
+ */
+export const WORD_DOCUMENT_VISION_MESSAGE =
+  'This tender came from a Word .docx, which has no rendered pages, so there is no page image to read.'
+
+// ── which intake path a chosen file takes ────────────────────────────────────
+
+/** The MIME type Word writes for a .docx, accepted alongside the extension. */
+export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+/** The two document types intake reads. */
+export type TenderSourceKind = 'pdf' | 'docx'
+
+/**
+ * Which reader a chosen file goes to.
+ *
+ * The NAME decides first: an OS-reported MIME type is a hint the file name
+ * contradicts often enough to matter (a .docx dragged from an archive, a PDF
+ * served as octet-stream), and the extension is what the user recognises. The
+ * type is only consulted for a file whose name carries neither extension.
+ * Null means intake cannot read it at all, which is the caller's error message
+ * to give.
+ */
+export function tenderSourceKind(file: { name: string; type: string }): TenderSourceKind | null {
+  if (/\.pdf$/i.test(file.name)) return 'pdf'
+  if (/\.docx$/i.test(file.name)) return 'docx'
+  if (file.type === 'application/pdf') return 'pdf'
+  if (file.type === DOCX_MIME) return 'docx'
+  return null
+}
+
+/**
+ * What a tender card says about its source document's own page count.
+ *
+ * A .docx that declares no page break is ONE page to this app — the whole file —
+ * and printing "1 page" beside a Word document would read as a printed page
+ * number. So a flowing .docx says what it is instead, and a .docx that declares
+ * breaks says where the numbers came from.
+ */
+export function documentPageSummary(tender: Pick<TenderRecord, 'fileName' | 'numPages'>): string {
+  if (!isWordDocumentName(tender.fileName)) return `${tender.numPages} pages`
+  return tender.numPages > 1
+    ? `${tender.numPages} pages (declared by the .docx)`
+    : '1 continuous block of text (no page breaks declared)'
+}
+
+// ── the AI pass's vision capability ──────────────────────────────────────────
+
+export interface ImportVisionArgs {
+  /**
+   * The parsed PDF, or null when the source is a Word .docx. A .docx has no
+   * rendered pages, so nothing can be rendered into a page image.
+   */
+  doc: PDFDocumentProxy | null
+  /** Whether the configured model can read an image at all. */
+  supportsVision: boolean
+  /** Built only when a page image can actually be read, so it is never wasted. */
+  createCompletion: () => AiVisionCompletion
+  renderPageImage: (doc: PDFDocumentProxy, pageNumber: number) => Promise<AiPageImage>
+}
+
+/**
+ * What the optional AI pass may do about the pages the local extractor flagged.
+ *
+ * The order matters and is the whole point of this function: a Word .docx
+ * refuses a vision read BEFORE the model's own capability is consulted. A
+ * vision-capable model would otherwise be handed a renderer for a document that
+ * cannot be rendered, and the run would fail on a file it had read perfectly.
+ * With the reason given, the pass reports it, and the flagged pages keep
+ * blocking readiness until a person reviews them.
+ */
+export function importVision(args: ImportVisionArgs): TenderAiPassVision {
+  const doc = args.doc
+  if (!doc) return { available: false, reason: WORD_DOCUMENT_VISION_MESSAGE }
+  if (!args.supportsVision) return { available: false, reason: IMAGE_READING_UNAVAILABLE_MESSAGE }
+  return {
+    available: true,
+    completion: args.createCompletion(),
+    renderPageImage: (pageNumber) => args.renderPageImage(doc, pageNumber),
+  }
+}
 
 function rejectionDetails(rejections: readonly ExtractionRejection[]): string[] {
   const shown = rejections.slice(0, AI_REJECTION_PREVIEW_LIMIT).map((item) => item.reason)
@@ -582,10 +688,42 @@ export function AiPassPanel({ tenderId, className }: { tenderId?: string; classN
   )
 }
 
-async function shredFile(
+/** What a caller can change about the intake, for one file. */
+export interface ShredTenderOptions {
+  /**
+   * Marks the tender as coming from the bundled sample RFP rather than the
+   * user's own document (`TenderRecord.dataOrigin`).
+   */
+  dataOrigin?: TenderDataOrigin
+  /**
+   * A managed-store path the file's bytes are ALREADY saved at.
+   *
+   * A document downloaded from the discovery feed is stored by main before the
+   * renderer sees it (`tenders:discovery-download-document` saves it as an `rfp`
+   * through the same managed-document store the upload path uses), so the intake
+   * adopts that file instead of writing a second copy of it. When present, a
+   * cancelled import deletes that stored document rather than leaving an orphan
+   * the user never asked for.
+   */
+  storedPath?: string
+}
+
+/**
+ * THE intake sequence: one chosen or downloaded document in, one fully-built
+ * tender record out.
+ *
+ * Both intake paths go through here — the dropzone/file input in `TenderList`
+ * (a PDF or a Word .docx the user picked) and the discovery pane's "Add to
+ * workspace" (a document the app downloaded from the eTenders feed) — so a
+ * discovered tender gets the same byte/page preflights, the same local rule
+ * engine, the same vault gap analysis, the same issuer template, the same
+ * duplicate-reference refusal and the same persistence as an imported one.
+ * `TenderList`'s `shredFile` and `intakeTenderFile` below are thin callers.
+ */
+export async function shredTenderFile(
   file: File,
   signal: AbortSignal,
-  dataOrigin?: TenderDataOrigin,
+  options: ShredTenderOptions = {},
 ): Promise<{
   record: TenderRecord
   extraction: Awaited<ReturnType<typeof extractAllPages>>
@@ -603,65 +741,91 @@ async function shredFile(
    */
   duplicateReference: DuplicateReferenceCheck
   /**
-   * The parsed document. Handed back ONLY so the optional AI pass can render a
-   * page that has no text layer — the caller owns releasing it (`cleanup()`), so
-   * a document whose import fails or whose pass never runs is not left open.
+   * The parsed PDF. Handed back ONLY so the optional AI pass can render a page
+   * that has no text layer — the caller owns releasing it (`cleanup()`), so a
+   * document whose import fails or whose pass never runs is not left open.
+   * Null when the source was a Word .docx: there is no page to render, and the
+   * AI pass is told so (see `importVision`).
    */
-  doc: Awaited<ReturnType<typeof loadPdfDocument>>
+  doc: PDFDocumentProxy | null
 }> {
   const setShredding = useTendersStore.getState().setShredding
+  const dataOrigin = options.dataOrigin
+  const kind = tenderSourceKind(file)
+  if (!kind) throw new Error('Unsupported document type.')
+  const wordDocument = kind === 'docx'
+  // Each intake path reports its own cancellation, so a cancelled Word import is
+  // never described as a cancelled PDF one.
   const throwIfAborted = (): void => {
-    if (signal.aborted) throw new PdfImportCancelledError()
+    if (!signal.aborted) return
+    throw wordDocument ? new DocxImportCancelledError() : new PdfImportCancelledError()
   }
-  let openedDoc: Awaited<ReturnType<typeof loadPdfDocument>> | null = null
+  let openedDoc: PDFDocumentProxy | null = null
   try {
-    // Preflight BEFORE reading the file buffer.
-    assertPdfBytesWithinLimit(file.size)
-    setShredding({ stage: 'loading', message: 'Reading PDF…', page: 0, total: 0 })
-    throwIfAborted()
-    const buf = await file.arrayBuffer()
-    const doc = await loadPdfDocument(buf)
-    openedDoc = doc
+    let ex: PageExtraction
+    if (wordDocument) {
+      // Byte preflight BEFORE reading the file buffer, then the line budget that
+      // stands in for the PDF path's page budget: a .docx declares its own pages
+      // (one, when it declares none), so the cost this bounds is the text, not a
+      // page count.
+      assertDocxBytesWithinLimit(file.size)
+      setShredding({ stage: 'loading', message: 'Reading Word document…', page: 0, total: 0 })
+      throwIfAborted()
+      ex = await extractDocxIntake(file, { signal })
+      throwIfAborted()
+    } else {
+      // Preflight BEFORE reading the file buffer.
+      assertPdfBytesWithinLimit(file.size)
+      setShredding({ stage: 'loading', message: 'Reading PDF…', page: 0, total: 0 })
+      throwIfAborted()
+      const buf = await file.arrayBuffer()
+      const doc = await loadPdfDocument(buf)
+      openedDoc = doc
 
-    // Page-count preflight BEFORE any page is read or rendered.
-    assertPdfPagesWithinLimit(doc.numPages)
-    throwIfAborted()
+      // Page-count preflight BEFORE any page is read or rendered.
+      assertPdfPagesWithinLimit(doc.numPages)
+      throwIfAborted()
 
-    setShredding({
-      stage: 'extracting',
-      message: 'Extracting text & coordinates…',
-      page: 0,
-      total: doc.numPages,
-    })
-    const ex = await extractAllPages(
-      doc,
-      (page, total) =>
-        useTendersStore.getState().setShredding({
-          stage: 'extracting',
-          message: 'Extracting text & coordinates…',
-          page,
-          total,
-        }),
-      { signal },
-    )
-    throwIfAborted()
+      setShredding({
+        stage: 'extracting',
+        message: 'Extracting text & coordinates…',
+        page: 0,
+        total: doc.numPages,
+      })
+      ex = await extractAllPages(
+        doc,
+        (page, total) =>
+          useTendersStore.getState().setShredding({
+            stage: 'extracting',
+            message: 'Extracting text & coordinates…',
+            page,
+            total,
+          }),
+        { signal },
+      )
+      throwIfAborted()
+    }
 
+    // No per-page progress for a Word document: it has no pages being read, so
+    // the bar would count something that never happens (the store renders the
+    // counter only when there is a total — see `ShredProgress`).
+    const progressTotal = wordDocument ? 0 : ex.numPages
     setShredding({
       stage: 'shredding',
       message: 'Matching compliance rules…',
-      page: ex.numPages,
-      total: ex.numPages,
+      page: progressTotal,
+      total: progressTotal,
     })
     await new Promise((r) => setTimeout(r, 120)) // let the UI paint
     throwIfAborted()
     const extracted = shredExtraction(ex)
-    const meta = extractTenderMeta(ex, file.name.replace(/\.pdf$/i, ''))
+    const meta = extractTenderMeta(ex, file.name.replace(/\.(?:pdf|docx)$/i, ''))
 
     setShredding({
       stage: 'analysing',
       message: 'Running vault gap analysis…',
-      page: ex.numPages,
-      total: ex.numPages,
+      page: progressTotal,
+      total: progressTotal,
     })
     // ONE vault keyword index for this analysis pass; each requirement matches
     // against a prefiltered candidate set instead of rescanning the vault.
@@ -689,7 +853,22 @@ async function shredFile(
     // A failure here is never silent: it is returned so the list can show a
     // visible warning that the imported PDF is only a session blob.
     let persistError: string | null = null
-    if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
+    if (options.storedPath) {
+      // The bytes are already a managed document — a discovery download is saved
+      // by main before the intake sees it — so the tender adopts that file
+      // instead of the app writing a second copy of it.
+      fileUrl = options.storedPath
+      // Same cancellation contract as the upload path below: a cancelled import
+      // must not leave a stored document nobody owns.
+      if (signal.aborted) {
+        try {
+          await window.tendersApi?.deleteDocument?.({ storedPath: options.storedPath })
+        } catch {
+          /* best-effort cleanup */
+        }
+        throw wordDocument ? new DocxImportCancelledError() : new PdfImportCancelledError()
+      }
+    } else if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
       let storedPath: string | null = null
       try {
         const buffer = await file.arrayBuffer()
@@ -717,7 +896,7 @@ async function shredFile(
             /* best-effort cleanup */
           }
         }
-        throw new PdfImportCancelledError()
+        throw wordDocument ? new DocxImportCancelledError() : new PdfImportCancelledError()
       }
     }
     if (!fileUrl) {
@@ -768,7 +947,7 @@ async function shredFile(
         submissionAddress: gated.submissionAddress,
       },
     )
-    setShredding({ stage: 'done', message: 'Done', page: ex.numPages, total: ex.numPages })
+    setShredding({ stage: 'done', message: 'Done', page: progressTotal, total: progressTotal })
     // The origin rides on the record, so it is committed with the tender and is
     // still there after a restart.
     return {
@@ -777,13 +956,13 @@ async function shredFile(
       meta,
       persistError,
       duplicateReference,
-      doc,
+      doc: openedDoc,
     }
   } catch (err) {
     // Nothing will render from a document whose import failed, so release it
     // here rather than leaving it open for the life of the window.
     void openedDoc?.cleanup().catch(() => {})
-    if (err instanceof PdfImportCancelledError) {
+    if (err instanceof PdfImportCancelledError || err instanceof DocxImportCancelledError) {
       // Clean cancellation: no tender is added, no partial state is kept.
       setShredding(null)
       throw err
@@ -792,6 +971,335 @@ async function shredFile(
     setShredding({ stage: 'error', message: msg, page: 0, total: 0 })
     throw err
   }
+}
+
+/** The intake sequence, called with the options its two entry points pass in. */
+async function shredFile(
+  file: File,
+  signal: AbortSignal,
+  options: ShredTenderOptions = {},
+): Promise<Awaited<ReturnType<typeof shredTenderFile>>> {
+  return shredTenderFile(file, signal, options)
+}
+
+// ── the optional AI pass, for either intake path ─────────────────────────────
+//
+// Module-level, so the discovery pane's "Add to workspace" starts the same pass
+// an imported file does: one implementation, one abort handle, and therefore one
+// run in flight per app — a newer import supersedes an older one exactly as it
+// did when the handle was a ref on `TenderList`.
+
+/** Aborts the AI pass started by an intake; null when nothing is in flight. */
+let importAiAbort: AbortController | null = null
+
+/** Stop the intake's AI pass in flight, if any. */
+export function abortAiPass(): void {
+  importAiAbort?.abort()
+}
+
+export interface ImportAiPassArgs {
+  tenderId: string
+  fileName: string
+  tenderTitle: string
+  extraction: PageExtraction
+  /** Null when the source is a Word .docx — see `importVision`. */
+  doc: PDFDocumentProxy | null
+  /** Lets a host keep its own readiness display current (the list's AI toggle). */
+  onReadiness?: (readiness: AiReadiness) => void
+}
+
+/**
+ * The additive AI pass, started AFTER the local result is committed and shown.
+ *
+ * It is never awaited by the import path: a slow, failed or cancelled model
+ * call cannot delay the tender, and it cannot remove anything the local engine
+ * found. Whatever it does produce lands in the review step as suggestions —
+ * `unconfirmed`, `suggestedBy: 'ai'` — and its refusals, warnings and the
+ * duplicate-reference case are reported rather than swallowed.
+ *
+ * It also owns the pages without a text layer: each one the parser flagged
+ * `needsOcr` is rendered to an image and handed to the model, and the page is
+ * recorded `ai-extracted` ONLY when a reading of it actually came back. A model
+ * that cannot read an image, a render that fails and a cancelled run all leave
+ * those pages blocking exactly as they were.
+ */
+export async function runAiPass(args: ImportAiPassArgs): Promise<void> {
+  // The run is made visible BEFORE anything can refuse it: "no model
+  // configured" is one of the outcomes the user has to be able to see, and a
+  // refusal recorded after the fact is a refusal nobody reads.
+  importAiAbort?.abort()
+  const controller = new AbortController()
+  importAiAbort = controller
+  const runId = startAiPass({
+    tenderId: args.tenderId,
+    tenderTitle: args.tenderTitle,
+    cancel: () => controller.abort(),
+  })
+  try {
+    const bridge = tendersAiBridge()
+    const readiness = await readAiReadiness(bridge)
+    args.onReadiness?.(readiness)
+    if (!readiness.ready) {
+      failAiPass(runId, readiness.message, 'unavailable')
+      return
+    }
+    // Readiness can only be `ready` with a bridge in hand; this is what tells
+    // the compiler so.
+    if (!bridge) {
+      failAiPass(runId, 'AI extraction is unavailable in this build.', 'unavailable')
+      return
+    }
+    // A model that cannot take an image is not asked to, and neither is a
+    // model reading a Word .docx: that file has no rendered page to hand it.
+    // Either way the pages without text keep blocking and the pass says why.
+    const vision = importVision({
+      doc: args.doc,
+      supportsVision: settingsSupportVision(readiness.settings),
+      createCompletion: () =>
+        createVisionCompletion({
+          bridge,
+          settings: readiness.settings,
+          onProgress: (progress) => reportAiPassChars(runId, progress.chars),
+        }),
+      renderPageImage: (doc, pageNumber) =>
+        renderPdfPageImage(doc, pageNumber, { signal: controller.signal }),
+    })
+    try {
+      const completion = createTendersCompletion({
+        bridge,
+        settings: readiness.settings,
+        onProgress: (progress) => reportAiPassChars(runId, progress.chars),
+      })
+      const pass = await runTenderAiPass({
+        completion,
+        pages: args.extraction.pages.map((page) => ({
+          pageNumber: page.pageNumber,
+          text: page.text,
+          needsOcr: page.needsOcr,
+        })),
+        numPages: args.extraction.numPages,
+        rules: AI_EXTRACTION_RULES,
+        fileName: args.fileName,
+        tenderTitle: args.tenderTitle,
+        signal: controller.signal,
+        vision,
+        onProgress: (progress) => reportAiPassProgress(runId, progress),
+      })
+      if (controller.signal.aborted) {
+        // Either the user cancelled or a newer import superseded this run. The
+        // store already recorded that, and `cancelAiPass` is given this run's
+        // id so a superseded attempt cannot cancel the one that replaced it.
+        cancelAiPass(runId)
+        return
+      }
+      // Read the tender back from the store: the user may have removed a
+      // requirement (or the tender) while the model was working.
+      const state = useTendersStore.getState()
+      const tender = state.tenders.find((candidate) => candidate.id === args.tenderId)
+      if (!tender) {
+        failAiPass(
+          runId,
+          'the tender this run was for is no longer in the workspace, so nothing was applied',
+        )
+        return
+      }
+      const adaptation = adaptAiExtraction({
+        merged: pass.merged,
+        existingRuleKeys: tender.requirements.map((requirement) => requirement.ruleKey),
+        existingTenders: state.tenders,
+        tenderId: args.tenderId,
+        visionSummary: pass.vision.summary,
+      })
+      // The store decides whether this run may still report. A run cancelled or
+      // superseded between the model answering and here is refused, so a
+      // stopped run can never write a partial result into the tender.
+      const accepted = finishAiPass(runId, {
+        summary: adaptation.summary,
+        rejections: adaptation.rejections,
+        warnings: adaptation.warnings,
+        unreadPages: adaptation.unreadPages,
+        readPages: pass.vision.readPages,
+        visionSkippedReason: pass.vision.skippedReason,
+        visionUnread: pass.vision.unread,
+        duplicateReference: adaptation.duplicateReference?.message ?? null,
+      })
+      if (!accepted) return
+      if (adaptation.requirements.length > 0) {
+        // AI rows go through the same vault gap analysis as the parser's, so a
+        // suggestion is matched against the vault exactly like a parsed rule.
+        const vaultIndex = buildVaultKeywordIndex(state.vault)
+        const added: RequirementRecord[] = applyGapToRequirementsIndexed(
+          adaptation.requirements.map((requirement) => ({
+            ...requirement,
+            status: 'OUTSTANDING' as const,
+            linkedVaultDocId: null,
+            reason: null,
+            suggestedVaultDocIds: [],
+          })),
+          vaultIndex,
+        )
+        useTendersStore
+          .getState()
+          .updateTender(args.tenderId, { requirements: [...tender.requirements, ...added] })
+      }
+      const review = useTendersStore.getState().tenderReviews[args.tenderId]
+      if (review) {
+        // The page states are written from the vision pass's own per-page
+        // result, never from what the model said about itself: a page is
+        // marked `ai-extracted` only where a reading of its image came back,
+        // and only where the parser had flagged it `needsOcr`.
+        const withPages = review.pages
+          ? {
+              ...review,
+              pages: markModelReadPages(review.pages, {
+                scannedPages: pass.vision.scannedPages,
+                readPages: pass.vision.readPages,
+              }),
+            }
+          : review
+        useTendersStore
+          .getState()
+          .setTenderReview(args.tenderId, mergeAiIntoReview(withPages, adaptation))
+      }
+    } catch (error) {
+      // Nothing is discarded: the local extraction is already committed, and
+      // this only adds a visible reason why the AI pass produced nothing. A
+      // run that was already stopped keeps its own state — a cancelled run
+      // cannot be relabelled as a failure, nor the other way round.
+      failAiPass(runId, error instanceof Error ? error.message : String(error))
+    } finally {
+      // Only the run that still owns the ref clears it: a second import
+      // supersedes this one, and the newer run must survive this one's
+      // unwinding.
+      if (importAiAbort === controller) importAiAbort = null
+    }
+  } finally {
+    // The parsed document was handed over only so a flagged page could be
+    // rendered, and every path through this pass is done with it. A Word
+    // .docx has none to release.
+    void args.doc?.cleanup().catch(() => {})
+  }
+}
+
+// ── one intake path for both entry points ────────────────────────────────────
+//
+// `TenderList`'s file input and the discovery pane's "Add to workspace" both end
+// here, so a tender that came from the eTenders feed is built by the same code as
+// one the user chose: the same review gate, the same readiness inputs, the same
+// compliance matrix, and the same optional AI pass. What differs is only where
+// the bytes came from — and that difference is recorded, never hidden (see
+// `reviewNotes`, which the discovery pane uses for provenance).
+
+export interface TenderIntakeOptions {
+  signal: AbortSignal
+  dataOrigin?: TenderDataOrigin
+  /** A managed-store path the bytes are already saved at (see `ShredTenderOptions`). */
+  storedPath?: string
+  /** Run the optional AI pass after the local result is committed. */
+  aiExtraction?: boolean
+  /**
+   * Extra notes for the review step's own conflict list. They are persisted with
+   * the tender (`intakeVerification.conflicts`) and shown at the top of the
+   * review, which is where a reader has to meet them before confirming anything.
+   * The discovery pane records a machine-sourced tender's provenance this way.
+   */
+  reviewNotes?: string[]
+  onReadiness?: (readiness: AiReadiness) => void
+  /** The RFP could not be persisted and is only a session blob. */
+  onPersistFailure?: (failure: { tenderId: string; label: string; message: string }) => void
+  /** The parser read a reference that already belongs to another tender. */
+  onDuplicateReference?: (message: string) => void
+}
+
+export interface TenderIntakeResult {
+  tenderId: string
+  record: TenderRecord
+}
+
+/**
+ * Read one document into a tender and commit it. Throws the intake's own typed
+ * errors (`PdfPreflightError` / `DocxPreflightError` / the two cancel errors) so
+ * each caller words its failure for its own surface; everything the two callers
+ * share is decided here.
+ */
+export async function intakeTenderFile(
+  file: File,
+  options: TenderIntakeOptions,
+): Promise<TenderIntakeResult> {
+  const kind = tenderSourceKind(file)
+  // How this import's own messages name the file: "the PDF" is wrong for a Word
+  // document, and the two paths fail in different ways.
+  const label = kind === 'docx' ? 'Word document' : 'PDF'
+  const { record, extraction, meta, persistError, duplicateReference, doc } = await shredFile(
+    file,
+    options.signal,
+    { dataOrigin: options.dataOrigin, storedPath: options.storedPath },
+  )
+  if (options.signal.aborted) {
+    // The import was cancelled after the shred: nothing is added, no partial
+    // state is kept, and the parsed document is released.
+    void doc?.cleanup().catch(() => {})
+    throw kind === 'docx' ? new DocxImportCancelledError() : new PdfImportCancelledError()
+  }
+  const store = useTendersStore.getState()
+  store.addTender(record)
+  if (persistError) {
+    // The tender imports fine, but the document fell back to an object URL that
+    // dies on reload. Say so, and offer to retry the save.
+    options.onPersistFailure?.({
+      tenderId: record.id,
+      label,
+      message: `The ${label} could not be saved to the workspace — ${persistError}. It is open for this session only and must be re-attached before you rely on it after a restart.`,
+    })
+  }
+  // Seed the extraction review from the parser's candidates so the user sees
+  // competing values and source pages straight away. Every field arrives
+  // `unconfirmed` — a discovered tender is machine-sourced exactly like a model
+  // suggestion, and only a human action moves a field out of that state.
+  const seeded = deriveTenderReview({
+    meta,
+    extraction,
+    requirements: record.requirements,
+    estimatedValue: record.estimatedValue ?? null,
+  })
+  const notes = (options.reviewNotes ?? []).filter((note) => note.trim().length > 0)
+  store.setTenderReview(
+    record.id,
+    notes.length === 0
+      ? seeded
+      : {
+          ...seeded,
+          // The caller's notes lead, and the whole list is clamped to what the
+          // schema accepts, so a provenance note can never push a review over
+          // the bound and make every autosave of the document fail.
+          conflicts: [...notes, ...seeded.conflicts].slice(0, MAX_TENDERS_REVIEW_CONFLICTS),
+        },
+  )
+  store.setActiveTender(record.id)
+  // A reference number that already belongs to another tender is kept in review
+  // rather than written to the record (the schema refuses the whole document on a
+  // duplicate), so say so instead of letting every autosave fail with a
+  // path-shaped schema error.
+  if (duplicateReference.message !== null)
+    options.onDuplicateReference?.(duplicateReference.message)
+  // The local result is committed and visible; the AI pass starts now and is
+  // deliberately not awaited. For a Word .docx `doc` is null and the pass is
+  // told there is no page image to read.
+  if (options.aiExtraction) {
+    void runAiPass({
+      tenderId: record.id,
+      fileName: record.fileName,
+      tenderTitle: record.title,
+      extraction,
+      doc,
+      onReadiness: options.onReadiness,
+    })
+  } else {
+    // Nothing will render from it: release the parsed document now rather than
+    // leaving it open for the life of the window.
+    void doc?.cleanup().catch(() => {})
+  }
+  return { tenderId: record.id, record }
 }
 
 export function TenderList() {
@@ -803,12 +1311,10 @@ export function TenderList() {
   const now = useNow(60_000)
   const issuerTemplates = useTendersStore((s) => s.issuerTemplates)
   const tenderReviews = useTendersStore((s) => s.tenderReviews)
-  const addTender = useTendersStore((s) => s.addTender)
   const removeTender = useTendersStore((s) => s.removeTender)
   const removeIssuerTemplate = useTendersStore((s) => s.removeIssuerTemplate)
   const setActiveTender = useTendersStore((s) => s.setActiveTender)
   const setShredding = useTendersStore((s) => s.setShredding)
-  const setTenderReview = useTendersStore((s) => s.setTenderReview)
   const updateTender = useTendersStore((s) => s.updateTender)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -816,6 +1322,8 @@ export function TenderList() {
   // and is only a session blob — never a silent console warning.
   const [storageWarning, setStorageWarning] = useState<{
     tenderId: string
+    /** How the message names the file: "PDF" or "Word document". */
+    label: string
     message: string
   } | null>(null)
   // Tender removal goes through the managed-file lifecycle: an in-app
@@ -842,7 +1350,6 @@ export function TenderList() {
   // `intakeNotice` is left for the one intake message that is not the AI pass's:
   // a reference number the parser read that already belongs to another tender.
   const [intakeNotice, setIntakeNotice] = useState<AiNotice | null>(null)
-  const aiAbortRef = useRef<AbortController | null>(null)
   // Read by the import callback without re-creating it on every toggle.
   const aiEnabledRef = useRef(aiEnabled)
   aiEnabledRef.current = aiEnabled
@@ -868,184 +1375,10 @@ export function TenderList() {
   const toggleAiExtraction = useCallback((enabled: boolean) => {
     setAiEnabled(enabled)
     persistAiExtractionPreference(enabled)
-    if (!enabled) aiAbortRef.current?.abort()
+    // The run in flight belongs to the intake, not to this view, so the handle
+    // is the module-level one (see `abortAiPass`).
+    if (!enabled) abortAiPass()
   }, [])
-
-  /**
-   * The additive AI pass, started AFTER the local result is committed and shown.
-   *
-   * It is never awaited by the import path: a slow, failed or cancelled model
-   * call cannot delay the tender, and it cannot remove anything the local engine
-   * found. Whatever it does produce lands in the review step as suggestions —
-   * `unconfirmed`, `suggestedBy: 'ai'` — and its refusals, warnings and the
-   * duplicate-reference case are reported rather than swallowed.
-   *
-   * It also owns the pages without a text layer: each one the parser flagged
-   * `needsOcr` is rendered to an image and handed to the model, and the page is
-   * recorded `ai-extracted` ONLY when a reading of it actually came back. A model
-   * that cannot read an image, a render that fails and a cancelled run all leave
-   * those pages blocking exactly as they were.
-   */
-  const runAiPass = useCallback(
-    async (args: {
-      tenderId: string
-      fileName: string
-      tenderTitle: string
-      extraction: Awaited<ReturnType<typeof extractAllPages>>
-      doc: Awaited<ReturnType<typeof loadPdfDocument>>
-    }): Promise<void> => {
-      // The run is made visible BEFORE anything can refuse it: "no model
-      // configured" is one of the outcomes the user has to be able to see, and a
-      // refusal recorded after the fact is a refusal nobody reads.
-      aiAbortRef.current?.abort()
-      const controller = new AbortController()
-      aiAbortRef.current = controller
-      const runId = startAiPass({
-        tenderId: args.tenderId,
-        tenderTitle: args.tenderTitle,
-        cancel: () => controller.abort(),
-      })
-      try {
-        const bridge = tendersAiBridge()
-        const readiness = await readAiReadiness(bridge)
-        setAiReadiness(readiness)
-        if (!readiness.ready) {
-          failAiPass(runId, readiness.message, 'unavailable')
-          return
-        }
-        // Readiness can only be `ready` with a bridge in hand; this is what tells
-        // the compiler so.
-        if (!bridge) {
-          failAiPass(runId, 'AI extraction is unavailable in this build.', 'unavailable')
-          return
-        }
-        // A model that cannot take an image is not asked to: the pages without a
-        // text layer then keep blocking, and the pass says why.
-        const vision: TenderAiPassVision = settingsSupportVision(readiness.settings)
-          ? {
-              available: true,
-              completion: createVisionCompletion({
-                bridge,
-                settings: readiness.settings,
-                onProgress: (progress) => reportAiPassChars(runId, progress.chars),
-              }),
-              renderPageImage: (pageNumber) =>
-                renderPdfPageImage(args.doc, pageNumber, { signal: controller.signal }),
-            }
-          : { available: false, reason: IMAGE_READING_UNAVAILABLE_MESSAGE }
-        try {
-          const completion = createTendersCompletion({
-            bridge,
-            settings: readiness.settings,
-            onProgress: (progress) => reportAiPassChars(runId, progress.chars),
-          })
-          const pass = await runTenderAiPass({
-            completion,
-            pages: args.extraction.pages.map((page) => ({
-              pageNumber: page.pageNumber,
-              text: page.text,
-              needsOcr: page.needsOcr,
-            })),
-            numPages: args.extraction.numPages,
-            rules: AI_EXTRACTION_RULES,
-            fileName: args.fileName,
-            tenderTitle: args.tenderTitle,
-            signal: controller.signal,
-            vision,
-            onProgress: (progress) => reportAiPassProgress(runId, progress),
-          })
-          if (controller.signal.aborted) {
-            // Either the user cancelled or a newer import superseded this run. The
-            // store already recorded that, and `cancelAiPass` is given this run's
-            // id so a superseded attempt cannot cancel the one that replaced it.
-            cancelAiPass(runId)
-            return
-          }
-          // Read the tender back from the store: the user may have removed a
-          // requirement (or the tender) while the model was working.
-          const state = useTendersStore.getState()
-          const tender = state.tenders.find((candidate) => candidate.id === args.tenderId)
-          if (!tender) {
-            failAiPass(
-              runId,
-              'the tender this run was for is no longer in the workspace, so nothing was applied',
-            )
-            return
-          }
-          const adaptation = adaptAiExtraction({
-            merged: pass.merged,
-            existingRuleKeys: tender.requirements.map((requirement) => requirement.ruleKey),
-            existingTenders: state.tenders,
-            tenderId: args.tenderId,
-            visionSummary: pass.vision.summary,
-          })
-          // The store decides whether this run may still report. A run cancelled or
-          // superseded between the model answering and here is refused, so a
-          // stopped run can never write a partial result into the tender.
-          const accepted = finishAiPass(runId, {
-            summary: adaptation.summary,
-            rejections: adaptation.rejections,
-            warnings: adaptation.warnings,
-            unreadPages: adaptation.unreadPages,
-            readPages: pass.vision.readPages,
-            visionSkippedReason: pass.vision.skippedReason,
-            visionUnread: pass.vision.unread,
-            duplicateReference: adaptation.duplicateReference?.message ?? null,
-          })
-          if (!accepted) return
-          if (adaptation.requirements.length > 0) {
-            // AI rows go through the same vault gap analysis as the parser's, so a
-            // suggestion is matched against the vault exactly like a parsed rule.
-            const vaultIndex = buildVaultKeywordIndex(state.vault)
-            const added: RequirementRecord[] = applyGapToRequirementsIndexed(
-              adaptation.requirements.map((requirement) => ({
-                ...requirement,
-                status: 'OUTSTANDING' as const,
-                linkedVaultDocId: null,
-                reason: null,
-                suggestedVaultDocIds: [],
-              })),
-              vaultIndex,
-            )
-            updateTender(args.tenderId, { requirements: [...tender.requirements, ...added] })
-          }
-          const review = useTendersStore.getState().tenderReviews[args.tenderId]
-          if (review) {
-            // The page states are written from the vision pass's own per-page
-            // result, never from what the model said about itself: a page is
-            // marked `ai-extracted` only where a reading of its image came back,
-            // and only where the parser had flagged it `needsOcr`.
-            const withPages = review.pages
-              ? {
-                  ...review,
-                  pages: markModelReadPages(review.pages, {
-                    scannedPages: pass.vision.scannedPages,
-                    readPages: pass.vision.readPages,
-                  }),
-                }
-              : review
-            setTenderReview(args.tenderId, mergeAiIntoReview(withPages, adaptation))
-          }
-        } catch (error) {
-          // Nothing is discarded: the local extraction is already committed, and
-          // this only adds a visible reason why the AI pass produced nothing. A
-          // run that was already stopped keeps its own state — a cancelled run
-          // cannot be relabelled as a failure, nor the other way round.
-          failAiPass(runId, error instanceof Error ? error.message : String(error))
-        } finally {
-          // Only the run that still owns the ref clears it: a second import
-          // supersedes this one, and the newer run must survive this one's
-          // unwinding.
-          if (aiAbortRef.current === controller) aiAbortRef.current = null
-        }
-      } finally {
-        // The parsed document was handed over only so a scanned page could be
-        // rendered, and every path through this pass is done with it.
-        void args.doc.cleanup().catch(() => {})
-      }
-    },
-    [setTenderReview, updateTender],
-  )
 
   const cancelImport = useCallback(() => {
     importAbortRef.current?.abort()
@@ -1053,89 +1386,67 @@ export function TenderList() {
 
   const handleFile = useCallback(
     async (file: File, options?: { dataOrigin?: TenderDataOrigin }): Promise<string | null> => {
-      if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-        setError('Only PDF files are supported.')
+      const kind = tenderSourceKind(file)
+      if (!kind) {
+        setError('Only PDF and Word (.docx) documents are supported.')
         return null
       }
+      // How this import's own messages name the file: "the PDF" is wrong for a
+      // Word document, and the two paths fail in different ways.
+      const label = kind === 'docx' ? 'Word document' : 'PDF'
       setError(null)
       setStorageWarning(null)
       const controller = new AbortController()
       importAbortRef.current?.abort()
       importAbortRef.current = controller
       try {
-        const { record, extraction, meta, persistError, duplicateReference, doc } = await shredFile(
-          file,
-          controller.signal,
-          options?.dataOrigin,
-        )
+        // The whole sequence lives in `intakeTenderFile`, so this path and the
+        // discovery pane's "Add to workspace" cannot drift apart. This view owns
+        // only what is its own: the visible error, the storage warning and the
+        // duplicate-reference notice.
+        const { tenderId } = await intakeTenderFile(file, {
+          signal: controller.signal,
+          dataOrigin: options?.dataOrigin,
+          aiExtraction: aiEnabledRef.current,
+          onReadiness: setAiReadiness,
+          onPersistFailure: (failure) => {
+            lastImportFileRef.current = file
+            setStorageWarning({
+              tenderId: failure.tenderId,
+              label: failure.label,
+              message: failure.message,
+            })
+          },
+          // Intake feedback, not the AI pass's, so it stays in this view's own
+          // state — reported at the moment of the import, alongside the card it
+          // belongs to.
+          onDuplicateReference: (message) => setIntakeNotice({ tone: 'warn', message }),
+        })
         if (controller.signal.aborted) return null
-        addTender(record)
-        if (persistError) {
-          // The tender imports fine, but the PDF fell back to an object URL that
-          // dies on reload. Say so, and offer to retry the save.
-          lastImportFileRef.current = file
-          setStorageWarning({
-            tenderId: record.id,
-            message: `The PDF could not be saved to the workspace — ${persistError}. It is open for this session only and must be re-attached before you rely on it after a restart.`,
-          })
-        }
-        // Seed the extraction review from the parser's candidates so the user
-        // sees competing values and source pages straight away.
-        setTenderReview(
-          record.id,
-          deriveTenderReview({
-            meta,
-            extraction,
-            requirements: record.requirements,
-            estimatedValue: record.estimatedValue ?? null,
-          }),
-        )
-        setActiveTender(record.id)
-        // A reference number that already belongs to another tender is kept in
-        // review rather than written to the record (the schema refuses the whole
-        // document on a duplicate), so say so instead of letting every autosave
-        // fail with a path-shaped schema error. This is intake feedback, not the
-        // AI pass's, so it stays in this view's own state — it is reported at the
-        // moment of the import, alongside the card it belongs to.
-        if (duplicateReference.message !== null) {
-          setIntakeNotice({ tone: 'warn', message: duplicateReference.message })
-        }
-        // The local result is committed and visible; the AI pass starts now and is
-        // deliberately not awaited. It reports itself through the store above, so
-        // the workspace — which this call is about to switch to — can show the
-        // progress, the findings and the cancel control too.
-        if (aiEnabledRef.current) {
-          void runAiPass({
-            tenderId: record.id,
-            fileName: record.fileName,
-            tenderTitle: record.title,
-            extraction,
-            doc,
-          })
-        } else {
-          // Nothing will render from it: release the parsed document now rather
-          // than leaving it open for the life of the window.
-          void doc.cleanup().catch(() => {})
-        }
-        return record.id
+        return tenderId
       } catch (err) {
-        if (err instanceof PdfImportCancelledError) {
+        if (err instanceof PdfImportCancelledError || err instanceof DocxImportCancelledError) {
           setError('Import cancelled.')
           return null
         }
-        if (err instanceof PdfPreflightError) {
-          // Typed, user-visible reason (oversize file / too many pages).
+        if (err instanceof PdfPreflightError || err instanceof DocxPreflightError) {
+          // Typed, user-visible reason (oversize file, too many pages/lines, a
+          // protected or unreadable package).
           setError(err.message)
           return null
         }
-        setError('Could not process that PDF. Is it encrypted or malformed?')
+        setError(
+          kind === 'docx'
+            ? 'Could not read that Word document. Is it damaged or password-protected?'
+            : 'Could not process that PDF. Is it encrypted or malformed?',
+        )
         setTimeout(() => setShredding(null), 2500)
         return null
       } finally {
         if (importAbortRef.current === controller) importAbortRef.current = null
       }
     },
-    [addTender, runAiPass, setActiveTender, setShredding, setTenderReview],
+    [setShredding],
   )
 
   /** Retry persisting the RFP that previously fell back to a session blob. */
@@ -1160,14 +1471,14 @@ export function TenderList() {
       }
       setStorageWarning({
         ...warning,
-        message: `The PDF still could not be saved to the workspace — ${persistFailureReason(
+        message: `The ${warning.label} still could not be saved to the workspace — ${persistFailureReason(
           res?.error,
         )}. It remains available for this session only.`,
       })
     } catch (err) {
       setStorageWarning({
         ...warning,
-        message: `The PDF still could not be saved to the workspace — ${persistFailureReason(
+        message: `The ${warning.label} still could not be saved to the workspace — ${persistFailureReason(
           err instanceof Error ? err.message : null,
         )}. It remains available for this session only.`,
       })
@@ -1293,7 +1604,7 @@ export function TenderList() {
       // Visible, accurate failure — never the raw fetch error.
       console.warn('tenders: bundled demo RFP could not be loaded', err)
       setError(
-        'The bundled sample RFP could not be loaded. Choose a PDF from your own machine instead — shredding works exactly the same.',
+        'The bundled sample RFP could not be loaded. Choose a PDF or a Word .docx from your own machine instead — shredding works exactly the same.',
       )
     }
   }, [handleFile])
@@ -1308,9 +1619,9 @@ export function TenderList() {
       <div className="border-b border-[var(--border)] bg-[var(--surface)] px-8 py-5">
         <h1 className="text-xl font-bold text-[var(--text)]">Tenders</h1>
         <p className="mt-0.5 text-sm text-[var(--text-secondary)]">
-          Drop a tender RFP (one PDF at a time) — Zanostack Tenders shreds it locally on this
-          machine into a compliance matrix, cross-references your company vault, and highlights
-          every source clause.
+          Drop a tender RFP (one PDF at a time, or a Word .docx) — Zanostack Tenders shreds it
+          locally on this machine into a compliance matrix, cross-references your company vault, and
+          shows every source clause.
         </p>
       </div>
       <section aria-label="Tender list" className="mx-auto w-full max-w-5xl flex-1 px-8 py-8">
@@ -1340,11 +1651,11 @@ export function TenderList() {
             <>
               <Upload className="mx-auto size-8 text-[var(--text-tertiary)]" />
               <p className="mt-3 text-sm font-medium text-[var(--text-secondary)]">
-                Drag &amp; drop a tender RFP (PDF), or
+                Drag &amp; drop a tender RFP (PDF or Word .docx), or
               </p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 <Button variant="primary" onClick={() => inputRef.current?.click()}>
-                  <FolderOpen size={15} /> Choose PDF
+                  <FolderOpen size={15} /> Choose document
                 </Button>
                 <Button onClick={loadDemo} title={DEMO_TENDER_HINT}>
                   <FileText size={15} /> Load demo RFP
@@ -1361,7 +1672,9 @@ export function TenderList() {
               </p>
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                 Import limits: up to {PDF_PREFLIGHT_LIMITS.maxPages} pages ·{' '}
-                {formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes)} per PDF.
+                {formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes)} per PDF, and up to{' '}
+                {DOCX_PREFLIGHT_LIMITS.maxLines} text lines ·{' '}
+                {formatBytes(DOCX_PREFLIGHT_LIMITS.maxBytes)} per Word .docx.
               </p>
               {/* Optional AI extraction: off unless the user turns it on, and
                   remembered between imports. Offered only when a model is
@@ -1385,8 +1698,9 @@ export function TenderList() {
                       The local rule engine always runs first, offline. With this on, the model
                       provider you configured in Settings is also asked to suggest extra
                       requirements and metadata — the document's text is sent to that provider, and
-                      so is a scanned page's image when that model can read one. Everything it
-                      returns is unconfirmed until you confirm it. You can cancel a run at any time.
+                      so is a scanned page's image when that model can read one (a Word .docx has no
+                      page images, so only its text is sent). Everything it returns is unconfirmed
+                      until you confirm it. You can cancel a run at any time.
                     </p>
                     {!settingsSupportVision(aiReadiness.settings) && (
                       <p
@@ -1413,7 +1727,7 @@ export function TenderList() {
           <input
             ref={inputRef}
             type="file"
-            accept="application/pdf,.pdf"
+            accept={`application/pdf,.pdf,${DOCX_MIME},.docx`}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -1560,8 +1874,8 @@ export function TenderList() {
           )}
           {tenders.length === 0 ? (
             <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
-              No tenders yet — drop an RFP PDF (or load the bundled demo RFP) to see the full
-              compliance workflow.
+              No tenders yet — drop a tender RFP (a PDF or a Word .docx), or load the bundled demo
+              RFP, to see the full compliance workflow.
             </p>
           ) : (
             <ul className="space-y-3">
@@ -1632,14 +1946,23 @@ export function TenderList() {
                                 {SUBMISSION_METHOD_LABEL[t.submissionMethod]}
                               </span>
                             )}
-                            <span>{t.numPages} pages</span>
+                            <span>{documentPageSummary(t)}</span>
                             {t.ocrPages > 0 && (
-                              // Naming scanned pages obliges the badge to state
-                              // their outcome: nothing on them was extracted, so
-                              // the count is work to review, not text to search.
+                              // Naming pages whose text was never obtained obliges
+                              // the badge to state their outcome: nothing on them
+                              // was extracted, so the count is work to review, not
+                              // text to search. A Word .docx has no scanner, so a
+                              // page of it that holds no text holds a picture —
+                              // calling that "scanned" would name a mechanism that
+                              // never ran on this file.
                               <Badge tone="amber">
-                                {t.ocrPages} scanned page{t.ocrPages === 1 ? '' : 's'} — text not
-                                extracted
+                                {isWordDocumentName(t.fileName)
+                                  ? `${t.ocrPages} picture-only page${
+                                      t.ocrPages === 1 ? '' : 's'
+                                    } — text not extracted`
+                                  : `${t.ocrPages} scanned page${
+                                      t.ocrPages === 1 ? '' : 's'
+                                    } — text not extracted`}
                               </Badge>
                             )}
                           </p>
@@ -1912,9 +2235,15 @@ function ShredProgress({ onCancel }: { onCancel?: () => void }) {
               />
             </div>
           )}
-          <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-            page {s.page} / {s.total || '?'}
-          </p>
+          {/* The page counter is rendered only when the import actually has pages
+              being read. A Word .docx has none (it declares its own pages, and
+              the whole file is one block), and "page 0 / ?" would report progress
+              through something that never happens. */}
+          {s.total > 0 && (
+            <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+              page {s.page} / {s.total}
+            </p>
+          )}
           {onCancel && (
             <button
               type="button"

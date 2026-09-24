@@ -485,9 +485,13 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         await expect(tendersPage!.getByRole('heading', { name: 'Compliance matrix' })).toBeVisible({
           timeout: 90_000,
         })
+        // The locate affordance is offered, in the wording of the source this
+        // tender actually is: the demo RFP is a PDF, so rows say "in PDF" and the
+        // Word wording ("in source pane", for an imported .docx) must not appear.
         await expect(
           tendersPage!.getByText(/\d+ requirements · click to locate in PDF/),
         ).toBeVisible()
+        await expect(tendersPage!.getByText(/click to locate in source pane/)).toHaveCount(0)
         const expandCount = await tendersPage!
           .locator('button[title="Show clause details"]')
           .count()

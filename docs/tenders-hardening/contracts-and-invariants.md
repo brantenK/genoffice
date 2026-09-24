@@ -219,7 +219,7 @@ v2 channels: `tenders:load-store-v2`, `tenders:save-store-v2`, `tenders:store-ch
 Preload API: `loadStoreV2`, `saveStoreV2`, `onStoreChangedV2` (direct objects, not JSON strings).
 
 Nine channels have since joined them: `tenders:close-flush-request` / `tenders:close-flush-result`
-(the shell dirty-close guard, §3a), the managed-document lifecycle
+(the shell dirty-close guard, §3e), the managed-document lifecycle
 (`tenders:list-document-trash`, `tenders:restore-document`, `tenders:replace-document`,
 `tenders:reconcile-documents`, `tenders:cleanup-document-trash`) and rotating-backup recovery
 (`tenders:list-recovery-candidates`, `tenders:restore-recovery-candidate`). All nine have
@@ -232,7 +232,32 @@ The optional AI extraction pass adds **no channel and no handler** to this list:
 through the shell's own `ai:*` channels (`AI_CHANNELS`), which Tenders only mirrors in the
 preload. See §5a.
 
-Authorization (applies to **all 23 privileged handlers**, each calling `isTrustedTendersEvent`
+**Tender discovery and deadline reminders add eight more** (§3b, §3c): five discovery channels —
+`tenders:discovery-list`, `tenders:discovery-refresh`, `tenders:discovery-read-cache`,
+`tenders:discovery-release`, `tenders:discovery-download-document` — and three reminder channels
+— `tenders:reminders-get`, `tenders:reminders-set`, `tenders:reminders-check`. Every one has a
+preload pass-through, and main owns the shape validation, the trust check, the URL allow-list,
+the byte caps and the store.
+
+| preload member                                                               | channel                                 |
+| ---------------------------------------------------------------------------- | --------------------------------------- |
+| `discoveryList(request: DiscoveryListRequest)`                               | `tenders:discovery-list` (invoke)       |
+| `discoveryRefresh(request?: DiscoveryRefreshRequest)`                        | `tenders:discovery-refresh` (invoke)    |
+| `discoveryReadCache()`                                                       | `tenders:discovery-read-cache` (invoke) |
+| `discoveryFetchRelease(request: DiscoveryReleaseRequest)`                    | `tenders:discovery-release` (invoke)    |
+| `discoveryDownloadDocument(request: DiscoveryDownloadDocumentRequest)`       | `tenders:discovery-download-document`   |
+| `getReminders(): Promise<RemindersStateResponse>`                            | `tenders:reminders-get` (invoke)        |
+| `setReminders(settings: RemindersSetRequest): Promise<RemindersSetResponse>` | `tenders:reminders-set` (invoke)        |
+| `checkReminders(): Promise<RemindersCheckResponse>`                          | `tenders:reminders-check` (invoke)      |
+
+Note the two names that differ deliberately between the two layers:
+`TENDERS_CHANNELS.discoveryRelease` is invoked from the preload's `discoveryFetchRelease`
+(the member describes what it does), and `TENDERS_CHANNELS.remindersGet` / `-Set` / `-Check`
+from `getReminders` / `setReminders` / `checkReminders` (the members describe what the
+renderer asks for). The preload exposes these as **functions only** — it never exposes
+`ipcRenderer`, so a renderer cannot reach a channel that has no member above.
+
+Authorization (applies to **all 31 privileged handlers**, each calling `isTrustedTendersEvent`
 **directly** — there is no central wrapper):
 
 - `isTrustedTendersEvent` requires: sender is a registered active Tenders WebContents,
@@ -294,6 +319,326 @@ every live Tenders tab after the sheets/pdf/markdown/html/slides/docs passes.
   the pending maps.
 - Bounded cost: the loop is sequential, so N wedged Tenders tabs cost up to 10 s × N plus one
   prompt each. Every path settles — nothing hangs.
+
+### 3b. Tender discovery (additive, optional, and the fork's second outbound reach)
+
+Tenders has always started with the user pasting a link. Discovery is the additive alternative:
+it turns National Treasury's public eTenders **OCDS 1.1** open data into a list of opportunities
+the user can pick from. It is optional, it is off until the user opens the Discover pane, and the
+local rule engine stays the offline, always-available default.
+
+Files:
+
+- `apps/tenders/src/shared/discovery.ts` — the **pure core**: parsing, normalising, filtering,
+  scoring, the cache envelope, and every URL the client is allowed to build. No `fetch`, no
+  `node:*`, no clock (every time-dependent function takes `now`), no randomness, no locale.
+- `apps/tenders/src/main/discovery-client.ts` — the **wire and the disk**. The network call is
+  injected (`fetchImpl` defaults to `globalThis.fetch`), so the whole client — retries, timeouts,
+  the byte cap, the redirect handling, the fallback, the cache — runs in the unit suite with zero
+  network.
+- `apps/tenders/src/main/tenders-main.ts` — the five handlers, the document download
+  (`downloadDiscoveryDocument`) and the cache directory resolution.
+- `apps/tenders/src/renderer/src/components/pages/DiscoverPage.tsx` — the pane.
+- `apps/tenders/tests/discovery.test.ts`, `tests/discovery-client.test.ts`,
+  `tests/discovery-pane.test.ts` and `e2e/tenders-discovery.spec.ts` (with
+  `e2e/tenders-discovery-fixtures.ts`) — the core's rules, the transport's bounds, the pane's copy,
+  and two built-app journeys.
+
+**The source, and what it does not cover — product facts, not footnotes.** The source is National
+Treasury's keyless eTenders OCDS feed (`ocds-api.etenders.gov.za`), published under the **Public
+Domain Dedication and Licence (PDDL) 1.0**. `describeCoverage()` in the core returns the limits in
+plain language for the UI to show **verbatim and always** (`DiscoverPage` renders it in every
+state, including the empty and error ones), because they are the thing a bidder could otherwise be
+misled by:
+
+- **National and provincial departments publish here. Municipalities and state-owned enterprises
+  appear only when they volunteer their data to Treasury**, so a tender the user already knows
+  about may simply be missing. Coverage starts **January 2024**.
+- Treasury labels the whole feed a **public beta** and states that **its accuracy is not
+  guaranteed**.
+- Treasury states the feed **must not be used for critical decision making or legal purposes**;
+  the copy says to work from the official tender document, not from the list.
+- Personal information is redacted at source under POPIA, so contact details may be absent.
+- Values are almost never published: a tender with no stated value shows **no** value, never a
+  zero. (A stated `amount: 0` — which the archive states for every release it publishes — is read
+  as "no value stated", never as a R 0 tender.)
+- The live feed is slow and unreliable (a two-record page measured 30 s; a 200-record page never
+  answered), so the app pages in small date windows, retries, and **says so when it could not get
+  everything** (`truncated`, `failedPages`, `warnings` — never a silently short list).
+
+**Invariants a future change must not break:**
+
+- **Main fetches; the renderer never does.** The renderer holds no `fetch` for the feed, and the
+  handlers pass every call through to the injected client. The pane can be reachable with no
+  network at all and answer from the cache.
+- **https only, on an exact-host allow-list, validated BEFORE any request.** `isAllowedDiscoveryUrl`
+  requires `https:`, one of `DISCOVERY_ALLOWED_HOSTS` (`ocds-api.etenders.gov.za`,
+  `data.etenders.gov.za`, `www.etenders.gov.za` — **exact** host match, so
+  `ocds-api.etenders.gov.za.evil.example` is refused), and no embedded credentials. It is checked
+  before `fetch` for the request URL, for a `links.next` the feed offered, and for the document
+  download's link.
+- **Redirects are followed manually, one hop at a time, and re-validated per hop.** `redirect:
+'manual'` is passed and each hop goes back through `isAllowedDiscoveryUrl`; a redirect off the
+  allow-list is refused with `BLOCKED_URL` and **nothing is requested at the target**. Hops are
+  bounded (`DISCOVERY_MAX_REDIRECTS` = 3).
+- **Every request is bounded in time and bytes.** A 45 s per-request timeout
+  (`DISCOVERY_REQUEST_TIMEOUT_MS`), bounded exponential-backoff retries on 5xx / 408 / 429 /
+  timeout / network only (`DISCOVERY_MAX_ATTEMPTS` = 3, base 750 ms, capped 8 s), an **8 MiB**
+  response ceiling enforced **while the body is read** rather than after
+  (`DISCOVERY_MAX_RESPONSE_BYTES`), a declared `content-length` check before the body,
+  `DISCOVERY_MAX_PAGES` = 20 pages walked per window, windows of at most
+  `DISCOVERY_MAX_WINDOW_DAYS` = 7 days, `DISCOVERY_MAX_WINDOWS_PER_REFRESH` = 6 windows per refresh,
+  2 archive files tried, 2 000 opportunities and 4 MiB kept in the cache. All of these are
+  constructor options, so a test proves each bound with no network and no wall time.
+- **The live feed is the default; the monthly bulk archive is the fallback, and it says so.**
+  When every live window fails, the archive is read instead and the cache records
+  `source: 'bulk-archive'` plus a warning that the archive lags the live feed by one to two
+  months. A fallback is never presented as the live feed.
+- **A failed refresh never destroys a good cache.** A refresh writes only when it has something to
+  write; otherwise the previous cache is left alone and the failure is returned.
+- **The on-disk cache is what makes the pane work offline.** Path:
+  `<userData>/tenders/discovery/discovery-cache.json` (`discoveryCacheDir(userDataDir)` +
+  `DISCOVERY_CACHE_FILE_NAME`), beside the store's own `tenders` directory. Staleness:
+  `DISCOVERY_CACHE_MAX_AGE_MS` = **6 hours**, and `readCache()` reports `stale` rather than hiding
+  the age. The write is **atomic** (a uniquely named `wx` temp file, then `rename`, mode 0600) and
+  the read is **defensive**: a wrong `version`, a missing window or an unreadable `fetchedAt`
+  refuses the whole envelope, and each stored record is re-derived (a closing state recomputed, a
+  document link re-checked, a province required to be a real province, a value required to be
+  positive), so a hand-edited or truncated cache cannot inject a record the app would otherwise
+  refuse.
+- **A downloaded document arrives through the SAME managed-document store and the SAME intake as a
+  file the user picked.** `discoveryDownloadDocument` re-checks the renderer-supplied link against
+  the allow-list **before any request**, follows redirects manually with the same re-validation,
+  enforces the same 25 MiB body ceiling (`MAX_DISCOVERY_DOWNLOAD_BYTES` =
+  `MAX_TENDERS_DOCUMENT_UPLOAD_BYTES`) while reading, and stores what it fetched through the
+  ordinary `ManagedDocumentStore.save(...)` at `category: 'rfp'`. The pane then hands that file to
+  `intakeTenderFile` with the **already-stored** path, so there is one intake, one store, and no
+  second copy. **The result is `unconfirmed` like any machine-sourced value** (§5a rule 1): a
+  listing is a lead, and the provenance note (`provenanceNote`) naming the feed, the ocid and the
+  source record rides into the tender's persisted review `conflicts`.
+- **Nothing here can claim readiness.** Every `Opportunity` carries
+  `provenance: 'discovery-feed'` and `reviewState: 'unconfirmed'` (`DISCOVERY_REVIEW_STATE`) —
+  the one review state a machine may write. Nothing in the core can produce `confirmed`.
+- **Reject with a reason, never throw and never repair.** Every dropped record
+  (`DiscoveryParseIssue`: `not-an-object` / `missing-ocid` / `missing-title` / `duplicate-ocid`)
+  and every refused document link (`refusedDocumentLinks`) is reported, because a silently
+  repaired field would be a fabricated one. A missing or unreadable closing date is flagged
+  (`closingState: 'missing' | 'unparseable'` plus a plain-language note), never invented.
+- **The feature reaches exactly two hosts by design, and a third only through the user.** The API
+  and the archive are read; **tender documents are re-hosted nowhere** — the app opens a linked
+  document on `etenders.gov.za` — and `www.etenders.gov.za` is on the allow-list only so the
+  download handler can accept a link the feed itself published, still under the same validation.
+
+### 3c. Deadline reminders (the app's only notification path — live-process only)
+
+The audit finding this answers is blunt: the app had **no reminder mechanism at all** — a manual
+`.ics` export and an on-screen countdown, nothing that survives the app being closed — so a user
+who shut the app was never warned about a closing time, which is the product's stated job.
+
+Files:
+
+- `apps/tenders/src/shared/reminders.ts` — the **pure core**. Every decision is a pure function of
+  `(tenders, settings, now, ledger)`: no Electron, no clock, no disk, no locale. It takes the
+  closing instant from the **one** parser (`parseClosingDate` in `./readiness`, which owns the SAST
+  anchor) and renders it with that module's own `formatClosingInstant`, so a reminder can never
+  disagree with the readiness gate or the countdown badge about when a bid closes or how that
+  instant is written.
+- `apps/tenders/src/main/reminders-scheduler.ts` — the main-process scheduler and the Electron
+  `Notification` path. Every side effect is injected (clock, notifier, tender reader, timer
+  primitives, logger), so the whole schedule — dedupe across restarts, the corrupt-file path, the
+  timer lifecycle — is testable with no Electron and no waiting.
+- `apps/tenders/src/main/tenders-main.ts` — the three handlers, `startTendersReminders()` (called
+  from `registerTendersIpc`, the same hook that starts the store watcher, so the store exists
+  before the first check reads it), and the `readReminderTenders` reader over the authoritative
+  store.
+- `apps/tenders/tests/reminders.test.ts`, `tests/reminders-scheduler.test.ts`,
+  `tests/reminders-settings-copy.test.ts` — the core's rules, the scheduler's containment and
+  durability, and the settings surface's copy.
+
+**THE LIMITATION, stated plainly: a reminder fires only while the app is running.** `Notification`
+is a live-process API. There is **no background service, no OS scheduler and no cloud push** here.
+If the app is closed when a threshold passes, nothing is sent at that time; the warning is
+delivered the next time the app opens and is marked `late` (the title reads "— late warning" and
+the body says the moment had already passed), so the copy never pretends the user was warned on
+time. The exact sentence is exported as `REMINDERS_RUNTIME_LIMITATION`, travels on the
+`reminders-get` / `reminders-set` responses so the settings surface shows the same words without
+importing a main-process module, is logged by `start()`, and is pinned verbatim by
+`tests/reminders-settings-copy.test.ts`. **This is the single most important thing to know about
+the feature.**
+
+The pure core's rules — each one a product decision, all documented in the source:
+
+- **The threshold ladder.** `DEFAULT_REMINDER_THRESHOLDS` ships `7d` / `3d` / `1d` / `2h` lead
+  times (a week out to start assembling, three days to chase documents, one day for the final
+  check, two hours to submit). Reminders are **enabled by default** (`DEFAULT_REMINDER_SETTINGS`)
+  — the schedule is computed entirely on this machine and "don't miss the closing time" is the
+  product's stated job — and `enabled: false` makes the schedule inert (`dueReminders` returns
+  nothing and writes nothing). A threshold is crossed once `now >= closing - leadMs`, **inclusive**
+  at the boundary (the instant a scheduler wakes).
+- **Once per (tender, threshold, closing instant).** The serialisable ledger
+  (`ReminderLedger`, `REMINDER_LEDGER_VERSION` = 1) records each decision and is fed back into the
+  next call; `dueReminders` records what it returned **within the same pass**, so a duplicated
+  tender row cannot fire twice either. The ledger is persisted as plain JSON, so the guarantee
+  survives a restart.
+- **Only open tenders, only future closings.** `OPEN_TENDER_STATUSES` is an explicit allow-list
+  (`IN_PROGRESS`, `READY_TO_ASSEMBLE`, `PACK_GENERATED`, `READY_FOR_SUBMISSION`), so an
+  unrecognised status fails **closed** and produces no notification. A tender with no closing date,
+  an unreadable one, or a closing instant already past gets no reminder and (for the first two) no
+  ledger entry — there is nothing to key on.
+- **The added-late rule.** When several thresholds have already passed at first consideration (a
+  late import, or the app closed for days), **at most ONE reminder fires — the most urgent crossed
+  threshold** — and every other crossed threshold is recorded as `skipped-stale`. Firing the
+  week-out, three-day and one-day warnings at once would be a burst of stale alarms; recording the
+  skipped ones is what stops them trickling out one per check afterwards. The entry is honest
+  about not having been shown (`ReminderLedgerDisposition`).
+- **The moved-deadline rule.** A ledger entry suppresses only the exact
+  (tender, threshold, closing instant) it was written for. **Moving the closing date — earlier or
+  later — makes every existing entry refer to a deadline that no longer exists, so the thresholds
+  fire again for the new instant.** Returning to a previously notified instant (A → B → A) is
+  suppressed, because the entry for A was never invalidated. Both directions are documented
+  rather than hidden.
+- **Pruning.** `pruneReminderLedger` drops entries for closings more than
+  `REMINDER_LEDGER_RETENTION_DAYS` = 30 days past, so the file cannot grow forever — and pruning is
+  by the **closing instant only**, deliberately not by status, because the lifecycle allows a
+  tender to move backwards and an entry dropped early would re-notify a deadline the user has
+  already been warned about. An unusable clock keeps the ledger rather than wiping it.
+- **Fail toward notifying.** `parseReminderLedger` discards a ledger whose `version` is not the one
+  this build writes and drops entries that do not validate; `normalizeReminderSettings` falls back
+  to the defaults. A corrupt or misunderstood ledger must never **suppress** a warning about a
+  closing time: re-notifying is a nuisance, silently missing the deadline is the failure the
+  feature exists to prevent. Entries are compared as **instants, not strings**, so
+  `09:00:00.000Z` and `11:00:00+02:00` suppress alike.
+- **Honest copy.** `describeReminder` names the tender, the remaining time and the closing instant
+  (with the `SAST` / "your local time" suffix the countdown badge uses) and stops there. It never
+  says a tender is ready, confirmed or compliant. `markRemindersSent` / `forgetReminders` exist so
+  a caller that displayed only a subset — or whose delivery failed — records exactly what was
+  shown; `nextReminderAt` reports the next strictly-future instant, so a scheduler could sleep
+  instead of poll.
+
+The main-process scheduler:
+
+- **State file:** `<userData>/tenders/reminders.json` (`remindersStatePath(userDataDir)`,
+  `REMINDERS_STATE_FILE_NAME`), **beside** the authoritative store rather than part of it — the
+  strict v2 authority schema stays untouched by a dedupe ledger. Layout version
+  `REMINDERS_STATE_VERSION` = 1; a file from another version or a damaged one is ignored
+  **entirely** (defaults + empty ledger), which is the fail-toward-notifying rule above. The
+  read ceiling is `MAX_REMINDERS_STATE_BYTES` = 4 MiB.
+- **The file is the single source of truth.** Every check re-reads it instead of trusting a memory
+  copy, so a second window, a restart or a hand-edited file cannot desync the schedule.
+- **Atomic writes.** A uniquely named `wx` temp file, then `rename`, mode 0600 — the store's own
+  discipline — and **pruned on every write**. A quiet check touches no disk at all (the ledger is
+  compared before writing).
+- **Checks are serialised** on one queue, so a check always sees the ledger the previous one
+  persisted. That is what makes ONCE-ONLY true rather than merely likely.
+- **Failures are contained.** A throwing tender reader, a failing notifier or a failed disk write
+  is reported through the log hook and absorbed: the ledger is left intact, `checkNow()` still
+  resolves (it never rejects — a rejected interval callback would end the schedule), and the
+  interval keeps running. A notifier that throws loses **no** ledger entry; a notification the OS
+  cannot show is logged naming the tender and threshold and is deliberately **not** re-armed
+  (retrying cannot make an unsupported platform show it, and re-arming would fire it at an
+  arbitrary later moment).
+- **Check interval:** `DEFAULT_REMINDER_CHECK_INTERVAL_MS` = **15 minutes** — the tightest default
+  lead time is two hours, so a quarter-hour poll bounds how late a warning can be to fifteen
+  minutes. `start()` is idempotent and runs **one check immediately**, which is what surfaces a
+  deadline that fell due while the app was closed. The schedule is tied to the **process**, not to
+  a window: it keeps running while the app runs even if the user closes the Tenders tab, and
+  `will-quit` stops it (not `before-quit`, which the shell's dirty-document flow can cancel).
+- **The notifier degrades honestly.** Without Electron, or on a platform reporting notifications
+  unsupported, it logs `NOTIFICATIONS_UNAVAILABLE_MESSAGE` / `NOTIFICATIONS_UNSUPPORTED_MESSAGE`
+  and returns quietly rather than throwing into the schedule.
+- **Nothing is networked.** The schedule is computed on this machine from the store the app
+  already has, exactly like the local rule engine. Reminders are not an online feature and do not
+  become one.
+
+### 3d. DOCX intake (additive on the PDF pipeline, one document at a time)
+
+Intake now accepts a **Word `.docx` as a single document, in exactly the same place a PDF is
+accepted** (the file input, the drag-and-drop path, and a document downloaded from the discovery
+pane). **It does not accept multi-file packs, `.doc`, or any other Word format** — one `.docx` is
+one tender, and the message for anything else says so
+(`Only PDF and Word (.docx) documents are supported.`). Saying this explicitly because "packs of
+files" is the obvious next guess and it is not what this is.
+
+File: `apps/tenders/src/renderer/src/intake/docx.ts` — `extractDocxIntake(source, options)`.
+Guards: `apps/tenders/tests/docx-intake.test.ts`, `tests/docx-intake-copy.test.ts`,
+`tests/tender-list-intake-copy.test.ts` and `e2e/tenders-docx-intake.spec.ts` (two built-app
+journeys: a real `.docx` imports, populates the matrix and persists; a file that is not a real
+`.docx` is refused with a reason rather than shredded).
+
+**The contract.** A `.docx` has no pages and no measured geometry, so the module presents the
+document honestly instead of inventing either. `DocxIntake` is `PageExtraction`-compatible on
+purpose — `shredExtraction`, `extractTenderMeta`, `extractIssuerInfo` and the review UI consume it
+with **no change**, so there is one shredder, one rule engine and one review step for both
+formats — plus a `kind: 'docx'` discriminator and the extra fields a surface needs to describe the
+source truthfully:
+
+- **One line per paragraph, and per table row** (cells joined, the way the PDF path clusters a
+  visual row), split further at the soft/column breaks the engine encodes as `'\n'`.
+- **Boxes are READING-ORDER COORDINATES, not measured geometry:** lines stack top-to-bottom inside
+  the band `0.20`–`0.80`, with a paragraph-sized gap between groups, which is exactly what
+  `buildClauses` needs to split clauses at paragraph boundaries. Staying out of the `0.18`
+  header/footer band keeps the running-boilerplate heuristic from stripping a body line.
+  `left`/`width` are the full column, because the file records no x positions.
+- **`needsOcr` mirrors the PDF rule's intent**, and is decided honestly: a `.docx` can tell the
+  difference between "no text" and "content that is not text", so a page is flagged **only** when
+  it carries visible content that is not text (pictures, charts, drawings) **and** yields fewer
+  than 20 non-space characters. A genuinely blank page does **not** block — the body was read in
+  full — while a picture-only page still fails closed.
+- **Not read, deliberately:** header/footer parts, footnotes, endnotes and comments (separate
+  parts; the body is where requirements live), and Word's saved `w:lastRenderedPageBreak` layout
+  hint, which is a layout **cache** whose position inside a paragraph the block model does not
+  carry — honouring it would place boundaries at paragraph starts, i.e. a **guessed** page number,
+  which is exactly what this module refuses to produce.
+
+**The pagination honesty rule (must not regress).** A `.docx` has no pages. Only page breaks the
+document **itself declares** are counted — a body-level `w:br w:type="page"`, a paragraph carrying
+`w:pageBreakBefore`, a section whose start type is `nextPage` / `evenPage` / `oddPage`. **A
+flowing `.docx` is one page to this app (`numPages: 1`) with
+`pagination: 'continuous'`, and the UI must NOT print "1 page" for it** — a printed page number
+the file does not have. `docxPaginationNote(intake)` is the one function that words this, so no
+surface paraphrases it and gets it wrong: a flowing document says it "declares no page breaks, so
+the document is presented as one continuous block of text: clause references read "p. 1" and are
+not printed page numbers", while a paged one says "Pages follow the page breaks this .docx declares
+(N pages)". The tender card follows the same rule through `documentPageSummary` — a flowing `.docx`
+reads "1 continuous block of text (no page breaks declared)". `numPages` is therefore the
+document's **own** page count and every `pageNumber` is one of its page numbers, so no clause can
+ever cite a page the file does not have. Pinned by `tests/docx-intake.test.ts` ("does not claim a
+page count it cannot support") and `tests/docx-intake-copy.test.ts`.
+
+**Preflight codes.** Every failure is typed and user-surfaceable (`DocxPreflightError` carries
+`code`, `actual`, `limit`); **nothing returns a silent empty extraction** that would look like a
+tender with no requirements. Cancellation is its own type (`DocxImportCancelledError`, code
+`CANCELLED`) and returns no partial result.
+
+| `DocxPreflightCode` | Raised when                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `FILE_TOO_LARGE`    | Over `DOCX_PREFLIGHT_LIMITS.maxBytes` — refused **before** the buffer is read               |
+| `TOO_MANY_LINES`    | Over `maxLines` (24 600), checked once the line count is known and before the shredder runs |
+| `ZIP_BOMB`          | Declared uncompressed size beyond `DOCX_ZIP_LIMITS` (zip bomb)                              |
+| `PROTECTED`         | A CFB/OLE container: password-protected, or a legacy `.doc` wearing a `.docx` name          |
+| `NOT_A_DOCX`        | Not a Word package at all (another format renamed, or no document part)                     |
+| `CORRUPT`           | Truncated, damaged or unparseable package                                                   |
+| `EMPTY_DOCUMENT`    | The document holds no content at all                                                        |
+| `NO_TEXT`           | The document holds content but no text (pictures/drawings only)                             |
+
+`DOCX_PREFLIGHT_LIMITS` deliberately reuses the PDF path's published per-file ceiling
+(`PDF_PREFLIGHT_LIMITS.maxBytes`) and states its own line budget (24 600 — the PDF envelope's own
+~0.042 MB heap per extracted line at a 1 GB budget, the cost that clause reconstruction plus rule
+matching bounds). `DOCX_ZIP_LIMITS` belongs to the engine (`@genoffice/docx-engine`), so the
+conditions there are mapped onto the union rather than re-derived.
+
+**The AI vision pass refuses a Word source, before it consults the model.** A `.docx` has no
+rendered page, so there is no page image to hand a model — whatever the configured model can do.
+`importVision` (`components/TenderList.tsx`) checks the document **first** and only then
+`settingsSupportVision`, deliberately: a vision-capable model would otherwise be handed a renderer
+for a document that cannot be rendered, and the run would fail over a file it had read perfectly.
+The refusal is `WORD_DOCUMENT_VISION_MESSAGE` ("This tender came from a Word .docx, which has no
+rendered pages, so there is no page image to read."), the pass reports it, and **the pages the
+local extractor flagged keep blocking readiness until a person compares them against the original
+and marks them reviewed** — the same fail-closed rule as a scanned PDF page (§1a, §4). A
+picture-only Word page is never called "scanned": no scanner ran, and the copy says so
+(`PAGE_STATUS_EXPLANATION_WORD`). Pinned by `tests/docx-intake-copy.test.ts` ("checks the document
+before the model, so a vision-capable model is not asked either").
 
 ## 4. Canonical readiness
 
@@ -417,7 +762,7 @@ Files:
 `apps/shell/src/main/index.ts`), and Tenders runs as a WebContentsView inside that same process —
 so a second `ipcMain.handle` on any of them throws
 ("Attempted to register a second handler for 'ai:stream'"). Tenders therefore registers **zero**
-AI handlers, and §3's handler count stays **23**.
+AI handlers, and §3's handler count stays **31**.
 
 Preload pass-throughs (`TendersApi`, `apps/tenders/src/preload/index.ts`):
 

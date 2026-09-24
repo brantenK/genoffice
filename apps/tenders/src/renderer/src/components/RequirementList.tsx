@@ -1,6 +1,8 @@
 // Checklist pane: grouped compliance matrix rows. Clicking a row focuses the
-// PDF viewer on the exact clause (list -> PDF); active state comes from the
-// store so PDF-box clicks highlight the row back (PDF -> list).
+// source of the exact clause (list -> source): the PDF viewer for a PDF tender,
+// the Word source pane for an imported .docx, which has no rendered page to
+// highlight. Active state comes from the store, so source-box clicks highlight
+// the row back (source -> list).
 //
 // WP-6 adds the requirement half of the extraction review here: add, edit,
 // remove and reclassify a requirement, verify a weak parser hit, and keep the
@@ -45,6 +47,7 @@ import { useTendersStore } from '../store'
 import {
   AI_SUGGESTION_LABEL,
   AI_SUGGESTION_TITLE,
+  isWordDocumentName,
   REVIEW_CONFIDENCE_THRESHOLD,
 } from './ExtractionReview'
 import { Badge, Button, RISK_LABEL, RISK_TONE, STATUS_LABEL, STATUS_TONE } from './ui'
@@ -134,8 +137,11 @@ export function RequirementList({ tender }: { tender: TenderRecord }) {
               <AlertTriangle size={11} /> {lowConfidenceCount} to verify
             </Badge>
           )}
+          {/* Where a matrix row jumps to depends on the source: a PDF has pages
+              to highlight, a .docx has clause text in the source pane. */}
           <span className="text-xs text-[var(--text-tertiary)]">
-            {tender.requirements.length} requirements · click to locate in PDF
+            {tender.requirements.length} requirements · click to locate in{' '}
+            {isWordDocumentName(tender.fileName) ? 'source pane' : 'PDF'}
           </span>
           <Button
             size="sm"

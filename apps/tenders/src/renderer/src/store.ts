@@ -498,18 +498,199 @@ function measureTendersSaveSize(document: TendersDataV2): TendersSaveSizeCheck |
   }
 }
 
+// ── save-refusal diagnostics ─────────────────────────────────────────────────
+// A refused save used to leave exactly the same trace as a committed one:
+// nothing. `saveStatus`/`saveError` were set for the UI, but no line was logged,
+// so an intermittent save failure (the e2e vault-upload flake) could not be
+// traced to the branch that refused it — the captured console was silent. These
+// helpers are DIAGNOSTIC ONLY: no state, no retry, no user-visible copy. The
+// other half of the contract is that a save which commits logs nothing at all,
+// which is what keeps this from turning into noise.
+
+/** The refusal a save hit — the stable vocabulary of the warning line. */
+export type TendersSaveRefusalCode =
+  /** The preload bridge is absent, so nothing can be written at all. */
+  | 'NO_IPC_BRIDGE'
+  /** A conflict is latched: the store never blind-writes, so this edit is refused. */
+  | 'SAVE_BLOCKED_BY_CONFLICT'
+  /** The renderer size pre-check refused the document. */
+  | 'DOCUMENT_OVER_SIZE'
+  /** `validateTendersDataV2` refused the document. */
+  | 'SCHEMA_INVALID'
+  /** Main answered `REVISION_CONFLICT`. */
+  | 'REVISION_CONFLICT'
+  /** Main answered `ok: false` with any other persistence error code. */
+  | 'STORE_REFUSED'
+  /** The `saveStoreV2` round trip threw instead of answering. */
+  | 'SAVE_THREW'
+
+/** Which save entry point refused. */
+export type TendersSaveRefusalPath = 'autosave' | 'migration-commit'
+
+/** What was being saved when the refusal happened — counts, never content. */
+export interface TendersSaveRefusalTarget {
+  /** Revision the refused attempt was built against. */
+  expectedRevision: number
+  /** `updatedAt` of the refused document, or null when none was built. */
+  updatedAt: string | null
+  workspaces: number
+  tenders: number
+  customers: number
+  vaultDocs: number
+}
+
+/** Input for {@link describeTendersSaveTarget} — a document, or the live store. */
+export interface TendersSaveRefusalTargetInput {
+  workspaces: readonly TendersWorkspaceV2[]
+  revision: number
+  updatedAt: string | null
+}
+
+export interface TendersSaveRefusalDetails {
+  code: TendersSaveRefusalCode
+  path: TendersSaveRefusalPath
+  /** Why it was refused, in the branch's own wording (or main's message). */
+  reason: string
+  /** The persistence error code main returned, when the refusal came from IPC. */
+  storeErrorCode?: string | null
+  /** Field path of the first schema issue; only set for `SCHEMA_INVALID`. */
+  fieldPath?: string | null
+  /** Byte figures and ceilings; only set for `DOCUMENT_OVER_SIZE`. */
+  size?: Pick<
+    TendersSaveSizeCheck,
+    'documentBytes' | 'documentLimitBytes' | 'fileBytes' | 'fileLimitBytes'
+  > | null
+  /** Which document was being saved — counts and revision, never its content. */
+  target: TendersSaveRefusalTarget
+}
+
+/** Summarise the document a refusal applied to, without dumping it. */
+export function describeTendersSaveTarget(
+  input: TendersSaveRefusalTargetInput,
+): TendersSaveRefusalTarget {
+  let tenders = 0
+  let customers = 0
+  let vaultDocs = 0
+  for (const workspace of input.workspaces) {
+    tenders += workspace.tenders.length
+    customers += workspace.customers.length
+    vaultDocs += workspace.vault.length
+  }
+  return {
+    expectedRevision: input.revision,
+    updatedAt: input.updatedAt,
+    workspaces: input.workspaces.length,
+    tenders,
+    customers,
+    vaultDocs,
+  }
+}
+
+/** One-line, grep-able rendering of a refusal (the console's first argument). */
+export function formatTendersSaveRefusal(details: TendersSaveRefusalDetails): string {
+  const context: string[] = []
+  if (details.fieldPath) context.push(`field ${details.fieldPath}`)
+  if (details.storeErrorCode) context.push(`store code ${details.storeErrorCode}`)
+  if (details.size) {
+    context.push(
+      `document ${details.size.documentBytes}B of ${details.size.documentLimitBytes}B, ` +
+        `file ${details.size.fileBytes}B of ${details.size.fileLimitBytes}B`,
+    )
+  }
+  const target = details.target
+  return (
+    `tenders: save refused [${details.code}] at ${details.path}` +
+    `${context.length > 0 ? ` (${context.join('; ')})` : ''}: ${details.reason} — ` +
+    `revision ${target.expectedRevision}` +
+    `${target.updatedAt ? `, updatedAt ${target.updatedAt}` : ''}, ` +
+    `${target.workspaces} workspace(s), ${target.tenders} tender(s), ` +
+    `${target.customers} customer(s), ${target.vaultDocs} vault doc(s)`
+  )
+}
+
+/**
+ * Log one refused save. The two-argument form matches the renderer's existing
+ * convention (`DocumentsPage`): a grep-able line for captured CI console plus an
+ * expandable object for a live devtools session. Counts only — the document is
+ * never included.
+ */
+export function warnTendersSaveRefused(details: TendersSaveRefusalDetails): void {
+  console.warn(formatTendersSaveRefusal(details), {
+    code: details.code,
+    path: details.path,
+    storeErrorCode: details.storeErrorCode ?? null,
+    fieldPath: details.fieldPath ?? null,
+    size: details.size ?? null,
+    target: details.target,
+  })
+}
+
+/**
+ * Warned once per module load: with no bridge the app cannot persist anything at
+ * all, and this branch runs on every mutation, so one line names the condition
+ * for the whole session instead of once per keystroke.
+ */
+let warnedMissingBridge = false
+
+/**
+ * Warned once per conflict episode (cleared as soon as an attempt gets past the
+ * conflict guard): a latched conflict refuses every later edit, and a user who
+ * keeps working through one must not turn the diagnostic into a log storm.
+ */
+let conflictWarnedFor: string | null = null
+
+function warnSaveRefusedForMissingBridge(path: TendersSaveRefusalPath): void {
+  if (warnedMissingBridge) return
+  warnedMissingBridge = true
+  const s = useTendersStore.getState()
+  warnTendersSaveRefused({
+    code: 'NO_IPC_BRIDGE',
+    path,
+    reason: 'window.tendersApi.saveStoreV2 is unavailable, so the edit cannot be written',
+    target: describeTendersSaveTarget({
+      workspaces: s.workspaces,
+      revision: committedRevision,
+      updatedAt: null,
+    }),
+  })
+}
+
+function warnSaveBlockedByConflict(path: TendersSaveRefusalPath, saveError: string | null): void {
+  const reason = saveError || 'the store is latched in conflict; a blind write is never attempted'
+  const signature = `${path}:${reason}`
+  if (conflictWarnedFor === signature) return
+  conflictWarnedFor = signature
+  const s = useTendersStore.getState()
+  warnTendersSaveRefused({
+    code: 'SAVE_BLOCKED_BY_CONFLICT',
+    path,
+    reason,
+    target: describeTendersSaveTarget({
+      workspaces: s.workspaces,
+      revision: committedRevision,
+      updatedAt: null,
+    }),
+  })
+}
+
 export function scheduleSaveToMain(): void {
   if (isSyncingFromMain) return
-  if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) return
+  if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) {
+    warnSaveRefusedForMissingBridge('autosave')
+    return
+  }
 
   // An edit that reaches here is uncommitted work even when the save itself is
   // deferred (a save in flight) or refused (a conflict): the shell's close guard
   // must never treat such an edit as already durable.
   hasUncommittedEdits = true
 
-  const currentStatus = useTendersStore.getState().saveStatus
-  if (currentStatus === 'conflict') {
-    // Never blind-write when in conflict
+  const current = useTendersStore.getState()
+  if (current.saveStatus === 'conflict') {
+    // Never blind-write when in conflict. This refusal is named once per
+    // conflict episode: the branch runs on every mutation, and an edit made
+    // through a conflict would otherwise warn per keystroke.
+    warnSaveBlockedByConflict('autosave', current.saveError)
     return
   }
 
@@ -546,10 +727,21 @@ async function performSaveToMain(): Promise<void> {
     isSavePending = true
     return
   }
-  if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) return
+  if (typeof window === 'undefined' || !window.tendersApi?.saveStoreV2) {
+    warnSaveRefusedForMissingBridge('autosave')
+    return
+  }
 
   const s = useTendersStore.getState()
-  if (s.saveStatus === 'conflict') return
+  if (s.saveStatus === 'conflict') {
+    // A deliberate attempt (Retry, or the close guard's flush) against a latched
+    // conflict. Same episode rule as the scheduling branch: one line per
+    // conflict, so a close-flush retry loop does not repeat it.
+    warnSaveBlockedByConflict('autosave', s.saveError)
+    return
+  }
+  // An attempt got past the conflict latch, so a later conflict is a new episode.
+  conflictWarnedFor = null
 
   isSaveInFlight = true
 
@@ -575,6 +767,13 @@ async function performSaveToMain(): Promise<void> {
       saveError: size.error,
       saveSizeWarning: null,
     })
+    warnTendersSaveRefused({
+      code: 'DOCUMENT_OVER_SIZE',
+      path: 'autosave',
+      reason: size.error ?? 'the document is over a save ceiling',
+      size,
+      target: describeTendersSaveTarget(document),
+    })
     return
   }
 
@@ -588,13 +787,18 @@ async function performSaveToMain(): Promise<void> {
     isSaveInFlight = false
     isSavePending = false
     const first = validation.issues[0]
-    useTendersStore.setState({
-      saveStatus: 'error',
-      saveError: first
-        ? first.path
-          ? `${first.path}: ${first.message}`
-          : first.message
-        : 'Tenders data failed schema validation.',
+    const message = first
+      ? first.path
+        ? `${first.path}: ${first.message}`
+        : first.message
+      : 'Tenders data failed schema validation.'
+    useTendersStore.setState({ saveStatus: 'error', saveError: message })
+    warnTendersSaveRefused({
+      code: 'SCHEMA_INVALID',
+      path: 'autosave',
+      reason: message,
+      fieldPath: first?.path || null,
+      target: describeTendersSaveTarget(document),
     })
     return
   }
@@ -642,15 +846,33 @@ async function performSaveToMain(): Promise<void> {
       isSavePending = false
       if (result.error.code === 'REVISION_CONFLICT') {
         useTendersStore.setState({ saveStatus: 'conflict', saveError: result.error.message })
+        warnTendersSaveRefused({
+          code: 'REVISION_CONFLICT',
+          path: 'autosave',
+          reason: result.error.message,
+          storeErrorCode: result.error.code,
+          target: describeTendersSaveTarget(document),
+        })
       } else {
         useTendersStore.setState({ saveStatus: 'error', saveError: result.error.message })
+        warnTendersSaveRefused({
+          code: 'STORE_REFUSED',
+          path: 'autosave',
+          reason: result.error.message,
+          storeErrorCode: result.error.code,
+          target: describeTendersSaveTarget(document),
+        })
       }
     }
   } catch (err) {
     isSavePending = false
-    useTendersStore.setState({
-      saveStatus: 'error',
-      saveError: err instanceof Error ? err.message : String(err),
+    const message = err instanceof Error ? err.message : String(err)
+    useTendersStore.setState({ saveStatus: 'error', saveError: message })
+    warnTendersSaveRefused({
+      code: 'SAVE_THREW',
+      path: 'autosave',
+      reason: message,
+      target: describeTendersSaveTarget(document),
     })
   } finally {
     isSaveInFlight = false
@@ -1616,6 +1838,13 @@ export const useTendersStore = create<TendersState>()(
                       saveError: migratedSize.error,
                       saveSizeWarning: null,
                     })
+                    warnTendersSaveRefused({
+                      code: 'DOCUMENT_OVER_SIZE',
+                      path: 'migration-commit',
+                      reason: migratedSize.error ?? 'the migrated document is over a save ceiling',
+                      size: migratedSize,
+                      target: describeTendersSaveTarget(res.data),
+                    })
                   } else {
                     const saveRes = await window.tendersApi.saveStoreV2({
                       expectedRevision: 0,
@@ -1640,12 +1869,26 @@ export const useTendersStore = create<TendersState>()(
                           saveRes.error.code === 'REVISION_CONFLICT' ? 'conflict' : 'error',
                         saveError: saveRes.error.message,
                       })
+                      warnTendersSaveRefused({
+                        code:
+                          saveRes.error.code === 'REVISION_CONFLICT'
+                            ? 'REVISION_CONFLICT'
+                            : 'STORE_REFUSED',
+                        path: 'migration-commit',
+                        reason: saveRes.error.message,
+                        storeErrorCode: saveRes.error.code,
+                        target: describeTendersSaveTarget(res.data),
+                      })
                     }
                   }
                 } catch (saveErr) {
-                  set({
-                    saveStatus: 'error',
-                    saveError: saveErr instanceof Error ? saveErr.message : String(saveErr),
+                  const message = saveErr instanceof Error ? saveErr.message : String(saveErr)
+                  set({ saveStatus: 'error', saveError: message })
+                  warnTendersSaveRefused({
+                    code: 'SAVE_THREW',
+                    path: 'migration-commit',
+                    reason: message,
+                    target: describeTendersSaveTarget(res.data),
                   })
                 } finally {
                   // Always release the latch so a failed migration can be

@@ -1313,7 +1313,16 @@ describe('the TenderList wiring', () => {
   })
 
   it('gates the pass on the remembered preference', () => {
-    expect(source).toMatch(/if \(aiEnabledRef\.current\) \{/)
+    // The gate moved into the shared intake sequence (`intakeTenderFile`), which
+    // both entry points run — the list's own import and the discovery pane's
+    // "Add to workspace" — so the list hands its live toggle to the option and
+    // the sequence starts the pass only when it is set.
+    expect(source, 'the list must hand its remembered preference to the intake').toMatch(
+      /aiExtraction: aiEnabledRef\.current/,
+    )
+    expect(source, 'the sequence must gate the pass on that option').toMatch(
+      /if \(options\.aiExtraction\) \{\s*void runAiPass\(/,
+    )
     expect(source).toMatch(/useState<boolean>\(\(\) => readAiExtractionPreference\(\)\)/)
     expect(source, 'the preference is written on every toggle').toMatch(
       /persistAiExtractionPreference\(enabled\)/,

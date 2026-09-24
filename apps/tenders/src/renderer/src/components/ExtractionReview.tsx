@@ -57,6 +57,7 @@ import type {
 } from '../../shared/types'
 import { SUBMISSION_METHOD_LABEL, pageContentObtained, valueProvenance } from '../../shared/types'
 import { parseClosingDate, unreviewedOcrPages } from '../readiness'
+import { docxPaginationNote, type DocxPagination } from '../intake/docx'
 import {
   extractMoneyLiterals,
   formatRandAmount,
@@ -176,6 +177,78 @@ const PAGE_STATUS_EXPLANATION: Record<PageExtractionStatus, string> = {
     'This page has no text layer and OCR is not available on this platform, so nothing on it was extracted.',
   'ocr-failed': 'No usable text could be produced for this page, so nothing on it was extracted.',
   'manually-reviewed': 'You confirmed this page against the original document.',
+}
+
+/**
+ * The same explanations for a Word .docx, whose pages are declared by the file
+ * itself and were never scanned by anything.
+ *
+ * A picture-only page of a .docx fails closed exactly like a scanned PDF page —
+ * its content produced no text, so it blocks readiness — but the vocabulary
+ * cannot be borrowed: there is no scanner, no text layer and no OCR step. Saying
+ * "scanned" of a Word page would describe a mechanism that never ran, which is
+ * the same class of error as claiming a page was read when it was not.
+ */
+const PAGE_STATUS_EXPLANATION_WORD: Partial<Record<PageExtractionStatus, string>> = {
+  native: 'This page carries text, so it was read normally.',
+  'ocr-required':
+    'This page holds no text — its content is a picture or a drawing. Zanostack reads text, and no AI extraction read this page, so nothing on it was extracted.',
+  'ocr-unavailable':
+    'This page holds no text and no text-reading method is available here, so nothing on it was extracted.',
+}
+
+/** One page row's explanation, in the vocabulary of the source it came from. */
+export function pageStatusExplanation(state: PageExtractionStatus, wordDocument = false): string {
+  if (wordDocument) {
+    const word = PAGE_STATUS_EXPLANATION_WORD[state]
+    if (word) return word
+  }
+  return PAGE_STATUS_EXPLANATION[state]
+}
+
+// ── which kind of source document this is ────────────────────────────────────
+//
+// The intake path already decides this from the chosen file (see
+// `tenderSourceKind` in TenderList), and the record keeps the file name it was
+// imported under. So a surface can ask the same question of a stored tender
+// without a new persisted field — and every Word-specific statement is derived
+// from this one answer rather than guessed per surface.
+
+/** True when this tender's source file is a Word .docx rather than a PDF. */
+export function isWordDocumentName(fileName: string | null | undefined): boolean {
+  return typeof fileName === 'string' && /\.docx$/i.test(fileName)
+}
+
+/**
+ * How a .docx intake's page numbers were derived, reconstructed for a stored
+ * tender.
+ *
+ * `TenderRecord` keeps the document's own page count (`numPages`) but not the
+ * `pagination` discriminator, and `extractDocxIntake` derives that discriminator
+ * from exactly this count — more than one page means the file declared page
+ * breaks. Reconstructing it here keeps the app from printing "1 page" for a
+ * flowing document whose single "page" is the whole file.
+ */
+export function wordDocumentPagination(tender: Pick<TenderRecord, 'numPages'>): {
+  pagination: DocxPagination
+  numPages: number
+} {
+  return {
+    pagination: tender.numPages > 1 ? 'declared' : 'continuous',
+    numPages: tender.numPages,
+  }
+}
+
+/**
+ * The honest one-line description of a Word document's pagination — the module's
+ * own `docxPaginationNote`, so no surface paraphrases the rule. Null for a PDF,
+ * which has real pages and needs no such note.
+ */
+export function wordDocumentPaginationNote(
+  tender: Pick<TenderRecord, 'fileName' | 'numPages'>,
+): string | null {
+  if (!isWordDocumentName(tender.fileName)) return null
+  return docxPaginationNote(wordDocumentPagination(tender))
 }
 
 /**
@@ -939,13 +1012,29 @@ function revealSourcePage(page: number | null): void {
 // ── page review ──────────────────────────────────────────────────────────────
 
 /** Jump-to-page affordance reused by every page row (same scroll as field sources). */
-function PageJumpButton({ pageNumber, pdfReady }: { pageNumber: number; pdfReady: boolean }) {
+function PageJumpButton({
+  pageNumber,
+  pdfReady,
+  wordDocument,
+}: {
+  pageNumber: number
+  pdfReady: boolean
+  wordDocument: boolean
+}) {
+  // A Word .docx has no rendered page to scroll to: the jump lands on the clause
+  // text the source pane shows for that page number, so the label says what the
+  // control actually does.
+  const title = pdfReady
+    ? wordDocument
+      ? `Scroll to the clause on page ${pageNumber} in the source pane`
+      : `Scroll the PDF to page ${pageNumber}`
+    : 'Open the tender document first'
   return (
     <button
       type="button"
       onClick={() => revealSourcePage(pageNumber)}
       disabled={!pdfReady}
-      title={pdfReady ? `Scroll the PDF to page ${pageNumber}` : 'Open the tender PDF first'}
+      title={title}
       className="inline-flex cursor-pointer items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent-dark)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
     >
       <FileText size={10} aria-hidden="true" /> p.{pageNumber}
@@ -970,7 +1059,9 @@ function pageConfidenceLabel(
 /**
  * The page half of the review step. A scanned tender shows its unreadable pages
  * first, each with the one action that clears the readiness gate (mark reviewed)
- * and a plain statement of what the app did and did not read.
+ * and a plain statement of what the app did and did not read. A Word .docx shows
+ * the same structure in its own vocabulary — it has no scanner and no text
+ * layer, and a picture-only page is not a scanned one.
  */
 function PagesSection({
   tender,
@@ -978,6 +1069,7 @@ function PagesSection({
   pendingPages,
   reviewedPages,
   pdfReady,
+  wordDocument,
   onReReadSource,
   onMarkReviewed,
   onMarkManyReviewed,
@@ -988,6 +1080,8 @@ function PagesSection({
   pendingPages: PageExtractionState[]
   reviewedPages: number
   pdfReady: boolean
+  /** True when the source is a Word .docx — see `pageStatusExplanation`. */
+  wordDocument: boolean
   onReReadSource?: () => Promise<PageExtraction | null>
   onMarkReviewed: (pageNumber: number) => void
   onMarkManyReviewed: (pageNumbers: number[]) => void
@@ -1026,12 +1120,14 @@ function PagesSection({
       >
         <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text)]">
           <ScanLine size={12} className="text-[var(--warn)]" aria-hidden="true" />
-          {tender.ocrPages} page{tender.ocrPages === 1 ? '' : 's'} without a text layer
+          {wordDocument
+            ? `${tender.ocrPages} page${tender.ocrPages === 1 ? '' : 's'} that hold no text`
+            : `${tender.ocrPages} page${tender.ocrPages === 1 ? '' : 's'} without a text layer`}
         </p>
         <p className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">
-          This tender has no page-level extraction state yet, so the app cannot say which pages were
-          read. Re-read the source to classify each page, then review the pages that have no text
-          layer.
+          {wordDocument
+            ? 'This tender has no page-level extraction state yet, so the app cannot say which pages were read. Re-read the source to classify each page, then review the pages that hold no text.'
+            : 'This tender has no page-level extraction state yet, so the app cannot say which pages were read. Re-read the source to classify each page, then review the pages that have no text layer.'}
         </p>
         {onReReadSource && (
           <div className="mt-2">
@@ -1080,20 +1176,41 @@ function PagesSection({
                     modelReadPages === 1 ? '' : 's'
                   } of this document, but a model read is a suggestion until you confirm it. `
                 : ''
-            }Zanostack does not read scanned pages${
-              modelReadPages > 0
-                ? ' on its own'
-                : ', and no AI extraction read any page of this document'
-            }. ${blocked.length} page${
-              blocked.length === 1 ? '' : 's'
-            } here have no usable text layer, so nothing on them was extracted — open each one in the PDF and mark it reviewed. Readiness stays blocked until every page is reviewed or has its own text layer.`
-          : `Every page either carries its own text layer, has been marked reviewed by you, or was read by AI.${
-              modelReadPages > 0
-                ? ` ${modelReadPages} model read${modelReadPages === 1 ? '' : 's'} here ${
-                    modelReadPages === 1 ? 'is' : 'are'
-                  } still an unconfirmed suggestion.`
-                : ''
-            }`}
+            }${
+              // A Word .docx has no scanner and no text layer: a page of it that
+              // holds no text holds a picture, and saying "scanned" would name a
+              // mechanism that never ran on this file.
+              wordDocument
+                ? `This tender is a Word .docx, and Zanostack read its text directly${
+                    modelReadPages > 0
+                      ? ''
+                      : ', and no AI extraction read any page of this document'
+                  }. ${blocked.length} page${
+                    blocked.length === 1 ? '' : 's'
+                  } here hold no text, so nothing on them was extracted — open the document, compare each one against the original, and mark it reviewed. Readiness stays blocked until every page is reviewed or holds text.`
+                : `Zanostack does not read scanned pages${
+                    modelReadPages > 0
+                      ? ' on its own'
+                      : ', and no AI extraction read any page of this document'
+                  }. ${blocked.length} page${
+                    blocked.length === 1 ? '' : 's'
+                  } here have no usable text layer, so nothing on them was extracted — open each one in the PDF and mark it reviewed. Readiness stays blocked until every page is reviewed or has its own text layer.`
+            }`
+          : wordDocument
+            ? `This .docx was read in full: no page holds content that produced no text.${
+                modelReadPages > 0
+                  ? ` ${modelReadPages} model read${modelReadPages === 1 ? '' : 's'} here ${
+                      modelReadPages === 1 ? 'is' : 'are'
+                    } still an unconfirmed suggestion.`
+                  : ''
+              }`
+            : `Every page either carries its own text layer, has been marked reviewed by you, or was read by AI.${
+                modelReadPages > 0
+                  ? ` ${modelReadPages} model read${modelReadPages === 1 ? '' : 's'} here ${
+                      modelReadPages === 1 ? 'is' : 'are'
+                    } still an unconfirmed suggestion.`
+                  : ''
+              }`}
       </p>
 
       {blocked.length > 1 && (
@@ -1119,10 +1236,14 @@ function PagesSection({
                   className="rounded-lg border border-[var(--warn-border)] bg-[var(--surface-subtle)] px-2.5 py-2"
                 >
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                    <PageJumpButton pageNumber={page.pageNumber} pdfReady={pdfReady} />
+                    <PageJumpButton
+                      pageNumber={page.pageNumber}
+                      pdfReady={pdfReady}
+                      wordDocument={wordDocument}
+                    />
                     <Chip
                       tone={PAGE_STATUS_TONE[page.state]}
-                      title={PAGE_STATUS_EXPLANATION[page.state]}
+                      title={pageStatusExplanation(page.state, wordDocument)}
                     >
                       {PAGE_STATUS_LABEL[page.state]}
                     </Chip>
@@ -1143,7 +1264,7 @@ function PagesSection({
                   </div>
                   <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-[var(--text-tertiary)]">
                     <EyeOff size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    {PAGE_STATUS_EXPLANATION[page.state]}
+                    {pageStatusExplanation(page.state, wordDocument)}
                   </p>
                 </li>
               )
@@ -1186,10 +1307,14 @@ function PagesSection({
                     key={page.pageNumber}
                     className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2.5 py-1.5"
                   >
-                    <PageJumpButton pageNumber={page.pageNumber} pdfReady={pdfReady} />
+                    <PageJumpButton
+                      pageNumber={page.pageNumber}
+                      pdfReady={pdfReady}
+                      wordDocument={wordDocument}
+                    />
                     <Chip
                       tone={PAGE_STATUS_TONE[page.state]}
-                      title={PAGE_STATUS_EXPLANATION[page.state]}
+                      title={pageStatusExplanation(page.state, wordDocument)}
                     >
                       {PAGE_STATUS_LABEL[page.state]}
                     </Chip>
@@ -1283,6 +1408,11 @@ export function ExtractionReview({
 
   const summary = useMemo(() => summarizeReview(tender, review), [tender, review])
   const pages = review.pages ?? []
+  // Which vocabulary and which jump affordance this review step uses. Derived
+  // from the source file name the tender was imported under — the same answer
+  // the intake path gave the file — so no surface has to be told separately.
+  const wordDocument = isWordDocumentName(tender.fileName)
+  const paginationNote = wordDocumentPaginationNote(tender)
 
   const currentValueFor = (field: ReviewFieldKey): string => {
     switch (field) {
@@ -1521,6 +1651,7 @@ export function ExtractionReview({
       pendingPages={summary.pendingPages}
       reviewedPages={summary.reviewedPages}
       pdfReady={pdfReady}
+      wordDocument={wordDocument}
       onReReadSource={onReReadSource}
       onMarkReviewed={handleMarkPageReviewed}
       onMarkManyReviewed={handleMarkManyPagesReviewed}
@@ -1543,6 +1674,18 @@ export function ExtractionReview({
             Confirm, correct or reject every value the parser lifted before the bid is treated as
             ready.
           </p>
+          {/* How this document's page numbers were derived, straight from the
+              module that derived them. Without it the page references below
+              would read as printed page numbers of a Word file that declares
+              none. */}
+          {paginationNote && (
+            <p
+              data-testid="docx-pagination-note"
+              className="mt-0.5 text-[11px] leading-snug text-[var(--text-tertiary)]"
+            >
+              {paginationNote}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {onReReadSource && (
@@ -1551,8 +1694,10 @@ export function ExtractionReview({
               disabled={!pdfReady || reReading}
               title={
                 pdfReady
-                  ? 'Re-read the PDF to refresh source pages and clauses'
-                  : 'Open the tender PDF first'
+                  ? wordDocument
+                    ? 'Re-read the Word document to refresh source pages and clauses'
+                    : 'Re-read the PDF to refresh source pages and clauses'
+                  : 'Open the tender document first'
               }
             >
               <RotateCcw size={12} className={reReading ? 'animate-spin' : ''} /> Re-read source
@@ -1687,6 +1832,7 @@ export function ExtractionReview({
                 error={errors[field] ?? null}
                 currentValue={currentValueFor(field)}
                 pdfReady={pdfReady}
+                wordDocument={wordDocument}
                 onDraft={(value) => setDrafts((previous) => ({ ...previous, [field]: value }))}
                 onCommit={(value) => commitField(field, value)}
                 onConfirm={(value) => confirmField(field, value)}
@@ -1740,7 +1886,11 @@ export function ExtractionReview({
                           onOpenRequirement(requirement.id)
                           revealSourcePage(requirement.pageNumber)
                         }}
-                        title="Show this clause in the PDF"
+                        title={
+                          wordDocument
+                            ? 'Show this clause in the source pane'
+                            : 'Show this clause in the PDF'
+                        }
                       >
                         <MapPin size={11} aria-hidden="true" /> Open source
                       </MiniButton>
@@ -1785,8 +1935,9 @@ export function ExtractionReview({
         {summary.pendingPages.length === 0 && pagesSection}
 
         <p className="mt-4 pb-2 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-          Corrections are saved to this tender as you make them — there is no need to import the PDF
-          again. The originally extracted text is kept beside each corrected field.
+          Corrections are saved to this tender as you make them — there is no need to import the{' '}
+          {wordDocument ? 'document' : 'PDF'} again. The originally extracted text is kept beside
+          each corrected field.
         </p>
       </div>
     </section>
@@ -1803,6 +1954,7 @@ function FieldCard({
   error,
   currentValue,
   pdfReady,
+  wordDocument,
   onDraft,
   onCommit,
   onConfirm,
@@ -1817,6 +1969,8 @@ function FieldCard({
   error: string | null
   currentValue: string
   pdfReady: boolean
+  /** True when the source is a Word .docx — the jump goes to clause text. */
+  wordDocument: boolean
   onDraft: (value: string) => void
   onCommit: (value: string) => void
   onConfirm: (value: string) => void
@@ -1974,13 +2128,17 @@ function FieldCard({
               className="inline-flex cursor-pointer items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 font-medium text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent-dark)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               title={
                 pdfReady
-                  ? 'Scroll the PDF to this page'
-                  : 'Open the tender PDF to jump to the source'
+                  ? wordDocument
+                    ? 'Scroll to the clause on this page in the source pane'
+                    : 'Scroll the PDF to this page'
+                  : 'Open the tender document to jump to the source'
               }
             >
               <MapPin size={10} aria-hidden="true" /> p.{sourcePage}
             </button>
-            <span className="text-[var(--text-tertiary)]">source page</span>
+            <span className="text-[var(--text-tertiary)]">
+              {wordDocument ? 'source page (as the .docx declares it)' : 'source page'}
+            </span>
           </>
         ) : (
           <span>No source page recorded for this value.</span>

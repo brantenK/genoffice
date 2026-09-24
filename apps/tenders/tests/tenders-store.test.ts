@@ -851,6 +851,39 @@ describe('Phase 2 authoritative Tenders store', () => {
     })
   })
 
+  describe('recovery candidate scan', () => {
+    it("offers the store's own leftover temp file, never another writer's", async () => {
+      const directory = await uniqueDirectory('recovery-scan')
+      const store = createTendersStore({ directory, now: () => FIXED_NOW })
+      expectSaveSuccess(await store.save({ expectedRevision: 0, document: validV2(0) }))
+
+      // Exactly the name a crashed commit leaves behind: the store writes
+      // `<primary>.<uuid>.tmp` and renames it into place, so this file holds a
+      // complete document and is a genuine candidate.
+      const storeTemp = `${TENDERS_PERSISTENCE_FILE_NAME}.${randomUUID()}.tmp`
+      await writeFile(join(directory, storeTemp), JSON.stringify(validV2(0, ['tmp'])), 'utf8')
+
+      // A temp file another writer keeps in the same directory: the reminder
+      // scheduler commits its ledger atomically as `reminders.json.<uuid>.tmp`
+      // beside the store. It holds no tender document, so it must never be
+      // reported to the user as a recoverable copy of their tender data.
+      const foreignTemp = 'reminders.json.abc.tmp'
+      await writeFile(join(directory, foreignTemp), '{"version":1,"entries":[]}', 'utf8')
+
+      const candidates = await store.listRecoveryCandidates()
+      expect(
+        candidates
+          .filter((candidate) => candidate.source === 'temporary')
+          .map((candidate) => candidate.id),
+      ).toEqual([storeTemp])
+      expect(candidates.map((candidate) => candidate.id)).not.toContain(foreignTemp)
+
+      // The foreign temp is not restorable either: the candidate id is validated
+      // against the same rule the scan uses.
+      expectSaveFailure(await store.restoreRecoveryCandidate(foreignTemp), 'INVALID_REQUEST')
+    })
+  })
+
   describe('isolation and path boundary', () => {
     it('never exposes mutable internal references through save or load results', async () => {
       const directory = await uniqueDirectory('references')

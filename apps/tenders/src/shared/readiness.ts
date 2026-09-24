@@ -519,6 +519,44 @@ export function parseClosingDate(raw: string | null | undefined): Date | null {
   return null
 }
 
+/**
+ * The clock a civil closing value is rendered on. `parseClosingDate` anchors
+ * civil SA values to SAST, so rendering them in `Africa/Johannesburg` shows the
+ * closing time exactly as the RFP states it, on every machine, and keeps the
+ * countdown badge, the readiness gate and the reminder copy describing the same
+ * instant.
+ */
+export const CIVIL_DISPLAY_TIMEZONE = 'Africa/Johannesburg'
+
+/**
+ * The timezone a closing value must be rendered in: an RFC 3339 value with an
+ * explicit offset is a real instant, so it is rendered on the reader's own clock
+ * (`undefined`), while every other supported form is the SAST-anchored civil
+ * value `parseClosingDate` produced.
+ */
+export function closingDisplayTimeZone(raw: string | null | undefined): string | undefined {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/.test((raw ?? '').trim()) ? undefined : CIVIL_DISPLAY_TIMEZONE
+}
+
+/**
+ * THE closing-instant formatter — "Mon, 30 Nov 2026, 11:00" — shared by the
+ * countdown badge and the reminder copy so the two can never render the same
+ * instant differently. `raw` is the closing value exactly as stored, which is
+ * what decides the timezone (see `closingDisplayTimeZone`); it is optional
+ * because a caller holding only an instant still gets a deterministic rendering.
+ */
+export function formatClosingInstant(date: Date, raw?: string | null): string {
+  return date.toLocaleString('en-ZA', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: closingDisplayTimeZone(raw),
+  })
+}
+
 export function assessDocHealth(
   doc: VaultDoc,
   now: Date = new Date(),

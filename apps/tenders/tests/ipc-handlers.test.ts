@@ -15,26 +15,82 @@ const {
   preloadBridge,
   dialogState,
   invokeSender,
-} = vi.hoisted(() => ({
-  ipcHandlers: new Map<string, (...args: unknown[]) => any>(),
-  openedPaths: [] as string[],
-  mockBroadcasts: [] as Array<{ channel: string; data: any }>,
-  removedHandlers: [] as string[],
-  booksInvoiceCalls: [] as any[],
-  preloadBridge: { key: '', api: undefined as unknown },
+  engineSeams,
+} = vi.hoisted(() => {
   /**
-   * The WebContents a renderer-initiated `invoke` is modelled as coming from.
-   * Real Electron hands the handler the calling WebContents, whose numeric `id`
-   * the close-flush reply binding checks, so a test that drives the renderer on
-   * behalf of a specific view sets this to that view.
+   * The seams the discovery + reminder wiring exposes
+   * (`setTendersEngineOverrides`). `main/tenders-main.ts` builds both engines
+   * through these, so installing the fakes before `registerTendersIpc()` proves
+   * the whole new IPC surface with no network, no real schedule and no wall
+   * time — and each fake records exactly what main asked it to do.
    */
-  invokeSender: { current: undefined as any },
-  dialogState: {
-    /** Index the stubbed message box answers with (1 = the safe "keep open"). */
-    response: 1,
-    calls: [] as Array<{ message: string; detail: string }>,
-  },
-}))
+  const reminderState = {
+    settings: {
+      enabled: true,
+      thresholds: [{ id: '7d', label: '7 days', leadMs: 7 * 24 * 60 * 60 * 1000 }],
+    },
+    ledger: { version: 1, entries: [] as unknown[] },
+  }
+  const engineSeams = {
+    /** The options main built the scheduler with — what proves the wiring. */
+    schedulerOptions: [] as any[],
+    scheduler: {
+      start: vi.fn(),
+      stop: vi.fn(),
+      checkNow: vi.fn(async () => ({ fired: 0, reminders: [], ledger: reminderState.ledger })),
+      readState: vi.fn(async () => ({
+        settings: reminderState.settings,
+        ledger: reminderState.ledger,
+      })),
+      writeSettings: vi.fn(async (patch: any) => ({ ...reminderState.settings, ...patch })),
+      setReadTenders: vi.fn(),
+    },
+    reminderState,
+    /** The options main built the discovery client with. */
+    clientOptions: [] as any[],
+    client: {
+      listOpportunities: vi.fn(async () => ({
+        ok: true,
+        opportunities: [],
+        issues: [],
+        warnings: [],
+        pages: 1,
+        failedPages: 0,
+        source: 'ocds-api',
+        truncated: false,
+      })),
+      fetchRelease: vi.fn(async () => ({ ok: true, opportunity: null, issues: [], warnings: [] })),
+      refreshCache: vi.fn(async () => ({ ok: true, cache: null, complete: true, warnings: [] })),
+      readCache: vi.fn(async () => ({ ok: true, cache: null, stale: true, warnings: [] })),
+    },
+    /** Every URL the document download asked for, and how it asked. */
+    documentFetchCalls: [] as Array<{ url: string; init?: any }>,
+    documentFetch: vi.fn(async (url: string): Promise<any> => {
+      throw new Error(`no document fetch was installed for ${url}`)
+    }),
+  }
+  return {
+    ipcHandlers: new Map<string, (...args: unknown[]) => any>(),
+    openedPaths: [] as string[],
+    mockBroadcasts: [] as Array<{ channel: string; data: any }>,
+    removedHandlers: [] as string[],
+    booksInvoiceCalls: [] as any[],
+    preloadBridge: { key: '', api: undefined as unknown },
+    /**
+     * The WebContents a renderer-initiated `invoke` is modelled as coming from.
+     * Real Electron hands the handler the calling WebContents, whose numeric `id`
+     * the close-flush reply binding checks, so a test that drives the renderer on
+     * behalf of a specific view sets this to that view.
+     */
+    invokeSender: { current: undefined as any },
+    dialogState: {
+      /** Index the stubbed message box answers with (1 = the safe "keep open"). */
+      response: 1,
+      calls: [] as Array<{ message: string; detail: string }>,
+    },
+    engineSeams,
+  }
+})
 
 vi.mock('electron', () => {
   return {
@@ -129,12 +185,22 @@ import {
   registerTendersWebContents,
   repairSubmissionReadinessSnapshots,
   requestTendersClose,
+  resetTendersIpcForTests,
   resolveSafeTendersPath,
   saveDocumentFile,
   SEED_TENDER_WTR_04,
+  setTendersEngineOverrides,
+  stopTendersReminders,
   unregisterTendersWebContents,
   writeTendersStore,
 } from '../src/main/tenders-main'
+import type {
+  DiscoveryClient,
+  DiscoveryDocumentFetch,
+  DiscoveryFetchInit,
+  DiscoveryHttpResponse,
+} from '../src/main/discovery-client'
+import type { RemindersScheduler } from '../src/main/reminders-scheduler'
 // Wrap (do not replace) the real Books posting so the existing invoice-numbering
 // coverage still runs while F4 can assert the exact number of posts.
 vi.mock('../../books/src/main/books-core', async (importOriginal) => {
@@ -149,10 +215,12 @@ vi.mock('../../books/src/main/books-core', async (importOriginal) => {
 })
 
 import {
+  MAX_DISCOVERY_DOWNLOAD_BYTES,
   MAX_TENDERS_DOCUMENT_UPLOAD_BYTES,
   MAX_TENDERS_MATRIX_EXPORT_BYTES,
   MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS,
   MAX_TENDERS_MATRIX_EXPORT_ROWS,
+  MAX_TENDERS_REMINDER_THRESHOLDS,
   TENDERS_CHANNELS,
 } from '../src/shared/ipc'
 import { createEmptyTendersDataV2, migrateTendersDataV1 } from '../src/shared/tenders-schema'
@@ -328,6 +396,156 @@ function deliveryRecorder(): {
   }
 }
 
+// ── the discovery + reminder engine seams ────────────────────────────────────
+
+/**
+ * Install the fakes `main/tenders-main.ts` builds both engines through. Called
+ * from `beforeAll` and from the describes that need a fresh schedule, so no test
+ * in this file reaches the network, builds a real timer or reads the real clock.
+ */
+function installEngineSeams(): void {
+  setTendersEngineOverrides({
+    createDiscoveryClient: (options) => {
+      engineSeams.clientOptions.push(options)
+      return engineSeams.client as unknown as DiscoveryClient
+    },
+    createRemindersScheduler: (options) => {
+      engineSeams.schedulerOptions.push(options)
+      return engineSeams.scheduler as unknown as RemindersScheduler
+    },
+    documentFetch: (url, init) => {
+      // Recorded in the wrapper, not in the mock's own implementation: a test
+      // that installs a one-shot answer (`mockResolvedValueOnce`) replaces that
+      // implementation, and the URL it was asked for still has to be visible.
+      engineSeams.documentFetchCalls.push({ url, init })
+      return engineSeams.documentFetch(url, init)
+    },
+  })
+}
+
+/** Forget what the fakes were asked, and restore their default answers. */
+function resetEngineSeams(): void {
+  engineSeams.schedulerOptions.length = 0
+  engineSeams.clientOptions.length = 0
+  engineSeams.documentFetchCalls.length = 0
+  for (const record of [engineSeams.scheduler, engineSeams.client]) {
+    for (const value of Object.values(record)) {
+      const mock = value as { mockClear?: () => void }
+      if (typeof mock.mockClear === 'function') mock.mockClear()
+    }
+  }
+  engineSeams.documentFetch.mockClear()
+  engineSeams.scheduler.checkNow.mockImplementation(async () => ({
+    fired: 0,
+    reminders: [],
+    ledger: engineSeams.reminderState.ledger,
+  }))
+  engineSeams.scheduler.readState.mockImplementation(async () => ({
+    settings: engineSeams.reminderState.settings,
+    ledger: engineSeams.reminderState.ledger,
+  }))
+  engineSeams.scheduler.writeSettings.mockImplementation(async (patch: any) => ({
+    ...engineSeams.reminderState.settings,
+    ...patch,
+  }))
+  engineSeams.documentFetch.mockImplementation(async (url: string) => {
+    throw new Error(`no document fetch was installed for ${url}`)
+  })
+}
+
+/** What is currently in the managed `documents/` directory. */
+function documentsDirEntries(): string[] {
+  const dir = getTendersDocumentsDir(testDir)
+  return existsSync(dir) ? readdirSync(dir).sort() : []
+}
+
+type DocumentReply = DiscoveryHttpResponse & { arrayBuffer?(): Promise<ArrayBuffer> }
+
+function bytesOf(value: string | Uint8Array): Uint8Array {
+  return typeof value === 'string' ? new TextEncoder().encode(value) : value
+}
+
+/** One buffered document reply, with a stream reader and its own bytes. */
+function documentReply(options: {
+  status?: number
+  body?: string | Uint8Array
+  contentLength?: number
+  location?: string
+  /** Omit the stream, so the download falls back to `arrayBuffer()`. */
+  streamless?: boolean
+}): DocumentReply {
+  const status = options.status ?? 200
+  const bytes = bytesOf(options.body ?? '')
+  const headers: Record<string, string> = {}
+  if (options.contentLength !== undefined) headers['content-length'] = String(options.contentLength)
+  if (options.location !== undefined) headers.location = options.location
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+    body: options.streamless
+      ? null
+      : {
+          getReader: () => {
+            let sent = false
+            return {
+              read: async () => {
+                if (sent) return { done: true }
+                sent = true
+                return { done: false, value: bytes }
+              },
+            }
+          },
+        },
+    arrayBuffer: async () => bytes.slice().buffer as ArrayBuffer,
+  }
+}
+
+/**
+ * A reply that streams one chunk over and over, so the byte cap can be proved
+ * while the body is read rather than from a declared length.
+ */
+function repeatingDocumentReply(chunkBytes: number, times: number): DocumentReply {
+  const chunk = new Uint8Array(chunkBytes)
+  return {
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      getReader: () => {
+        let sent = 0
+        let cancelled = false
+        return {
+          read: async () => {
+            if (cancelled || sent >= times) return { done: true }
+            sent += 1
+            return { done: false, value: chunk }
+          },
+          cancel: async () => {
+            cancelled = true
+          },
+        }
+      },
+    },
+  }
+}
+
+/** A due reminder, as the pure core shapes it. */
+const DUE_REMINDER = {
+  tenderId: SEED_TENDER_WTR_04.id,
+  tenderTitle: SEED_TENDER_WTR_04.title,
+  thresholdId: '2h',
+  thresholdLabel: '2 hours',
+  leadMs: 7_200_000,
+  closingAt: '2026-10-31T21:59:00.000Z',
+  closingDate: '2026-10-31',
+  dueAt: '2026-10-31T19:59:00.000Z',
+  remainingMs: 3_600_000,
+  late: false,
+  skippedThresholdIds: [],
+  skippedThresholdLabels: [],
+}
+
 describe('Electron IPC Handlers & Security Validation', () => {
   beforeAll(() => {
     mkdirSync(testDir, { recursive: true })
@@ -336,6 +554,11 @@ describe('Electron IPC Handlers & Security Validation', () => {
       rendererUrl: TRUSTED_RENDERER_URL,
       rendererFile: '',
     })
+    // The engine seams go in BEFORE registration: `registerTendersIpc` starts the
+    // reminder schedule, and every discovery handler builds its client lazily, so
+    // installing them here is what keeps this whole file off the network and off
+    // a real timer.
+    installEngineSeams()
     registerTendersIpc()
   })
 
@@ -1407,6 +1630,31 @@ describe('Electron IPC Handlers & Security Validation', () => {
       },
       { label: 'openInCrm', channel: TENDERS_CHANNELS.openInCrm, args: ['deal-tender-x'] },
       { label: 'openBooks', channel: TENDERS_CHANNELS.openBooks, args: [] },
+      // Tender discovery + deadline reminders (the wired engines).
+      {
+        label: 'discoveryList',
+        channel: TENDERS_CHANNELS.discoveryList,
+        args: [{ window: { from: '2026-09-01', to: '2026-09-07' } }],
+      },
+      { label: 'discoveryRefresh', channel: TENDERS_CHANNELS.discoveryRefresh, args: [{}] },
+      { label: 'discoveryReadCache', channel: TENDERS_CHANNELS.discoveryReadCache, args: [] },
+      {
+        label: 'discoveryFetchRelease',
+        channel: TENDERS_CHANNELS.discoveryRelease,
+        args: [{ ocid: 'ocds-abc-1' }],
+      },
+      {
+        label: 'discoveryDownloadDocument',
+        channel: TENDERS_CHANNELS.discoveryDownloadDocument,
+        args: [{ url: 'https://www.etenders.gov.za/Documents/RFP.pdf' }],
+      },
+      { label: 'getReminders', channel: TENDERS_CHANNELS.remindersGet, args: [] },
+      {
+        label: 'setReminders',
+        channel: TENDERS_CHANNELS.remindersSet,
+        args: [{ enabled: false }],
+      },
+      { label: 'checkReminders', channel: TENDERS_CHANNELS.remindersCheck, args: [] },
     ]
 
     it.each(privilegedCalls)(
@@ -2358,6 +2606,653 @@ describe('Electron IPC Handlers & Security Validation', () => {
       await expect(pending).resolves.toBe(false)
       expect(dialogState.calls).toHaveLength(1)
       expect(dialogState.calls[0].detail).toMatch(/did not respond/i)
+    })
+  })
+
+  // ── Tender discovery + deadline reminders (the wired engines) ──────────────
+  //
+  // The two engines are complete and tested on their own; what these tests prove
+  // is the transport — the trusted-sender gate on every new channel, the URL
+  // allow-list in front of the document download, the store path the download
+  // lands in, the settings round-trip, and the lifecycle of the schedule.
+
+  const trustedSender = (): any => registeredWebContents()
+
+  /** The three sender classes every privileged channel must refuse. */
+  function untrustedAttempts(): Array<{ label: string; eventArg: any }> {
+    const unregisteredSender = { isDestroyed: () => false, send: vi.fn(), once: vi.fn() }
+    const untrustedSender = registeredWebContents(vi.fn(), UNTRUSTED_RENDERER_URL)
+    const subframeSender = registeredWebContents(vi.fn())
+    return [
+      { label: 'an unregistered sender', eventArg: event(unregisteredSender as any) },
+      { label: 'an untrusted-origin sender', eventArg: event(untrustedSender, untrustedFrame()) },
+      { label: 'a subframe sender', eventArg: event(subframeSender, subFrame()) },
+    ]
+  }
+
+  const DISCOVERY_CHANNELS: Array<{ label: string; channel: string; args: unknown[] }> = [
+    {
+      label: 'discovery-list',
+      channel: TENDERS_CHANNELS.discoveryList,
+      args: [{ window: { from: '2026-09-01', to: '2026-09-07' } }],
+    },
+    { label: 'discovery-refresh', channel: TENDERS_CHANNELS.discoveryRefresh, args: [{}] },
+    { label: 'discovery-read-cache', channel: TENDERS_CHANNELS.discoveryReadCache, args: [] },
+    {
+      label: 'discovery-release',
+      channel: TENDERS_CHANNELS.discoveryRelease,
+      args: [{ ocid: 'ocds-abc-1' }],
+    },
+    {
+      label: 'discovery-download-document',
+      channel: TENDERS_CHANNELS.discoveryDownloadDocument,
+      args: [{ url: 'https://www.etenders.gov.za/Documents/RFP.pdf' }],
+    },
+  ]
+
+  describe('22. Tender discovery IPC', () => {
+    beforeEach(() => {
+      resetEngineSeams()
+      installEngineSeams()
+    })
+
+    it.each(DISCOVERY_CHANNELS)(
+      '$label rejects every untrusted sender with zero engine side effects',
+      async ({ channel, args }) => {
+        const handler = ipcHandlers.get(channel)
+        expect(handler, `${channel} must be registered`).toBeDefined()
+
+        for (const attempt of untrustedAttempts()) {
+          const result = await handler!(attempt.eventArg, ...args)
+          expect.soft(result, `${channel} must refuse ${attempt.label}`).toMatchObject({
+            ok: false,
+            error: {
+              code: 'INVALID_REQUEST',
+              message: expect.stringMatching(/authoriz|trusted|registered Tenders WebContents/i),
+            },
+          })
+        }
+
+        // Zero side effects: no client call, no download, no file on disk.
+        expect(engineSeams.client.listOpportunities).not.toHaveBeenCalled()
+        expect(engineSeams.client.refreshCache).not.toHaveBeenCalled()
+        expect(engineSeams.client.readCache).not.toHaveBeenCalled()
+        expect(engineSeams.client.fetchRelease).not.toHaveBeenCalled()
+        expect(engineSeams.documentFetchCalls).toHaveLength(0)
+        expect(documentsDirEntries()).toEqual([])
+      },
+    )
+
+    it('builds the client with the app cache directory under userData', async () => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryReadCache)!
+
+      const result = await handler(event(trustedSender()))
+
+      expect(result).toEqual({ ok: true, cache: null, stale: true, warnings: [] })
+      expect(engineSeams.clientOptions).toHaveLength(1)
+      expect(engineSeams.clientOptions[0].cacheDir).toBe(join(testDir, 'tenders', 'discovery'))
+      expect(engineSeams.client.readCache).toHaveBeenCalledTimes(1)
+    })
+
+    it('lists opportunities through the client and returns its shapes unchanged', async () => {
+      const opportunity = { ocid: 'ocds-abc-1', title: 'Supply of water meters' }
+      engineSeams.client.listOpportunities.mockResolvedValueOnce({
+        ok: true,
+        opportunities: [opportunity],
+        issues: [{ path: 'releases[1]', code: 'missing-title', detail: 'no title' }],
+        warnings: ['one page failed'],
+        pages: 2,
+        failedPages: 1,
+        source: 'ocds-api',
+        truncated: true,
+      })
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryList)!
+
+      const result = await handler(event(trustedSender()), {
+        window: { from: '2026-09-01', to: '2026-09-07' },
+        pageSize: 10,
+      })
+
+      expect(engineSeams.client.listOpportunities).toHaveBeenCalledWith({
+        window: { from: '2026-09-01', to: '2026-09-07' },
+        pageSize: 10,
+      })
+      expect(result.opportunities).toEqual([opportunity])
+      expect(result.issues).toHaveLength(1)
+      expect(result).toMatchObject({ ok: true, pages: 2, failedPages: 1, truncated: true })
+      expect(result.warnings).toEqual(['one page failed'])
+    })
+
+    it('passes the client refusal through verbatim instead of re-wording it', async () => {
+      engineSeams.client.listOpportunities.mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'That window spans 40 days. The eTenders feed reliably answers at most 7 days.',
+        },
+      })
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryList)!
+
+      const result = await handler(event(trustedSender()), {
+        window: { from: '2026-01-01', to: '2026-02-09' },
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'That window spans 40 days. The eTenders feed reliably answers at most 7 days.',
+        },
+      })
+    })
+
+    it('refreshes with the caller window, or with none at all', async () => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryRefresh)!
+
+      await handler(event(trustedSender()))
+      expect(engineSeams.client.refreshCache).toHaveBeenLastCalledWith()
+
+      await handler(event(trustedSender()), { window: { from: '2026-09-01', to: '2026-09-07' } })
+      expect(engineSeams.client.refreshCache).toHaveBeenLastCalledWith({
+        window: { from: '2026-09-01', to: '2026-09-07' },
+      })
+    })
+
+    it('reads one release by ocid through the client', async () => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryRelease)!
+
+      const result = await handler(event(trustedSender()), { ocid: '  ocds-abc-1  ' })
+
+      expect(engineSeams.client.fetchRelease).toHaveBeenCalledWith('ocds-abc-1')
+      expect(result).toEqual({ ok: true, opportunity: null, issues: [], warnings: [] })
+    })
+
+    it.each([
+      { label: 'no window', request: {} },
+      { label: 'a non-object window', request: { window: '2026-09-01' } },
+      { label: 'a non-string window end', request: { window: { from: '2026-09-01', to: 5 } } },
+      {
+        label: 'a page size of zero',
+        request: { window: { from: '2026-09-01', to: '2026-09-07' }, pageSize: 0 },
+      },
+      {
+        label: 'a page size beyond the bound',
+        request: { window: { from: '2026-09-01', to: '2026-09-07' }, pageSize: 500 },
+      },
+      {
+        label: 'a non-numeric page size',
+        request: { window: { from: '2026-09-01', to: '2026-09-07' }, pageSize: 'many' },
+      },
+    ])('refuses a list request with $label without calling the client', async ({ request }) => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryList)!
+
+      const result = await handler(event(trustedSender()), request)
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+      expect(engineSeams.client.listOpportunities).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      { label: 'a missing ocid', request: {} },
+      { label: 'an empty ocid', request: { ocid: '   ' } },
+      { label: 'an over-long ocid', request: { ocid: 'x'.repeat(129) } },
+    ])('refuses a release lookup with $label without calling the client', async ({ request }) => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryRelease)!
+
+      const result = await handler(event(trustedSender()), request)
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+      expect(engineSeams.client.fetchRelease).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('23. Deadline reminder IPC', () => {
+    beforeEach(() => {
+      resetEngineSeams()
+      installEngineSeams()
+    })
+
+    it.each([
+      { label: 'reminders-get', channel: TENDERS_CHANNELS.remindersGet, args: [] as unknown[] },
+      {
+        label: 'reminders-set',
+        channel: TENDERS_CHANNELS.remindersSet,
+        args: [{ enabled: false }],
+      },
+      { label: 'reminders-check', channel: TENDERS_CHANNELS.remindersCheck, args: [] as unknown[] },
+    ])(
+      '$label rejects every untrusted sender with no scheduler call',
+      async ({ channel, args }) => {
+        const handler = ipcHandlers.get(channel)
+        expect(handler, `${channel} must be registered`).toBeDefined()
+
+        for (const attempt of untrustedAttempts()) {
+          const result = await handler!(attempt.eventArg, ...args)
+          expect.soft(result, `${channel} must refuse ${attempt.label}`).toMatchObject({
+            ok: false,
+            error: {
+              code: 'INVALID_REQUEST',
+              message: expect.stringMatching(/authoriz|trusted|registered Tenders WebContents/i),
+            },
+          })
+        }
+
+        expect(engineSeams.scheduler.readState).not.toHaveBeenCalled()
+        expect(engineSeams.scheduler.writeSettings).not.toHaveBeenCalled()
+        expect(engineSeams.scheduler.checkNow).not.toHaveBeenCalled()
+      },
+    )
+
+    it('returns the persisted settings, the ledger and the honest runtime limitation', async () => {
+      engineSeams.reminderState.settings = {
+        enabled: false,
+        thresholds: [{ id: '2h', label: '2 hours', leadMs: 7_200_000 }],
+      }
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersGet)!
+
+      const result = await handler(event(trustedSender()))
+
+      expect(result.settings).toEqual(engineSeams.reminderState.settings)
+      expect(result.ledger).toEqual(engineSeams.reminderState.ledger)
+      // The reach of a notification is stated, not implied: this is the sentence
+      // the settings surface shows.
+      expect(result.limitation).toMatch(/only while Zanostack Tenders is running/i)
+      expect(result.limitation).toMatch(/no notification is sent at that time/i)
+    })
+
+    it('merges a settings patch through the scheduler and returns what was written', async () => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersSet)!
+      const thresholds = [{ id: '1d', label: '1 day', leadMs: 86_400_000 }]
+
+      const result = await handler(event(trustedSender()), { enabled: false, thresholds })
+
+      expect(engineSeams.scheduler.writeSettings).toHaveBeenCalledWith({
+        enabled: false,
+        thresholds,
+      })
+      expect(result).toMatchObject({
+        ok: true,
+        settings: { enabled: false, thresholds },
+      })
+      expect(result.limitation).toMatch(/only while Zanostack Tenders is running/i)
+    })
+
+    it('defaults a threshold label to its id, as the pure core does', async () => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersSet)!
+
+      await handler(event(trustedSender()), { thresholds: [{ id: '3d', leadMs: 259_200_000 }] })
+
+      expect(engineSeams.scheduler.writeSettings).toHaveBeenCalledWith({
+        thresholds: [{ id: '3d', label: '3d', leadMs: 259_200_000 }],
+      })
+    })
+
+    it.each([
+      { label: 'a settings change that is not an object', settings: 'off' },
+      { label: 'a non-boolean switch', settings: { enabled: 'yes' } },
+      { label: 'a threshold list that is not a list', settings: { thresholds: {} } },
+      {
+        label: 'more thresholds than the bound allows',
+        settings: {
+          thresholds: Array.from({ length: MAX_TENDERS_REMINDER_THRESHOLDS + 1 }, (_, index) => ({
+            id: `t${index}`,
+            leadMs: 60_000,
+          })),
+        },
+      },
+      { label: 'a zero lead time', settings: { thresholds: [{ id: 'x', leadMs: 0 }] } },
+      { label: 'a negative lead time', settings: { thresholds: [{ id: 'x', leadMs: -1 }] } },
+      {
+        label: 'a non-numeric lead time',
+        settings: { thresholds: [{ id: 'x', leadMs: '1 day' }] },
+      },
+      {
+        label: 'a lead time beyond a year',
+        settings: { thresholds: [{ id: 'x', leadMs: 366 * 24 * 60 * 60 * 1000 }] },
+      },
+      { label: 'a threshold with no id', settings: { thresholds: [{ leadMs: 60_000 }] } },
+      {
+        label: 'an over-long threshold id',
+        settings: { thresholds: [{ id: 'x'.repeat(65), leadMs: 60_000 }] },
+      },
+    ])('refuses $label and saves nothing', async ({ settings }) => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersSet)!
+
+      const result = await handler(event(trustedSender()), settings)
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+      expect(engineSeams.scheduler.writeSettings).not.toHaveBeenCalled()
+    })
+
+    it('reports a settings write that could not be persisted instead of claiming it was saved', async () => {
+      engineSeams.scheduler.writeSettings.mockRejectedValueOnce(new Error('disk is read-only'))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersSet)!
+
+      const result = await handler(event(trustedSender()), { enabled: false })
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'WRITE_FAILED', message: expect.stringContaining('disk is read-only') },
+      })
+    })
+
+    it('runs one check through the scheduler and returns the reminders, never the ledger', async () => {
+      engineSeams.scheduler.checkNow.mockResolvedValueOnce({
+        fired: 1,
+        reminders: [DUE_REMINDER],
+        ledger: { version: 1, entries: [{ tenderId: SEED_TENDER_WTR_04.id }] },
+      })
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersCheck)!
+
+      const result = await handler(event(trustedSender()))
+
+      expect(result).toEqual({ ok: true, fired: 1, reminders: [DUE_REMINDER] })
+      // The dedupe ledger is main's memory of what was already shown; a renderer
+      // has no business writing it back.
+      expect(result).not.toHaveProperty('ledger')
+    })
+
+    it('reports a check that failed instead of throwing into the renderer', async () => {
+      engineSeams.scheduler.checkNow.mockRejectedValueOnce(new Error('the ledger is unreadable'))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersCheck)!
+
+      const result = await handler(event(trustedSender()))
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          code: 'CHECK_FAILED',
+          message: expect.stringContaining('the ledger is unreadable'),
+        },
+      })
+    })
+  })
+
+  describe('24. discovery + reminder lifecycle', () => {
+    it('starts the schedule on registration over the authoritative store, and stops it on teardown', async () => {
+      // A fresh registration, so the schedule is built from these seams.
+      resetTendersIpcForTests()
+      resetEngineSeams()
+      installEngineSeams()
+      registerTendersIpc()
+
+      expect(engineSeams.schedulerOptions).toHaveLength(1)
+      const options = engineSeams.schedulerOptions[0]
+      expect(options.userDataDir).toBe(testDir)
+      expect(typeof options.readTenders).toBe('function')
+      expect(engineSeams.scheduler.start).toHaveBeenCalledTimes(1)
+
+      // The reader reads the AUTHORITATIVE store: commit a document and the
+      // schedule sees its tenders, with exactly the four fields it needs.
+      const saveHandler = ipcHandlers.get(TENDERS_CHANNELS.saveStoreV2)!
+      const committed = await saveHandler(event(trustedSender()), {
+        expectedRevision: 0,
+        document: v2WithSeedTender(0),
+      })
+      expect(committed.ok).toBe(true)
+      await expect(options.readTenders()).resolves.toEqual([
+        {
+          id: SEED_TENDER_WTR_04.id,
+          title: SEED_TENDER_WTR_04.title,
+          closingDate: SEED_TENDER_WTR_04.closingDate,
+          status: SEED_TENDER_WTR_04.status,
+        },
+      ])
+
+      // Teardown stops the timer; a test-only reset stops it too, so no interval
+      // outlives the surface it belongs to.
+      stopTendersReminders()
+      expect(engineSeams.scheduler.stop).toHaveBeenCalledTimes(1)
+      resetTendersIpcForTests()
+      expect(engineSeams.scheduler.stop).toHaveBeenCalledTimes(2)
+
+      // And re-registration rebuilds and restarts it.
+      installEngineSeams()
+      registerTendersIpc()
+      expect(engineSeams.scheduler.start).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('25. tender-document download', () => {
+    const PDF_BYTES = '%PDF-1.7 tender document body'
+    const ALLOWED = 'https://www.etenders.gov.za/Documents/RFP-WTR-2026-04.pdf'
+
+    beforeEach(() => {
+      resetEngineSeams()
+      installEngineSeams()
+    })
+
+    it.each([
+      { label: 'a plain-http link', url: 'http://www.etenders.gov.za/Documents/RFP.pdf' },
+      { label: 'an off-host link', url: 'https://evil.example/RFP.pdf' },
+      { label: 'a file: link', url: 'file:///C:/Windows/win.ini' },
+      {
+        label: 'a look-alike host',
+        url: 'https://www.etenders.gov.za.evil.example/RFP.pdf',
+      },
+      {
+        label: 'a link carrying credentials',
+        url: 'https://user:secret@www.etenders.gov.za/RFP.pdf',
+      },
+      { label: 'something that is not a URL', url: 'not a url at all' },
+    ])('refuses $label before any fetch or disk work', async ({ url }) => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+      const before = documentsDirEntries()
+
+      const result = await handler(event(trustedSender()), { url })
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'BLOCKED_URL' } })
+      expect(result.error.message).toMatch(/was not requested/i)
+      expect(engineSeams.documentFetchCalls).toHaveLength(0)
+      expect(documentsDirEntries()).toEqual(before)
+    })
+
+    it.each([
+      { label: 'no link at all', request: {} },
+      { label: 'a non-object request', request: 'https://www.etenders.gov.za/RFP.pdf' },
+      {
+        label: 'an over-long link',
+        request: { url: `https://www.etenders.gov.za/${'a'.repeat(2100)}` },
+      },
+      {
+        label: 'an over-long stored name',
+        request: { url: 'https://www.etenders.gov.za/RFP.pdf', fileName: 'a'.repeat(513) },
+      },
+    ])('refuses a download request with $label, fetching nothing', async ({ request }) => {
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+
+      const result = await handler(event(trustedSender()), request)
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+      expect(engineSeams.documentFetchCalls).toHaveLength(0)
+    })
+
+    it('downloads an allow-listed document into the managed store and returns its record and bytes', async () => {
+      engineSeams.documentFetch.mockResolvedValueOnce(documentReply({ body: PDF_BYTES }))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(engineSeams.documentFetchCalls).toHaveLength(1)
+      expect(engineSeams.documentFetchCalls[0].url).toBe(ALLOWED)
+      // Redirects are followed by main, one hop at a time, so each hop can be
+      // re-checked against the allow-list.
+      expect(engineSeams.documentFetchCalls[0].init?.redirect).toBe('manual')
+
+      expect(result.ok).toBe(true)
+      expect(result.storedPath).toMatch(/^documents\/\d+_RFP-WTR-2026-04\.pdf$/)
+      expect(result.fileName).toBe('RFP-WTR-2026-04.pdf')
+      expect(result.mimeType).toBe('application/pdf')
+      expect(result.byteLength).toBe(Buffer.byteLength(PDF_BYTES))
+      expect(result.record.relativePath).toBe(result.storedPath)
+      expect(result.record.state).toBe('active')
+
+      // The document is an ordinary managed document: on disk under documents/,
+      // and readable through the channel the renderer already uses.
+      const onDisk = join(
+        getTendersDocumentsDir(testDir),
+        result.storedPath.replace('documents/', ''),
+      )
+      expect(readFileSync(onDisk, 'utf8')).toBe(PDF_BYTES)
+      const read = await readDocumentFile({ storedPath: result.storedPath }, testDir)
+      expect(Buffer.from(read.buffer!).toString('utf8')).toBe(PDF_BYTES)
+      expect(Buffer.from(result.buffer).toString('utf8')).toBe(PDF_BYTES)
+
+      rmSync(onDisk, { force: true })
+    })
+
+    it('names the stored document from the link when the caller names none', async () => {
+      engineSeams.documentFetch.mockResolvedValueOnce(documentReply({ body: PDF_BYTES }))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+
+      const result = await handler(event(trustedSender()), {
+        url: 'https://www.etenders.gov.za/Documents/Tender%20Pack.docx',
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.fileName).toBe('Tender_Pack.docx')
+      expect(result.mimeType).toBe(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      )
+      rmSync(join(getTendersDocumentsDir(testDir), result.storedPath.replace('documents/', '')), {
+        force: true,
+      })
+    })
+
+    it('reads a streamless response through its own bytes rather than decoding it as text', async () => {
+      const bytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x10])
+      engineSeams.documentFetch.mockResolvedValueOnce(
+        documentReply({ body: bytes, streamless: true }),
+      )
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(result.ok).toBe(true)
+      const onDisk = join(
+        getTendersDocumentsDir(testDir),
+        result.storedPath.replace('documents/', ''),
+      )
+      expect([...readFileSync(onDisk)]).toEqual([...bytes])
+      rmSync(onDisk, { force: true })
+    })
+
+    it('refuses a document larger than the store will accept, before reading the body', async () => {
+      engineSeams.documentFetch.mockResolvedValueOnce(
+        documentReply({ body: PDF_BYTES, contentLength: MAX_DISCOVERY_DOWNLOAD_BYTES + 1 }),
+      )
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+      const before = documentsDirEntries()
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'RESPONSE_TOO_LARGE' } })
+      expect(documentsDirEntries()).toEqual(before)
+    })
+
+    it('enforces the byte cap while the body is read, with no declared length', async () => {
+      // 26 MiB in 1 MiB chunks: one mebibyte over the 25 MiB ceiling, and never
+      // declared in advance.
+      engineSeams.documentFetch.mockResolvedValueOnce(repeatingDocumentReply(1024 * 1024, 26))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+      const before = documentsDirEntries()
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'RESPONSE_TOO_LARGE' } })
+      expect(documentsDirEntries()).toEqual(before)
+    })
+
+    it.each([
+      { label: 'an empty document', reply: documentReply({ body: '' }), code: 'MALFORMED_BODY' },
+      {
+        label: 'a refused request',
+        reply: documentReply({ status: 503, body: 'unavailable' }),
+        code: 'HTTP_STATUS',
+      },
+      {
+        label: 'a not-found document',
+        reply: documentReply({ status: 404, body: 'no' }),
+        code: 'HTTP_STATUS',
+      },
+    ])('refuses $label and saves nothing', async ({ reply, code }) => {
+      engineSeams.documentFetch.mockResolvedValueOnce(reply)
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+      const before = documentsDirEntries()
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(result).toMatchObject({ ok: false, error: { code } })
+      expect(documentsDirEntries()).toEqual(before)
+    })
+
+    it('refuses a redirect off the allow-list instead of following it', async () => {
+      engineSeams.documentFetch.mockResolvedValueOnce(
+        documentReply({ status: 302, location: 'https://evil.example/RFP.pdf' }),
+      )
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+      const before = documentsDirEntries()
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'BLOCKED_URL' } })
+      expect(engineSeams.documentFetchCalls).toHaveLength(1)
+      expect(documentsDirEntries()).toEqual(before)
+    })
+
+    it('follows a redirect that stays on the allow-list, and names the document from that hop', async () => {
+      engineSeams.documentFetch
+        .mockResolvedValueOnce(
+          documentReply({ status: 302, location: 'https://data.etenders.gov.za/Files/RFP.pdf' }),
+        )
+        .mockResolvedValueOnce(documentReply({ body: PDF_BYTES }))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(engineSeams.documentFetchCalls.map((call) => call.url)).toEqual([
+        ALLOWED,
+        'https://data.etenders.gov.za/Files/RFP.pdf',
+      ])
+      expect(result.ok).toBe(true)
+      expect(result.fileName).toBe('RFP.pdf')
+      rmSync(join(getTendersDocumentsDir(testDir), result.storedPath.replace('documents/', '')), {
+        force: true,
+      })
+    })
+
+    it('reports a host that could not be reached, saving nothing', async () => {
+      engineSeams.documentFetch.mockRejectedValueOnce(new Error('socket hang up'))
+      const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+      const before = documentsDirEntries()
+
+      const result = await handler(event(trustedSender()), { url: ALLOWED })
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'NETWORK' } })
+      expect(documentsDirEntries()).toEqual(before)
+    })
+
+    it('gives up on a host that never answers, saving nothing', async () => {
+      vi.useFakeTimers()
+      try {
+        engineSeams.documentFetch.mockImplementationOnce(
+          (_url: string, init?: DiscoveryFetchInit) =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+            }),
+        )
+        const handler = ipcHandlers.get(TENDERS_CHANNELS.discoveryDownloadDocument)!
+        const before = documentsDirEntries()
+
+        const pending = handler(event(trustedSender()), { url: ALLOWED })
+        await vi.advanceTimersByTimeAsync(46_000)
+        const result = await pending
+
+        expect(result).toMatchObject({ ok: false, error: { code: 'TIMEOUT' } })
+        expect(documentsDirEntries()).toEqual(before)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

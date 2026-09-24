@@ -42,15 +42,23 @@ import { deadlineStatus, urgencyClasses, useNow } from '../deadline'
 import { extractAllPages, loadPdfDocument } from '../pdf/extract'
 import { assessReadiness } from '../readiness'
 import { selectActiveTender, useTendersStore } from '../store'
-import { SUBMISSION_METHOD_LABEL, type ContractMilestone } from '../../shared/types'
+import {
+  SUBMISSION_METHOD_LABEL,
+  type ContractMilestone,
+  type TenderRecord,
+} from '../../shared/types'
 import { milestonesAllowed } from '../../../shared/lifecycle'
 import { formatRandAmount } from '../../../shared/money'
 import { PdfViewer } from './PdfViewer'
 import {
+  AI_SUGGESTION_LABEL,
+  AI_SUGGESTION_TITLE,
   ExtractionReview,
   deriveTenderReview,
+  isWordDocumentName,
   refreshTenderReview,
   summarizeReview,
+  wordDocumentPaginationNote,
 } from './ExtractionReview'
 import {
   SAMPLE_WRITE_BLOCKED_REASON,
@@ -387,6 +395,12 @@ export function Workspace() {
     [tender, review],
   )
 
+  // A Word .docx is not a PDF: it has no rendered pages, so it is never handed
+  // to pdfjs (which could only fail, and would be reported as "the tender PDF
+  // could not be opened" for a document that was read perfectly). The source
+  // pane shows the clauses the extractor lifted instead.
+  const wordDocument = isWordDocumentName(tender?.fileName)
+
   const readiness = useMemo(
     () => (tender ? assessReadiness(tender, vault, company, now) : null),
     [tender, vault, company, now],
@@ -552,8 +566,15 @@ export function Workspace() {
   // Load the tender's PDF into pdfjs for the viewer.
   // If tender.fileUrl is a stored path on disk, read via IPC readDocument.
   // If tender.fileUrl is an ephemeral blob or web url, fetch it directly.
+  // A Word .docx is skipped entirely: `WordSourcePane` shows the extracted
+  // clauses, and no page highlight exists to jump to.
   useEffect(() => {
     if (!tender) return
+    if (wordDocument) {
+      setDoc(null)
+      setDocError(null)
+      return
+    }
     if (!tender.fileUrl) {
       setDoc(null)
       setDocError(null)
@@ -615,7 +636,7 @@ export function Workspace() {
       // PDFDocumentProxy has no destroy() in pdfjs v6; cleanup releases memory.
       void loaded?.cleanup().catch(() => {})
     }
-  }, [tender?.id, tender?.fileUrl, pdfReloadToken])
+  }, [tender?.id, tender?.fileUrl, pdfReloadToken, wordDocument])
 
   if (!tender) {
     return (
@@ -882,8 +903,21 @@ export function Workspace() {
                         <MetaRow label="Contact">{review.contactEmail}</MetaRow>
                       )}
                     <MetaRow label="Document">
-                      {tender.numPages} pages
-                      {tender.ocrPages > 0 ? ` · ${tender.ocrPages} scanned` : ''}
+                      {wordDocument ? (
+                        <>
+                          {wordDocumentPaginationNote(tender)}
+                          {tender.ocrPages > 0
+                            ? ` ${tender.ocrPages} page${
+                                tender.ocrPages === 1 ? '' : 's'
+                              } hold no text.`
+                            : ''}
+                        </>
+                      ) : (
+                        <>
+                          {tender.numPages} pages
+                          {tender.ocrPages > 0 ? ` · ${tender.ocrPages} scanned` : ''}
+                        </>
+                      )}
                     </MetaRow>
                   </dl>
                 </div>
@@ -1145,11 +1179,11 @@ export function Workspace() {
               onClick={() => showCompactPane('pdf')}
               className="cursor-pointer rounded-[var(--radius-6)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             >
-              PDF
+              {wordDocument ? 'Source' : 'PDF'}
             </button>
           </div>
           <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">
-            p.{currentPage} · {Math.round(zoom * 100)}%
+            {wordDocument ? 'Word .docx' : `p.${currentPage} · ${Math.round(zoom * 100)}%`}
           </span>
         </div>
       )}
@@ -1360,9 +1394,11 @@ export function Workspace() {
                 <ExtractionReview
                   tender={tender}
                   review={review}
-                  pdfReady={doc !== null}
+                  pdfReady={doc !== null || wordDocument}
                   onBack={() => setReviewOpen(false)}
-                  onReReadSource={handleReReadSource}
+                  // A Word .docx has no PDF to re-read, and offering the control
+                  // disabled would be a dead end: the button is simply absent.
+                  onReReadSource={wordDocument ? undefined : handleReReadSource}
                   onOpenRequirement={(requirementId) => focusRequirement(requirementId)}
                 />
               </div>
@@ -1415,7 +1451,9 @@ export function Workspace() {
               e.target.value = ''
             }}
           />
-          {!tender.fileUrl ? (
+          {wordDocument ? (
+            <WordSourcePane tender={tender} />
+          ) : !tender.fileUrl ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-[var(--warn-bg)] text-[var(--warn)] ring-1 ring-[var(--warn-border)]">
                 <FileUp size={20} />
@@ -1492,6 +1530,100 @@ export function Workspace() {
         {milestonesOpen && canBill && <MilestonesDrawer onClose={() => setMilestonesOpen(false)} />}
       </div>
     </section>
+  )
+}
+
+/**
+ * The source pane for a Word .docx import.
+ *
+ * A .docx has no rendered pages, so there is no page to show and no page
+ * highlight a clause could be located on. The pane therefore shows what the
+ * local extractor actually read — each requirement's own clause text, on the
+ * page number the document itself declares — and states how those page numbers
+ * were derived (`docxPaginationNote`, via `wordDocumentPaginationNote`).
+ *
+ * Every clause block carries `data-page`, which is what the review step's
+ * "open source" affordance scrolls to: a clause jump lands on the clause text
+ * instead of on a page highlight that does not exist. A clause a model
+ * suggested is marked as such — it is a quote of a suggestion, not of the file.
+ */
+function WordSourcePane({ tender }: { tender: TenderRecord }) {
+  const activeRequirementId = useTendersStore((s) => s.activeRequirementId)
+  const listRef = useRef<HTMLUListElement | null>(null)
+  const withClause = tender.requirements.filter(
+    (requirement) => requirement.verbatimClause.trim().length > 0,
+  )
+  const paginationNote = wordDocumentPaginationNote(tender)
+
+  // Locating a requirement in the matrix must land on its clause here: the PDF
+  // viewer's own locate has no page to scroll to for a .docx, so without this
+  // the jump would highlight a clause the user cannot see.
+  useEffect(() => {
+    if (!activeRequirementId) return
+    const element = listRef.current?.querySelector(`[data-requirement="${activeRequirementId}"]`)
+    if (element instanceof HTMLElement) element.scrollIntoView({ block: 'nearest' })
+  }, [activeRequirementId])
+
+  return (
+    <div data-testid="word-source-pane" className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2.5">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
+          <FileText size={13} className="text-[var(--accent)]" aria-hidden="true" />
+          Word document — the text this app read
+        </p>
+        {paginationNote && (
+          <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+            {paginationNote}
+          </p>
+        )}
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+          The .docx is not rendered in this pane. These are the clauses the local extractor lifted
+          from its text; open the file itself in Word to read it as it was written.
+        </p>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-4 py-3">
+        {withClause.length === 0 ? (
+          <p className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-4 text-center text-xs text-[var(--text-secondary)]">
+            No requirement clause was lifted from this document, so there is no source text to show
+            here. The document's own text is in the file itself.
+          </p>
+        ) : (
+          <ul ref={listRef} className="space-y-2.5">
+            {withClause.map((requirement) => {
+              const active = requirement.id === activeRequirementId
+              return (
+                <li
+                  key={requirement.id}
+                  data-page={requirement.pageNumber}
+                  data-requirement={requirement.id}
+                  data-active={active ? 'true' : undefined}
+                  className={`rounded-lg border px-3 py-2.5 ${
+                    active
+                      ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                      : 'border-[var(--border)] bg-[var(--surface)]'
+                  }`}
+                >
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold text-[var(--text)]">
+                    <span>{requirement.title}</span>
+                    <span className="font-normal text-[var(--text-tertiary)]">
+                      p.{requirement.pageNumber}
+                    </span>
+                    {requirement.suggestedBy === 'ai' && (
+                      <span title={AI_SUGGESTION_TITLE}>
+                        <Badge tone="violet">{AI_SUGGESTION_LABEL}</Badge>
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)] italic">
+                    “{requirement.verbatimClause}”
+                  </p>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
   )
 }
 

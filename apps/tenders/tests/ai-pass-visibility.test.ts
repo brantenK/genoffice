@@ -444,7 +444,13 @@ describe('the feedback is rendered from wherever the user is', () => {
   it('the pass is only started when the user turned it on', () => {
     // With AI off the store is never written to, so the panel has nothing to
     // render and the app behaves exactly as it did before the feature existed.
-    expect(list).toMatch(/if \(aiEnabledRef\.current\) \{\s*void runAiPass\(/)
+    //
+    // The gate now lives in the shared intake sequence (`intakeTenderFile`),
+    // which both entry points run — the list's own import and the discovery
+    // pane's "Add to workspace" — so the list hands its live toggle to the
+    // option and the sequence starts the pass only when that option is set.
+    expect(list).toMatch(/aiExtraction: aiEnabledRef\.current/)
+    expect(list).toMatch(/if \(options\.aiExtraction\) \{\s*void runAiPass\(/)
     expect(getAiPassState()).toBeNull()
   })
 })
