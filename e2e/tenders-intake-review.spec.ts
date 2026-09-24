@@ -305,8 +305,9 @@ async function readinessState(tenders: Page): Promise<ReadinessState> {
   const pageFail = tenders.getByText(/are not readable without review/)
   const pageBlocked = (await pageFail.count()) > 0
   const pageLabelPresent =
-    (await tenders.getByText('Every scanned page is OCR-extracted or manually reviewed').count()) >
-    0
+    (await tenders
+      .getByText('Every page without a text layer was read by AI or reviewed by you')
+      .count()) > 0
   const intakeDetail = intakeBlocked ? await intakeFail.first().innerText() : ''
   const pageDetail = pageBlocked ? await pageFail.first().innerText() : ''
   // Close the drawer before the next check.
@@ -649,10 +650,16 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
       await openReview(tenders)
       const pageReview = tenders.getByRole('region', { name: 'Page review' })
       await expect(pageReview).toBeVisible({ timeout: 20_000 })
-      // The app must never imply the scanned page was read.
+      // The app must never imply the scanned page was read. No model read this
+      // document, so the copy names the local limitation AND the recorded fact
+      // that no AI extraction read any of its pages.
       await expect(pageReview.getByText('No text layer', { exact: true }).first()).toBeVisible()
       await expect(
-        pageReview.getByText(/Zanostack does not read scanned pages/).first(),
+        pageReview
+          .getByText(
+            /Zanostack does not read scanned pages, and no AI extraction read any page of this document/,
+          )
+          .first(),
       ).toBeVisible()
       await expect(pageReview.getByText('Text layer', { exact: true })).toHaveCount(0)
       await expect(tenders.getByText(/1 page to review/).first()).toBeVisible()

@@ -143,6 +143,34 @@ export interface PageExtraction {
   ocrPages: number
 }
 
+/**
+ * Who produced a value.
+ *
+ *  - `'parser'` — the local, offline rule engine read it from the page text.
+ *  - `'ai'` — a model suggested it.
+ *
+ * Provenance only, never a review decision: a value a model suggested is
+ * `suggestedBy: 'ai'` and stays `unconfirmed` / `unreviewed` until a human
+ * confirms it, and a human confirming it never erases who produced it.
+ *
+ * Optional everywhere it appears, and ABSENT means `'parser'` — every value
+ * stored before this marker existed was produced by the rule engine, so an
+ * unmarked value is never presented as a model suggestion (see
+ * `valueProvenance`).
+ */
+export type ValueProvenance = 'parser' | 'ai'
+
+/**
+ * The provenance of a value, defaulting to the local parser when unmarked. The
+ * single place that decides "absent means parser", so no surface has to — and
+ * no surface may — infer it differently.
+ */
+export function valueProvenance(
+  carrier: { suggestedBy?: ValueProvenance } | null | undefined,
+): ValueProvenance {
+  return carrier?.suggestedBy === 'ai' ? 'ai' : 'parser'
+}
+
 /** A requirement produced by the shredder. */
 export interface ExtractedRequirement {
   id: string
@@ -158,6 +186,13 @@ export interface ExtractedRequirement {
   additionalClauses?: { text: string; pageNumber: number }[]
   confidence?: number
   notes?: string
+  /**
+   * Who produced this requirement (see `ValueProvenance`). Additive/optional:
+   * absent means the local rule engine, so a requirement stored before this
+   * field existed reads unchanged. Carried onto `RequirementRecord` by
+   * extension.
+   */
+  suggestedBy?: ValueProvenance
 }
 
 /** Requirement + working state in the compliance matrix. */
@@ -288,6 +323,11 @@ export interface TenderRecord {
   fileName: string
   fileUrl: string
   numPages: number
+  /**
+   * The parser's own count of pages that carried no usable text layer — the
+   * on-disk fact readiness fail-closes on. A later model read of such a page is
+   * recorded per page (`ai-extracted`) and NEVER rewrites this count.
+   */
   ocrPages: number
   requirements: RequirementRecord[]
   linkedCrmDealId?: string | null
@@ -352,6 +392,12 @@ export type ReviewFieldKey =
   | 'submissionDestination'
   | 'estimatedValue'
 
+/**
+ * `unconfirmed` is the only state a value can arrive in: nothing a model
+ * produces may write `confirmed` / `corrected` / `not_stated`. Those three are
+ * human decisions — `reviewedAt` records when a person made one — and a field a
+ * model suggested therefore blocks readiness until a human decides it.
+ */
 export type ReviewFieldState = 'unconfirmed' | 'confirmed' | 'corrected' | 'not_stated'
 
 /** One competing value the review layer found in the source document. */
@@ -361,10 +407,19 @@ export interface ReviewCandidate {
   sourceClause: string | null
   /** 0–1 relative strength within this field's candidate set. */
   score: number
+  /**
+   * Who produced THIS candidate — one candidate set may mix a rule-engine read
+   * with a model suggestion. Additive/optional; absent means `'parser'`.
+   */
+  suggestedBy?: ValueProvenance
 }
 
 export interface FieldReview {
-  /** What the parser lifted before any correction — provenance. */
+  /**
+   * What was lifted before any correction — provenance. `suggestedBy` says who
+   * produced it, so a model-suggested value is never presented as the local
+   * parser's own read.
+   */
   extractedValue: string | null
   sourcePage: number | null
   sourceClause: string | null
@@ -372,6 +427,13 @@ export interface FieldReview {
   candidates: ReviewCandidate[]
   state: ReviewFieldState
   reviewedAt: string | null
+  /**
+   * Who produced `extractedValue` / `confidence` (see `ValueProvenance`).
+   * Additive/optional: absent means `'parser'`, so review state stored before
+   * this marker existed reads unchanged. Never a review decision — `state`
+   * stays `unconfirmed` until a human decides, whatever the provenance.
+   */
+  suggestedBy?: ValueProvenance
 }
 
 export type RequirementReviewState = 'unreviewed' | 'verified'
@@ -385,17 +447,52 @@ export interface RequirementReview {
   correctedAt: string | null
 }
 
-/** Per-page extraction method. OCR-required/failed/unavailable pages block readiness. */
+/**
+ * Per-page extraction method. OCR-required/failed/unavailable pages block readiness.
+ *
+ * `ai-extracted` — the page has no text layer and a MODEL read its image, so its
+ * content is available. It is deliberately neither `native` (which claims the
+ * page carries its own text layer) nor `manually-reviewed` (which claims a human
+ * read it): the content is available, but nothing on the page has been confirmed
+ * by a person. See `AI_VISION_METHOD` and `pageContentObtained`.
+ */
 export type PageExtractionStatus =
-  'native' | 'ocr-required' | 'ocr-unavailable' | 'ocr-failed' | 'manually-reviewed'
+  | 'native'
+  | 'ocr-required'
+  | 'ocr-unavailable'
+  | 'ocr-failed'
+  | 'manually-reviewed'
+  | 'ai-extracted'
+
+/**
+ * The `PageExtractionState.method` a model-read page records. `method` stays an
+ * open string for backward compatibility with already-stored documents, so this
+ * constant — not a type-level enum — is what makes the reader unambiguous.
+ */
+export const AI_VISION_METHOD = 'ai-vision'
 
 export interface PageExtractionState {
   pageNumber: number
   state: PageExtractionStatus
-  /** e.g. 'native-text' | 'ocr' | null when OCR has not run. */
+  /** e.g. 'native-text' | 'ocr' | `AI_VISION_METHOD` | null when unread. */
   method: string | null
   confidence: number | null
   reviewedAt: string | null
+}
+
+/**
+ * Does this page state prove the page's CONTENT was obtained — a native text
+ * layer, a human review against the original, or a model read? False for every
+ * state that leaves the page unread (`ocr-required`, `ocr-unavailable`,
+ * `ocr-failed`), which is exactly the fail-closed set readiness blocks on: a
+ * page whose text was never obtained must still block.
+ *
+ * It says nothing about confirmation. Content being available is not a human
+ * decision, so every value lifted from such a page stays `suggestedBy: 'ai'` and
+ * `unconfirmed` until a person confirms it.
+ */
+export function pageContentObtained(state: PageExtractionStatus): boolean {
+  return state === 'native' || state === 'manually-reviewed' || state === 'ai-extracted'
 }
 
 export interface IntakeVerification {

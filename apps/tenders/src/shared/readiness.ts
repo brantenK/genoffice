@@ -10,7 +10,7 @@ import type {
   TenderRecord,
   VaultDoc,
 } from './types'
-import { INTAKE_CRITICAL_REVIEW_FIELDS } from './types'
+import { INTAKE_CRITICAL_REVIEW_FIELDS, pageContentObtained } from './types'
 import { RULE_BY_KEY, TENDER_RULES } from './rules'
 
 /** Signature semantics are owned by the catalogue, not a second readiness list. */
@@ -160,13 +160,13 @@ export function unconfirmedCriticalFields(intake: IntakeVerification): ReviewFie
 }
 
 /**
- * Pages that are neither natively extracted nor manually reviewed. OCR-required,
- * OCR-failed and OCR-unavailable pages block readiness until reviewed.
+ * Pages whose content was never obtained: every state `pageContentObtained`
+ * rejects (`ocr-required`, `ocr-unavailable`, `ocr-failed`). A page with a text
+ * layer, a page a person reviewed, and a page a model read are all content-
+ * obtained, so none of them blocks readiness here.
  */
 export function unreviewedOcrPages(intake: IntakeVerification): PageExtractionState[] {
-  return (intake.pages ?? []).filter(
-    (page) => page.state !== 'native' && page.state !== 'manually-reviewed',
-  )
+  return (intake.pages ?? []).filter((page) => !pageContentObtained(page.state))
 }
 
 /**
@@ -178,9 +178,12 @@ export function unreviewedOcrPages(intake: IntakeVerification): PageExtractionSt
  *
  * Decided from authoritative data only:
  *  - pages still flagged `ocr-required` / `ocr-unavailable` / `ocr-failed`
- *    always count;
- *  - a `manually-reviewed` page (or a natively re-extracted page whose method is
- *    `ocr`) proves one unreadable page resolved;
+ *    always count (nothing obtained their content);
+ *  - a page whose content was obtained proves one unreadable page resolved:
+ *    a `manually-reviewed` page (a person read it against the original), an
+ *    `ai-extracted` page (a model read its image, so the content is available
+ *    even though nothing on it is confirmed), or a natively re-extracted page
+ *    whose method is `ocr`;
  *  - any remaining `ocrPages` not covered by that proof counts.
  *
  * `ocrPages === 0` (or undefined) with no page state returns 0, so the no-OCR
@@ -190,12 +193,12 @@ export function unprovenOcrPageCount(
   tender: Pick<TenderRecord, 'ocrPages' | 'intakeVerification'>,
 ): number {
   const pages = tender.intakeVerification?.pages ?? []
-  const unresolved = pages.filter(
-    (page) => page.state !== 'native' && page.state !== 'manually-reviewed',
-  ).length
+  const unresolved = pages.filter((page) => !pageContentObtained(page.state)).length
   const resolvedUnreadable = pages.filter(
     (page) =>
-      page.state === 'manually-reviewed' || (page.state === 'native' && page.method === 'ocr'),
+      page.state === 'manually-reviewed' ||
+      page.state === 'ai-extracted' ||
+      (page.state === 'native' && page.method === 'ocr'),
   ).length
   const required = Math.max(0, tender.ocrPages ?? 0)
   return Math.max(unresolved, required - resolvedUnreadable)
@@ -884,16 +887,22 @@ export function assessReadiness(
   // exist, and an absent/empty review proves nothing about them, so readiness
   // must not clear. With `ocrPages === 0` and no page issues this is not added
   // at all, keeping the no-OCR path byte-identical.
+  //
+  // What clears a page is its CONTENT being obtained — a text layer, a human
+  // review, or a model read (`ai-extracted`) — never a confirmation: an
+  // `ai-extracted` page stops blocking the page gate while every value lifted
+  // from it stays `suggestedBy: 'ai'` and `unconfirmed`, so it still has to be
+  // confirmed in the intake-review gate before the bid can be ready.
   const unprovenPages = unprovenOcrPageCount(tender)
   if (intake || unprovenPages > 0) {
     const blockedPages = intake ? unreviewedOcrPages(intake) : []
     const listed = blockedPages.map((page) => `p.${page.pageNumber} (${page.state})`).join(', ')
     checks.push({
       id: 'page-extraction',
-      label: 'Every scanned page is OCR-extracted or manually reviewed',
+      label: 'Every page without a text layer was read by AI or reviewed by you',
       detail:
         unprovenPages === 0
-          ? 'All pages have native text or were manually reviewed.'
+          ? 'Every page either carries its own text layer, was read by AI, or was reviewed by you.'
           : blockedPages.length > 0 && unprovenPages <= blockedPages.length
             ? `${blockedPages.length} page(s) are not readable without review: ${listed}.`
             : `${unprovenPages} unreadable page(s) are not covered by review.${listed ? ` Flagged: ${listed}.` : ''}`,

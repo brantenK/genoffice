@@ -66,6 +66,7 @@ import {
   type MilestoneBillingFeedback,
 } from './MilestonesDrawer'
 import { SaveStatus } from './SaveStatus'
+import { AiPassPanel } from './TenderList'
 import { Badge, Button, Spinner } from './ui'
 
 /** Container width at (or above) which the matrix/PDF split is comfortable. */
@@ -961,6 +962,13 @@ export function Workspace() {
           </div>
         </div>
       </div>
+
+      {/* The optional AI pass reports here, because this is where the user is:
+          importing a tender activates it and switches to this view, so feedback
+          rendered only by the list would be unmounted before the run started. The
+          panel scopes itself to the tender on screen and renders nothing when no
+          run is in flight or reported — with AI off, nothing appears at all. */}
+      <AiPassPanel tenderId={tender.id} className="mx-4 my-2 shrink-0" />
 
       {/* Re-attached PDF could not be persisted — visible, not console-only. */}
       {pdfSaveError && (

@@ -8,6 +8,13 @@
 // built-Electron specs rely on (`button[title="Show clause details"]`, the
 // status `select` carrying a FULFILLED option, and `li` rows keyed by title)
 // are deliberately unchanged.
+//
+// Provenance is visible here too, in the row's own vocabulary: a requirement a
+// model suggested carries an "AI-suggested" badge and names its number as the
+// model's confidence, while a requirement the local rule engine read carries no
+// badge and keeps "match confidence" / "Parser confidence". Absent provenance
+// means the parser (`valueProvenance`), so nothing stored before the marker
+// existed is relabelled.
 import { useMemo, useState } from 'react'
 import {
   AlertTriangle,
@@ -20,6 +27,7 @@ import {
   Link2,
   MapPin,
   Pencil,
+  Sparkles,
   Trash2,
   Undo2,
   X,
@@ -27,13 +35,18 @@ import {
 import {
   CATEGORY_ORDER,
   REQUIREMENT_CATEGORY_LABEL,
+  valueProvenance,
   type RequirementCategory,
   type RequirementRecord,
   type RiskLevel,
   type TenderRecord,
 } from '../../shared/types'
 import { useTendersStore } from '../store'
-import { REVIEW_CONFIDENCE_THRESHOLD } from './ExtractionReview'
+import {
+  AI_SUGGESTION_LABEL,
+  AI_SUGGESTION_TITLE,
+  REVIEW_CONFIDENCE_THRESHOLD,
+} from './ExtractionReview'
 import { Badge, Button, RISK_LABEL, RISK_TONE, STATUS_LABEL, STATUS_TONE } from './ui'
 
 const RISK_ORDER: RiskLevel[] = ['CRITICAL_DISQUALIFIER', 'POINT_SCORED', 'INFORMATIONAL']
@@ -418,6 +431,10 @@ function RequirementRow({
   const lowConfidence =
     typeof req.confidence === 'number' && req.confidence < REVIEW_CONFIDENCE_THRESHOLD
   const verified = reviewState?.state === 'verified'
+  // Who produced this requirement. `valueProvenance` owns "absent means the
+  // parser", so a requirement stored before the marker existed is never
+  // presented as a model suggestion.
+  const aiSuggested = valueProvenance(req) === 'ai'
   const originalTitle =
     reviewState?.originalTitle && reviewState.originalTitle !== req.title
       ? reviewState.originalTitle
@@ -489,9 +506,16 @@ function RequirementRow({
           <MapPin size={11} /> p.{req.pageNumber}
         </button>
         {req.isMandatory && <Badge tone="violet">Mandatory</Badge>}
+        {aiSuggested && (
+          <span className="inline-flex" title={AI_SUGGESTION_TITLE}>
+            <Badge tone="indigo">
+              <Sparkles size={11} /> {AI_SUGGESTION_LABEL}
+            </Badge>
+          </span>
+        )}
         {typeof req.confidence === 'number' && (
           <Badge tone={confidenceTone(req.confidence)}>
-            {Math.round(req.confidence * 100)}% match confidence
+            {Math.round(req.confidence * 100)}% {aiSuggested ? 'model' : 'match'} confidence
           </Badge>
         )}
         {lowConfidence && !verified && (
@@ -722,7 +746,8 @@ function RequirementRow({
             )}
             {typeof req.confidence === 'number' && (
               <p className="text-[11px] text-[var(--text-tertiary)]">
-                Parser confidence {Math.round(req.confidence * 100)}% · source p.{req.pageNumber}
+                {aiSuggested ? 'Model' : 'Parser'} confidence {Math.round(req.confidence * 100)}% ·
+                source p.{req.pageNumber}
               </p>
             )}
 

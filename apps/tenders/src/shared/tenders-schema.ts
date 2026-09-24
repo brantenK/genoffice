@@ -26,6 +26,7 @@ import type {
   TendersDataV1,
   TendersDataV2,
   TendersWorkspaceV2,
+  ValueProvenance,
   VaultDoc,
 } from './types'
 import { parseClosingDate } from './readiness'
@@ -238,6 +239,7 @@ const REQUIREMENT = new Set([
   'additionalClauses',
   'confidence',
   'notes',
+  'suggestedBy',
   'status',
   'linkedVaultDocId',
   'reason',
@@ -298,8 +300,9 @@ const FIELD_REVIEW = new Set([
   'candidates',
   'state',
   'reviewedAt',
+  'suggestedBy',
 ])
-const REVIEW_CANDIDATE = new Set(['value', 'sourcePage', 'sourceClause', 'score'])
+const REVIEW_CANDIDATE = new Set(['value', 'sourcePage', 'sourceClause', 'score', 'suggestedBy'])
 const REQUIREMENT_REVIEW = new Set(['state', 'originalTitle', 'originalCategory', 'correctedAt'])
 const PAGE_EXTRACTION = new Set(['pageNumber', 'state', 'method', 'confidence', 'reviewedAt'])
 
@@ -337,12 +340,19 @@ const FULFILLMENT_STATUSES = new Set([
 const MILESTONE_STATUSES = new Set(['PENDING', 'REACHED', 'BILLED', 'PAID'])
 const REVIEW_FIELD_STATES = new Set(['unconfirmed', 'confirmed', 'corrected', 'not_stated'])
 const REQUIREMENT_REVIEW_STATES = new Set(['unreviewed', 'verified'])
+/**
+ * Allowed provenance markers (see `ValueProvenance`). Closed on purpose: an
+ * unrecognised origin is rejected rather than stored, so a value's origin can
+ * never be recorded as something the schema does not understand.
+ */
+const VALUE_PROVENANCES = new Set(['parser', 'ai'])
 const PAGE_EXTRACTION_STATUSES = new Set([
   'native',
   'ocr-required',
   'ocr-unavailable',
   'ocr-failed',
   'manually-reviewed',
+  'ai-extracted',
 ])
 
 function record(value: unknown): value is UnknownRecord {
@@ -853,6 +863,7 @@ function parseRequirement(
     ...(hasDefined(object, 'notes')
       ? { notes: stringValue(object.notes, `${path}.notes`, issues) }
       : {}),
+    ...provenanceField(object, path, issues),
     status: (enumValue(
       required(object, 'status', path, issues),
       `${path}.status`,
@@ -1001,7 +1012,23 @@ function parseReviewCandidate(
     ),
     sourceClause: requiredNullableString(object, 'sourceClause', path, issues),
     score: boundedUnit(required(object, 'score', path, issues), `${path}.score`, issues) ?? 0,
+    ...provenanceField(object, path, issues),
   }
+}
+
+/**
+ * Additive optional provenance marker. Omitted entirely when the key is absent,
+ * so a document written before the marker existed round-trips unchanged, and an
+ * unrecognised value is an issue rather than a silent coercion to `'parser'`.
+ */
+function provenanceField(
+  object: UnknownRecord,
+  path: string,
+  issues: Issues,
+): { suggestedBy?: ValueProvenance } {
+  if (!hasDefined(object, 'suggestedBy')) return {}
+  const parsed = enumValue(object.suggestedBy, `${path}.suggestedBy`, VALUE_PROVENANCES, issues)
+  return parsed === undefined ? {} : { suggestedBy: parsed as ValueProvenance }
 }
 
 function parseFieldReview(value: unknown, path: string, issues: Issues): FieldReview | undefined {
@@ -1041,6 +1068,7 @@ function parseFieldReview(value: unknown, path: string, issues: Issues): FieldRe
       `${path}.reviewedAt`,
       issues,
     ),
+    ...provenanceField(object, path, issues),
   }
 }
 

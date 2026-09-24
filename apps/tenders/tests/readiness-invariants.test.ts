@@ -5,10 +5,20 @@ import {
   docsAtClosing,
   isRequirementResolved,
   parseClosingDate,
+  unprovenOcrPageCount,
+  unreviewedOcrPages,
 } from '../src/shared/readiness'
 import { MOCK_COMPANY } from '../src/renderer/src/mock/company'
 import { TENDER_RULES } from '../src/shared/rules'
-import type { CompanyProfile, RequirementRecord, TenderRecord, VaultDoc } from '../src/shared/types'
+import { AI_VISION_METHOD } from '../src/shared/types'
+import type {
+  CompanyProfile,
+  IntakeVerification,
+  PageExtractionState,
+  RequirementRecord,
+  TenderRecord,
+  VaultDoc,
+} from '../src/shared/types'
 
 const NOW = new Date('2026-09-01T00:00:00Z')
 
@@ -906,5 +916,84 @@ describe('closing-day deadline gate', () => {
     )
     expect(blockingCheck(report, 'deadline')?.passed).toBe(false)
     expect(report.ready).toBe(false)
+  })
+})
+
+// ── page-content predicates ───────────────────────────────────────────────────
+// The two exported predicates behind the `page-extraction` gate, tested directly
+// so the gate's fail-closed arithmetic cannot drift. Content obtained is the
+// ONLY thing that clears a page, and three different actors can obtain it: the
+// page's own text layer, a human review, and a model read (`ai-extracted`).
+// Obtaining content is not a confirmation — the review gate is separate.
+
+describe('page-content predicates (text layer, human review, model read)', () => {
+  function pageState(overrides: Partial<PageExtractionState> = {}): PageExtractionState {
+    return {
+      pageNumber: 1,
+      state: 'native',
+      method: 'native-text',
+      confidence: null,
+      reviewedAt: null,
+      ...overrides,
+    }
+  }
+
+  function intake(pages: PageExtractionState[]): IntakeVerification {
+    return {
+      fields: {},
+      requirements: {},
+      pages,
+      contactEmail: null,
+      conflicts: [],
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    }
+  }
+
+  const aiRead = (pageNumber: number): PageExtractionState =>
+    pageState({
+      pageNumber,
+      state: 'ai-extracted',
+      method: AI_VISION_METHOD,
+      confidence: 0.7,
+    })
+
+  it('lists only the pages nothing obtained content for as unread', () => {
+    const pages = [
+      pageState({ pageNumber: 1 }),
+      pageState({
+        pageNumber: 2,
+        state: 'manually-reviewed',
+        method: 'manual',
+        reviewedAt: '2026-09-01T00:00:00.000Z',
+      }),
+      aiRead(3),
+      pageState({ pageNumber: 4, state: 'ocr-required', method: null }),
+      pageState({ pageNumber: 5, state: 'ocr-unavailable', method: null }),
+      pageState({ pageNumber: 6, state: 'ocr-failed', method: null }),
+    ]
+
+    expect(unreviewedOcrPages(intake(pages)).map((page) => page.pageNumber)).toEqual([4, 5, 6])
+  })
+
+  it('counts a model read as proof for one unreadable page, never for another', () => {
+    expect(unprovenOcrPageCount({ ocrPages: 1, intakeVerification: intake([aiRead(2)]) })).toBe(0)
+    // One model read is not proof for a second unreadable page the parser counted.
+    expect(unprovenOcrPageCount({ ocrPages: 2, intakeVerification: intake([aiRead(2)]) })).toBe(1)
+    expect(
+      unprovenOcrPageCount({
+        ocrPages: 2,
+        intakeVerification: intake([
+          aiRead(2),
+          pageState({ pageNumber: 3, state: 'ocr-failed', method: null }),
+        ]),
+      }),
+    ).toBe(1)
+  })
+
+  it('fails closed when a review recorded no page state at all', () => {
+    expect(unprovenOcrPageCount({ ocrPages: 2 })).toBe(2)
+    expect(unprovenOcrPageCount({ ocrPages: 2, intakeVerification: intake([]) })).toBe(2)
+    expect(unprovenOcrPageCount({ ocrPages: 0, intakeVerification: intake([]) })).toBe(0)
   })
 })

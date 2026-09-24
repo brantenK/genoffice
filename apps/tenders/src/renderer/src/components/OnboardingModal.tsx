@@ -39,7 +39,8 @@ const SLIDES: Slide[] = [
         <p className="mt-3">
           <strong>Local-first.</strong> Your files and records are saved on this machine in Tenders'
           own application store, so they are still here next time you open it. Nothing is uploaded
-          and no account is needed.
+          and no account is needed — with one exception: if you turn on AI extraction, the document
+          you extract is sent to the model provider you configured.
         </p>
       </>
     ),
@@ -87,13 +88,21 @@ const SLIDES: Slide[] = [
       <>
         <p>
           Open <strong>Tenders</strong> and drag an RFP PDF onto the dropzone (or load the demo
-          RFP). Zanostack Tenders extracts the text layer of every page that has one and lifts out
-          requirements, closing dates, submission logistics and the issuing authority.
+          RFP). Tenders' own rule engine runs offline and is always available: it extracts the text
+          layer of every page that has one and lifts out requirements, closing dates, submission
+          logistics and the issuing authority.
         </p>
         <p className="mt-3">
-          Pages saved as images have no text layer, so the text on them is not extracted. Tenders
-          lists those pages for you, and they block readiness until you open each one and mark it
-          reviewed.
+          Pages saved as images have no text layer, so the text on them is not extracted. The local
+          engine does not read them; Tenders lists those pages for you, and they block readiness
+          until you open each one and mark it reviewed.
+        </p>
+        <p className="mt-3">
+          <strong>AI extraction is optional.</strong> If you configure a model provider, you can let
+          a model read the document instead — including the pages saved as images above. When you
+          use it, the document's text, or the image of a scanned page, is sent to the model provider
+          you configured, and everything the model suggests is unconfirmed until you confirm it.
+          Leave AI extraction off and nothing leaves this machine.
         </p>
         <p className="mt-3">
           Each requirement is auto-matched against your vault with a confidence score; strong

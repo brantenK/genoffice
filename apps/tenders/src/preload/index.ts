@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
+  AI_CHANNELS,
   SUITE_THEME_CHANNELS,
   TENDERS_CHANNELS,
+  type AiSettings,
+  type AiStreamChunk,
+  type AiStreamRequest,
   type TendersApi,
   type TendersCloseFlushResult,
   type TendersResolvedTheme,
@@ -158,6 +162,26 @@ const tendersApi: TendersApi = {
   billMilestoneInBooks: (tenderIdOrPayload, milestoneId) =>
     ipcRenderer.invoke(TENDERS_CHANNELS.billMilestoneInBooks, tenderIdOrPayload, milestoneId),
   openBooks: () => ipcRenderer.invoke(TENDERS_CHANNELS.openBooks),
+  // ── Shared AI surface (AI extraction pass) ────────────────────────────────
+  // The shell registers these `ai:*` handlers once for the whole suite
+  // (`registerAiIpc()` in the shell main process), so this is a pass-through
+  // and Tenders registers no AI handler of its own. AI is optional: with no key
+  // or no network the stream answers with an `error` chunk and the offline rule
+  // engine carries on. Mirror of the PDF pane's bridge
+  // (`apps/pdf/src/preload/index.ts`), including the unsubscribe handle.
+  getAiSettings: (): Promise<AiSettings> => ipcRenderer.invoke(AI_CHANNELS.getSettings),
+  aiStream: (request: AiStreamRequest): Promise<void> =>
+    ipcRenderer.invoke(AI_CHANNELS.stream, request),
+  aiStreamCancel: (requestId: string): Promise<void> =>
+    ipcRenderer.invoke(AI_CHANNELS.streamCancel, requestId),
+  onAiStream: (handler: (chunk: AiStreamChunk) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, chunk: AiStreamChunk): void =>
+      handler(chunk)
+    ipcRenderer.on(AI_CHANNELS.streamChunk, listener)
+    return () => {
+      ipcRenderer.removeListener(AI_CHANNELS.streamChunk, listener)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('tendersApi', tendersApi)

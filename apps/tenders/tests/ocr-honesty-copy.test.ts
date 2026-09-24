@@ -1,9 +1,23 @@
-// OCR honesty guard — Phase 3 (Tenders intake), WP-7 alpha.
+// Scanned-page honesty guard — Phase 3 (Tenders intake), extended for optional AI
+// extraction.
 //
-// Only `needsOcr` DETECTION ships: pages with no text layer are flagged and block
-// readiness until a person reviews them. No OCR is performed anywhere in the
-// renderer. This guard fails if user-facing copy drifts back into claiming that
-// scanned / image-only pages are read, or that an OCR step handles them.
+// Two different claims have to hold at once, and they are not the same claim:
+//
+//   * the LOCAL engine never reads a page that has no text layer. Pages without
+//     one are flagged (`needsOcr`) and block readiness until a person reviews
+//     them, and no OCR runs anywhere in the renderer.
+//   * AI extraction CAN read such a page — by sending its image to the model
+//     provider the user configured. That is a different actor reading by a
+//     different mechanism, so a surface may only say scanned pages are read when
+//     it names AI as the reader.
+//
+// The old unconditional bans on naming OCR are therefore gone: they would forbid
+// describing the AI path. In their place, every "scanned pages are read" shape
+// must name AI in the same sentence as the claim, and the qualifier has to be
+// there — one parked in another sentence, or in a neighbouring limit of the same
+// notice, does not license it (all three directions are pinned below). The
+// universal "text layer of every page" claim stays unconditionally forbidden: no
+// reading path, local or model, reads a text layer off a page that has none.
 //
 // It deliberately scans source text rather than rendering components: the copy
 // lives in JSX and is wrapped across lines, so phrases are matched against the
@@ -66,8 +80,34 @@ const COPY_SURFACES = [
   'components/OnboardingModal.tsx',
   'components/GuidedTour.tsx',
   'components/pages/TutorialsPage.tsx',
+  'components/LimitationsNotice.tsx',
   'components/TenderList.tsx',
 ]
+
+/**
+ * Naming AI anywhere is what turns "scanned pages are read" from a false claim
+ * into the true one: the model provider reads the page's image, and the surface
+ * that says so is describing the optional path rather than the local engine.
+ */
+const AI_QUALIFIER = /\bAI\b|AI extraction|AI provider|model provider|configured model/i
+
+interface ClaimShape {
+  pattern: RegExp
+  asserts: string
+  /**
+   * True when naming AI as the reader makes the shape honest. The universal
+   * text-layer claim is deliberately not in this group: qualifying it with AI
+   * cannot rescue it, because a model reads a page's image, never a text layer
+   * the page does not have.
+   */
+  aiQualifiable: boolean
+  /**
+   * True for the positive verb shapes, which copy can also use negated
+   * ("does not read scanned pages"). That negation is the honest sentence and
+   * must not be caught, so the words immediately before the verb decide.
+   */
+  negatable?: boolean
+}
 
 /**
  * The unqualified universal claim: "the text layer of every page" with no
@@ -78,46 +118,102 @@ const COPY_SURFACES = [
 const UNIVERSAL_TEXT_LAYER_CLAIM = /text layer of (?:every|all) pages?(?!\s+that\b)/i
 
 /**
- * Phrasings that claim scanned / image-only pages are read, or that an OCR step
- * runs. Each entry explains what the copy would be asserting.
- *
- * `anywhere: true` marks the strongest claim shapes, checked across the WHOLE
- * renderer so a claim cannot simply move to another component.
+ * Phrasings that claim scanned / image-only pages are read. Each entry explains
+ * what the copy would be asserting; the two flags decide whether naming AI — or
+ * negating the verb — makes the shape honest.
  */
-const FORBIDDEN_CLAIMS: Array<{ pattern: RegExp; asserts: string; anywhere?: boolean }> = [
+const CLAIM_SHAPES: ClaimShape[] = [
   {
     pattern: /including scanned/i,
     asserts: 'every page is read, including scanned pages',
-    anywhere: true,
+    aiQualifiable: true,
   },
-  { pattern: /scanned pages? via ocr/i, asserts: 'OCR reads scanned pages', anywhere: true },
-  { pattern: /via ocr/i, asserts: 'OCR is performed' },
-  { pattern: /\bocr\s+step\b/i, asserts: 'an OCR step runs in the app', anywhere: true },
-  { pattern: /handles? them automatically/i, asserts: 'scanned pages need no manual review' },
-  { pattern: /reads? every page/i, asserts: 'every page is read' },
+  { pattern: /scanned pages? via ocr/i, asserts: 'OCR reads scanned pages', aiQualifiable: true },
+  { pattern: /via ocr/i, asserts: 'OCR is performed', aiQualifiable: true },
+  { pattern: /\bocr\s+step\b/i, asserts: 'an OCR step runs in the app', aiQualifiable: true },
+  {
+    pattern: /handles? them automatically/i,
+    asserts: 'scanned pages need no manual review',
+    aiQualifiable: true,
+  },
+  { pattern: /reads? every page/i, asserts: 'every page is read', aiQualifiable: true },
+  {
+    pattern: /\b(?:reads?|extracts?)\b[^.]{0,40}\bscanned\b/i,
+    asserts: 'scanned pages are read',
+    aiQualifiable: true,
+    negatable: true,
+  },
+  {
+    pattern: /scanned pages? (?:are|get|gets|can be) read\b/i,
+    asserts: 'scanned pages are read',
+    aiQualifiable: true,
+  },
   {
     pattern: UNIVERSAL_TEXT_LAYER_CLAIM,
     asserts: 'the text layer of every page is extracted, so no page is skipped',
-    anywhere: true,
+    aiQualifiable: false,
   },
-  { pattern: /reads? the text layer/i, asserts: "the app reads a page's text layer" },
+  {
+    pattern: /reads? the text layer/i,
+    asserts: "the app reads a page's text layer",
+    aiQualifiable: false,
+  },
 ]
-
-/** The strongest claim phrasings, checked across the WHOLE renderer. */
-const FORBIDDEN_ANYWHERE = FORBIDDEN_CLAIMS.filter((claim) => claim.anywhere)
 
 /** A surface that names scanned / image-only pages must also state the outcome. */
 const SCANNED_MENTION = /scanned|image-only|saved as images/i
 const HONEST_CONSEQUENCE = /not extracted|no text layer|does not read|by hand|manually reviewed/i
 
-describe('OCR honesty copy (WP-7 alpha)', () => {
-  it.each(COPY_SURFACES)('%s does not claim scanned pages are read', (file) => {
-    const text = copyText(join(SRC, file))
-    for (const { pattern, asserts } of FORBIDDEN_CLAIMS) {
-      expect(pattern.test(text), `${file} claims ${asserts} (matched ${String(pattern)})`).toBe(
-        false,
-      )
+function matchesWithIndex(pattern: RegExp, text: string): Array<{ match: string; index: number }> {
+  const scanner = new RegExp(pattern.source, pattern.flags.replace(/g/g, '') + 'g')
+  const out: Array<{ match: string; index: number }> = []
+  for (const found of text.matchAll(scanner)) out.push({ match: found[0], index: found.index ?? 0 })
+  return out
+}
+
+/**
+ * `AI` named in the same sentence as the claim, so it is doing the reading the
+ * claim describes. Sentence scope, not a character window: a neighbouring limit
+ * or paragraph that happens to mention AI must not license an absolute claim
+ * about the whole document.
+ */
+function aiQualifiedInSentence(text: string, index: number, length: number): boolean {
+  const from = text.lastIndexOf('.', index) + 1
+  const to = text.indexOf('.', index + length)
+  return AI_QUALIFIER.test(text.slice(from, to === -1 ? text.length : to))
+}
+
+/** "does not read scanned pages" is the honest sentence, not the claim. */
+function isNegated(text: string, index: number): boolean {
+  const before = text.slice(Math.max(0, index - 32), index)
+  return /(?:\bnot|\bnever|\bno|cannot|can't|without)\s+(?:\w+\s+){0,2}$/i.test(before)
+}
+
+/** Every scanned-page claim in `text` that no AI qualifier (or negation) rescues. */
+function claimViolations(text: string): Array<{ asserts: string; pattern: RegExp; match: string }> {
+  const out: Array<{ asserts: string; pattern: RegExp; match: string }> = []
+  for (const shape of CLAIM_SHAPES) {
+    for (const { match, index } of matchesWithIndex(shape.pattern, text)) {
+      if (shape.negatable && isNegated(text, index)) continue
+      if (shape.aiQualifiable && aiQualifiedInSentence(text, index, match.length)) continue
+      out.push({ asserts: shape.asserts, pattern: shape.pattern, match })
     }
+  }
+  return out
+}
+
+function expectNoClaimViolations(file: string, text: string): void {
+  expect(
+    claimViolations(text).map(
+      (violation) => `${violation.asserts} (matched ${String(violation.pattern)})`,
+    ),
+    `${file} claims scanned pages are read without naming AI as the reader`,
+  ).toEqual([])
+}
+
+describe('scanned-page honesty copy (local engine, plus optional AI)', () => {
+  it.each(COPY_SURFACES)('%s does not claim scanned pages are read without naming AI', (file) => {
+    expectNoClaimViolations(file, copyText(join(SRC, file)))
   })
 
   it.each(COPY_SURFACES)('%s says what happens to scanned pages when it names them', (file) => {
@@ -129,15 +225,43 @@ describe('OCR honesty copy (WP-7 alpha)', () => {
     ).toBe(true)
   })
 
-  it('never claims scanned pages are read anywhere in the renderer', () => {
+  it('never makes an unqualified scanned-page claim anywhere in the renderer', () => {
     for (const file of listRendererSources()) {
-      const text = copyText(join(SRC, file))
-      for (const { pattern, asserts } of FORBIDDEN_ANYWHERE) {
-        expect(pattern.test(text), `${file} claims ${asserts} (matched ${String(pattern)})`).toBe(
-          false,
-        )
-      }
+      expectNoClaimViolations(file, copyText(join(SRC, file)))
     }
+  })
+
+  it('the claim check still has teeth on the copy that shipped', () => {
+    // The phrasings the guard exists to reject: none of them names AI, so none of
+    // them can be the optional path.
+    for (const shipped of [
+      'Zanostack Tenders reads every page, including scanned pages.',
+      'Scanned pages are read via OCR.',
+      'An OCR step handles them automatically.',
+      'Tenders reads scanned pages too.',
+      'Zanostack Tenders extracts the text layer of every page.',
+    ]) {
+      expect(claimViolations(shipped).length, `must reject: ${shipped}`).toBeGreaterThan(0)
+    }
+  })
+
+  it('accepts the AI-qualified claim and the local negation, and nothing looser', () => {
+    // The honest AI path, stated as the AI path.
+    expect(
+      claimViolations('AI extraction can read scanned pages the local engine cannot.'),
+    ).toEqual([])
+    // The honest local limitation.
+    expect(
+      claimViolations('Zanostack does not read scanned pages, so nothing on them was extracted.'),
+    ).toEqual([])
+    // ...but a qualifier parked in another sentence does not license the claim:
+    // sentence scope is what keeps "mention AI somewhere" from passing as honesty.
+    const distant = `AI extraction is optional. ${'Padding sentence. '.repeat(20)}Tenders reads every page, including scanned pages.`
+    expect(claimViolations(distant).length).toBeGreaterThan(0)
+    // ...and neither does one in a neighbouring limit of the same notice.
+    const nextLimit =
+      'Tenders reads every page, including scanned pages. AI extraction is optional.'
+    expect(claimViolations(nextLimit).length).toBeGreaterThan(0)
   })
 
   it('the universal text-layer claim pattern still has teeth', () => {
@@ -152,6 +276,13 @@ describe('OCR honesty copy (WP-7 alpha)', () => {
         'Zanostack Tenders extracts the text layer of every page that has one.',
       ),
     ).toBe(false)
+    // ...and naming AI cannot rescue it: a model reads the page image, not a text
+    // layer the page does not have.
+    expect(
+      claimViolations(
+        'AI extraction extracts the text layer of every page, including the scanned ones.',
+      ).length,
+    ).toBeGreaterThan(0)
   })
 
   it('the consequence check has teeth on every surface that names scanned pages', () => {
@@ -164,17 +295,20 @@ describe('OCR honesty copy (WP-7 alpha)', () => {
     // ...and the surface that carries it must stay in the checked list: moving it
     // back out to an exemption is the defect, not a refactor.
     expect(COPY_SURFACES).toContain('components/TenderList.tsx')
+    // The surfaces this feature's copy changes are checked for the claim too.
+    expect(COPY_SURFACES).toContain('components/LimitationsNotice.tsx')
   })
 
   it('keeps the per-page review copy honest', () => {
     const review = copyText(join(SRC, 'components/ExtractionReview.tsx'))
     // The shipping statement of the limitation (also asserted by the built-Electron
-    // intake-review E2E spec) must survive.
-    expect(review).toMatch(/does not read scanned pages/)
+    // intake-review E2E spec) must survive: the local engine does not read a page
+    // with no text layer.
+    expect(review).toMatch(/(?:does not|doesn't|never) reads?\b|not read\b/i)
     expect(review).toMatch(/no text layer/i)
     // ...and it must say the text was not extracted, not merely that it is unread.
     expect(review).toMatch(/not extracted|nothing on it was extracted/i)
-    expect(review).not.toMatch(/via ocr/i)
-    expect(review).not.toMatch(/\bocr\s+step\b/i)
+    // ...and if it ever says a model read such a page, that claim must name AI.
+    expectNoClaimViolations('components/ExtractionReview.tsx', review)
   })
 })

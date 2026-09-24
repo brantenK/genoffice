@@ -37,7 +37,10 @@ resume without re-discovery**.
 ## Verified current state (do not re-derive)
 
 - Full Tenders suite: **1056 passing**, 0 failed, 7 skipped, **36 test files** (the 7 skipped
-  are the gated benchmark tests unless `TENDERS_BENCH=1`).
+  are the gated benchmark tests unless `TENDERS_BENCH=1`). These figures were recorded **before**
+  the AI-extraction wave, which adds test files (`tests/ai-extraction.test.ts`,
+  `tests/ai-honesty-copy.test.ts`) and modifies several others — re-run
+  `npm test -w @genoffice/tenders` for the current totals.
 - `npm run typecheck` (all 28 workspaces) and `npm run typecheck -w @genoffice/tenders`: clean.
 - `npm run build:all`: clean (exit 0).
 - All six repo guards pass: `npm run check:theme-colors`, `npm run check:english-comments`,
@@ -91,14 +94,18 @@ resume without re-discovery**.
 - **Known limitation:** the Phase 3 corpus is **synthetic** (code-generated), not
   real/anonymised tender documents. Criterion #1 is met on synthetic data only; real-world
   accuracy still needs user-supplied tenders before any paid-release claim.
-- **OCR (alpha only):** pages with no text layer are **detected and classified**
-  (`ocr-required` / `ocr-unavailable` / `ocr-failed`); their text is **not extracted**; they
-  block readiness until each page is marked manually reviewed. This is exactly what the
-  shipping copy says — onboarding, the guided tour, the Tutorials page and the review step
-  all state that scanned/image-only pages are not read. `tests/ocr-honesty-copy.test.ts`
-  fails if copy claiming scanned pages are read (for example "including scanned pages",
-  "via OCR", or "the OCR step handles them automatically") reappears in the renderer.
-  **OCR-Beta (real OCR) is deferred** to a later phase/backlog by decision.
+- **OCR (alpha only) — now conditional on AI.** The **local** engine performs no OCR: pages with
+  no text layer are **detected and classified** (`ocr-required` / `ocr-unavailable` /
+  `ocr-failed`), their text is **not extracted**, and they block readiness until each page is
+  read by the optional AI pass (`ai-extracted`, `contracts-and-invariants.md` §5a) or marked
+  manually reviewed. That local limit is permanent and unconditional. What changed this wave is
+  that a model the user configured can read such a page's **image**, so "scanned pages are not
+  read" is true of the app **only while AI extraction is off**. Both directions are guarded:
+  `tests/ocr-honesty-copy.test.ts` fails when a surface says scanned pages are read without
+  naming AI as the reader (or claims the text layer of every page is extracted), and
+  `tests/ai-honesty-copy.test.ts` fails when a surface calls the app entirely offline without
+  stating that AI extraction sends the document to the model provider the user configured.
+  **OCR-Beta (in-app OCR) remains deferred** to a later phase/backlog by decision.
 - Phase 2 Oracle gate: **PASS** (`ora-1` re-gate, after a `reviewer_2b_cutover`
   REQUEST_CHANGES — an integrity backdoor in `partialize` — was remediated) and after a
   shredder v2 schema-validity data-loss defect and the B1 `closingDate` bricking defect
@@ -142,6 +149,22 @@ it:
   `apps/books`, `apps/crm` and `apps/tenders` trees, so libraries that ship inside `app.asar`
   (lucide-react, zustand) finally have notice entries.
 
+**Optional AI extraction (this wave — the deliberate boundary change).** Tenders can now read a
+tender with a model provider the **user** configures, alongside the local rule engine, which
+stays the offline default. The boundary amendment and what it excludes are in the
+Product-boundary reminder above; the contracts are in `contracts-and-invariants.md` §5a, and
+`fork/COMPLIANCE.md` records it as a fork decision with its first outbound network call.
+
+- **Verified in this wave:** the pure core (`apps/tenders/src/shared/ai-extraction.ts`) with its
+  behaviour guard (`tests/ai-extraction.test.ts`), the preload pass-throughs over the shell's own
+  `ai:*` channels (Tenders registers no handler), the schema's `suggestedBy` provenance marker,
+  the `'ai-extracted'` page status with the `pageContentObtained` readiness rule, and the two
+  copy guards.
+- **What a release claim would still need:** the whole AI journey exercised in the **built** app
+  (offer → extraction → review → readiness), and a live-provider smoke test. No test in this repo
+  may call a provider — the model call is injected precisely so tests need no network — so nothing
+  here proves a real model call works, and the AI path deliberately has no e2e coverage.
+
 **Remaining release work (not correctness blockers):**
 
 - **Real/anonymised tender corpus.** Every parser accuracy figure is measured on a synthetic,
@@ -164,8 +187,9 @@ it:
   single `com.zanostack.app` product (`apps/shell/electron-builder.cjs`,
   `extraResources → modules/tenders`), so there is no separate Tenders artifact to sign. A
   signed release would also cover the bundled native sidecar (`xlsx-sidecar.exe`).
-- **OCR-Beta (real OCR)** remains deferred; image-only pages are detected and block
-  readiness until manually reviewed, and the product copy says so.
+- **OCR-Beta (in-app OCR)** remains deferred; image-only pages are detected and block
+  readiness until the optional AI pass reads them or a person marks them reviewed, and the
+  product copy says so.
 
 **Known environmental (non-product) notes:** a terminal Playwright worker-teardown timeout
 can yield a non-zero E2E exit after all tests pass, and `apps/shell` has a pre-existing,
@@ -270,3 +294,23 @@ automated email/portal submission, tender-marketplace scraping, generic CRM feat
 AI-authored methodology, broad international rule packs, mobile/web SaaS, or an
 automatic legal-advice engine. Tenders is a high-confidence tender **control** system,
 not a compliance authority.
+
+**Amended — optional AI extraction is permitted (owner's decision).** The earlier "the document
+never leaves the machine" position was relaxed deliberately, to raise extraction accuracy and to
+read scanned (image-only) pages: the user may configure a model provider and let it read the
+tender. This is the fork's **first outbound network call from Tenders**, so it is recorded here
+rather than left to be discovered as an accident (see `fork/COMPLIANCE.md`).
+
+- **The local rule engine stays the offline default.** AI is optional and additive: with no API
+  key, or no network, the app behaves exactly as it did before the feature existed.
+- **Nothing AI produces is ever confirmed.** Every value a model returns is an unconfirmed
+  suggestion carrying `suggestedBy: 'ai'`, and no AI output may write `confirmed`. A page a model
+  read stops blocking readiness while everything lifted from it still needs a human decision —
+  `contracts-and-invariants.md` §5a.
+- **Still forbidden, and why this is not it.** Tender-marketplace scraping and portal/email
+  submission stay out: AI extraction reads a document the **user already has** and only lifts
+  values for that user to confirm — it never fetches a tender from a marketplace, never acts as
+  the user, and never submits anything. AI-authored methodology stays out too: the pass extracts
+  what the document says, it does not write the bid.
+- The copy rules this obliges are enforced by `apps/tenders/tests/ai-honesty-copy.test.ts` and
+  `apps/tenders/tests/ocr-honesty-copy.test.ts`.

@@ -1,10 +1,13 @@
-// Limitations notice — Phase 5 Oracle remediation (criterion 5).
+// Limitations notice — Phase 5 Oracle remediation (criterion 5), extended for
+// optional AI extraction.
 //
 // Tenders is a control/tracking tool: it is not legal advice, it is not a
-// compliance authority, it never submits anything for you, it does not read
-// scanned (image-only) pages, and its extraction is heuristic. Those limits are
-// stated here in plain language so a user can find them before trusting a
-// readiness score.
+// compliance authority, it never submits anything for you, and its extraction is
+// heuristic. The scanned-page limit is now stated as the conditional it is: the
+// LOCAL engine does not read a page without a text layer, while AI extraction —
+// which you have to configure and turn on — can read such a page by sending its
+// image to the model provider you chose. Those limits are stated here in plain
+// language so a user can find them before trusting a readiness score.
 //
 // Reachable from three places: the sidebar Help menu (App.tsx), the first-use
 // screen (FirstUsePage) and the tutorials page (TutorialsPage). It renders
@@ -13,7 +16,7 @@
 //
 // Chrome colours are semantic tokens only; document data never appears here.
 import { useState } from 'react'
-import { ClipboardCheck, FileSearch, Scale, Send, ShieldAlert } from 'lucide-react'
+import { ClipboardCheck, FileSearch, Scale, Send, ShieldAlert, Sparkles } from 'lucide-react'
 import { Dialog } from './Dialog'
 import { Button } from './ui'
 
@@ -50,14 +53,32 @@ const LIMITS: Limit[] = [
     ),
   },
   {
-    key: 'no-ocr',
+    key: 'scanned-pages',
     icon: <FileSearch size={15} aria-hidden="true" />,
-    title: 'Scanned pages are detected, not read',
+    title: 'Scanned pages are detected, not read by the local engine',
     body: (
       <>
-        Pages saved as images have no text layer. Tenders flags them, and they block readiness until
-        you open each page and mark it reviewed — it does not read them, and there is no OCR in this
-        build. Treat those pages as unread until you have checked them yourself.
+        Pages saved as images have no text layer. The local engine does not read them — it flags
+        them, and they block readiness until you open each page and mark it reviewed. Treat those
+        pages as unread until you have checked them yourself, or until you have used AI extraction
+        on them (below), which still leaves every value it returns for you to confirm.
+      </>
+    ),
+  },
+  {
+    key: 'ai-optional',
+    icon: <Sparkles size={15} aria-hidden="true" />,
+    title: 'AI extraction is optional — and it sends your document to your provider',
+    body: (
+      <>
+        Tenders' own rule engine runs offline and is always available: no API key, no network —
+        nothing leaves this machine unless you turn on AI extraction. AI extraction is optional, and
+        it is not part of Tenders — it is a model provider you configure yourself, with your own API
+        key. When you use it, the document's text — or the image of a scanned page — is sent to the
+        model provider you configured, and everything the model suggests is unconfirmed until you
+        confirm it yourself. A model's suggestion is a suggestion, not a verified fact: it can be
+        wrong in the same ways the local engine can, and it can be confidently wrong in ways the
+        local engine cannot. With AI extraction switched off, Tenders is entirely local again.
       </>
     ),
   },
@@ -67,9 +88,11 @@ const LIMITS: Limit[] = [
     title: 'Extraction is a best guess that must be reviewed',
     body: (
       <>
-        Requirements, dates and submission details are extracted heuristically and can be wrong.
-        Every value is offered for review, not as fact — confirm the critical fields against the
-        source pages before you rely on the readiness score.
+        Requirements, dates and submission details are extracted heuristically — or, when you use AI
+        extraction, suggested by a model — and either way they can be wrong. Every value is offered
+        for review, not as fact, and a model's output arrives no more confirmed than the local
+        engine's: confirm the critical fields against the source pages before you rely on the
+        readiness score.
       </>
     ),
   },
@@ -129,8 +152,10 @@ export function LimitationsNotice({ onClose }: LimitationsNoticeProps) {
         </ul>
 
         <p className="mt-4 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-          Everything you add stays on this machine. Files and records are written to Tenders' local
-          application store, nothing is uploaded, and no account is needed.
+          Your files, records and settings stay on this machine: they are written to Tenders' local
+          application store, no account is needed, and nothing is uploaded unless you turn on AI
+          extraction — which sends the document's text, or a scanned page's image, to the model
+          provider you configured.
         </p>
       </div>
     </Dialog>

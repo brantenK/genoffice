@@ -7,19 +7,32 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { exposeInMainWorld, invoke, on, removeListener } = vi.hoisted(() => ({
-  exposeInMainWorld: vi.fn(),
-  invoke: vi.fn(async () => ({ ok: true, dealId: 'deal-1' })),
-  on: vi.fn(),
-  removeListener: vi.fn(),
-}))
+const { exposeInMainWorld, invoke, on, removeListener, ipcRendererStub } = vi.hoisted(() => {
+  const invoke = vi.fn(async (..._args: unknown[]) => ({ ok: true, dealId: 'deal-1' }))
+  const on = vi.fn()
+  const removeListener = vi.fn()
+  return {
+    exposeInMainWorld: vi.fn(),
+    invoke,
+    on,
+    removeListener,
+    ipcRendererStub: { invoke, on, removeListener },
+  }
+})
 
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld },
-  ipcRenderer: { invoke, on, removeListener },
+  ipcRenderer: ipcRendererStub,
 }))
 
-import { TENDERS_CHANNELS, type TendersApi } from '../src/shared/ipc'
+import {
+  AI_CHANNELS,
+  TENDERS_CHANNELS,
+  type AiSettings,
+  type AiStreamChunk,
+  type AiStreamRequest,
+  type TendersApi,
+} from '../src/shared/ipc'
 
 let exposed: TendersApi | undefined
 
@@ -27,6 +40,8 @@ beforeEach(async () => {
   vi.resetModules()
   exposeInMainWorld.mockReset()
   invoke.mockClear()
+  on.mockClear()
+  removeListener.mockClear()
   exposeInMainWorld.mockImplementation((_key: string, api: TendersApi) => {
     exposed = api
   })
@@ -142,5 +157,86 @@ describe('preload tenders bridge', () => {
     expect(typeof fn).toBe('function')
     await fn(...args)
     expect(invoke).toHaveBeenCalledWith(channel, ...args)
+  })
+})
+
+/**
+ * Shared AI surface. The `ai:*` handlers are registered exactly once by the
+ * shell's main process (`registerAiIpc()` from the docs app) and Tenders runs in
+ * that same process, so the bridge is a pure pass-through: it must reach the
+ * shell's channels and must NOT try to own them (a second `ipcMain.handle` on
+ * the same channel throws "second handler"). What these tests pin is the wire
+ * contract the AI extraction pass is written against.
+ */
+describe('preload tenders bridge — shared AI channels', () => {
+  const streamRequest = {
+    requestId: 'req-1',
+    settings: { provider: 'openai', providers: {} } as unknown as AiSettings,
+    system: 'extract the requirements',
+    messages: [{ role: 'user', text: 'clause text' }],
+  } satisfies AiStreamRequest
+
+  it('exposes the four AI members as functions', () => {
+    for (const member of ['getAiSettings', 'aiStream', 'aiStreamCancel', 'onAiStream']) {
+      expect(typeof (exposed as unknown as Record<string, unknown>)[member], member).toBe(
+        'function',
+      )
+    }
+  })
+
+  it('reads settings through the shell-registered ai:get-settings channel', async () => {
+    await exposed!.getAiSettings()
+    expect(invoke).toHaveBeenCalledWith(AI_CHANNELS.getSettings)
+    expect(AI_CHANNELS.getSettings).toBe('ai:get-settings')
+  })
+
+  it('forwards aiStream to ai:stream with the request untouched', async () => {
+    await exposed!.aiStream(streamRequest)
+    expect(AI_CHANNELS.stream).toBe('ai:stream')
+    expect(invoke).toHaveBeenCalledWith(AI_CHANNELS.stream, streamRequest)
+    // Same reference: the bridge adds no fields, so main validates exactly what
+    // the renderer sent (settings, messages, tools, maxTokens).
+    expect(invoke.mock.calls.at(-1)?.[1]).toBe(streamRequest)
+  })
+
+  it('forwards aiStreamCancel to ai:stream-cancel with the request id', async () => {
+    await exposed!.aiStreamCancel('req-1')
+    expect(AI_CHANNELS.streamCancel).toBe('ai:stream-cancel')
+    expect(invoke).toHaveBeenCalledWith(AI_CHANNELS.streamCancel, 'req-1')
+  })
+
+  it('delivers ai:stream-chunk payloads to the subscriber and unsubscribes on demand', () => {
+    const chunks: AiStreamChunk[] = []
+    const unsubscribe = exposed!.onAiStream((chunk) => chunks.push(chunk))
+
+    expect(AI_CHANNELS.streamChunk).toBe('ai:stream-chunk')
+    expect(on).toHaveBeenCalledWith(AI_CHANNELS.streamChunk, expect.any(Function))
+    const listener = on.mock.calls.at(-1)?.[1] as (event: unknown, chunk: AiStreamChunk) => void
+
+    listener({}, { requestId: 'req-1', type: 'delta', text: 'clause 4.2' })
+    listener({}, { requestId: 'req-1', type: 'done' })
+    expect(chunks).toEqual([
+      { requestId: 'req-1', type: 'delta', text: 'clause 4.2' },
+      { requestId: 'req-1', type: 'done' },
+    ])
+
+    unsubscribe()
+    // Removes THIS listener from THIS channel — not a blanket removeAllListeners,
+    // so a second extraction pass (or the AI panel) keeps its own subscription.
+    expect(removeListener).toHaveBeenCalledWith(AI_CHANNELS.streamChunk, listener)
+  })
+
+  it('never hands the renderer ipcRenderer: every exposed member is a function', () => {
+    expect(exposed).not.toBe(ipcRendererStub)
+    const members = Object.entries(exposed as unknown as Record<string, unknown>)
+    expect(members.length).toBeGreaterThan(0)
+    for (const [key, value] of members) {
+      expect(typeof value, key).toBe('function')
+    }
+    for (const leaked of ['ipcRenderer', 'invoke', 'send', 'on', 'removeListener']) {
+      expect(Object.keys(exposed as unknown as Record<string, unknown>), leaked).not.toContain(
+        leaked,
+      )
+    }
   })
 })

@@ -20,6 +20,8 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@genoffice/agent-core": "*",
+    "@genoffice/ai-provider": "*",
     "@genoffice/docx-engine": "*",
     "@genoffice/electron-utils": "*",
     "@genoffice/i18n": "*",

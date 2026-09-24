@@ -142,13 +142,18 @@ const STEPS: TourStep[] = [
           <strong>Load demo RFP</strong> to try the full workflow right now.
         </p>
         <p className="mt-2">
-          Zanostack Tenders reads your PDF locally on this machine, builds the compliance matrix,
-          auto-links matching vault documents and recognizes the issuing authority from its
-          letterhead.
+          Tenders' own rule engine runs offline and is always available: it reads your PDF locally
+          on this machine, builds the compliance matrix, auto-links matching vault documents and
+          recognizes the issuing authority from its letterhead.
         </p>
         <p className="mt-2">
-          Pages saved as images have no text layer: their text is not extracted, and they block
-          readiness until you review them by hand.
+          AI extraction is optional. If you configure a model provider and use it, the document's
+          text — or the image of a scanned page — is sent to the model provider you configured, and
+          everything the model suggests is unconfirmed until you confirm it.
+        </p>
+        <p className="mt-2">
+          Pages saved as images have no text layer: the local engine does not read them, their text
+          is not extracted, and they block readiness until you review them by hand.
         </p>
       </>
     ),

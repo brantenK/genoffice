@@ -87,7 +87,7 @@ const GROUPS: Group[] = [
         title: 'How to shred a tender RFP',
         minutes: '~2 min',
         summary:
-          'Turn any RFP PDF into a compliance matrix — processed locally on this machine, nothing is uploaded.',
+          'Turn any RFP PDF into a compliance matrix with the offline rule engine — nothing is uploaded unless you turn on AI extraction.',
         steps: [
           <>
             Open the <strong>Tenders</strong> page in the sidebar.
@@ -101,6 +101,15 @@ const GROUPS: Group[] = [
             Watch the <strong>progress indicator</strong>: reading the PDF → extracting text &amp;
             coordinates from every page that has a text layer → matching compliance rules → running
             vault gap analysis.
+          </>,
+          <>
+            <strong>AI extraction is optional.</strong> Tenders' own rule engine runs offline and is
+            always available — no API key, no network. If you configure a model provider, you can
+            turn AI extraction on for a stronger read, including of pages saved as images. When you
+            use it, the document's text — or the image of a scanned page — is sent to the model
+            provider you configured, and every value the model suggests is unconfirmed until you
+            confirm it in <em>Review extraction</em>. Leave AI extraction off and nothing leaves
+            this machine.
           </>,
           <>
             When it finishes you land in the <strong>tender workspace</strong> with the compliance
@@ -146,9 +155,11 @@ const GROUPS: Group[] = [
           </>,
           <>
             Pages saved as images have no text layer, so their text is{' '}
-            <strong>not extracted</strong>. They count toward the scanned badge on the tender card,
-            appear under <em>Pages</em> in <em>Review extraction</em>, and block readiness until you
-            open each one and mark it reviewed.
+            <strong>not extracted</strong> by the local engine. They count toward the scanned badge
+            on the tender card, appear under <em>Pages</em> in <em>Review extraction</em>, and block
+            readiness until you open each one and mark it reviewed — or let AI extraction read the
+            page, which sends that page's image to the model provider you configured and still needs
+            your confirmation.
           </>,
         ],
       },
@@ -432,8 +443,9 @@ const GROUPS: Group[] = [
           </>,
           <>
             Your data and your settings both live locally on this machine in the application data
-            directory — nothing is stored on any server, and your work is still here after a
-            restart.
+            directory — nothing is stored on any server unless you turn on AI extraction, and your
+            work is still here after a restart. When you do use AI extraction, the document's text —
+            or the image of a scanned page — is sent to the model provider you configured.
           </>,
         ],
       },
@@ -562,7 +574,7 @@ export function TutorialsPage() {
           <LimitationsButton
             variant="default"
             size="md"
-            title="Read what Tenders does not do: not legal advice, no automated submission, no OCR, review every extracted value"
+            title="Read what Tenders does not do: not legal advice, no automated submission, the local engine does not read scanned pages, review every extracted value"
           />
         </div>
       </div>

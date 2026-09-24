@@ -85,6 +85,7 @@ merge (see `fork/RUNBOOK.md`).
 | `apps/tenders/electron.vite.config.ts`, `apps/tenders/vite.renderer.config.ts`                                                                                                                                                                 | renderer `publicDir` → `apps/tenders/public`                                                                                                                                                                                                                                                                                                                                           | electron-vite's renderer root made vite's default `publicDir` empty, so `demo/` was never emitted: "Load demo RFP" fetched a 404 and the sample workspace's vault PDFs did not exist                                                                                                                                                         |
 | `tools/gen-third-party-notices.mjs`                                                                                                                                                                                                            | source globs now include `apps/books`, `apps/crm` and `apps/tenders`                                                                                                                                                                                                                                                                                                                   | Libraries that ship inside `app.asar` (lucide-react ISC, zustand MIT) had no notice entry at all, because the three fork-only apps were never scanned                                                                                                                                                                                        |
 | `fork/RUNBOOK.md`                                                                                                                                                                                                                              | Added "Verify a sync" and "Porting an upstream spec to the fork's UI"                                                                                                                                                                                                                                                                                                                  | Records the ordering that matters (sweep → locales → gates → typecheck → build → e2e), the baseline ritual, and why heavy suites must run one at a time on this disk                                                                                                                                                                         |
+| `apps/tenders/src/shared/ai-extraction.ts`, `apps/tenders/src/preload/index.ts`, `apps/tenders/src/renderer/src/ai/`, `apps/tenders/tests/ai-*.test.ts`                                                                                        | Added **optional AI extraction**: a BYOK model may read the tender's text (or a scanned page's image) through the shell's shared `ai:*` channels; the offline rule engine stays the default, every AI value is an unconfirmed suggestion, and no AI output may write `confirmed`                                                                                                       | **Deliberate fork decision (owner)** — see the subsection below the table: Tenders' **first outbound network call**, reusing the suite's BYOK plumbing; marketplace scraping and portal submission stay forbidden                                                                                                                            |
 
 Protections verified after the sweep: `@genoffice/*` npm scope, `GENOFFICE_*`
 env-var prefix, and PDF format keys (`GenOfficeStaticFormFills`,
@@ -97,6 +98,30 @@ upstream on purpose), and the vendored `tools/ooxml-validate/` toolset — its
 README documents an amendment marker that lives inside the byte-identical
 ISO/IEC 29500 `.xsd` files, so re-branding the prose would leave it describing
 something the schema no longer says.
+
+### Optional AI extraction — the fork's first outbound network call from Tenders
+
+The owner decided that Tenders may offer **optional AI extraction** alongside its local rule
+engine: a model provider the user configures (the suite's existing BYOK plumbing — no
+credentials shipped, no new service, nothing of Mainfunc's) may read the tender's text, or a
+scanned page's image. Recorded here because it is a **deliberate fork decision, not a merge
+artifact**, and because it is the first time this fork's Tenders pane sends anything off the
+machine.
+
+- **Off by default and additive.** No API key or no network means the app behaves exactly as it
+  did before the feature existed; the local, offline rule engine is what always runs.
+- **What leaves the machine:** the page text of the document the **user** opened, or, for a page
+  with no text layer, that page's image — to the provider the user configured, only when the user
+  turns the feature on.
+- **What does not change:** nothing AI produces is ever confirmed. Every value a model returns is
+  an unconfirmed suggestion (`suggestedBy: 'ai'`), no AI output may write `confirmed`, and the
+  renderer never handles an API key (main injects it per request).
+- **Still forbidden:** tender-marketplace scraping and portal/email submission. AI extraction
+  reads a document the user already has, only to lift values for that user to confirm — it never
+  fetches a tender from a marketplace, never acts as the user, and never submits anything. It is
+  also not AI-authored methodology: the pass extracts what the document says.
+- Contracts: `docs/tenders-hardening/contracts-and-invariants.md` §5a; the boundary amendment:
+  `docs/tenders-hardening/README.md` ("Product-boundary reminder").
 
 ## Branding swap status
 

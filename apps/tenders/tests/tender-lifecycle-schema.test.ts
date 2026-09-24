@@ -386,6 +386,40 @@ describe('lifecycle schema compatibility', () => {
   })
 })
 
+describe('AI provenance schema compatibility', () => {
+  it('validates a requirement written before the provenance marker existed', () => {
+    const result = validateTendersDataV2(documentV2(tender()))
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // No key is invented on read: an unmarked requirement is never re-labelled
+      // as a model suggestion (absent means the local rule engine).
+      expect(result.data.workspaces[0].tenders[0].requirements[0]).not.toHaveProperty('suggestedBy')
+    }
+  })
+
+  it('accepts and round-trips a model-suggested requirement', () => {
+    const aiRequirement: RequirementRecord = { ...requirement(), suggestedBy: 'ai' }
+    const result = validateTendersDataV2(documentV2(tender({ requirements: [aiRequirement] })))
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.workspaces[0].tenders[0].requirements[0]).toEqual(aiRequirement)
+    }
+  })
+
+  it('accepts an explicit parser marker and rejects an unrecognised origin', () => {
+    const parserRequirement: RequirementRecord = { ...requirement(), suggestedBy: 'parser' }
+    expect(
+      validateTendersDataV2(documentV2(tender({ requirements: [parserRequirement] }))).ok,
+    ).toBe(true)
+    expectIssue(
+      validateTendersDataV2(
+        documentV2(tender({ requirements: [{ ...requirement(), suggestedBy: 'human' } as never] })),
+      ),
+      'workspaces.0.tenders.0.requirements.0.suggestedBy',
+    )
+  })
+})
+
 describe('archive flags schema', () => {
   it('accepts null and RFC3339 archivedAt on customer and company', () => {
     const withArchive = documentV2(tender(), customer({ archivedAt: AT }))

@@ -10,6 +10,10 @@
 //  - edits/confirms title, reference, issuing body, contact e-mail, closing
 //    date/time, submission method + destination, and value;
 //  - shows the review confidence and the source page/clause for every field;
+//  - shows WHO produced each value: a model's suggestion carries a visible
+//    "AI-suggested" chip on the field, on each candidate and on each
+//    requirement, and the local rule engine's own read carries nothing (absent
+//    provenance means the parser — see `valueProvenance`);
 //  - surfaces competing candidates (never silently picks one) and keeps the
 //    originally extracted value after a correction;
 //  - marks a field "not stated" (which clears the domain value, so an
@@ -39,6 +43,7 @@ import {
   RotateCcw,
   ScanLine,
   Send,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 import type {
@@ -48,8 +53,9 @@ import type {
   RequirementRecord,
   SubmissionMethod,
   TenderRecord,
+  ValueProvenance,
 } from '../../shared/types'
-import { SUBMISSION_METHOD_LABEL } from '../../shared/types'
+import { SUBMISSION_METHOD_LABEL, pageContentObtained, valueProvenance } from '../../shared/types'
 import { parseClosingDate, unreviewedOcrPages } from '../readiness'
 import {
   extractMoneyLiterals,
@@ -131,10 +137,14 @@ const INPUT_CLASS =
   'w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-tertiary)] hover:border-[var(--border-hover)] focus-visible:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent-soft)]'
 
 // ── page extraction state (WP-7 alpha contract) ───────────────────────────────
-// Pages with a text layer were read normally. Pages without one are NOT read:
-// this build performs no OCR, so they stay unconfirmed and block readiness until
-// a person opens the page and marks it reviewed. Nothing in this UI may imply a
-// scanned page was extracted automatically.
+// Pages with a text layer were read normally. Pages without one are read by
+// nobody by default — this build performs no OCR — so they stay unconfirmed and
+// block readiness until a person opens the page and marks it reviewed. The
+// optional AI extraction pass can read such a page's IMAGE with the model the
+// user configured; that read records `ai-extracted`, which obtains the page's
+// content (so it stops blocking readiness) without confirming anything on it —
+// every value lifted from it stays a model suggestion until a human confirms it.
+// Nothing in this UI may imply the LOCAL engine extracted a scanned page.
 
 export const PAGE_STATUS_LABEL: Record<PageExtractionStatus, string> = {
   native: 'Text layer',
@@ -142,6 +152,7 @@ export const PAGE_STATUS_LABEL: Record<PageExtractionStatus, string> = {
   'ocr-unavailable': 'OCR unavailable',
   'ocr-failed': 'No usable text',
   'manually-reviewed': 'Reviewed',
+  'ai-extracted': 'Model-read',
 }
 
 const PAGE_STATUS_TONE: Record<PageExtractionStatus, Tone> = {
@@ -150,21 +161,36 @@ const PAGE_STATUS_TONE: Record<PageExtractionStatus, Tone> = {
   'ocr-unavailable': 'warn',
   'ocr-failed': 'bad',
   'manually-reviewed': 'ok',
+  // Neither human-confirmed nor a problem: content obtained by a model, still a
+  // suggestion. Deliberately not the 'ok' tone a human review earns.
+  'ai-extracted': 'accent',
 }
 
 const PAGE_STATUS_EXPLANATION: Record<PageExtractionStatus, string> = {
   native: 'This page carries its own text layer, so it was read normally.',
+  'ai-extracted':
+    'This page has no text layer, so AI extraction read the page image with the model you configured. Its content is available as a model suggestion — nothing on it has been confirmed, and every value lifted from it still needs your review.',
   'ocr-required':
-    'This page has no text layer. Zanostack does not read scanned pages, so nothing on it was extracted.',
+    'This page has no text layer. Zanostack does not read scanned pages on its own and no AI extraction read this one, so nothing on it was extracted.',
   'ocr-unavailable':
     'This page has no text layer and OCR is not available on this platform, so nothing on it was extracted.',
   'ocr-failed': 'No usable text could be produced for this page, so nothing on it was extracted.',
   'manually-reviewed': 'You confirmed this page against the original document.',
 }
 
-/** A page blocks readiness until it has native text or a manual review. */
+/**
+ * A page blocks readiness until its content has been obtained — a text layer, a
+ * human review, or a model read. Same predicate as readiness
+ * (`pageContentObtained`), so the panel can never claim a page is settled that
+ * the gate still blocks, or vice versa.
+ */
 function pageBlocksReadiness(state: PageExtractionStatus): boolean {
-  return state !== 'native' && state !== 'manually-reviewed'
+  return !pageContentObtained(state)
+}
+
+/** Pages of this document a model read — content available, nothing confirmed. */
+function countModelReadPages(pages: PageExtractionState[]): number {
+  return pages.filter((page) => page.state === 'ai-extracted').length
 }
 
 /** How many unreadable pages are listed inline before a "show all" control. */
@@ -676,9 +702,11 @@ export interface ReviewSummary {
   /** Low-confidence requirements the user has marked verified. */
   verifiedLowConfidenceRequirements: number
   /**
-   * Pages with no text layer that have not been manually reviewed. These block
-   * readiness (canonical predicate: `unreviewedOcrPages`), so the review step
-   * must expose them with a way to clear each one.
+   * Pages whose content was never obtained — nothing read them, so they have no
+   * usable text. These block readiness (canonical predicate:
+   * `unreviewedOcrPages`), so the review step must expose them with a way to
+   * clear each one. A page a model read is content-obtained and is NOT here,
+   * even though every value on it is still an unconfirmed suggestion.
    */
   pendingPages: PageExtractionState[]
   /** Pages the user has marked manually reviewed. */
@@ -780,6 +808,35 @@ function Chip({
     >
       {children}
     </span>
+  )
+}
+
+// ── who produced a value ─────────────────────────────────────────────────────
+//
+// The whole promise of this step is that a value's origin is visible: the local
+// rule engine's own read and a model's suggestion must never look alike, and
+// neither may look verified. So provenance gets its own labelled, always-visible
+// chip with its own icon, never a tooltip and never a colour borrowed from the
+// confidence or review-state chips — and it is rendered ONLY for `'ai'`.
+// `valueProvenance` in `shared/types` owns "absent means the parser", so a value
+// stored before the marker existed can never wear this label.
+
+export const AI_SUGGESTION_LABEL = 'AI-suggested'
+
+export const AI_SUGGESTION_TITLE =
+  'A model you configured suggested this value. It is a suggestion, not a verified fact — confirm or correct it yourself.'
+
+/** The AI-suggested marker, or nothing at all for a parser value. */
+function ProvenanceChip({
+  carrier,
+}: {
+  carrier: { suggestedBy?: ValueProvenance } | null | undefined
+}) {
+  if (valueProvenance(carrier) !== 'ai') return null
+  return (
+    <Chip tone="accent" title={AI_SUGGESTION_TITLE}>
+      <Sparkles size={11} aria-hidden="true" /> {AI_SUGGESTION_LABEL}
+    </Chip>
   )
 }
 
@@ -896,9 +953,18 @@ function PageJumpButton({ pageNumber, pdfReady }: { pageNumber: number; pdfReady
   )
 }
 
-function pageConfidenceLabel(confidence: number | null): string | null {
+/**
+ * How much confidence to show for a page, named after who produced it: a model
+ * read's number is the model's own confidence, never a text-layer confidence.
+ */
+function pageConfidenceLabel(
+  state: PageExtractionStatus,
+  confidence: number | null,
+): string | null {
   if (typeof confidence !== 'number') return null
-  return `${Math.round(confidence * 100)}% text confidence`
+  return `${Math.round(confidence * 100)}% ${
+    state === 'ai-extracted' ? 'model' : 'text'
+  } confidence`
 }
 
 /**
@@ -946,6 +1012,7 @@ function PagesSection({
   )
   const blockedShown = showAllBlocked ? blocked : blocked.slice(0, PAGE_PREVIEW_LIMIT)
   const isBlocked = blocked.length > 0
+  const modelReadPages = countModelReadPages(pages)
 
   // No page-level state was ever captured. If the document is known to contain
   // pages without a text layer, say so and point at the re-read action instead
@@ -1007,10 +1074,26 @@ function PagesSection({
 
       <p className="mt-1.5 text-[11px] leading-snug text-[var(--text-secondary)]">
         {isBlocked
-          ? `Zanostack does not read scanned pages. ${blocked.length} page${
+          ? `${
+              modelReadPages > 0
+                ? `AI extraction read ${modelReadPages} page${
+                    modelReadPages === 1 ? '' : 's'
+                  } of this document, but a model read is a suggestion until you confirm it. `
+                : ''
+            }Zanostack does not read scanned pages${
+              modelReadPages > 0
+                ? ' on its own'
+                : ', and no AI extraction read any page of this document'
+            }. ${blocked.length} page${
               blocked.length === 1 ? '' : 's'
             } here have no usable text layer, so nothing on them was extracted — open each one in the PDF and mark it reviewed. Readiness stays blocked until every page is reviewed or has its own text layer.`
-          : 'Every page either carries its own text layer or has been marked reviewed by you.'}
+          : `Every page either carries its own text layer, has been marked reviewed by you, or was read by AI.${
+              modelReadPages > 0
+                ? ` ${modelReadPages} model read${modelReadPages === 1 ? '' : 's'} here ${
+                    modelReadPages === 1 ? 'is' : 'are'
+                  } still an unconfirmed suggestion.`
+                : ''
+            }`}
       </p>
 
       {blocked.length > 1 && (
@@ -1029,7 +1112,7 @@ function PagesSection({
         <>
           <ul className="mt-2 space-y-1.5">
             {blockedShown.map((page) => {
-              const confidence = pageConfidenceLabel(page.confidence)
+              const confidence = pageConfidenceLabel(page.state, page.confidence)
               return (
                 <li
                   key={page.pageNumber}
@@ -1097,14 +1180,19 @@ function PagesSection({
           {showResolved && (
             <ul id={resolvedListId} className="mt-1.5 space-y-1">
               {resolved.map((page) => {
-                const confidence = pageConfidenceLabel(page.confidence)
+                const confidence = pageConfidenceLabel(page.state, page.confidence)
                 return (
                   <li
                     key={page.pageNumber}
                     className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2.5 py-1.5"
                   >
                     <PageJumpButton pageNumber={page.pageNumber} pdfReady={pdfReady} />
-                    <Chip tone={PAGE_STATUS_TONE[page.state]}>{PAGE_STATUS_LABEL[page.state]}</Chip>
+                    <Chip
+                      tone={PAGE_STATUS_TONE[page.state]}
+                      title={PAGE_STATUS_EXPLANATION[page.state]}
+                    >
+                      {PAGE_STATUS_LABEL[page.state]}
+                    </Chip>
                     {page.method && (
                       <span className="text-[11px] text-[var(--text-tertiary)]">{page.method}</span>
                     )}
@@ -1559,7 +1647,7 @@ export function ExtractionReview({
               cleared, and a deadline, submission method or destination that had competing values
               was imported as unknown — so readiness stays blocked until you resolve it here.
               {summary.pendingPages.length > 0 &&
-                ` Pages with no text layer also block readiness until you review them below.`}
+                ` Unread pages also block readiness until you review them below.`}
               {summary.pagesUnclassified &&
                 ` This tender reports pages without a text layer but none were classified — re-read the source to classify them.`}
             </p>
@@ -1641,6 +1729,7 @@ export function ExtractionReview({
                       </p>
                       <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
                         <span>p.{requirement.pageNumber}</span>
+                        <ProvenanceChip carrier={requirement} />
                         <Chip tone="warn">{confidenceLabel(requirement.confidence ?? null)}</Chip>
                         {requirement.isMandatory && <Chip tone="bad">Mandatory</Chip>}
                       </p>
@@ -1762,6 +1851,7 @@ function FieldCard({
     topCandidate && normalizeForMatch(topCandidate.value) !== normalizeForMatch(currentValue)
       ? topCandidate
       : null
+  const aiSuggested = valueProvenance(detail) === 'ai'
 
   return (
     <fieldset
@@ -1783,10 +1873,15 @@ function FieldCard({
           </label>
         </p>
         <div className="flex flex-wrap items-center gap-1.5">
+          <ProvenanceChip carrier={detail} />
           <Chip tone={chip.tone}>{chip.label}</Chip>
           <Chip
             tone={confidenceTone(confidence)}
-            title="How strongly the document supports this value. Low confidence values must be checked against the source page."
+            title={
+              aiSuggested
+                ? 'The confidence the model reported for its own suggestion. Check it against the source page.'
+                : 'How strongly the document supports this value. Low confidence values must be checked against the source page.'
+            }
           >
             {confidenceLabel(confidence)}
           </Chip>
@@ -1854,6 +1949,7 @@ function FieldCard({
           {topSuggestion.sourcePage && (
             <span className="text-[var(--text-tertiary)]">p.{topSuggestion.sourcePage}</span>
           )}
+          <ProvenanceChip carrier={topSuggestion} />
           <MiniButton
             variant="subtle"
             className="ml-auto"
@@ -1901,6 +1997,7 @@ function FieldCard({
         <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-2 py-1 text-[11px] text-[var(--text-secondary)]">
           <span className="font-medium">Original extracted text:</span>
           <span className="italic">{displayCandidateValue(field, original)}</span>
+          <ProvenanceChip carrier={detail} />
           {corrected && (
             <button
               type="button"
@@ -1943,6 +2040,7 @@ function FieldCard({
                           </span>
                         ) : null}
                       </span>
+                      <ProvenanceChip carrier={candidate} />
                       {candidate.sourceClause && (
                         <span className="mt-0.5 line-clamp-2 block text-[11px] text-[var(--text-tertiary)] italic">
                           “{candidate.sourceClause}”

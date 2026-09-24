@@ -1,5 +1,5 @@
 // Dashboard: dropzone + tender cards + demo loader + shred progress.
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   AlertTriangle,
   BadgeCheck,
@@ -14,6 +14,7 @@ import {
   MapPin,
   Monitor,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -48,6 +49,27 @@ import { deriveTenderReview, gateConflictingMeta, summarizeReview } from './Extr
 import { lifecycleCardSummary } from './TenderLifecyclePanel'
 import { Badge, Button, Spinner } from './ui'
 import { Dialog } from './Dialog'
+import type { ExtractionRejection } from '../../../shared/ai-extraction'
+import {
+  AI_EXTRACTION_RULES,
+  adaptAiExtraction,
+  checkDuplicateReference,
+  createVisionCompletion,
+  markModelReadPages,
+  mergeAiIntoReview,
+  runTenderAiPass,
+  settingsSupportVision,
+  type AiPassProgress,
+  type DuplicateReferenceCheck,
+  type TenderAiPassVision,
+} from '../ai/extract-with-ai'
+import {
+  createTendersCompletion,
+  readAiReadiness,
+  tendersAiBridge,
+  type AiReadiness,
+} from '../ai/transport'
+import { renderPageImage as renderPdfPageImage } from '../pdf/page-image'
 
 /**
  * The bundled sample RFP, in both document-relative (`./`) and root-relative
@@ -114,6 +136,452 @@ export function persistFailureReason(detail: string | null | undefined): string 
 
 let tenderSeq = 0
 
+// ── the optional AI pass ─────────────────────────────────────────────────────
+//
+// The local rule engine is what always runs: it is offline, needs no key, and
+// its result is committed and shown before a model is ever called. AI extraction
+// is an OPT-IN second reader, remembered between imports as a UI preference —
+// `localStorage`, the same place the workspace split already keeps its own
+// preference (`SPLIT_STORAGE_KEY` in `Workspace.tsx`), and deliberately NOT the
+// authoritative document: an extraction preference is not tender data, and a
+// preference that lived in the document would be a domain edit on a toggle.
+
+/** localStorage key for the opt-in AI-extraction preference. */
+export const AI_EXTRACTION_PREF_KEY = 'zanostack-tenders-ai-extraction'
+
+/** The slice of `Storage` the preference needs, so a test can supply its own. */
+export interface AiPreferenceStorage {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+function aiPreferenceStorage(): AiPreferenceStorage | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage
+  } catch {
+    // Storage unavailable (private mode / disabled): the toggle still works for
+    // this session, it just is not remembered.
+    return null
+  }
+}
+
+/** Read the remembered choice. Absent, unreadable or malformed means OFF. */
+export function readAiExtractionPreference(storage?: AiPreferenceStorage | null): boolean {
+  const store = storage === undefined ? aiPreferenceStorage() : storage
+  if (!store) return false
+  try {
+    const raw = store.getItem(AI_EXTRACTION_PREF_KEY)
+    if (!raw) return false
+    const parsed = JSON.parse(raw) as { enabled?: unknown }
+    return parsed?.enabled === true
+  } catch {
+    return false
+  }
+}
+
+/** Remember the choice for the next import. A failure here is non-fatal. */
+export function persistAiExtractionPreference(
+  enabled: boolean,
+  storage?: AiPreferenceStorage | null,
+): void {
+  const store = storage === undefined ? aiPreferenceStorage() : storage
+  if (!store) return
+  try {
+    store.setItem(AI_EXTRACTION_PREF_KEY, JSON.stringify({ enabled }))
+  } catch {
+    // Non-fatal: the toggle still applies to this session.
+  }
+}
+
+/** How many refusal reasons are shown before the rest are summarised. */
+const AI_REJECTION_PREVIEW_LIMIT = 3
+
+/** One surfaced AI message: what happened, and the reasons behind it. */
+interface AiNotice {
+  tone: 'info' | 'warn'
+  message: string
+  details?: string[]
+}
+
+/** Live progress of the AI pass: one entry per step, in the order it happens. */
+interface AiRunProgress {
+  phase: 'text' | 'vision-read' | 'vision-extract'
+  /** 0-based index within the phase */
+  index: number
+  /** how many units the phase has (chunks, or pages for a vision read) */
+  total: number
+  pageNumbers: number[]
+  chars: number
+}
+
+/**
+ * Shown when the configured model cannot be used to read an image. The pages
+ * without a text layer then cannot be read by AI at all, so the pass says so
+ * instead of quietly doing nothing with them.
+ */
+const IMAGE_READING_UNAVAILABLE_MESSAGE =
+  'The model you configured cannot be used to read an image.'
+
+function rejectionDetails(rejections: readonly ExtractionRejection[]): string[] {
+  const shown = rejections.slice(0, AI_REJECTION_PREVIEW_LIMIT).map((item) => item.reason)
+  const rest = rejections.length - shown.length
+  return rest > 0 ? [...shown, `…and ${rest} more.`] : shown
+}
+
+/**
+ * What the pass is doing right now, in one line a user can read.
+ *
+ * Every step names the reader. A phase label is still copy a user reads, so the
+ * scanned-page honesty guard (`tests/ocr-honesty-copy.test.ts`) polices it: the
+ * words "read"/"read it"/"extract" next to "scanned" would claim a page whose
+ * text was never obtained had been read, and the row this label sits in says AI
+ * extraction, so it says whose reading this is.
+ */
+export function aiRunLabel(run: AiRunProgress): string {
+  const step = `${Math.min(run.index + 1, Math.max(run.total, 1))} of ${Math.max(run.total, 1)}`
+  const pages = run.pageNumbers.length > 0 ? ` (${pageRangeLabel(run.pageNumbers)})` : ''
+  if (run.phase === 'vision-read') return `the model reading a page image, ${step}${pages}`
+  if (run.phase === 'vision-extract') return `chunk ${step} of what the model read${pages}`
+  return `chunk ${step}${pages}`
+}
+
+/** "pages 4–7" / "page 3" for a chunk's page range. */
+function pageRangeLabel(pageNumbers: readonly number[]): string {
+  if (pageNumbers.length === 0) return 'no pages'
+  const first = pageNumbers[0]
+  const last = pageNumbers[pageNumbers.length - 1]
+  if (pageNumbers.length === 1) return `page ${first}`
+  const contiguous = pageNumbers.every(
+    (page, index) => index === 0 || page === pageNumbers[index - 1] + 1,
+  )
+  return contiguous ? `pages ${first}–${last}` : `pages ${pageNumbers.join(', ')}`
+}
+
+// ── the AI pass's own state, reachable from wherever the user is ──────────────
+//
+// The pass is fire-and-forget and it enriches the tender that was just imported
+// — and importing ACTIVATES that tender, which unmounts this component for the
+// workspace view. State kept in a `useState` here was therefore gone before the
+// run had even started: the user turned AI on, imported, landed in the workspace
+// and could never see whether it ran, what it found, whether it failed, or cancel
+// it.
+//
+// So the run's state lives in this module-level store instead — plain data with
+// `subscribe`/`getSnapshot`, the shape the suite already uses for renderer-only
+// state (`packages/ui/src/ai-panel-prefs-store.ts`), readable by the list view
+// and by the workspace, and testable without a component harness.
+//
+// It is UI state and it stays UI state. Nothing here is written to the tender or
+// to the persisted document: `store.ts`'s `partialize` enumerates the keys that
+// are persisted and no key of this store is among them. A run's findings reach
+// the document only the way any other suggestion does — `updateTender` /
+// `setTenderReview`, as `unconfirmed` review material a person still has to
+// confirm.
+
+/** Where a run is: in flight, finished, or stopped without producing anything. */
+export type AiPassStatus = 'running' | 'done' | 'cancelled' | 'failed' | 'unavailable'
+
+/** What a finished run produced, refused, or could not do. */
+export interface AiPassOutcome {
+  /** One honest sentence describing what the pass produced. */
+  summary: string
+  /** Suggestions the core refused, with the reason. */
+  rejections: ExtractionRejection[]
+  /** Everything else worth saying (truncated pages, chunks that failed, …). */
+  warnings: string[]
+  /** Pages no reading method obtained — these still block readiness. */
+  unreadPages: number[]
+  /** Pages whose image a model actually read, ascending. */
+  readPages: number[]
+  /** Why no page image was read at all; null when one was. */
+  visionSkippedReason: string | null
+  /** Pages the model did not read, and why. */
+  visionUnread: { pageNumber: number; reason: string }[]
+  /** The model's strongest reference already belongs to another tender. */
+  duplicateReference: string | null
+}
+
+/** One run of the optional AI pass, as the UI needs to see it. */
+export interface AiPassState {
+  /** Which attempt this is. Updates from any other attempt are refused. */
+  runId: number
+  tenderId: string
+  tenderTitle: string
+  status: AiPassStatus
+  /** The step in flight, for `'running'`; null once the run has stopped. */
+  progress: AiRunProgress | null
+  /** What a finished run produced, for `'done'`; null otherwise. */
+  outcome: AiPassOutcome | null
+  /** Why the run produced nothing, for `'failed'` and `'unavailable'`. */
+  failure: string | null
+}
+
+let aiPassState: AiPassState | null = null
+let aiPassSeq = 0
+/** Aborts the run in flight; null when nothing is in flight. */
+let aiPassAbort: (() => void) | null = null
+const aiPassListeners = new Set<() => void>()
+
+function emitAiPass(next: AiPassState | null): void {
+  aiPassState = next
+  for (const listener of aiPassListeners) listener()
+}
+
+export function subscribeAiPass(listener: () => void): () => void {
+  aiPassListeners.add(listener)
+  return () => {
+    aiPassListeners.delete(listener)
+  }
+}
+
+/** The run's state, or null when there is nothing to report. */
+export function getAiPassState(): AiPassState | null {
+  return aiPassState
+}
+
+/** The same state as a React value; null means "nothing to report". */
+export function useAiPass(): AiPassState | null {
+  return useSyncExternalStore(subscribeAiPass, getAiPassState, () => null)
+}
+
+/**
+ * Start a run and make it visible. `cancel` is how the store stops the work: the
+ * pass owns its own `AbortController`, so the store holds only the handle.
+ */
+export function startAiPass(input: {
+  tenderId: string
+  tenderTitle: string
+  cancel?: () => void
+}): number {
+  aiPassSeq += 1
+  aiPassAbort = input.cancel ?? null
+  emitAiPass({
+    runId: aiPassSeq,
+    tenderId: input.tenderId,
+    tenderTitle: input.tenderTitle,
+    status: 'running',
+    progress: { phase: 'text', index: 0, total: 1, pageNumbers: [], chars: 0 },
+    outcome: null,
+    failure: null,
+  })
+  return aiPassSeq
+}
+
+/** The run this id still owns, or null when it has been stopped or superseded. */
+function liveAiPass(runId: number): AiPassState | null {
+  return aiPassState && aiPassState.runId === runId ? aiPassState : null
+}
+
+/** Report the step now in flight. A stopped or superseded run is ignored. */
+export function reportAiPassProgress(runId: number, progress: AiPassProgress): void {
+  const run = liveAiPass(runId)
+  if (!run || run.status !== 'running') return
+  emitAiPass({ ...run, progress: { ...progress, chars: 0 } })
+}
+
+/** Report text the model has streamed back so far within the current step. */
+export function reportAiPassChars(runId: number, chars: number): void {
+  const run = liveAiPass(runId)
+  if (!run || run.status !== 'running' || !run.progress) return
+  emitAiPass({ ...run, progress: { ...run.progress, chars } })
+}
+
+/**
+ * The run finished and produced `outcome`.
+ *
+ * Returns false — and records nothing — when the run was cancelled or superseded,
+ * which is how a stopped run can never apply a partial result: the caller gates
+ * every write on this answer, so the tender keeps exactly what the local engine
+ * produced.
+ */
+export function finishAiPass(runId: number, outcome: AiPassOutcome): boolean {
+  const run = liveAiPass(runId)
+  if (!run || run.status !== 'running') return false
+  aiPassAbort = null
+  emitAiPass({ ...run, status: 'done', progress: null, outcome, failure: null })
+  return true
+}
+
+/**
+ * The run stopped without producing anything: a failure, or a refusal to start
+ * (no model configured, a model that cannot read an image, no bridge).
+ */
+export function failAiPass(
+  runId: number,
+  message: string,
+  status: 'failed' | 'unavailable' = 'failed',
+): boolean {
+  const run = liveAiPass(runId)
+  if (!run || run.status !== 'running') return false
+  aiPassAbort = null
+  emitAiPass({ ...run, status, progress: null, outcome: null, failure: message })
+  return true
+}
+
+/**
+ * Stop the run in progress: abort the work, and record that nothing from it was
+ * applied.
+ *
+ * `runId` is given by the run's own unwinding path so a superseded attempt cannot
+ * cancel the attempt that replaced it; the UI omits it and stops whatever is
+ * actually in flight.
+ */
+export function cancelAiPass(runId?: number): boolean {
+  const run = aiPassState
+  if (!run || run.status !== 'running') return false
+  if (runId !== undefined && run.runId !== runId) return false
+  const abort = aiPassAbort
+  aiPassAbort = null
+  abort?.()
+  emitAiPass({ ...run, status: 'cancelled', progress: null, outcome: null, failure: null })
+  return true
+}
+
+/**
+ * Forget a stopped run's report. A run still in flight is not dismissable — the
+ * only way to end it is to cancel it, so the cancel control cannot be dismissed
+ * out from under a user who needs it.
+ */
+export function dismissAiPass(): void {
+  if (aiPassState?.status === 'running') return
+  aiPassAbort = null
+  emitAiPass(null)
+}
+
+/** What a stopped or finished run says in one line. */
+export function aiPassMessage(state: AiPassState): string {
+  switch (state.status) {
+    case 'done':
+      return state.outcome?.summary ?? ''
+    case 'cancelled':
+      return 'AI extraction was cancelled, so nothing from that run was applied. The local extraction is unchanged.'
+    case 'failed':
+      return `AI extraction failed: ${state.failure ?? 'no reason reported'}. The local extraction is unaffected.`
+    case 'unavailable':
+      return state.failure ?? ''
+    default:
+      return ''
+  }
+}
+
+/**
+ * Everything a finished run has to say, one line each: the refusals with their
+ * reasons, the warnings the adapter returned, a duplicate reference, and the
+ * pages no reader obtained. Pure, so the panel and the tests agree on the copy.
+ */
+export function aiPassDetails(state: AiPassState): string[] {
+  const outcome = state.outcome
+  if (!outcome) return []
+  const details: string[] = []
+  if (outcome.duplicateReference) details.push(outcome.duplicateReference)
+  details.push(...outcome.warnings)
+  details.push(...rejectionDetails(outcome.rejections))
+  for (const page of outcome.visionUnread) {
+    details.push(`Page ${page.pageNumber} was not read: ${page.reason}`)
+  }
+  if (outcome.unreadPages.length > 0) {
+    const count = outcome.unreadPages.length
+    details.push(
+      `${pageRangeLabel(outcome.unreadPages)} — no reader obtained the text, so ${
+        count === 1 ? 'it still blocks' : 'they still block'
+      } readiness.`,
+    )
+  }
+  return details
+}
+
+/**
+ * The AI pass's feedback, rendered from wherever the user is: the list view and
+ * the workspace both mount it, so turning AI on and importing cannot leave the
+ * run invisible. It renders nothing when there is nothing to report — with AI off
+ * the store is never written to at all, so this adds no UI and no extra render.
+ *
+ * `tenderId` scopes the report to the tender on screen: in the workspace,
+ * progress and findings for a document the user is not looking at would be
+ * feedback about the wrong tender. `className` carries the host's own spacing, so
+ * a host that has nothing to report gets no empty gap.
+ */
+export function AiPassPanel({ tenderId, className }: { tenderId?: string; className?: string }) {
+  const state = useAiPass()
+  const cancelAiRun = useCallback(() => {
+    cancelAiPass()
+  }, [])
+  if (!state) return null
+  if (tenderId !== undefined && state.tenderId !== tenderId) return null
+
+  if (state.status === 'running') {
+    const progress = state.progress
+    const chars = progress?.chars ?? 0
+    return (
+      <div
+        role="status"
+        data-testid="ai-extraction-progress"
+        className={`flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2.5 text-[12px] text-[var(--text-secondary)] ${className ?? ''}`}
+      >
+        <Loader2
+          size={14}
+          className="shrink-0 animate-spin text-[var(--accent)]"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1 leading-relaxed">
+          AI extraction — {progress ? aiRunLabel(progress) : 'starting'}
+          {chars > 0 ? `, ${chars} characters received` : ''}. The local extraction is already
+          saved; this only adds suggestions to the review.
+        </span>
+        <Button size="sm" variant="default" onClick={cancelAiRun}>
+          Cancel AI extraction
+        </Button>
+      </div>
+    )
+  }
+
+  const message = aiPassMessage(state)
+  const details = aiPassDetails(state)
+  if (message.length === 0 && details.length === 0) return null
+  // A refusal or a failure is a warning; a finished run that refused nothing and
+  // warned about nothing is information.
+  const warn =
+    state.status === 'failed' ||
+    state.status === 'unavailable' ||
+    (state.outcome?.rejections.length ?? 0) > 0 ||
+    (state.outcome?.warnings.length ?? 0) > 0
+  return (
+    <div
+      role={warn ? 'alert' : 'status'}
+      data-testid="intake-notice"
+      className={`flex flex-wrap items-start gap-2 rounded-lg border px-3 py-2.5 text-[12px] text-[var(--text-secondary)] ${
+        warn
+          ? 'border-[var(--warn-border)] bg-[var(--warn-bg)]'
+          : 'border-[var(--border)] bg-[var(--surface-subtle)]'
+      } ${className ?? ''}`}
+    >
+      {warn ? (
+        <AlertTriangle
+          size={14}
+          className="mt-0.5 shrink-0 text-[var(--warn)]"
+          aria-hidden="true"
+        />
+      ) : (
+        <Sparkles size={14} className="mt-0.5 shrink-0 text-[var(--accent)]" aria-hidden="true" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="leading-relaxed">{message}</p>
+        {details.length > 0 && (
+          <ul className="mt-1.5 list-disc space-y-0.5 pl-4 leading-relaxed">
+            {details.map((detail) => (
+              <li key={detail}>{detail}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <Button size="sm" variant="ghost" onClick={dismissAiPass}>
+        Dismiss
+      </Button>
+    </div>
+  )
+}
+
 async function shredFile(
   file: File,
   signal: AbortSignal,
@@ -127,11 +595,25 @@ async function shredFile(
    * value is a plain-language reason, never the raw store/I-O error.
    */
   persistError: string | null
+  /**
+   * The reference number the parser read already belongs to another tender in
+   * this workspace. The record was imported with `referenceNumber: null` and the
+   * value is kept in the review annotation instead; `message` says so in plain
+   * language (null when there is no collision).
+   */
+  duplicateReference: DuplicateReferenceCheck
+  /**
+   * The parsed document. Handed back ONLY so the optional AI pass can render a
+   * page that has no text layer — the caller owns releasing it (`cleanup()`), so
+   * a document whose import fails or whose pass never runs is not left open.
+   */
+  doc: Awaited<ReturnType<typeof loadPdfDocument>>
 }> {
   const setShredding = useTendersStore.getState().setShredding
   const throwIfAborted = (): void => {
     if (signal.aborted) throw new PdfImportCancelledError()
   }
+  let openedDoc: Awaited<ReturnType<typeof loadPdfDocument>> | null = null
   try {
     // Preflight BEFORE reading the file buffer.
     assertPdfBytesWithinLimit(file.size)
@@ -139,6 +621,7 @@ async function shredFile(
     throwIfAborted()
     const buf = await file.arrayBuffer()
     const doc = await loadPdfDocument(buf)
+    openedDoc = doc
 
     // Page-count preflight BEFORE any page is read or rendered.
     assertPdfPagesWithinLimit(doc.numPages)
@@ -260,6 +743,16 @@ async function shredFile(
     // unambiguous. Competing candidates stay in the review step for resolution
     // instead of one of them silently deciding the deadline/method/destination.
     const gated = gateConflictingMeta(meta)
+    // The same rule for the reference number, for a different reason: the schema
+    // refuses the ENTIRE document when two tenders carry the same non-null
+    // reference, so a re-import (or an RFP lifted from the same source twice)
+    // must not write it to the record. The value is not lost — the review step
+    // still shows it as the parser's own extraction, and `handleFile` says why
+    // the tender's own reference was left blank.
+    const duplicateReference = checkDuplicateReference(
+      meta.referenceNumber,
+      useTendersStore.getState().tenders,
+    )
     const record = buildTenderRecord(
       `t-${Date.now()}-${tenderSeq++}`,
       file.name,
@@ -268,7 +761,7 @@ async function shredFile(
       requirements,
       meta.title,
       {
-        referenceNumber: meta.referenceNumber,
+        referenceNumber: duplicateReference.message === null ? meta.referenceNumber : null,
         issuingBody: meta.issuingBody,
         closingDate: gated.closingDate,
         submissionMethod: gated.submissionMethod,
@@ -283,8 +776,13 @@ async function shredFile(
       extraction: ex,
       meta,
       persistError,
+      duplicateReference,
+      doc,
     }
   } catch (err) {
+    // Nothing will render from a document whose import failed, so release it
+    // here rather than leaving it open for the life of the window.
+    void openedDoc?.cleanup().catch(() => {})
     if (err instanceof PdfImportCancelledError) {
       // Clean cancellation: no tender is added, no partial state is kept.
       setShredding(null)
@@ -331,6 +829,224 @@ export function TenderList() {
   const importAbortRef = useRef<AbortController | null>(null)
   const lastImportFileRef = useRef<File | null>(null)
 
+  // ── the optional AI pass ───────────────────────────────────────────────────
+  // OFF unless the user turned it on, and remembered between imports (see
+  // `readAiExtractionPreference`). `aiReadiness` answers "can it be offered at
+  // all?" — with no model configured the toggle is not shown silently, the
+  // reason is stated instead.
+  const [aiEnabled, setAiEnabled] = useState<boolean>(() => readAiExtractionPreference())
+  const [aiReadiness, setAiReadiness] = useState<AiReadiness | null>(null)
+  // The AI pass's own progress, outcome and cancel handle live in the module-level
+  // store above, NOT here: importing a tender activates it, which unmounts this
+  // component, so state kept here would be gone before the run it describes.
+  // `intakeNotice` is left for the one intake message that is not the AI pass's:
+  // a reference number the parser read that already belongs to another tender.
+  const [intakeNotice, setIntakeNotice] = useState<AiNotice | null>(null)
+  const aiAbortRef = useRef<AbortController | null>(null)
+  // Read by the import callback without re-creating it on every toggle.
+  const aiEnabledRef = useRef(aiEnabled)
+  aiEnabledRef.current = aiEnabled
+
+  useEffect(() => {
+    let alive = true
+    const refresh = (): void => {
+      void readAiReadiness().then((readiness) => {
+        if (alive) setAiReadiness(readiness)
+      })
+    }
+    refresh()
+    // The settings surface lives in the shell, so a model configured while this
+    // view is open is picked up when the user comes back to it — otherwise the
+    // opt-in would stay hidden until a reload.
+    window.addEventListener('focus', refresh)
+    return () => {
+      alive = false
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+
+  const toggleAiExtraction = useCallback((enabled: boolean) => {
+    setAiEnabled(enabled)
+    persistAiExtractionPreference(enabled)
+    if (!enabled) aiAbortRef.current?.abort()
+  }, [])
+
+  /**
+   * The additive AI pass, started AFTER the local result is committed and shown.
+   *
+   * It is never awaited by the import path: a slow, failed or cancelled model
+   * call cannot delay the tender, and it cannot remove anything the local engine
+   * found. Whatever it does produce lands in the review step as suggestions —
+   * `unconfirmed`, `suggestedBy: 'ai'` — and its refusals, warnings and the
+   * duplicate-reference case are reported rather than swallowed.
+   *
+   * It also owns the pages without a text layer: each one the parser flagged
+   * `needsOcr` is rendered to an image and handed to the model, and the page is
+   * recorded `ai-extracted` ONLY when a reading of it actually came back. A model
+   * that cannot read an image, a render that fails and a cancelled run all leave
+   * those pages blocking exactly as they were.
+   */
+  const runAiPass = useCallback(
+    async (args: {
+      tenderId: string
+      fileName: string
+      tenderTitle: string
+      extraction: Awaited<ReturnType<typeof extractAllPages>>
+      doc: Awaited<ReturnType<typeof loadPdfDocument>>
+    }): Promise<void> => {
+      // The run is made visible BEFORE anything can refuse it: "no model
+      // configured" is one of the outcomes the user has to be able to see, and a
+      // refusal recorded after the fact is a refusal nobody reads.
+      aiAbortRef.current?.abort()
+      const controller = new AbortController()
+      aiAbortRef.current = controller
+      const runId = startAiPass({
+        tenderId: args.tenderId,
+        tenderTitle: args.tenderTitle,
+        cancel: () => controller.abort(),
+      })
+      try {
+        const bridge = tendersAiBridge()
+        const readiness = await readAiReadiness(bridge)
+        setAiReadiness(readiness)
+        if (!readiness.ready) {
+          failAiPass(runId, readiness.message, 'unavailable')
+          return
+        }
+        // Readiness can only be `ready` with a bridge in hand; this is what tells
+        // the compiler so.
+        if (!bridge) {
+          failAiPass(runId, 'AI extraction is unavailable in this build.', 'unavailable')
+          return
+        }
+        // A model that cannot take an image is not asked to: the pages without a
+        // text layer then keep blocking, and the pass says why.
+        const vision: TenderAiPassVision = settingsSupportVision(readiness.settings)
+          ? {
+              available: true,
+              completion: createVisionCompletion({
+                bridge,
+                settings: readiness.settings,
+                onProgress: (progress) => reportAiPassChars(runId, progress.chars),
+              }),
+              renderPageImage: (pageNumber) =>
+                renderPdfPageImage(args.doc, pageNumber, { signal: controller.signal }),
+            }
+          : { available: false, reason: IMAGE_READING_UNAVAILABLE_MESSAGE }
+        try {
+          const completion = createTendersCompletion({
+            bridge,
+            settings: readiness.settings,
+            onProgress: (progress) => reportAiPassChars(runId, progress.chars),
+          })
+          const pass = await runTenderAiPass({
+            completion,
+            pages: args.extraction.pages.map((page) => ({
+              pageNumber: page.pageNumber,
+              text: page.text,
+              needsOcr: page.needsOcr,
+            })),
+            numPages: args.extraction.numPages,
+            rules: AI_EXTRACTION_RULES,
+            fileName: args.fileName,
+            tenderTitle: args.tenderTitle,
+            signal: controller.signal,
+            vision,
+            onProgress: (progress) => reportAiPassProgress(runId, progress),
+          })
+          if (controller.signal.aborted) {
+            // Either the user cancelled or a newer import superseded this run. The
+            // store already recorded that, and `cancelAiPass` is given this run's
+            // id so a superseded attempt cannot cancel the one that replaced it.
+            cancelAiPass(runId)
+            return
+          }
+          // Read the tender back from the store: the user may have removed a
+          // requirement (or the tender) while the model was working.
+          const state = useTendersStore.getState()
+          const tender = state.tenders.find((candidate) => candidate.id === args.tenderId)
+          if (!tender) {
+            failAiPass(
+              runId,
+              'the tender this run was for is no longer in the workspace, so nothing was applied',
+            )
+            return
+          }
+          const adaptation = adaptAiExtraction({
+            merged: pass.merged,
+            existingRuleKeys: tender.requirements.map((requirement) => requirement.ruleKey),
+            existingTenders: state.tenders,
+            tenderId: args.tenderId,
+            visionSummary: pass.vision.summary,
+          })
+          // The store decides whether this run may still report. A run cancelled or
+          // superseded between the model answering and here is refused, so a
+          // stopped run can never write a partial result into the tender.
+          const accepted = finishAiPass(runId, {
+            summary: adaptation.summary,
+            rejections: adaptation.rejections,
+            warnings: adaptation.warnings,
+            unreadPages: adaptation.unreadPages,
+            readPages: pass.vision.readPages,
+            visionSkippedReason: pass.vision.skippedReason,
+            visionUnread: pass.vision.unread,
+            duplicateReference: adaptation.duplicateReference?.message ?? null,
+          })
+          if (!accepted) return
+          if (adaptation.requirements.length > 0) {
+            // AI rows go through the same vault gap analysis as the parser's, so a
+            // suggestion is matched against the vault exactly like a parsed rule.
+            const vaultIndex = buildVaultKeywordIndex(state.vault)
+            const added: RequirementRecord[] = applyGapToRequirementsIndexed(
+              adaptation.requirements.map((requirement) => ({
+                ...requirement,
+                status: 'OUTSTANDING' as const,
+                linkedVaultDocId: null,
+                reason: null,
+                suggestedVaultDocIds: [],
+              })),
+              vaultIndex,
+            )
+            updateTender(args.tenderId, { requirements: [...tender.requirements, ...added] })
+          }
+          const review = useTendersStore.getState().tenderReviews[args.tenderId]
+          if (review) {
+            // The page states are written from the vision pass's own per-page
+            // result, never from what the model said about itself: a page is
+            // marked `ai-extracted` only where a reading of its image came back,
+            // and only where the parser had flagged it `needsOcr`.
+            const withPages = review.pages
+              ? {
+                  ...review,
+                  pages: markModelReadPages(review.pages, {
+                    scannedPages: pass.vision.scannedPages,
+                    readPages: pass.vision.readPages,
+                  }),
+                }
+              : review
+            setTenderReview(args.tenderId, mergeAiIntoReview(withPages, adaptation))
+          }
+        } catch (error) {
+          // Nothing is discarded: the local extraction is already committed, and
+          // this only adds a visible reason why the AI pass produced nothing. A
+          // run that was already stopped keeps its own state — a cancelled run
+          // cannot be relabelled as a failure, nor the other way round.
+          failAiPass(runId, error instanceof Error ? error.message : String(error))
+        } finally {
+          // Only the run that still owns the ref clears it: a second import
+          // supersedes this one, and the newer run must survive this one's
+          // unwinding.
+          if (aiAbortRef.current === controller) aiAbortRef.current = null
+        }
+      } finally {
+        // The parsed document was handed over only so a scanned page could be
+        // rendered, and every path through this pass is done with it.
+        void args.doc.cleanup().catch(() => {})
+      }
+    },
+    [setTenderReview, updateTender],
+  )
+
   const cancelImport = useCallback(() => {
     importAbortRef.current?.abort()
   }, [])
@@ -347,7 +1063,7 @@ export function TenderList() {
       importAbortRef.current?.abort()
       importAbortRef.current = controller
       try {
-        const { record, extraction, meta, persistError } = await shredFile(
+        const { record, extraction, meta, persistError, duplicateReference, doc } = await shredFile(
           file,
           controller.signal,
           options?.dataOrigin,
@@ -375,6 +1091,32 @@ export function TenderList() {
           }),
         )
         setActiveTender(record.id)
+        // A reference number that already belongs to another tender is kept in
+        // review rather than written to the record (the schema refuses the whole
+        // document on a duplicate), so say so instead of letting every autosave
+        // fail with a path-shaped schema error. This is intake feedback, not the
+        // AI pass's, so it stays in this view's own state — it is reported at the
+        // moment of the import, alongside the card it belongs to.
+        if (duplicateReference.message !== null) {
+          setIntakeNotice({ tone: 'warn', message: duplicateReference.message })
+        }
+        // The local result is committed and visible; the AI pass starts now and is
+        // deliberately not awaited. It reports itself through the store above, so
+        // the workspace — which this call is about to switch to — can show the
+        // progress, the findings and the cancel control too.
+        if (aiEnabledRef.current) {
+          void runAiPass({
+            tenderId: record.id,
+            fileName: record.fileName,
+            tenderTitle: record.title,
+            extraction,
+            doc,
+          })
+        } else {
+          // Nothing will render from it: release the parsed document now rather
+          // than leaving it open for the life of the window.
+          void doc.cleanup().catch(() => {})
+        }
         return record.id
       } catch (err) {
         if (err instanceof PdfImportCancelledError) {
@@ -393,7 +1135,7 @@ export function TenderList() {
         if (importAbortRef.current === controller) importAbortRef.current = null
       }
     },
-    [addTender, setActiveTender, setShredding, setTenderReview],
+    [addTender, runAiPass, setActiveTender, setShredding, setTenderReview],
   )
 
   /** Retry persisting the RFP that previously fell back to a session blob. */
@@ -608,13 +1350,64 @@ export function TenderList() {
                   <FileText size={15} /> Load demo RFP
                 </Button>
               </div>
+              {/* The claim that shipped here ("100% local processing — your
+                  documents never leave this computer") stopped being true the
+                  moment a model could be asked to read the document, so the
+                  exception is stated in the same sentence as the claim. */}
               <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                100% local processing — your documents never leave this computer.
+                The local rule engine runs on this machine, offline, and is always available.
+                Nothing is uploaded unless you turn on AI extraction, which sends the document to
+                the model provider you configured.
               </p>
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                 Import limits: up to {PDF_PREFLIGHT_LIMITS.maxPages} pages ·{' '}
                 {formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes)} per PDF.
               </p>
+              {/* Optional AI extraction: off unless the user turns it on, and
+                  remembered between imports. Offered only when a model is
+                  actually configured — otherwise the reason is stated plainly
+                  instead of a toggle that could only fail. */}
+              <div className="mt-4 flex flex-col items-center gap-1.5">
+                {aiReadiness?.ready === true ? (
+                  <>
+                    <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
+                      <input
+                        type="checkbox"
+                        checked={aiEnabled}
+                        onChange={(e) => toggleAiExtraction(e.target.checked)}
+                        data-testid="ai-extraction-toggle"
+                        className="size-3.5 cursor-pointer accent-[var(--accent)]"
+                      />
+                      <Sparkles size={13} className="text-[var(--accent)]" aria-hidden="true" />
+                      AI extraction (optional)
+                    </label>
+                    <p className="max-w-md text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                      The local rule engine always runs first, offline. With this on, the model
+                      provider you configured in Settings is also asked to suggest extra
+                      requirements and metadata — the document's text is sent to that provider, and
+                      so is a scanned page's image when that model can read one. Everything it
+                      returns is unconfirmed until you confirm it. You can cancel a run at any time.
+                    </p>
+                    {!settingsSupportVision(aiReadiness.settings) && (
+                      <p
+                        data-testid="ai-extraction-no-vision"
+                        className="max-w-md text-[11px] leading-relaxed text-[var(--warn)]"
+                      >
+                        {IMAGE_READING_UNAVAILABLE_MESSAGE}, so pages without a text layer will not
+                        be read by AI and will keep blocking readiness until you review them
+                        yourself.
+                      </p>
+                    )}
+                  </>
+                ) : aiReadiness ? (
+                  <p
+                    data-testid="ai-extraction-unavailable"
+                    className="max-w-md text-[11px] leading-relaxed text-[var(--text-tertiary)]"
+                  >
+                    {aiReadiness.message}
+                  </p>
+                ) : null}
+              </div>
             </>
           )}
           <input
@@ -637,6 +1430,58 @@ export function TenderList() {
             </p>
           )}
         </section>
+
+        {/* The AI pass runs only AFTER the local result is committed and shown,
+            so this never blocks the tender from appearing — and it can be
+            cancelled mid-run. The panel reads the module-level store rather than
+            this component's state, so the same progress row, the same cancel
+            control and the same findings are on screen in the workspace too:
+            importing activates the tender, which unmounts this component. */}
+        <AiPassPanel className="mt-4" />
+
+        {/* The one intake message that is not the AI pass's: a reference number the
+            parser read that already belongs to another tender. It has its own
+            testid because the AI pass's outcome notice can be on screen at the
+            same time, and two elements answering to one testid are not
+            addressable. */}
+        {intakeNotice && (
+          <div
+            role={intakeNotice.tone === 'warn' ? 'alert' : 'status'}
+            data-testid="intake-reference-notice"
+            className={`mt-4 flex flex-wrap items-start gap-2 rounded-lg border px-3 py-2.5 text-[12px] text-[var(--text-secondary)] ${
+              intakeNotice.tone === 'warn'
+                ? 'border-[var(--warn-border)] bg-[var(--warn-bg)]'
+                : 'border-[var(--border)] bg-[var(--surface-subtle)]'
+            }`}
+          >
+            {intakeNotice.tone === 'warn' ? (
+              <AlertTriangle
+                size={14}
+                className="mt-0.5 shrink-0 text-[var(--warn)]"
+                aria-hidden="true"
+              />
+            ) : (
+              <Sparkles
+                size={14}
+                className="mt-0.5 shrink-0 text-[var(--accent)]"
+                aria-hidden="true"
+              />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="leading-relaxed">{intakeNotice.message}</p>
+              {intakeNotice.details && intakeNotice.details.length > 0 && (
+                <ul className="mt-1.5 list-disc space-y-0.5 pl-4 leading-relaxed">
+                  {intakeNotice.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => setIntakeNotice(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
 
         {/* The import succeeded but the PDF is not durable — visible, retryable. */}
         {storageWarning && (

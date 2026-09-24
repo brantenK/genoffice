@@ -132,7 +132,16 @@ Also exported from `shared/ipc.ts`:
 version bump; a document without it still validates exactly as before). It holds the
 extraction-review state: per readiness-critical field a state plus the chosen value and the
 original extracted candidate(s) (provenance), requirement-review annotations, and per-page
-extraction state (`native | ocr-required | ocr-unavailable | ocr-failed | manually-reviewed`).
+extraction state (`native | ocr-required | ocr-unavailable | ocr-failed | manually-reviewed |
+ai-extracted` — `ai-extracted` is the optional AI extraction pass, §5a).
+
+An additive optional marker also rides on the review records: `suggestedBy?: 'parser' | 'ai'`
+(`ValueProvenance`) on `FieldReview`, `ReviewCandidate` and `ExtractedRequirement` /
+`RequirementRecord`, so a value a model suggested is never presented as the local parser's own
+read. Absent means `'parser'` — decided in exactly one place, `valueProvenance(carrier)`, and
+the schema accepts only the closed set `VALUE_PROVENANCES` (`parser`, `ai`), rejecting an
+unrecognised origin rather than coercing it. Provenance is never a review decision: it does not
+change `state`.
 
 `TenderRecord.dataOrigin?: 'demo'` is a **second** additive optional field on the same terms
 (no version bump; absent still validates) — see the demo-identity exception in §1. Only
@@ -146,10 +155,14 @@ score weight **0**.
 - The `intake-review` check is added **only when `intakeVerification` is present**.
 - The `page-extraction` check is **fail-closed**: it is added when `intakeVerification`
   exists **or** when the authoritative `TenderRecord.ocrPages > 0` is not covered by an
-  individual `manually-reviewed` page state (`unprovenOcrPageCount(tender) > 0`). This closes
-  the v1→v2 migration false-clear: a migrated tender with unreadable pages and no page state
-  is blocked (fail-closed) until each page is reviewed. With `ocrPages === 0`/absent and no
-  review, no page check is added and readiness is byte-identical to pre-Phase-3.
+  individual page state whose content was obtained (`unprovenOcrPageCount(tender) > 0`). This
+  closes the v1→v2 migration false-clear: a migrated tender with unreadable pages and no page
+  state is blocked (fail-closed) until each page is reviewed. With `ocrPages === 0`/absent and
+  no review, no page check is added and readiness is byte-identical to pre-Phase-3.
+- What clears a page is its **content being obtained**, never a confirmation — one predicate,
+  `pageContentObtained(state)` in `shared/types.ts`: `native`, `manually-reviewed` and
+  `ai-extracted` are content-obtained; `ocr-required`, `ocr-unavailable` and `ocr-failed` are
+  not. A page no method obtained still blocks readiness (§5a).
 
 Review and page state are authoritative (persisted through the v2 store); the legacy
 `zanostack-tenders-review-v1` localStorage key is purged and never written.
@@ -214,6 +227,10 @@ preload pass-throughs (`onCloseFlushRequest`, `reportCloseFlush`, `listDocumentT
 `cleanupDocumentTrash`, `listRecoveryCandidates` / `restoreRecoveryCandidate`), and the
 document channels (`saveDocument` / `readDocument` / `openDocument` / `deleteDocument`) are
 wired too — validation, trust and path confinement all stay in main.
+
+The optional AI extraction pass adds **no channel and no handler** to this list: it goes
+through the shell's own `ai:*` channels (`AI_CHANNELS`), which Tenders only mirrors in the
+preload. See §5a.
 
 Authorization (applies to **all 23 privileged handlers**, each calling `isTrustedTendersEvent`
 **directly** — there is no central wrapper):
@@ -292,6 +309,12 @@ Files: `apps/tenders/src/shared/readiness.ts`, `apps/tenders/src/shared/rules.ts
   or file-less linked evidence; expiry/certification unknown; missing company details
   demanded by mandatory applicable requirements; invalid/unparseable dates; unchecked
   signatures; unknown or past deadline.
+- Additively (score weight **0**, §1a): unconfirmed readiness-critical fields / unresolved
+  competing candidates, and pages whose content was never obtained. The page gate's predicate
+  is `pageContentObtained` — a page a model read (`ai-extracted`) is content-obtained, so it
+  stops blocking **that** gate, while every value lifted from it stays an unconfirmed model
+  suggestion and blocks through the review gate instead (§5a). No AI output can clear the
+  review gate.
 - `NOT_APPLICABLE` resolves only with a dedicated `notApplicableReason` (never the generic
   automated `reason`); a valid N/A skips evidence and company checks.
 - `parseClosingDate` accepts strict RFC 3339 (with timezone) plus ISO civil, day-first
@@ -345,6 +368,312 @@ Files: `apps/tenders/src/main/proposal-generator.ts`,
   the locale parameterised and an `en-ZA` fallback (`safeMoneyLocale` rejects any locale
   `Intl.NumberFormat` cannot parse). Blockers are deduplicated by stable IDs; `Cf` controls
   stripped; Markdown table cells escaped.
+
+## 5a. AI extraction (optional, additive — a deliberate boundary change)
+
+The owner decided that Tenders may offer **optional AI extraction** alongside the local rule
+engine, to raise extraction accuracy and to read scanned pages. It is additive in every
+direction: the local engine stays the offline, always-available default, and with no API key
+(or no network) the app behaves exactly as it did before this feature existed. The boundary this
+changes — and what stays forbidden — is recorded in `README.md` ("Product-boundary reminder")
+and `fork/COMPLIANCE.md`.
+
+Files:
+
+- `apps/tenders/src/shared/ai-extraction.ts` — the pure core: availability, chunking, prompt,
+  defensive parsing, per-bound validation, merge, pipeline, and the vision read's prompt and reply
+  parser. It imports nothing but `./types` (pinned by its test): no `node:*`, no `electron`, no
+  `@genoffice/ai-provider`, no `fetch`; no clock, no randomness, no locale.
+- `apps/tenders/src/renderer/src/ai/transport.ts` — the transport: it builds the core's injected
+  call on the shared bridge, and is the one place the renderer reaches a model.
+- `apps/tenders/src/renderer/src/ai/extract-with-ai.ts` — the adapter: the rule catalogue
+  projection, the translation of a core suggestion into `ReviewCandidate` /
+  `ExtractedRequirement` (`suggestedBy: 'ai'`), the duplicate-reference check, the fold into
+  `intakeVerification`, and the vision pass (`runTenderAiPass`, `markModelReadPages`,
+  `createVisionCompletion`, `settingsSupportVision`).
+- `apps/tenders/src/renderer/src/pdf/page-image.ts` — one PDF page rendered to a downscaled image
+  for a model to read (the vision lane, below).
+- `apps/tenders/tests/ai-extraction.test.ts` — the core's behaviour guard; the model call is a
+  deterministic double, so the whole file runs with no network.
+- `apps/tenders/tests/ai-extraction-adapter.test.ts` — the adapter's guard: the translation,
+  the candidate merge, the review fold, and the credential-rule delegation to the core.
+- `apps/tenders/tests/ai-vision.test.ts` — the vision lane: page images, the read prompt and
+  reply, the capability gate, the completion on the bridge, and the pass itself.
+- `apps/tenders/tests/ai-pass-visibility.test.ts` — the pass store: visibility, the cancel /
+  supersede refusals, and that its state adds no persisted key.
+- `apps/tenders/tests/ai-e2e-contract.test.ts` and `e2e/tenders-ai-extraction.spec.ts` (with
+  `e2e/tenders-ai-fixtures.ts`) — the contract the four e2e journeys assert on disk, and the
+  journeys themselves over a local fake provider: AI off contacts nothing, AI on lands a marked
+  unconfirmed suggestion, a failing/malformed reply degrades to the local extraction, and an
+  interrupted run leaves a usable tender and writes nothing.
+- `apps/tenders/tests/ai-honesty-copy.test.ts` and `tests/ocr-honesty-copy.test.ts` — the copy
+  guards (see the honesty rules below).
+
+### The channels are the shell's; Tenders registers none
+
+`AI_CHANNELS` (`shared/ipc.ts`): `ai:get-settings`, `ai:stream`, `ai:stream-chunk`,
+`ai:stream-cancel`. `ipcMain.handle` for every one is registered **once for the whole suite** by
+`registerAiIpc()` (the docs app's function, called at module scope in
+`apps/shell/src/main/index.ts`), and Tenders runs as a WebContentsView inside that same process —
+so a second `ipcMain.handle` on any of them throws
+("Attempted to register a second handler for 'ai:stream'"). Tenders therefore registers **zero**
+AI handlers, and §3's handler count stays **23**.
+
+Preload pass-throughs (`TendersApi`, `apps/tenders/src/preload/index.ts`):
+
+| member                                                            | channel                                        |
+| ----------------------------------------------------------------- | ---------------------------------------------- |
+| `getAiSettings(): Promise<AiSettings>`                            | `ai:get-settings` (invoke)                     |
+| `aiStream(request: AiStreamRequest): Promise<void>`               | `ai:stream` (invoke)                           |
+| `aiStreamCancel(requestId: string): Promise<void>`                | `ai:stream-cancel` (invoke)                    |
+| `onAiStream(handler: (chunk: AiStreamChunk) => void): () => void` | `ai:stream-chunk` (on; returns an unsubscribe) |
+
+`AiSettings` / `AiStreamRequest` / `AiStreamChunk` are the canonical types from
+`@genoffice/ai-provider`, re-exported by `shared/ipc.ts` as **type-only** imports (erased by the
+bundler), so the wire shape is never restated and no Node-backed transport reaches the renderer
+bundle through them. The settings the shell returns have already been through `activeProvider`;
+the renderer passes the whole object back per request, main injects the key, and the renderer
+never handles a key itself.
+
+### The injected completion seam
+
+```ts
+type AiCompletion = (args: { system: string; user: string; signal?: AbortSignal }) => Promise<string>
+
+runAiExtraction(input: AiExtractionRunInput): Promise<AiExtractionRun> // { merged, outcomes }
+```
+
+The core never knows which provider answered: a caller wraps `chatForProvider` /
+`streamForProvider`, or passes a test double. A chunk whose call throws, or whose reply cannot be
+read, is recorded in `outcomes` with an error and its pages stay unread — the run still returns
+every other chunk's output, which is what makes the pass additive: nothing a model does can
+remove or weaken the local engine's result.
+
+### Provenance — a model suggestion is never the parser's own read
+
+- `ValueProvenance = 'parser' | 'ai'` and `valueProvenance(carrier)` are the only place "absent
+  means parser" is decided (§1a); the schema accepts only that closed set.
+- The core marks its own output: `AI_SUGGESTION_PROVENANCE = 'ai-suggested'`, `markProvenance()`
+  (additive, non-mutating, idempotent), `isAiSuggested()`.
+- Every suggestion `validateSuggestions` / `mergeExtractionChunks` returns carries the marker, and
+  the renderer's adaptation translates it to the schema's `'ai'` — `toReviewCandidate` and
+  `toExtractedRequirement` name every member rather than spreading, because the schema rejects
+  unknown keys document-wide.
+- The marker is **visible**, not a tooltip: `ExtractionReview.tsx` renders `AI_SUGGESTION_LABEL`
+  = `'AI-suggested'` as its own always-visible chip with its own icon, on the field, on each
+  candidate and on each requirement — and only for `'ai'`, so a parser value never wears it.
+  `ai-e2e-contract.test.ts` pins the marker the e2e journeys assert against that label.
+
+### No AI output may ever write `confirmed` — the standing rule
+
+Three independent places enforce it, and none may be relaxed:
+
+1. `AI_SUGGESTION_REVIEW_STATE = 'unconfirmed'` is the only review state the core can return
+   (`MergedExtraction.reviewState`).
+2. `deriveTenderReview` (renderer `ExtractionReview.tsx`) writes `state: 'unconfirmed'` for every
+   field it builds; only a human action moves a field out of it.
+3. The schema's review states are decisions, not provenance: `suggestedBy` records who produced a
+   value and never changes `state`.
+
+Consequence: a model-suggested value blocks readiness until a human confirms it — so an
+`ai-extracted` page clears the **page** gate while the values lifted from it still block through
+the **review** gate.
+
+### The page status, the method and the readiness rule
+
+- `PageExtractionStatus` gained `'ai-extracted'`; the `method` such a page records is
+  `AI_VISION_METHOD = 'ai-vision'` (`shared/types.ts`). `method` stays an open string for
+  backward compatibility with already-stored documents, so that constant — not a type — is what
+  makes the reader unambiguous.
+- `pageContentObtained(state)` is the single predicate (§1a). `unreviewedOcrPages` and
+  `unprovenOcrPageCount` both use it, and `ai-extracted` counts as proof that one unreadable page
+  was resolved — so the page gate stops blocking, while `TenderRecord.ocrPages` (the parser's own
+  count) is never rewritten by a model read.
+- A page whose text was never obtained still blocks readiness: `MergedExtraction.unreadPages` is
+  the complement of `pagesRead` (`{ pageNumber, method: 'native-text' | 'ai-vision', chunkIndex }`),
+  and a page with no text layer is never sent as text — it is either read as an image or left
+  unread.
+- The status is deliberately neither `native` (which claims the page has its own text layer) nor
+  `manually-reviewed` (which claims a person read it): the content is available, nothing on it is
+  confirmed. The renderer labels it "Model-read", gives it a non-human tone, and shows a model
+  read's confidence as "model confidence", never "text confidence".
+
+### The vision lane — reading a page that has no text layer
+
+The local engine cannot read a page with no text layer, so such a page is either handed to a
+model as an **image** or left unread (and an unread page keeps blocking, §4).
+
+- `renderer/src/pdf/page-image.ts` — `renderPageImage(doc, pageNumber, options)`: one page of an
+  already-parsed `PDFDocumentProxy`, rendered to a downscaled JPEG (`PAGE_IMAGE_MIME`,
+  `DEFAULT_PAGE_IMAGE_MAX_EDGE` = 1500 px on the longest edge, `DEFAULT_PAGE_IMAGE_QUALITY` = 0.7)
+  and returned as raw base64 with no `data:` prefix — the wire shape. Cost is what the cap is for:
+  a native-resolution scan is an order of magnitude more tokens for text a model reads just as
+  well. `pageImageSize` is pure (caps the longest edge, preserves the aspect ratio, never
+  upscales); `decodeDataUrl` takes the mime from the encoder, so the declared type can never
+  disagree with the bytes. Failure is per page and typed — `PageImageError` with
+  `INVALID_OPTION | NO_CANVAS | RENDER_FAILED | ENCODE_FAILED | CANCELLED`, whose message is safe
+  to show as that page's reason — never a blank or full-size image, and `page.cleanup()` always
+  runs. Only pdf.js **types** are imported (the caller passes the document it parsed), so this
+  module runs in a plain jsdom test. The canvas is painted white first: a PDF page is transparent
+  wherever it has no content and a JPEG has no alpha channel, so an unpainted canvas would encode
+  those areas black.
+- `renderer/src/ai/extract-with-ai.ts` — `runTenderAiPass` is the whole pass: the text chunks,
+  then `readScannedPages`, then **one** merge of both. `settingsSupportVision(settings)` mirrors
+  the slides renderer's own gate (provider capabilities, then `modelLacksVision`) and withholds a
+  vision read that would fail, because a page then keeps blocking and the caller says why, whereas
+  attempting it would spend the user's tokens to learn nothing. `createVisionCompletion` builds
+  the read on the shared bridge by passing the page image through `createTendersCompletion`'s own
+  optional `images` argument, which puts it on the request's last user message — so the stream
+  lifecycle (one listener, both watchdogs, the reply ceiling, `stopReason`) stays the one
+  `createTendersCompletion` implementation and no second copy exists to drift. `AiVisionCompletion` is deliberately a **different type** from the core's
+  `AiCompletion`, so a caller must be able to withhold it rather than have the pass quietly ask a
+  model to transcribe an image it was never sent. `VISION_UNAVAILABLE_MESSAGE` and
+  `VISION_CANCELLED_REASON` are complete sentences shown as-is.
+- `shared/ai-extraction.ts` — `buildVisionReadPrompt` is a **transcription** request, not an
+  extraction request: the reading becomes the page's _text_, which then goes through the same
+  chunk → prompt → parse → validate path as a page carrying its own text layer. One extraction
+  path and one set of honesty rules for both kinds of page, and the reading stays reviewable in
+  its own right instead of arriving already digested into suggestions. `parseVisionReadReply`
+  turns a reply into text or a failure, and two constants make a refusal safe:
+  `VISION_UNREADABLE_MARKER` = `'UNREADABLE'`, the exact marker the prompt asks for when the image
+  cannot be read — an explicit refusal protocol, because inferring failure from the reply's shape
+  would let a prose refusal pass as the page's text, which is the one way a model could clear the
+  page gate without having read anything — and `MIN_VISION_TRANSCRIPT_CHARS` = 20, the same
+  threshold `extractSinglePage` flags `needsOcr` at, so a reading below it has produced no more
+  usable text than the text layer it replaces.
+- **Only pages the parser itself flagged `needsOcr` may be marked `'ai-extracted'`, and only when
+  a read actually obtained text.** `markModelReadPages` is the only function that writes a page
+  state; it intersects the read set with the parser's `scannedPages`, skips any page whose content
+  is already obtained (a text layer, or a human's own review — a model read may never displace
+  either), and writes nothing else. The reason is mechanical, not stylistic: readiness'
+  `unprovenOcrPageCount` is **count-based** (`max(unresolved, ocrPages - resolvedUnreadable)`),
+  so marking one page too many would over-subtract and **weaken** the page gate — the gate would
+  clear on a document with an unread scanned page. `runTenderAiPass` makes the same rule hold
+  upstream by emptying a flagged page's text before chunking, so `textlessPages` and the parser's
+  flagged set are the same pages and no page can be marked from a text chunk that never existed.
+  Pinned by `tests/ai-vision.test.ts` ("never marks a page the parser did not flag, even if a read
+  claims it"; "never displaces a human's own review of a page").
+- **A page is marked on the reading, not on the extraction over it.** A vision chunk whose
+  extraction then produced nothing still records its pages as read — the content was obtained,
+  there are simply no suggestions from it — while a refused, empty, too-short, unrenderable or
+  failed reading leaves the page exactly as it was: still blocking. That is why
+  `ChunkExtractionOutcome.method` exists: an `'ai-vision'` chunk's pages record a null
+  `chunkIndex` (no text chunk read them) and can never be recorded as `'native-text'`, which would
+  claim a text layer they do not have.
+
+### The AI pass UI state and its apply gate
+
+The pass is fire-and-forget and it enriches the tender that was just imported — and importing
+**activates** that tender, which unmounts the list view. State in a `useState` there was gone
+before the run had even started, so the run's state lives in a module-level store in
+`renderer/src/components/TenderList.tsx` (`AiPassState`, `startAiPass`, `reportAiPassProgress`,
+`reportAiPassChars`, `finishAiPass`, `failAiPass`, `cancelAiPass`, `dismissAiPass`,
+`subscribeAiPass` / `getAiPassState` / `useAiPass`, and the `AiPassPanel` that renders it) —
+plain data with subscribe/getSnapshot, the shape the suite already uses for renderer-only state
+(`packages/ui/src/ai-panel-prefs-store.ts`), readable from the list view and from the workspace
+and testable with no component harness. `components/Workspace.tsx` mounts it scoped to the tender
+on screen (`<AiPassPanel tenderId={tender.id} … />`): progress and findings for a document the
+user is not looking at would be feedback about the wrong tender.
+
+- **A cancelled or superseded run applies nothing, and the gate is checked before any write.**
+  `finishAiPass(runId, outcome)` returns `false` and records nothing unless that `runId` still
+  owns the live run (`liveAiPass`), and `runAiPass` returns on `!accepted` **before** the first
+  `updateTender` / `setTenderReview`. So a run stopped between the model answering and the apply
+  step cannot write a requirement, a candidate or a page state — the tender keeps exactly what the
+  local engine produced. `failAiPass` refuses the same way, so a cancelled run can never be
+  relabelled a failure, nor the other way round; `cancelAiPass(runId)` takes the run's own id so a
+  superseded attempt cannot cancel the attempt that replaced it. The run is made visible _before_
+  anything can refuse it, so "no model configured" is recorded and read rather than swallowed.
+- **This state is UI-only and must never be persisted into the authoritative document.** Nothing
+  in the store is written to the tender or to the document: `store.ts`'s `partialize` enumerates
+  the persisted keys (`page`, `view`, `zoom`, `currentPage`, `onboardingDone`, `activeTenderId`,
+  `activeRequirementId`) and no key of this store is among them. A run's findings reach the
+  document only the way any other suggestion does — `updateTender` / `setTenderReview`, as
+  `unconfirmed` review material a person still has to confirm (§5a, "No AI output may ever write
+  `confirmed`"). `tests/ai-pass-visibility.test.ts` pins this ("adds no persisted key, and changes
+  nothing the store already persists").
+
+### Availability — can this user run AI extraction, and if not why not
+
+`aiExtractionAvailability(input)` → `{ available: true, provider, model, visionCapable }` or
+`{ available: false, reason: 'no-provider-configured' | 'no-api-key' | 'no-model', message }`.
+
+- Pure and dependency-free, so the settings are typed structurally (`AiSettingsLike`); the same
+  rule that keeps the core importable in a browser and a plain jsdom test.
+- It mirrors the gate that actually decides a stream, in order: `activeProvider`'s fallback to
+  the BYOK default (`AI_FALLBACK_PROVIDER`), then **the resolved provider's own credential**,
+  then a model id. A stored selection is usable when **both** hold: a model id (except for a
+  CLI provider, which picks the account's own current default) **and** the credential its
+  provider kind requires. The credential shape is the one table,
+  `AI_PROVIDER_AUTH_KINDS: Record<string, 'api-key' | 'base-url' | 'cli' | 'sign-in'>`, and the
+  three derived lists — `AI_KEYLESS_PROVIDERS`, `AI_BASE_URL_PROVIDERS`,
+  `AI_SIGN_IN_PROVIDERS` — are read off it rather than listed again, so a provider's kind is
+  stated once:
+  - `'api-key'` (the default, and every provider absent from the table) — a non-empty
+    `apiKey.trim()`.
+  - `'base-url'` (today exactly `custom`) — a non-empty `baseUrl.trim()`, and the key stays
+    **optional**: custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) accept anonymous
+    requests.
+  - `'cli'` (today exactly `codex`) — nothing at all: no key and no model id, because the CLI is
+    already signed in.
+  - `'sign-in'` (today exactly `genspark`) — nothing, because main fetches the key from the
+    app's own login per request. A model id is still required of it, exactly as the
+    main-process guard requires one of every provider but codex.
+- All of it is restated rather than imported — the module may not import `@genoffice/ai-provider`
+  — and `tests/ai-extraction.test.ts` pins the table against the catalogue's `needsCliPath` /
+  `needsBaseUrl` flags and the registry's `codex-chatgpt` / `gsk-login` / `api-key` auth, so the
+  two cannot drift silently.
+- The caller supplies **no override list**. The old `keylessProviders` / `baseUrlProviders`
+  inputs were deleted: a caller able to extend the keyless or base-URL set could make one
+  settings object answer two ways, which is the drift a single source of truth exists to
+  prevent. `AiAvailabilityInput` carries the settings, an optional fallback id and the caller's
+  vision answer — nothing else.
+- `'no-api-key'` is the "the credential is missing" bucket, and its message names what is
+  actually missing for **this** provider — a base URL where that is the credential. The
+  renderer shows the helper's own per-reason `message` verbatim: `AI_MODEL_SETTINGS_HINT` was
+  deleted, so there is no second copy of this copy to fall out of step with the reason
+  (`readAiReadiness` passes `message: availability.message` through and adds nothing).
+- `visionCapable` is the **caller's** answer to "can this model read an image"
+  (`modelLacksVision` lives in `@genoffice/ai-provider/browser`, which this module may not
+  import) and is echoed back unchanged. It is deliberately not a fourth reason: a text-only model
+  still runs the pass over every page that carries a text layer; it only cannot read a scanned
+  page, and the caller decides what to do about that.
+- Unavailable is not an error and never stops the app: the message is the reason the _optional_
+  pass is off, and the local engine keeps working.
+
+### Limits
+
+| Constant (core)                                                                                                                                                                      | Value                                 | Mirrors / why                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------ |
+| `DEFAULT_EXTRACTION_CHUNK_CHARS`                                                                                                                                                     | 24 000                                | `READ_CHUNK_CHARS` in `apps/pdf/src/renderer/ai/tools.ts`                      |
+| `MAX_REQUIREMENTS_PER_CHUNK`                                                                                                                                                         | 64                                    | headroom over the 27-rule catalogue                                            |
+| `MAX_METADATA_SUGGESTIONS_PER_CHUNK`                                                                                                                                                 | 64                                    | one chunk's metadata budget                                                    |
+| `MAX_PARSED_ITEMS_PER_CHUNK`                                                                                                                                                         | 128                                   | bounds what a hostile reply can push into validation                           |
+| `MAX_REQUIREMENTS_PER_RESULT`                                                                                                                                                        | 5 000                                 | `MAX_TENDERS_REQUIREMENTS_PER_TENDER`                                          |
+| `MAX_METADATA_CANDIDATES_PER_FIELD`                                                                                                                                                  | 16                                    | `MAX_TENDERS_REVIEW_CANDIDATES_PER_FIELD`                                      |
+| `MAX_ADDITIONAL_CLAUSES_PER_REQUIREMENT`                                                                                                                                             | 8                                     | held far below `MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT` (1 000)        |
+| `MAX_SOURCE_CLAUSE_CHARS` / `MAX_REQUIREMENT_CLAUSE_CHARS` / `MAX_REQUIREMENT_TITLE_CHARS` / `MAX_REQUIREMENT_NOTES_CHARS` / `MAX_METADATA_VALUE_CHARS` / `MAX_REQUIREMENT_ID_CHARS` | 2 000 / 4 000 / 200 / 500 / 512 / 128 | quoted-evidence and label bounds, all inside `MAX_TENDERS_SINGLE_STRING_CHARS` |
+
+The numeric mirrors (`MAX_REQUIREMENTS_PER_RESULT`, `MAX_METADATA_CANDIDATES_PER_FIELD` and
+`MAX_ADDITIONAL_CLAUSES_PER_REQUIREMENT`) are restated in the core, not imported, and **no test
+pins them against `tenders-persistence.ts`** — see §6 item 13. (The provider constants above —
+`AI_FALLBACK_PROVIDER` and `AI_PROVIDER_AUTH_KINDS` with the three lists derived from it _are_
+pinned, by `tests/ai-extraction.test.ts`, against the catalogue's flags and the registry's auth.)
+
+### Honesty rules the copy must carry
+
+Two guards scan the renderer's source text:
+
+- `ai-honesty-copy.test.ts` — every surface on the AI journey states that AI extraction is
+  optional, that the local rule engine is offline and always available, that using AI sends the
+  document's text (or a scanned page's image) to the model provider the user configured, and that
+  what comes back is unconfirmed until the user confirms it. A model's output may never be called
+  verified, accurate or trustworthy, and no surface may imply AI (or an API key) is required to
+  extract.
+- `ocr-honesty-copy.test.ts` — the LOCAL engine never reads a page with no text layer; a
+  "scanned pages are read" claim is honest only when the same sentence names AI as the reader;
+  and the universal "text layer of every page" claim stays forbidden outright, because no reading
+  path — local or model — reads a text layer off a page that has none.
 
 ## 6. Non-blocking follow-ups (tracked, from `cod-7` / `sec-2`)
 
@@ -422,3 +751,15 @@ Added during the Phase 2 gate (re-gate PASS; all non-blocking):
     reconciles as a `REVISION_CONFLICT` on the next save (never a silent overwrite or
     loss). Alternative: exclude the originating WebContents in main's commit broadcast so
     external writes can be adopted immediately.
+13. **The AI core restates three bounds and the provider catalogue's credential facts instead of
+    importing them** (§5a): `MAX_REQUIREMENTS_PER_RESULT` (mirrors
+    `MAX_TENDERS_REQUIREMENTS_PER_TENDER`), `MAX_METADATA_CANDIDATES_PER_FIELD` (mirrors
+    `MAX_TENDERS_REVIEW_CANDIDATES_PER_FIELD`), `MAX_ADDITIONAL_CLAUSES_PER_REQUIREMENT` (held far
+    below `MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT`), and `AI_FALLBACK_PROVIDER` +
+    `AI_PROVIDER_AUTH_KINDS` with the three lists derived from it (`AI_KEYLESS_PROVIDERS`,
+    `AI_BASE_URL_PROVIDERS`, `AI_SIGN_IN_PROVIDERS`), which mirror the provider catalogue's
+    `needsCliPath` / `needsBaseUrl` flags, the registry's auth (`codex-chatgpt`, `gsk-login`,
+    `api-key`) and `activeProvider`'s fallback. The provider facts are pinned by
+    `tests/ai-extraction.test.ts`, which reads the catalogue source; the three numeric mirrors are
+    **not** pinned by any test yet, because the core may not import `tenders-persistence.ts` — a
+    test that compares the three pairs would close that gap.

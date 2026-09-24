@@ -115,14 +115,15 @@ export function FirstUsePage({
           <HardDrive size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span>
             Everything you add is written to this machine's local application store as you work, so
-            it is still here next time you open Tenders. Nothing is uploaded and no account is
-            needed.
+            it is still here next time you open Tenders. Nothing is uploaded unless you turn on AI
+            extraction, which sends the document to the model provider you configured — it is
+            optional, and no account is needed either way.
           </span>
         </p>
 
         {/* Honest limits, reachable before the first record is created. */}
         <div className="mt-4 flex justify-center">
-          <LimitationsButton title="Read what Tenders does not do: not legal advice, no automated submission, no OCR, review every extracted value" />
+          <LimitationsButton title="Read what Tenders does not do: not legal advice, no automated submission, the local engine does not read pages with no text layer, review every extracted value" />
         </div>
       </div>
     </div>

@@ -13,6 +13,18 @@ import type {
 } from './tenders-persistence'
 
 /**
+ * Canonical AI types live in `@genoffice/ai-provider` (shared with docs / pdf /
+ * sheets / slides), so the wire shape is never restated here. `AiSettings` comes
+ * from the package's browser-safe subpath. `AiStreamRequest` / `AiStreamChunk`
+ * are only re-exported from the package root today; every one of these is a
+ * type-only import + type-only re-export, which the bundler erases, so no
+ * Node-backed transport can reach the renderer bundle through them.
+ */
+import type { AiSettings } from '@genoffice/ai-provider/browser'
+import type { AiStreamChunk, AiStreamRequest } from '@genoffice/ai-provider'
+export type { AiSettings, AiStreamChunk, AiStreamRequest }
+
+/**
  * Suite UI theme preference as chosen by the user in the shell
  * (`'system'` = follow the OS). Kept for completeness; the shell Settings owns
  * the preference UI.
@@ -33,6 +45,31 @@ export const SUITE_THEME_CHANNELS = {
   getTheme: 'app:get-theme',
   /** Broadcast of the resolved theme. */
   themeChanged: 'app:theme-changed',
+} as const
+
+/**
+ * App-wide shared AI channels — pass-through only, exactly like the PDF pane's
+ * `AI_CHANNELS`. `ipcMain.handle` for every one of these is registered ONCE for
+ * the whole suite by the shell's main process (`registerAiIpc()`, the docs app's
+ * function, called at module scope in `apps/shell/src/main/index.ts`), and
+ * Tenders runs as a WebContentsView inside that same process, so the handlers
+ * are already live whenever Tenders is open. Tenders must NEVER register them:
+ * a second `ipcMain.handle` on the same channel throws
+ * "Attempted to register a second handler for 'ai:stream'".
+ *
+ * Consequence for the renderer: AI is OPTIONAL and additive. With no API key
+ * (or no network) the stream answers with an `error` chunk — the local rule
+ * engine stays the offline default and must keep working untouched.
+ */
+export const AI_CHANNELS = {
+  /** BYOK settings (`userData/ai-settings.json`), owned by the shell. */
+  getSettings: 'ai:get-settings',
+  /** One streaming turn: invoke with an `AiStreamRequest`. */
+  stream: 'ai:stream',
+  /** Per-request stream chunks broadcast back to this webContents. */
+  streamChunk: 'ai:stream-chunk',
+  /** Abort an in-flight stream by its `requestId`. */
+  streamCancel: 'ai:stream-cancel',
 } as const
 
 export const TENDERS_CHANNELS = {
@@ -388,6 +425,19 @@ export interface TendersApi extends TendersApiBridge {
   getTheme: () => Promise<TendersResolvedTheme>
   /** Subscribe to resolved suite theme changes; returns an unsubscribe function. */
   onThemeChanged: (handler: (theme: TendersResolvedTheme) => void) => () => void
+  // ── Shared AI surface (AI extraction pass) ────────────────────────────────
+  // Pass-throughs to the shell-registered `ai:*` handlers (see `AI_CHANNELS`).
+  // The bridge adds nothing: settings, message list, tools and maxTokens reach
+  // main exactly as the renderer built them.
+  /** BYOK settings from the shell (`userData/ai-settings.json`). */
+  getAiSettings: () => Promise<AiSettings>
+  /** Start one streaming turn. Resolves when main has taken the request; the
+   * answer arrives as `ai:stream-chunk` events via `onAiStream`. */
+  aiStream: (request: AiStreamRequest) => Promise<void>
+  /** Abort an in-flight stream by its `requestId` (the `AiStreamRequest` id). */
+  aiStreamCancel: (requestId: string) => Promise<void>
+  /** Subscribe to this view's stream chunks; returns an unsubscribe function. */
+  onAiStream: (handler: (chunk: AiStreamChunk) => void) => () => void
 }
 
 declare global {

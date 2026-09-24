@@ -1,12 +1,20 @@
-// Limitations honesty guard — Phase 5 Oracle remediation (criterion 5).
+// Limitations honesty guard — Phase 5 Oracle remediation (criterion 5), extended
+// for optional AI extraction.
 //
 // Tenders is a control/tracking tool, not a compliance authority: it is not legal
-// advice, it never submits anything for the user, it does not read scanned
-// (image-only) pages, and its extraction is heuristic. Those statements are
-// user-visible copy in `components/LimitationsNotice.tsx` and must not silently
-// disappear, be softened into a promise, or lose a way in from the UI.
+// advice, it never submits anything for the user, the local engine does not read
+// scanned (image-only) pages, and its extraction is heuristic. Those statements
+// are user-visible copy in `components/LimitationsNotice.tsx` and must not
+// silently disappear, be softened into a promise, or lose a way in from the UI.
 //
-// Like the OCR honesty guard, this scans source text rather than rendering
+// The scanned-page limit is no longer an absolute: the notice used to say there
+// was "no OCR in this build", which read as "scanned pages are never read" and is
+// now false, because AI extraction can read one by sending its image to the model
+// provider the user configured. The requirement therefore moved from `no ocr` to
+// the conditional it always was, plus the AI position itself — optional, sent to
+// the provider you configured, and unconfirmed until the user confirms it.
+//
+// Like the scanned-page guard, this scans source text rather than rendering
 // components: the copy lives in JSX and is wrapped across lines, so phrases are
 // matched against whitespace-collapsed, comment-stripped file content (a phrase
 // split over two lines still fails, as it should).
@@ -74,12 +82,34 @@ const REQUIRED_LIMITS: Array<{ what: string; statements: RegExp[] }> = [
     ],
   },
   {
-    what: 'scanned pages are detected, not read, and block readiness',
-    statements: [/no text layer/i, /does not read/i, /readiness/i, /no ocr/i],
+    what: 'the local engine does not read scanned pages, and they block readiness',
+    statements: [
+      /no text layer/i,
+      /(?:does not|doesn't|never) reads?\b/i,
+      /readiness/i,
+      // The limit is stated as the local engine's behaviour, never as the absolute
+      // "no OCR" that reads as "scanned pages are never read".
+      /local engine/i,
+    ],
+  },
+  {
+    what: 'AI extraction is optional, offline-default, sends the document to the configured provider, and stays unconfirmed',
+    statements: [
+      /AI extraction is optional/i,
+      /offline and is always available/i,
+      /sent to the model provider you configured/i,
+      /unconfirmed until you confirm/i,
+    ],
   },
   {
     what: 'extraction is heuristic and must be reviewed before it is relied on',
-    statements: [/heuristic/i, /must be reviewed|reviewed, not as fact/i, /confirm/i],
+    statements: [
+      /heuristic/i,
+      /must be reviewed|reviewed, not as fact/i,
+      /confirm/i,
+      // A model's output is not evidence either: the notice has to say so.
+      /not a verified fact/i,
+    ],
   },
 ]
 
@@ -94,6 +124,11 @@ const FORBIDDEN_CLAIMS: Array<{ pattern: RegExp; asserts: string }> = [
   { pattern: /guarantees? (award|compliance|you)\b/i, asserts: 'an outcome is guaranteed' },
   { pattern: /ensures? legal compliance/i, asserts: 'legal compliance is assured' },
   { pattern: /legally binding advice/i, asserts: 'the output is legal advice' },
+  {
+    pattern: /\bno ocr\b/i,
+    asserts:
+      'scanned pages are never read — false once AI extraction is on; the honest form is "the local engine does not read scanned pages"',
+  },
 ]
 
 /** The stale justification that the shipped managed trash made untrue. */
@@ -110,6 +145,26 @@ describe('limitations notice (Oracle criterion 5)', () => {
           `${NOTICE} no longer states ${limit.what} (missing ${String(statement)})`,
         ).toBe(true)
       }
+    }
+  })
+
+  it('states the AI limit as the conditional it is, not as an absolute', () => {
+    const text = copyText(join(SRC, NOTICE))
+    // The requirement that replaced `no ocr`: the local engine's limitation is
+    // named, and the AI path that can read such a page is named with the provider
+    // that receives it.
+    expect(text).toMatch(/does not read them|does not read scanned/i)
+    expect(text).toMatch(/AI extraction/i)
+    // ...and the notice must not promise that nothing ever leaves the machine
+    // without stating the AI exception in the same breath.
+    const claim = /nothing is uploaded|nothing leaves this machine/i.exec(text)
+    if (claim) {
+      const from = Math.max(0, claim.index - 260)
+      const to = Math.min(text.length, claim.index + claim[0].length + 260)
+      expect(
+        /AI extraction/i.test(text.slice(from, to)),
+        `${NOTICE} says ${claim[0]} without stating the AI exception next to it`,
+      ).toBe(true)
     }
   })
 
