@@ -290,6 +290,62 @@ describe('the sink never throws', () => {
   })
 })
 
+// ── the sink: an entry is on disk when `record()` returns ─────────────────────
+// The property the whole log is for, and the one the tests above never pinned:
+// every one of them either calls `flush()` or reads through a helper that does.
+// A crash, a SIGKILL, or a machine losing power never runs a quit hook, so a sink
+// that buffered would lose exactly the entries a support request needs. These two
+// cases read the file with NO flush and NO quit, which is the only state a killed
+// run can be in.
+
+describe('an entry is durable the moment it is recorded, with no flush', () => {
+  it('has the entry on disk when `record()` returns, without any flush', () => {
+    const log = createDiagnosticsLog({ dir: logDir, now: FIXED_CLOCK })
+    // Nothing is constructed with an open handle, so the file does not exist yet.
+    expect(existsSync(liveFile()), 'the log is created lazily').toBe(false)
+
+    // No `await`, no `flush()`, no microtask drain of any kind between these two
+    // lines: the read happens in the same turn as the write.
+    log.record(info('recorded with no flush, and already durable'))
+    const text = readFileSync(log.path(), 'utf8')
+
+    expect(text).toContain('recorded with no flush, and already durable')
+    expect(text.trimEnd().split('\n')).toHaveLength(1)
+  })
+
+  it('survives an abrupt end: the file is complete with no quit hook, flush or exit', async () => {
+    // A session that is KILLED. Nothing below is a shutdown hook: no `flush()`,
+    // no `process.on('exit')`, no `beforeExit` — the process simply stops. What a
+    // reader after the fact can see is therefore exactly what was on disk.
+    const killed = createDiagnosticsLog({ dir: logDir, now: FIXED_CLOCK })
+    recordDiagnosticsStart(killed, '1.2.3')
+    killed.record(info('first thing before the crash'))
+    killed.record({ level: 'error', source: 'store', message: 'the save was refused' })
+    killed.record(info('last thing before the crash'))
+
+    // The process is gone. A NEW sink in the same directory — the next launch —
+    // sees every line, in order, and appends to them rather than starting over.
+    const nextLaunch = createDiagnosticsLog({ dir: logDir, now: FIXED_CLOCK })
+    const beforeCrash = readFileSync(liveFile(), 'utf8')
+    expect(beforeCrash).toContain('Zanostack Tenders diagnostics started (version 1.2.3).')
+    expect(beforeCrash).toContain('the save was refused')
+    expect(beforeCrash).toContain('last thing before the crash')
+    expect(beforeCrash.endsWith('\n'), 'a killed run never leaves a half-written line').toBe(true)
+
+    nextLaunch.record(info('the launch after the crash'))
+    const both = readFileSync(liveFile(), 'utf8')
+    expect(both.indexOf('last thing before the crash')).toBeLessThan(
+      both.indexOf('the launch after the crash'),
+    )
+    // The file is what actually existed at the kill: `nextLaunch` only appended.
+    expect(both.startsWith(beforeCrash)).toBe(true)
+    await expect(
+      killed.flush(),
+      'flush is a resolved no-op — it was never what saved the entry',
+    ).resolves.toBeUndefined()
+  })
+})
+
 // ── the sink: never records document content ──────────────────────────────────
 
 describe('the sink refuses document content', () => {

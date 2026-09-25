@@ -36,6 +36,7 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
+import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -55,29 +56,6 @@ async function scratchUserData(): Promise<string> {
 
 function storeFile(userDataDir: string): string {
   return join(userDataDir, 'tenders', 'tenders-data.json')
-}
-
-async function readStore(userDataDir: string): Promise<any | null> {
-  try {
-    return JSON.parse(await readFile(storeFile(userDataDir), 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-async function pollStore(
-  userDataDir: string,
-  predicate: (store: any) => boolean,
-  timeoutMs = 25_000,
-): Promise<any | null> {
-  const deadline = Date.now() + timeoutMs
-  let last: any | null = null
-  while (Date.now() < deadline) {
-    last = await readStore(userDataDir)
-    if (last && predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return last
 }
 
 async function fileSignature(path: string): Promise<string> {

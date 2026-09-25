@@ -308,8 +308,11 @@ say otherwise. Tracked in §6 item 14 (a Books-owned change; not made here).
 
 ## 3. IPC + preload bridge
 
-Files: `apps/tenders/src/shared/ipc.ts`, `apps/tenders/src/preload/index.ts`,
-`apps/tenders/src/main/tenders-main.ts`
+Files: `apps/tenders/src/shared/ipc.ts`, `apps/tenders/src/preload/index.ts`, and — after the
+composition-root split — `apps/tenders/src/main/ipc/handlers.ts` (all 33 registrations),
+`apps/tenders/src/main/ipc/trust.ts` (the gate) and `apps/tenders/src/main/ipc/registration-state.ts`
+(the registered boolean). `apps/tenders/src/main/tenders-main.ts` is now the composition root and
+re-exports the surface; see `module-map.md`.
 
 v2 channels: `tenders:load-store-v2`, `tenders:save-store-v2`, `tenders:store-changed-v2`.
 Preload API: `loadStoreV2`, `saveStoreV2`, `onStoreChangedV2` (direct objects, not JSON strings).
@@ -843,13 +846,15 @@ and both returning a bare string `error` when refused (§3):
   and how many recovery copies are visible), a refused `saveStoreV2` / legacy write (with the
   code), a legacy read refusal, a recomputed readiness checkpoint, and the reminders
   scheduler's own log events.
-- **What is built and what is not, stated because it is easy to over-claim:** the sink, the
-  channels and the renderer forwarder are built and pinned. `recordDiagnosticsStart(log, version)`
-  — the one line a fresh session should start with, so a file attached to a support request says
-  what wrote it — exists and is exercised by `tests/diagnostics.test.ts`, but **nothing in main
-  calls it yet**, so no such line is currently written in a real session; and no surface renders
-  `diagnosticsPath()` to the user yet, although the member is exposed for one to do so. §6 item
-  15 tracks both, each a small wiring change in files this documentation pass does not own.
+- **Both former wiring gaps are now CLOSED, and this line used to say the opposite.** (a)
+  `recordDiagnosticsStart(log, version)` — the one line a fresh session should start with, so a
+  file attached to a support request says what wrote it — **is called from `registerTendersIpc`**
+  in `main/ipc/handlers.ts`, before anything else can record (the `isTendersIpcRegistered` guard
+  keeps it from being written twice), so a real session's log now opens with that line. §3e's
+  earlier wording and §6 item 15 both described this as un-wired and were corrected against disk.
+  (b) The renderer **does** render the log path to the user: `ErrorBoundary` takes an optional
+  `diagnosticsPath` prop and `errorBoundaryLogHint(path, code)` names the file (and the code) in
+  its fallback, which is the one surface where telling the user where the log is matters most.
   Pinned by `tests/diagnostics.test.ts` (the sink's bounds and rotation, the content rule, the
   renderer's no-op path, and the no-bridge save state) and `tests/ipc-handlers.test.ts`
   ("4c. Diagnostics transport", including a refusal for every untrusted sender).
@@ -1315,6 +1320,43 @@ Two guards scan the renderer's source text:
   and the universal "text layer of every page" claim stays forbidden outright, because no reading
   path — local or model — reads a text layer off a page that has none.
 
+## 5b. The module map, the diagnostics log and the test infrastructure
+
+**The structural reference is now `module-map.md`** in this folder — where each responsibility
+lives after the composition-root split, the import-graph direction, the IPC arithmetic recounted
+from disk, the diagnostics log's path and bounds, the test-infrastructure additions, and the
+**no-blank-screen** invariant. Read it beside this file; it states structure, this one states
+behaviour, and this one wins on every point of behaviour.
+
+Three things from it that this document must not contradict:
+
+- **`apps/tenders/src/main/tenders-main.ts` is now the composition root only (347 lines; it was
+  3,702)**, and `main` imports **nothing** from `renderer/` — the demo dataset moved to
+  `shared/demo-seed.ts` and the renderer's mock modules re-export it. **The IPC arithmetic is
+  unchanged:** 33 `ipcMain.handle` registrations, now all in `main/ipc/handlers.ts`, each still
+  beginning with `isTrustedTendersEvent` (verified mechanically, not by reading). §3's count and
+  channel breakdown stand.
+- **The diagnostics log's path and bounds are `<userData>/tenders/tenders-diagnostics.log`, 1 MiB
+  live × 3 files = 3 MiB maximum** (§3e), and the surface stays **write-only** from the UI. §6 item
+  15's two gaps are **CLOSED**: `recordDiagnosticsStart` is called from `registerTendersIpc` before
+  anything else can record, so a real session's log opens with the line that says what wrote it, and
+  `ErrorBoundary` renders the log path to the user in its fallback.
+- **The no-blank-screen invariant has LANDED.** `renderer/src/components/ErrorBoundary.tsx` is a
+  React class boundary catching a render/lifecycle/effect throw and showing an honest, recoverable
+  fallback instead of an empty window; it is mounted twice — once in `renderer/src/main.tsx` around
+  `<App />` (covering the sidebar, modals, tour and the shell render itself) and once in
+  `App.tsx` around the page area, so a crash in one view keeps the sidebar and its navigation.
+  Recovery is a **remount** of the child subtree under a new `key`, not a re-render, because the
+  same element would simply throw again and a retry that cannot work is a worse lie than no button.
+  **The fallback claims only what is true:** the window is still running and navigation still works;
+  the failure was written to the diagnostics log as an **error code plus a component stack and
+  nothing else** — deliberately not the error message, which can embed the tender text that choked
+  it, so the content rule holds even here; and **nothing was confirmed on the user's behalf**, which
+  is what keeps the app's core invariant intact through a crash. It never claims data was lost, and
+  never claims it is intact. It cannot catch an event-handler or async throw (React's own limit),
+  which is why every cross-app call still reports its own failure visibly. Pinned by
+  `tests/components/error-boundary.test.tsx`.
+
 ## 6. Non-blocking follow-ups (tracked, from `cod-7` / `sec-2`)
 
 1. **CLOSED (Phase 4).** Billing now validates the caller revision before posting, posts
@@ -1414,9 +1456,87 @@ Added during the Phase 2 gate (re-gate PASS; all non-blocking):
     require fails. It is not a Tenders surface and it predates the v2 store, but it means
     "`tenders-data.json` has exactly one writer" is true of this app only. Delete the path (Books
     owns it) or route it through the Books port, and drop the qualifier in §2b.
-15. **Two diagnostics wiring gaps** (§3e), each small and neither a correctness risk: (a)
-    `recordDiagnosticsStart(log, version)` is exported and tested but **called from nowhere in
-    main**, so a real session's log does not open with the line that says what wrote it; (b) no
-    surface renders `diagnosticsPath()` yet, so the user is not told where the log is even though
-    the preload member exists for exactly that. Both are one-line changes in
-    `apps/tenders/src/main/tenders-main.ts` / a Tenders renderer surface.
+15. **CLOSED.** Both diagnostics wiring gaps (§3e) are now closed, and this item used to record
+    them as open. (a) `recordDiagnosticsStart(log, version)` is called from `registerTendersIpc`
+    in `apps/tenders/src/main/ipc/handlers.ts`, before anything else can record, so a real
+    session's log opens with the line that says what wrote it. (b) A surface renders the log path:
+    `ErrorBoundary` (`renderer/src/components/ErrorBoundary.tsx`) takes an optional
+    `diagnosticsPath` prop and its fallback names the file and an error code via
+    `errorBoundaryLogHint`, so the user is told where to look at the moment it matters most.
+
+## 7. The e2e lane's timing contract (why the windows are what they are)
+
+The Tenders e2e lane is **load-sensitive by construction**, and this section exists because that
+fact cost this project hours twice: a run against a loaded machine reported a _shifting_ set of
+failures, each of which passed when run alone.
+
+### What was measured
+
+Both figures come from a purpose-built measurement spec run against the built shell over a scratch
+profile, polling the real store file every 50 ms and timing one real commit:
+
+| Commit                                         | Healthy wall time (observed by poll)              |
+| ---------------------------------------------- | ------------------------------------------------- |
+| Workspace created through the first-use dialog | **907 ms** from the click; **227 / 234 / 472 ms** |
+| A shredded tender's requirements reaching disk | **348 ms**                                        |
+| A requirement status change reaching disk      | **599 ms** first edit, then **4 ms** and **7 ms** |
+
+The last row is the informative one: 599 ms on the first edit, then single-digit milliseconds,
+because the product's own 300 ms autosave debounce had already elapsed for the later edits. So a
+healthy commit is observed by a poll in **under ~600 ms**, and the slowest thing any journey has to
+cover is **under 1 s**.
+
+### The windows, and why these figures are safe
+
+`e2e/tenders-timing.ts` is the single place the lane's poll windows are declared. It exports one
+`pollStore` / `readStore` / `storeFile` / `storeSignature`, and eight specs import them rather than
+each carrying a hand-picked number that could drift apart again (`cli-control.spec.ts` is the
+repo's precedent for a shared e2e helper with no test case of its own).
+
+| Constant                 | Value      | Basis                                                               |
+| ------------------------ | ---------- | ------------------------------------------------------------------- |
+| `STORE_COMMIT_POLL_MS`   | **12 000** | **20× the slowest measured healthy commit (599 ms)**                |
+| `STORE_IMPORT_POLL_MS`   | **30 000** | a whole shredded document — parse, matrix, commit                   |
+| `FIXTURE_SETTLE_POLL_MS` | **60 000** | a test-process-driven fixture settling; covers harness latency only |
+
+**The figures that were replaced, so the change is auditable.** The per-spec defaults and explicit
+windows were: `20_000` (billing guard, demo isolation, first-use CRUD, intake review, regression
+smoke, persistence cutover's `expectStoreStable` slack of `+4_000`); `25_000` (lifecycle,
+persistence cutover); `30_000` (AI fixtures, docx intake, and explicit calls in the AI extraction,
+intake review, persistence cutover and regression smoke specs); `15_000` (billing guard's two
+`BILLED`-milestone polls); and `45_000` (the smoke's shredded-tender poll — **the one window that
+was already generous** and is now `STORE_IMPORT_POLL_MS`). The a11y/theme spec's repeated **20 s**
+visibility gates became a named `UI_SETTLE_TIMEOUT_MS` = **60 000**; its `settledPdfSignature`
+helper's hard-coded twelve × 350 ms sleeps became an `expect.poll` on the same 350 ms interval with
+a 60 s window, so a slow _paint_ is no longer what fails a **theme** assertion.
+
+**Why a window 20× the healthy latency is not "tight".** It is the margin a runner needs when the
+machine is shared. Two consecutive `pollStore` calls leave well over 100 s of headroom on an idle
+machine and still finish inside the suite's own ceiling when it is 4–9× oversubscribed.
+
+### What was deliberately NOT done, and why
+
+- **No window was widened to hide a broken behaviour.** Every `pollStore` call still returns the
+  last document read, so every caller's `expect(store, …)` still fails when the predicate never
+  becomes true. What changed is only the _time allowed for a correct behaviour to be observed_.
+- **The close-guard journey's timing gate keeps its figure and its meaning.** Journey 7 of
+  `tenders-persistence-cutover.spec.ts` measures the product's own **300 ms** autosave debounce on
+  the renderer's own clock (`closeFlushFromScheduleMs`), because that measurement is the whole
+  point of the journey: it is what rules out the debounce having been what committed the edit. It
+  was measured at **328 ms** and at **exactly 300 ms** on loaded machines. Its figure is **not**
+  widened — widening it would make those races pass too, and the measurement exists to catch them.
+  What changed is its **failure message**, which now says which side was at fault: both timestamps
+  are renderer-clock readings, so an overrun there is the **close path's own IPC hops under load**,
+  not the debounce and not a dropped edit, and the message says so and says to re-run the journey
+  alone before treating it as a regression.
+- **A window is not reduced to buy parallelism.** `e2e/playwright.config.ts` already runs the whole
+  suite with `workers: 1` and `fullyParallel: false`, because the specs launch real Electron
+  instances that fight over the GPU cache. There is no parallelism left in the Tenders lane to
+  trade away.
+
+### The operational rule
+
+**A failure that passes when run alone is a load artefact, not a regression.** Treat the isolated
+run as the verdict and re-run the suite serially — do not "fix" it. `fork/RUNBOOK.md` carries this
+rule alongside the suite's healthy and loaded wall times, because it is the fact a reader needs
+before they touch anything.

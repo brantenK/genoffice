@@ -21,7 +21,7 @@
  */
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -33,6 +33,7 @@ import {
   SHELL_DIR,
   type LaunchedApp,
 } from './helpers'
+import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -65,29 +66,6 @@ async function scratchUserData(): Promise<string> {
 
 function storeFile(userDataDir: string): string {
   return join(userDataDir, 'tenders', 'tenders-data.json')
-}
-
-async function readStore(userDataDir: string): Promise<any | null> {
-  try {
-    return JSON.parse(await readFile(storeFile(userDataDir), 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-async function pollStore(
-  userDataDir: string,
-  predicate: (store: any) => boolean,
-  timeoutMs = 25_000,
-): Promise<any | null> {
-  const deadline = Date.now() + timeoutMs
-  let last: any | null = null
-  while (Date.now() < deadline) {
-    last = await readStore(userDataDir)
-    if (last && predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return last
 }
 
 function findTender(store: any, reference: string): any | undefined {
@@ -489,7 +467,7 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
               t.intakeVerification?.requirements?.[r.id]?.originalCategory === originalCategory,
           )
         },
-        30_000,
+        STORE_IMPORT_POLL_MS,
       )
       const reclassified = (findTender(reclassStore, TENDER_REF)?.requirements ?? []).find(
         (r: any) => r.category === targetCategory,
@@ -517,7 +495,7 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
             added && t.intakeVerification?.requirements?.[added.id]?.state === 'verified',
           )
         },
-        30_000,
+        STORE_IMPORT_POLL_MS,
       )
       expect(
         (findTender(addedStore, TENDER_REF)?.requirements ?? []).some(
@@ -689,7 +667,7 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
           const pages = findTender(s, TENDER_REF)?.intakeVerification?.pages ?? []
           return pages.some((p: any) => p.pageNumber === 2 && p.state === 'manually-reviewed')
         },
-        30_000,
+        STORE_IMPORT_POLL_MS,
       )
       const tender = findTender(store, TENDER_REF)
       const page2 = (tender?.intakeVerification?.pages ?? []).find((p: any) => p.pageNumber === 2)

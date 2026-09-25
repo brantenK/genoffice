@@ -35,7 +35,7 @@
  */
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -46,6 +46,7 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
+import { readStore, pollStore, STORE_COMMIT_POLL_MS, STORE_IMPORT_POLL_MS } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -95,29 +96,6 @@ function storeFile(userDataDir: string): string {
   return join(userDataDir, 'tenders', 'tenders-data.json')
 }
 
-async function readStore(userDataDir: string): Promise<any | null> {
-  try {
-    return JSON.parse(await readFile(storeFile(userDataDir), 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-async function pollStore(
-  userDataDir: string,
-  predicate: (store: any) => boolean,
-  timeoutMs = 25_000,
-): Promise<any | null> {
-  const deadline = Date.now() + timeoutMs
-  let last: any | null = null
-  while (Date.now() < deadline) {
-    last = await readStore(userDataDir)
-    if (last && predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return last
-}
-
 function findTender(store: any, reference: string): any | undefined {
   for (const workspace of store?.workspaces ?? []) {
     for (const tender of workspace?.tenders ?? []) {
@@ -137,7 +115,7 @@ async function pollCommitted(
   tenders: Page,
   userDataDir: string,
   predicate: (store: any) => boolean,
-  perAttemptMs = 12_000,
+  perAttemptMs = STORE_COMMIT_POLL_MS,
 ): Promise<any | null> {
   let store = await pollStore(userDataDir, predicate, perAttemptMs)
   if (store && predicate(store)) return store
@@ -700,7 +678,7 @@ test.describe('Tenders lifecycle (WP-11)', () => {
             findTender(s, TENDER_REF_A)?.outcome?.status === 'won' &&
             findTender(s, TENDER_REF_B)?.status === 'LOST' &&
             findTender(s, TENDER_REF_B)?.outcome?.status === 'lost',
-          20_000,
+          STORE_IMPORT_POLL_MS,
         )
         wonTender = findTender(decided, TENDER_REF_A)
         lostTender = findTender(decided, TENDER_REF_B)

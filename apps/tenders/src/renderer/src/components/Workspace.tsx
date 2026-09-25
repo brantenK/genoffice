@@ -776,10 +776,14 @@ export function Workspace() {
   }, [menuOpen, activeMenuIndex])
 
   if (!tender) {
+    // `min-h-0`/`flex-1` for the same reason the loaded branch carries them: the
+    // enclosing error boundary renders this element as the page area's child, and
+    // a flex item without `min-height: 0` cannot shrink below its content — the
+    // empty state would push the window's own layout out instead of sitting in it.
     return (
       <section
         aria-label="Tender workspace"
-        className="flex flex-1 items-center justify-center text-sm text-[var(--text-tertiary)]"
+        className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-tertiary)]"
       >
         No tender selected.
       </section>

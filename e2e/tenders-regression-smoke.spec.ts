@@ -28,7 +28,7 @@
  */
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -41,6 +41,7 @@ import {
   SHELL_DIR,
   type LaunchedApp,
 } from './helpers'
+import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
 
 const TENDERS_DEMO_DIR = resolve(SHELL_DIR, '..', 'tenders', 'public', 'demo')
 const VAULT_PDF = join(TENDERS_DEMO_DIR, 'vault', 'tax-clearance.pdf')
@@ -114,29 +115,6 @@ function storeFile(userDataDir: string): string {
   return join(userDataDir, 'tenders', 'tenders-data.json')
 }
 
-async function readStore(userDataDir: string): Promise<any | null> {
-  try {
-    return JSON.parse(await readFile(storeFile(userDataDir), 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-async function pollStore(
-  userDataDir: string,
-  predicate: (store: any) => boolean,
-  timeoutMs = 20_000,
-): Promise<any | null> {
-  const deadline = Date.now() + timeoutMs
-  let last: any | null = null
-  while (Date.now() < deadline) {
-    last = await readStore(userDataDir)
-    if (last && predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  return last
-}
-
 function allTenders(store: any): any[] {
   const out: any[] = []
   for (const workspace of store?.workspaces ?? []) {
@@ -205,6 +183,47 @@ async function listMatrixCsvs(): Promise<string[]> {
   return entries
     .filter((name) => name.includes('_Compliance_Matrix_'))
     .map((name) => join(tmpdir(), name))
+}
+
+/** A filesystem-safe local timestamp, for artefacts a run may produce twice. */
+function stamped(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+/**
+ * Salvage the app's own diagnostics log before its profile is deleted.
+ *
+ * The log is the most valuable artefact this lane produces and it used to exist
+ * only *after* a green run: `<userData>/tenders/tenders-diagnostics.log` (see
+ * `src/main/diagnostics-log.ts`) had no copy made of it anywhere in `e2e/`.
+ *
+ * It is collected HERE, in the `finally`, for a reason: the `rm()` below deletes
+ * the profile, and it has to run before the test body's final lines (which write
+ * the result JSON) whenever a flow throws. Copying from the body would therefore
+ * lose the log in exactly the failing run it was built to explain. A log that is
+ * written and never collected is the "silent failure with no artefact" problem
+ * this app spent a wave removing.
+ *
+ * A run that failed before the app started has no log at all; that is expected
+ * and is not an error, so the absence is tolerated and reported as absent rather
+ * than as a failure.
+ */
+async function salvageDiagnosticsLog(
+  userDataDir: string,
+  copyName: string,
+): Promise<string | null> {
+  const source = join(userDataDir, 'tenders', 'tenders-diagnostics.log')
+  // The copy carries the SALVAGE INSTANT, not just the run's start: a run that
+  // never removed its profile leaves logs from several runs in the directory, so
+  // the filename has to say which one was saved.
+  const target = join(ARTIFACTS_DIR, 'diagnostics', `${copyName}-${stamped()}.log`)
+  try {
+    await mkdir(join(ARTIFACTS_DIR, 'diagnostics'), { recursive: true })
+    await copyFile(source, target)
+    return target
+  } catch {
+    return null
+  }
 }
 
 // ── UI navigation helpers ─────────────────────────────────────────────────────
@@ -338,6 +357,7 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
     let generatedProposalPath: string | undefined
     let crmDealId: string | undefined
     let proposalContent: string | undefined
+    let diagnosticsLogPath: string | null = null
 
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
@@ -424,7 +444,6 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         const store = await pollStore(
           userDataDir,
           (s) => s.schemaVersion === 2 && s.workspaces?.length === 1,
-          25_000,
         )
         expect(Array.isArray(store?.workspaces)).toBe(true)
         expect(workspaceNames(store)).toContain(COMPANY_NAME)
@@ -498,7 +517,11 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         expect(expandCount).toBeGreaterThan(0)
         // Persistence is the regression the cutover journey caught: the shredded
         // tender must reach the authoritative v2 store, not just the UI.
-        const store = await pollStore(userDataDir, (s) => Boolean(findShreddedTender(s)), 45_000)
+        const store = await pollStore(
+          userDataDir,
+          (s) => Boolean(findShreddedTender(s)),
+          STORE_IMPORT_POLL_MS,
+        )
         const tender = findShreddedTender(store)
         expect(tender, 'shredded tender persisted to the authoritative v2 store').toBeTruthy()
         expect(tender.requirements.length).toBeGreaterThan(0)
@@ -521,10 +544,8 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         await statusSelect.selectOption(to)
         await expect(statusSelect).toHaveValue(to)
 
-        const store = await pollStore(
-          userDataDir,
-          (s) => Boolean(findRequirement(s, (r) => r.status === to)),
-          30_000,
+        const store = await pollStore(userDataDir, (s) =>
+          Boolean(findRequirement(s, (r) => r.status === to)),
         )
         const requirement = findRequirement(store, (r) => r.status === to)
         expect(requirement, 'requirement status change must persist to disk').toBeTruthy()
@@ -560,11 +581,7 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
           timeout: 15_000,
         })
 
-        const store = await pollStore(
-          userDataDir,
-          (s) => Boolean(findVaultDoc(s, VAULT_DOC_TITLE)),
-          30_000,
-        )
+        const store = await pollStore(userDataDir, (s) => Boolean(findVaultDoc(s, VAULT_DOC_TITLE)))
         const doc = findVaultDoc(store, VAULT_DOC_TITLE)
         expect(doc, 'vault doc persisted through the authoritative v2 store').toBeTruthy()
         vaultDocStoredPath = doc.fileUrl
@@ -643,10 +660,8 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
       // tender through the authoritative store. With the v2 schema fixed this
       // back-link now commits; assert it rather than diagnosing its absence.
       await step('crm-tender-backlink', async () => {
-        const store = await pollStore(
-          userDataDir,
-          (s) => Boolean(findShreddedTender(s)?.linkedCrmDealId),
-          20_000,
+        const store = await pollStore(userDataDir, (s) =>
+          Boolean(findShreddedTender(s)?.linkedCrmDealId),
         )
         const backlink = findShreddedTender(store)?.linkedCrmDealId ?? null
         diagnostics.crmTenderBacklink = { linkedCrmDealId: backlink }
@@ -750,6 +765,9 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         )
         if (video) videos.push(video)
       }
+      // BEFORE the profile goes: the log lives inside it, and a failing flow
+      // reaches this block with the result JSON still unwritten (see the helper).
+      diagnosticsLogPath = await salvageDiagnosticsLog(userDataDir, 'tenders-regression-smoke')
       await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
     }
 
@@ -772,6 +790,12 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
       if (TRUST_ERROR_RE.test(entry)) unauthorizedEvents.push(entry)
     }
     diagnostics.unauthorizedEvents = unauthorizedEvents
+    diagnostics.diagnosticsLogArtifact = diagnosticsLogPath
+    diagnostics.diagnosticsLogInsideProfile = join(
+      userDataDir,
+      'tenders',
+      'tenders-diagnostics.log',
+    )
     diagnostics.forbiddenStatuses = {
       'READY FOR SUBMISSION': proposalContent ? /READY FOR SUBMISSION/.test(proposalContent) : null,
       'Confirmed Total Bid Valuation': proposalContent
@@ -795,7 +819,12 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
       userDataDir,
       flows,
       failedFlows: failedFlows.map((flow) => flow.name),
-      artifacts: { screenshots, videos, resultJson: resultPath },
+      artifacts: {
+        screenshots,
+        videos,
+        diagnosticsLog: diagnosticsLogPath,
+        resultJson: resultPath,
+      },
       unauthorizedOrInvalidRequest: unauthorizedEvents,
       diagnostics,
     }

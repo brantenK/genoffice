@@ -104,6 +104,7 @@ import {
   writeAiSettings,
   type FakeProvider,
 } from './tenders-ai-fixtures'
+import { STORE_COMMIT_POLL_MS, STORE_IMPORT_POLL_MS } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -426,7 +427,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
       const committed = await pollStore(
         userDataDir,
         (s) => Boolean(findTenderByReference(s, TENDER_REF)),
-        40_000,
+        STORE_IMPORT_POLL_MS,
       )
       const tender = findTenderByReference(committed, TENDER_REF)
       expect(tender, 'the locally shredded tender must be committed').toBeTruthy()
@@ -566,7 +567,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
             (requirement: any) => requirement.ruleKey === AI_ONLY_RULE_KEY,
           )
         },
-        60_000,
+        STORE_IMPORT_POLL_MS,
       )
       const tender = findTenderByReference(committed, TENDER_REF)
       expect(tender, 'the tender must be committed').toBeTruthy()
@@ -697,7 +698,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
       const decided = await pollStore(
         userDataDir,
         (s) => findTenderByReference(s, TENDER_REF)?.closingDate === AI_SUGGESTED_CLOSING_DATE,
-        30_000,
+        STORE_COMMIT_POLL_MS,
       )
       const decidedTender = findTenderByReference(decided, TENDER_REF)
       expect(
@@ -789,7 +790,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
       const afterFiveHundred = await pollStore(
         userDataDir,
         (s) => Boolean(findTenderByReference(s, TENDER_REF)),
-        40_000,
+        STORE_IMPORT_POLL_MS,
       )
       const failedTender = findTenderByReference(afterFiveHundred, TENDER_REF)
       expect(failedTender, 'a failed model call must not lose the tender').toBeTruthy()
@@ -822,7 +823,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
       const afterMalformed = await pollStore(
         userDataDir,
         (s) => Boolean(findTenderByReference(s, TENDER_REF_TWO)),
-        40_000,
+        STORE_IMPORT_POLL_MS,
       )
       const malformedTender = findTenderByReference(afterMalformed, TENDER_REF_TWO)
       expect(malformedTender, 'an unreadable reply must not lose the tender').toBeTruthy()
@@ -926,7 +927,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
       const committed = await pollStore(
         userDataDir,
         (s) => Boolean(findTenderByReference(s, TENDER_REF)),
-        40_000,
+        STORE_IMPORT_POLL_MS,
       )
       const tender = findTenderByReference(committed, TENDER_REF)
       expect(

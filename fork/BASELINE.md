@@ -2,10 +2,32 @@
 
 Recorded at `5711775` on 2026-09-24 (unit only — re-run with --with-e2e), 2 runs each.
 
+## Re-measured entries
+
+Only **`@genoffice/tenders`** was re-measured. It was re-recorded by hand from a
+clean pair of runs rather than by a full re-record, so that **its pass total is
+now three remediation waves ahead** of the commit in the header above, while
+**every other workspace's entry is unchanged and was NOT re-recorded** — those
+figures still describe `5711775` on 2026-09-24 and should be read as such. The
+header's date and SHA, and the `e2e` lane, are also untouched: this round ran no
+e2e lane and no other workspace's suite.
+
 These are the tests that already fail, so `npm run check:baseline` can tell a
 regression from the background noise. Refresh with
 `node fork/tools/baseline.mjs --write --with-e2e` once a fix has landed, and read
-this as "known-bad", not as "accepted".
+this as "known-bad", not as "accepted". That tool rewrites **every** section from
+a fresh run of every workspace plus the e2e lane — it is the way to make this file
+whole again, and a hand-edit of one entry (as here) is deliberately narrower.
+
+## @genoffice/tenders
+
+1854 passed, 0 failed, 7 skipped — 58 test files, measured at `e634250` plus the
+three uncommitted remediation waves, twice (`npx vitest run` from `apps/tenders`,
+104 s and 103 s), both runs identical. The figure recorded here before was
+`1068 passed` at the older commit; the increase is those waves' new tests, not a
+recovery from failures.
+
+- (nothing failing)
 
 ## @genoffice/books
 
@@ -13,20 +35,17 @@ this as "known-bad", not as "accepted".
 
 - (nothing failing)
 
-
 ## @genoffice/crm
 
 24 passed, 0 failed, 0 skipped
 
 - (nothing failing)
 
-
 ## @genoffice/docs
 
 2571 passed, 1 failed, 0 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/docs (flaky)
 
@@ -41,13 +60,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/markdown
 
 559 passed, 0 failed, 0 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/pdf
 
@@ -55,13 +72,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/sheets
 
 2835 passed, 0 failed, 3 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/shell
 
@@ -85,13 +100,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/agent-core
 
 104 passed, 0 failed, 0 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/ai-provider
 
@@ -99,20 +112,17 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/ai-search
 
 98 passed, 0 failed, 0 skipped
 
 - (nothing failing)
 
-
 ## @genoffice/cli
 
 291 passed, 0 failed, 7 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/docx-engine
 
@@ -126,13 +136,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/file-parse
 
 75 passed, 0 failed, 0 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/font-metrics
 
@@ -140,13 +148,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/html2docx
 
 90 passed, 0 failed, 0 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/i18n
 
@@ -154,13 +160,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/pdf2docx
 
 757 passed, 0 failed, 7 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/pipelines
 
@@ -168,13 +172,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/pptx-engine
 
 1057 passed, 0 failed, 17 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/pptx-ops
 
@@ -182,13 +184,11 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/pptx-render
 
 348 passed, 0 failed, 0 skipped
 
 - (nothing failing)
-
 
 ## @genoffice/project-store
 
@@ -196,17 +196,14 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
-
 ## @genoffice/ui
 
 32 passed, 0 failed, 0 skipped
 
 - (nothing failing)
 
-
 ## @genoffice/xlsx-gateway
 
 82 passed, 0 failed, 0 skipped
 
 - (nothing failing)
-

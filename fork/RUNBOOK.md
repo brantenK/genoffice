@@ -237,17 +237,27 @@ they stop reappearing as new failures):
 node fork/tools/baseline.mjs --write --with-e2e --repeat 2
 ```
 
-Both lanes are stale right now, and this paragraph used to quote counts that were never
-re-measured. What is verifiable without running a suite: HEAD is `7f7067b`, with an
-**uncommitted** remediation wave on top of it (the Tenders legacy v1 stack,
-`shared/readiness.ts`, `main/document-store.ts`, the diagnostics sink and more than a dozen
-Tenders unit files among the changes) plus a concurrent `apps/books` workstream, so
+Both lanes are stale, and this paragraph used to quote counts that were never re-measured.
+What is verifiable without running a suite: **HEAD is `e634250`** with an **uncommitted**
+structural wave on top of it (the `main/` composition-root split, `shared/demo-seed.ts`, the
+e2e timing contract, and these documents) plus a concurrent `apps/books` workstream, so
 `check:baseline` reports both lanes as changed until it is re-recorded. The old claim here
 ("the Tenders unit suite is green: 1011 passed / 0 failed / 7 skipped") is withdrawn rather
-than restated: the unit suite's total was **not** re-measured, and the remediation wave
-changes behaviour several tests pinned, so treat the lane as unverified until
-`npm test -w @genoffice/tenders` is run and the baseline re-recorded once the Tenders e2e
-lane is green too.
+than restated.
+
+**`fork/BASELINE.md`'s Tenders entry has been re-measured.** It said
+`1068 passed, 0 failed, 7 skipped`; it now records **1854 passed / 0 failed / 7 skipped over
+58 test files**, taken from two clean identical runs (`npx vitest run` from `apps/tenders`,
+104 s and 103 s) at `e634250` plus the uncommitted structural wave. The two earlier figures in
+this section are superseded and kept only as a caution: `1604 passed / 8 failed / 7 skipped`
+over 58 files was measured while the tree was being edited by two other agents (a `main/` split
+and a `shared/demo-seed.ts` extraction landing mid-run, and an in-flight
+`tests/components/__probe.test.tsx` that rewrites a fixture module on disk), and three of those
+failures — `adversarial-stress.test.ts`, `ai-e2e-contract.test.ts` and
+`renderer-display-locale.test.ts` — **passed when run alone (61 passed / 61)**. They were
+concurrent-edit noise, and on a quiet tree there were none. `fork/BASELINE.md` now says which
+sections were re-measured and which were not; the tool command in its guidance is unchanged and
+remains the way to re-record the file whole.
 
 Before the _next_ sync, re-record it at the pre-merge commit. That comparison is
 the single highest-value thing this runbook asks for: in the 2026-09-22 sync it
@@ -262,6 +272,58 @@ failures that pass in isolation — measured here as `sheets` failing a _differe
 three tests each run, and Playwright `locator.click` never becoming "visible,
 enabled and stable". If a failure passes alone, treat the isolated run as the
 verdict and re-run the full suite serially; do not "fix" it.
+
+### The Playwright e2e suite is load-sensitive, and a lone pass is the verdict
+
+**Measured wall times for the whole `e2e/` Playwright suite on this machine:**
+
+| Conditions                                                              | Wall time                     |
+| ----------------------------------------------------------------------- | ----------------------------- |
+| Idle machine, healthy                                                   | **~11 min**                   |
+| Shared with another workstream (4–9× oversubscribed), two observed runs | **49.6 min** and **49.8 min** |
+
+**What happens under load is not a stable extra failure — it is a _shifting_ one.**
+In those two long runs the failing test moved every time: first the vault flow,
+then the requirement-status flow, then the close-guard journey — and **every one of
+them passed when run alone** (for the Tenders regression smoke, `1 passed (2.2m)`
+in isolation). The Tenders lane polls the on-disk store between a UI action and its
+assertion, and those poll windows were the part that shrank: they were hand-picked
+per spec, and the smaller ones were too tight at 4–9× load. A single Electron
+window that takes 2 s to render on an idle machine can take 15 s on a loaded one
+without anything in the app being wrong.
+
+**Two operational consequences, and the rule they imply:**
+
+1. **A failure that passes when run alone is a load artefact, not a regression.**
+   Treat the isolated run as the verdict. Do not "fix" the app to make the loaded
+   run pass, and do not weaken the assertion either — re-run the suite serially on
+   an unloaded machine and judge from that.
+2. **A loaded run's wall time is not a performance signal about the app.** 49.6
+   minutes against a healthy ~11 is the machine, not the product. Do not quote a
+   loaded figure as the suite's cost, and do not treat a longer run as evidence
+   anything regressed.
+
+The Tenders lane's poll windows are no longer hand-picked: they are declared once
+in `e2e/tenders-timing.ts`, derived from a measurement of the app's own commit
+latency against the built shell (a healthy commit is observed by a poll in **under
+~600 ms**; the slowest thing any journey covers is **under 1 s**; the default
+`STORE_COMMIT_POLL_MS` is **20× that slowest figure**). The measurement, the
+figures the new ones replaced, and what was deliberately left alone are in
+`docs/tenders-hardening/contracts-and-invariants.md` §7. The one deliberate
+exception is the close-guard journey's 300 ms debounce gate, which is a
+_measurement_ rather than a wait: its figure is not widened, because widening it
+would let the races it exists to catch pass too.
+
+The relevant `package.json` scripts and what each costs:
+
+```bash
+npm run test:e2e      # the WHOLE Playwright suite — ~11 min healthy, up to ~50 under load
+npm run check:e2e-types   # cheap; tsc over e2e/tsconfig.json only
+```
+
+`npm run verify:sync` runs `check:e2e-types` among its cheap gates and only reaches
+e2e after `build:all`; `--fast` stops before both. Prefer `--fast` while iterating,
+and reserve a full `test:e2e` for a machine you are not sharing.
 
 ## Porting an upstream spec to the fork's UI
 

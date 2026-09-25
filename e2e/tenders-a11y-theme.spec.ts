@@ -93,6 +93,19 @@ import {
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
 const LOADED_AT = '2026-09-01T08:00:00.000Z'
 
+/**
+ * How long the app is given to render a surface this spec then asserts on.
+ *
+ * Raised from the repeated hand-picked 20 s every one of these gates used to
+ * carry. These are fixture-driven visibility waits (`expect(...).toBeVisible`),
+ * not measurements: on a loaded runner the app renders more slowly without any
+ * behaviour changing, and a 20 s ceiling was what turned that into a phantom
+ * failure. 60 s is the same margin the Tenders import journeys already allow for
+ * "the workspace appeared", and it is several times the measured cost of the
+ * slowest commit this suite performs (see `e2e/tenders-timing.ts`).
+ */
+const UI_SETTLE_TIMEOUT_MS = 60_000
+
 const COMPANY_NAME = 'E2E A11y Theme Civils (Pty) Ltd'
 const TENDER_REF = 'E2E/A11Y/2026/01'
 const TENDER_WON_REF = 'E2E/A11Y/2026/02'
@@ -345,14 +358,14 @@ async function dismissTendersOnboarding(tenders: Page): Promise<void> {
 
 async function createCompany(tenders: Page, name: string): Promise<void> {
   await expect(tenders.getByRole('heading', { name: 'No company workspaces yet' })).toBeVisible({
-    timeout: 20_000,
+    timeout: UI_SETTLE_TIMEOUT_MS,
   })
   await tenders.getByRole('button', { name: 'Create company workspace' }).click()
   const dialog = tenders.getByRole('dialog', { name: 'Set up your company' })
-  await expect(dialog).toBeVisible({ timeout: 15_000 })
+  await expect(dialog).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
   await dialog.getByLabel('Trading name').fill(name)
   await dialog.getByRole('button', { name: 'Create workspace' }).click()
-  await expect(tenders.getByText(name).first()).toBeVisible({ timeout: 15_000 })
+  await expect(tenders.getByText(name).first()).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
   await dismissTendersOnboarding(tenders)
 }
 
@@ -382,7 +395,7 @@ async function resizeToCompact(app: ElectronApplication, tenders: Page): Promise
   })
   await expect
     .poll(() => tenders.evaluate(() => Math.abs(window.innerWidth - 800) <= 8), {
-      timeout: 20_000,
+      timeout: UI_SETTLE_TIMEOUT_MS,
       message: 'the window must take the compact width',
     })
     .toBe(true)
@@ -399,7 +412,10 @@ async function resizeToCompact(app: ElectronApplication, tenders: Page): Promise
         await new Promise((resolve) => setTimeout(resolve, 350))
         return first > 0 && first === (await sample())
       },
-      { timeout: 20_000, message: 'the workspace layout must settle after the resize' },
+      {
+        timeout: UI_SETTLE_TIMEOUT_MS,
+        message: 'the workspace layout must settle after the resize',
+      },
     )
     .toBe(true)
   await app.evaluate(({ BrowserWindow }, minimum) => {
@@ -422,7 +438,7 @@ async function openTendersList(tenders: Page): Promise<void> {
   ) {
     await back.click()
   }
-  await expect(listHeading).toBeVisible({ timeout: 20_000 })
+  await expect(listHeading).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
 }
 
 /**
@@ -442,14 +458,17 @@ async function openTender(tenders: Page, reference: string): Promise<void> {
 
   // 1) Move the module to its Tenders page (no-op when already there).
   const navTenders = tenders.locator('nav').getByRole('button', { name: 'Tenders' })
-  await expect(navTenders).toBeVisible({ timeout: 20_000 })
+  await expect(navTenders).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
   await navTenders.click()
   await expect
     .poll(
       async () =>
         (await listHeading.isVisible().catch(() => false)) ||
         (await back.isVisible().catch(() => false)),
-      { timeout: 20_000, message: 'the Tenders page must render after the nav click' },
+      {
+        timeout: UI_SETTLE_TIMEOUT_MS,
+        message: 'the Tenders page must render after the nav click',
+      },
     )
     .toBe(true)
 
@@ -459,13 +478,13 @@ async function openTender(tenders: Page, reference: string): Promise<void> {
   // 3) Otherwise show the tender list and open the requested card.
   if (!(await listHeading.isVisible().catch(() => false))) {
     await back.click()
-    await expect(listHeading).toBeVisible({ timeout: 20_000 })
+    await expect(listHeading).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
   }
   const card = tenders.locator('main li', { hasText: reference }).first()
-  await expect(card).toBeVisible({ timeout: 20_000 })
+  await expect(card).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
   await card.click()
-  await expect(matrixHeading).toBeVisible({ timeout: 20_000 })
-  await expect.poll(headerShowsReference, { timeout: 20_000 }).toBe(true)
+  await expect(matrixHeading).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
+  await expect.poll(headerShowsReference, { timeout: UI_SETTLE_TIMEOUT_MS }).toBe(true)
 }
 
 /** Drive the suite theme through the shell's own API (theme-pipeline.spec.ts). */
@@ -584,12 +603,26 @@ async function pdfSignature(page: Page): Promise<{
  */
 async function settledPdfSignature(page: Page): Promise<Awaited<ReturnType<typeof pdfSignature>>> {
   let prev = await pdfSignature(page)
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    await page.waitForTimeout(350)
-    const next = await pdfSignature(page)
-    if (next.hash === prev.hash && next.canvasCount === prev.canvasCount) return next
-    prev = next
-  }
+  // Poll for the pixels to stop changing rather than sleeping a fixed 350 ms
+  // between twelve samples. On a loaded runner the sleep is the part that
+  // shrinks — the page's own paint can outlast it — so the loop waits for the
+  // signature to be stable twice in a row and lets `expect.poll` own the
+  // window. Because it returns `prev` when the window expires, a canvas that
+  // never settles still reaches the caller's own assertions instead of failing
+  // here with a timeout that says nothing about the theme.
+  let stable = 0
+  await expect
+    .poll(
+      async () => {
+        const next = await pdfSignature(page)
+        stable = next.hash === prev.hash && next.canvasCount === prev.canvasCount ? stable + 1 : 0
+        prev = next
+        return stable
+      },
+      { timeout: 60_000, intervals: [350] },
+    )
+    .toBeGreaterThanOrEqual(2)
+    .catch(() => undefined)
   return prev
 }
 
@@ -1232,7 +1265,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
             .locator('main li', { hasText: TENDER_REF })
             .getByRole('button', { name: 'Remove tender' })
             .first()
-          await expect(removeButton).toBeVisible({ timeout: 20_000 })
+          await expect(removeButton).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
           await removeButton.click()
           await expect(tenders.locator('[data-testid="delete-tender-dialog"]')).toBeVisible({
             timeout: 15_000,
@@ -1247,7 +1280,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         async () => {
           await gotoPage(tenders, 'Tutorials')
           const trigger = tenders.getByRole('button', { name: 'What Tenders does not do' }).first()
-          await expect(trigger).toBeVisible({ timeout: 20_000 })
+          await expect(trigger).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
           await trigger.click()
           await expect(
             tenders.getByRole('dialog', { name: 'What Tenders does not do' }),
@@ -1687,7 +1720,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       // Keyboard-only critical action: operate a requirement status select.
       await openTender(tenders, TENDER_REF)
       const firstRow = tenders.locator('main li', { hasText: 'E2E requirement one' }).first()
-      await expect(firstRow).toBeVisible({ timeout: 20_000 })
+      await expect(firstRow).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
       const expand = firstRow.locator('button[title="Show clause details"]').first()
       await expand.focus()
       await tenders.keyboard.press('Enter')
@@ -1706,7 +1739,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       await tenders.keyboard.press('Enter')
       await expect(select).toHaveValue(after)
       await expect(tenders.getByText('Saved', { exact: true }).first()).toBeVisible({
-        timeout: 20_000,
+        timeout: UI_SETTLE_TIMEOUT_MS,
       })
       screenshots.push(await shot(tenders, 'a11y-theme-j5-keyboard-journey'))
 
@@ -2098,7 +2131,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       // clause details are expanded).
       await openTender(tenders, TENDER_REF)
       const row = tenders.locator('main li', { hasText: 'E2E requirement one' }).first()
-      await expect(row).toBeVisible({ timeout: 20_000 })
+      await expect(row).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
       await row.locator('button[title="Show clause details"]').first().click()
       const select = row.locator('select:has(option[value="FULFILLED"])').first()
       await expect(select).toBeVisible()
@@ -2241,7 +2274,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       // they had landed on. The region is now named BY the page heading.
       await gotoPage(tenders, 'Discover')
       const pageRegion = tenders.getByRole('region', { name: 'Find tenders' })
-      await expect(pageRegion).toBeVisible({ timeout: 20_000 })
+      await expect(pageRegion).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
       await expect(
         tenders.getByRole('heading', { name: 'Find tenders', level: 1 }),
         'the region must be named by the page heading of the same page',
@@ -2268,7 +2301,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         .first()
         .click()
       const panel = tenders.getByRole('region', { name: 'Extraction review' })
-      await expect(panel).toBeVisible({ timeout: 20_000 })
+      await expect(panel).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
 
       // The field the model suggested: the marker is NAMED (not hover-only), and
       // the control carries it in its accessible description, so a screen-reader
@@ -2310,7 +2343,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         .first()
         .click()
       const parserPanel = tenders.getByRole('region', { name: 'Extraction review' })
-      await expect(parserPanel).toBeVisible({ timeout: 20_000 })
+      await expect(parserPanel).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
       await expect(
         parserPanel.getByRole('note', { name: /AI-suggested/ }),
         'a parser-only tender must render no machine-provenance marker',
@@ -2358,7 +2391,7 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       await resizeToCompact(run.app, tenders)
 
       const trigger = tenders.locator('[data-testid="workspace-overflow-trigger"]')
-      await expect(trigger).toBeVisible({ timeout: 20_000 })
+      await expect(trigger).toBeVisible({ timeout: UI_SETTLE_TIMEOUT_MS })
       await expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
       await expect(
         tenders.locator('[data-testid="workspace-pane-switch"]'),

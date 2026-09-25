@@ -32,7 +32,7 @@
  */
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // ── the model-provenance marker ───────────────────────────────────────────────
@@ -396,32 +396,11 @@ export async function generateTenderPdf(targetPath: string, lines: string[]): Pr
 
 // ── the authoritative store ───────────────────────────────────────────────────
 
-export function storeFile(userDataDir: string): string {
-  return join(userDataDir, 'tenders', 'tenders-data.json')
-}
-
-export async function readStore(userDataDir: string): Promise<any | null> {
-  try {
-    return JSON.parse(await readFile(storeFile(userDataDir), 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-export async function pollStore(
-  userDataDir: string,
-  predicate: (store: any) => boolean,
-  timeoutMs = 30_000,
-): Promise<any | null> {
-  const deadline = Date.now() + timeoutMs
-  let last: any | null = null
-  while (Date.now() < deadline) {
-    last = await readStore(userDataDir)
-    if (last && predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return last
-}
+// `storeFile`, `readStore` and `pollStore` all live in `./tenders-timing`, which
+// owns and justifies the lane's poll windows. Re-exported here so this module's
+// existing consumers keep importing them from the fixture module they use, and
+// so there is exactly one `pollStore` implementation in the lane.
+export { storeFile, readStore, pollStore } from './tenders-timing'
 
 export function allTenders(store: any): any[] {
   const out: any[] = []

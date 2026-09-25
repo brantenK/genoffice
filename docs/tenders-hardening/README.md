@@ -5,16 +5,14 @@ trustworthy paid local-first desktop tender product. Written so a **new session 
 resume without re-discovery**.
 
 - Repo: `C:\Users\brant\OneDrive\Documents\GenOffice\genoffice`
-- Branch: `product`. **HEAD is `7f7067b`** (`feat(tenders): DOCX intake, tender discovery and
-deadline reminders`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
+- Branch: `product`. **HEAD is `e634250`** (`refactor(tenders): close the 10-reviewer code review
+findings`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
   `284c312`…`5711775` on top of it; the five-wave hardening fix set is **committed** as
-  `a22b5e6`, the optional-AI wave as `c188470`, and the DOCX/discovery/reminders wave as
-  `7f7067b`. A **remediation wave is uncommitted** on top of `7f7067b`, alongside a
-  concurrent, unrelated `apps/books` + `.agents/` workstream. Measured during this documentation
-  pass, `git status --porcelain` reported **70 entries — 52 modified, 18 untracked**; that
-  number moves while agents edit, so run the command rather than quoting a figure. (The earlier
-  text here said the five-wave set was uncommitted on top of `5711775` with "72 modified + 12
-  untracked": wrong on the commit and stale on the count.)
+  `a22b5e6`, the optional-AI wave as `c188470`, the DOCX/discovery/reminders wave as
+  `7f7067b`, and the two remediation waves (review findings, then coordination sweep) as
+  **`e634250`**. A **third wave (structural) is uncommitted** on top of `e634250`, alongside a
+  concurrent, unrelated `apps/books` + `.agents/` workstream. That number moves while agents edit,
+  so run `git status --porcelain` rather than quoting a figure from here.
 - Deepwork coordination state: `.slim/deepwork/tenders-9of10.md` (git-local; read it too)
 - Original audit artifacts: `C:\Users\brant\AppData\Local\Temp\opencode\tenders-live-audit-Lpyf1l\`
 - Full 15-work-package roadmap + release gates: produced by planner `pla-1`, pressure-tested
@@ -22,14 +20,15 @@ deadline reminders`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e
 
 ## Documents in this folder
 
-| File                          | Contents                                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `README.md`                   | This index, current status, resume instructions, commands                                         |
-| `contracts-and-invariants.md` | Technical reference: v2 schema, store API, IPC channels, limits, invariants that must not regress |
-| `phase-2-remaining.md`        | Phase 2 (durability) — COMPLETE; retained as the record of what was done                          |
-| `phase-3-intake.md`           | Phase 3 — parser corpus, extraction review, OCR, scale                                            |
-| `phase-4-workflows.md`        | Phase 4 — company/customer CRUD, submission/outcome, typed integrations                           |
-| `phase-5-product.md`          | Phase 5 — responsive UX, accessibility, theme, IPC hardening, release evidence                    |
+| File                          | Contents                                                                                                                                                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `README.md`                   | This index, current status, resume instructions, commands                                                                                                                                                             |
+| `contracts-and-invariants.md` | Technical reference: v2 schema, store API, IPC channels, limits, invariants that must not regress                                                                                                                     |
+| `module-map.md`               | **Structural reference**: where each responsibility lives after the composition-root split, the import-graph direction, the diagnostics log's path/bounds, the test infrastructure, and the no-blank-screen invariant |
+| `phase-2-remaining.md`        | Phase 2 (durability) — COMPLETE; retained as the record of what was done                                                                                                                                              |
+| `phase-3-intake.md`           | Phase 3 — parser corpus, extraction review, OCR, scale                                                                                                                                                                |
+| `phase-4-workflows.md`        | Phase 4 — company/customer CRUD, submission/outcome, typed integrations                                                                                                                                               |
+| `phase-5-product.md`          | Phase 5 — responsive UX, accessibility, theme, IPC hardening, release evidence                                                                                                                                        |
 
 ## Phase status
 
@@ -45,37 +44,54 @@ deadline reminders`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e
 
 - **The four newest features — DOCX intake, tender discovery, deadline reminders and optional AI
   extraction — are documented in `contracts-and-invariants.md` §3b (discovery), §3c (reminders),
-  §3d (DOCX intake), §3e (diagnostics) and §5a (AI).** The privileged handler count is **33**
-  (it was stated as 14, then 23, then 31 as channels were added — §3 now shows the arithmetic
-  and the command that counts it): every one of the 33 `ipcMain.handle` calls in
-  `apps/tenders/src/main/tenders-main.ts` begins with `isTrustedTendersEvent`, and the eight
-  discovery/reminder channels plus the two diagnostics channels are in §3's list with their
+  §3d (DOCX intake), §3e (diagnostics) and §5a (AI).** The privileged handler count is **33** and
+  unchanged by the composition-root split (it was stated as 14, then 23, then 31 as channels were
+  added — §3 now shows the arithmetic and the command that counts it): after the split all 33
+  `ipcMain.handle` calls live in `apps/tenders/src/main/ipc/handlers.ts`, and **every one of the 33
+  begins with `isTrustedTendersEvent`** — verified mechanically by splitting that file on
+  `ipcMain.handle` and requiring the gate within each handler, which reports zero exceptions. The
+  eight discovery/reminder channels plus the two diagnostics channels are in §3's list with their
   preload member names.
-- Full Tenders suite — **the numbers that were here (1056 passing, 36 test files) are retired,
-  and the pass total was NOT re-measured in this documentation pass.** What was measured, with
-  `find apps/tenders/tests -name "*.test.ts*" | wc -l`, is **56 unit test files on disk** at the
-  moment of this pass: 53 top-level `.test.ts`, `tests/performance/scale.test.ts` (whose measured
-  benchmarks stay gated behind `TENDERS_BENCH=1`), and the `tests/components/*.test.tsx` component
-  specs that `apps/tenders/vitest.config.ts` now includes. **Even that file count is moving** —
-  the same command reports more a few minutes later, because other agents are adding specs — and
-  the remediation wave changes behaviour several tests pinned, so the pass total is in flux: run
-  `npm test -w @genoffice/tenders` and quote that, never a figure from this file.
-- `npm run typecheck` (all 28 workspaces) and `npm run typecheck -w @genoffice/tenders`: recorded
-  clean in the wave-1 handoff. **Not re-run in this documentation pass** (a repo-wide typecheck
-  is out of its scope), so treat it as a record and re-run before relying on it.
-- `npm run build:all`: recorded clean (exit 0) in the wave-1 handoff; not re-run here.
-- Repo guards: `npm run check:english-comments` and `git diff --check` were re-run for this pass
-  (both clean) together with `npx prettier --check` on the six files this pass owns. The other
-  guards — `check:theme-colors`, `check:brand`, `check:app-chrome`, `check:skill-version`,
-  `check:e2e-types`, `format:check` — were **recorded** as passing in the wave-1 handoff and were
-  not re-run here; the concurrent `apps/books` workstream can change `format:check` on its own.
-- Built-Electron E2E — **13 Tenders specs on disk** (measured: `ls e2e/tenders-*.spec.ts | wc -l`
-  → 13), together declaring **59** `test(` cases at the moment this line was written (measured
-  statically, not run: `grep -h "^\s*test(" e2e/tenders-*.spec.ts | wc -l` → 59, a number that
-  moves while other agents edit those specs; `tenders-regression-smoke.spec.ts` is one `test(`
-  that drives 17 flows). **The lane's pass/fail totals were NOT re-measured in this documentation
-  pass** — the figures that used to sit here ("the recorded run covered 10 specs / 48 tests:
-  48 passed / 0 failed") are a record of an earlier run, and three specs have been added since:
+- **The structural reference is now `module-map.md`** (wave 3): the per-module responsibility map,
+  the line counts, the import-graph direction, the diagnostics log, the test infrastructure and the
+  no-blank-screen invariant. It also records that **`main` no longer imports `renderer/`** — the
+  demo dataset moved to `shared/demo-seed.ts` — and that `main/tenders-main.ts` is now **347 lines**
+  (it was 3,702) and is the composition root only.
+- **Three items this file used to record as open have closed, verified on disk:** the **error
+  boundary** landed (`renderer/src/components/ErrorBoundary.tsx`, mounted in `main.tsx` around
+  `<App />` and in `App.tsx` around the page area — a render throw is now a recoverable, honest
+  fallback rather than a blank window; `tests/components/error-boundary.test.tsx` pins it); and
+  **both diagnostics wiring gaps** closed (`recordDiagnosticsStart` is called from
+  `registerTendersIpc` before anything else can record, and `ErrorBoundary` renders the log path to
+  the user in its fallback). §6 item 15 and §3e were corrected against disk; the earlier wording in
+  this folder described all three as un-landed and was wrong.
+- Full Tenders suite — **re-measured in the wave-3 pass, and the result was not a clean green:**
+  `npm test -w @genoffice/tenders` reported **Test Files 10 failed | 48 passed (58)** and
+  **Tests 8 failed | 1604 passed | 7 skipped (1619)** in **real 1m58s**. **Read that as a
+  concurrent-edit artefact, not a regression**: the tree is being edited by two other agents while
+  this is written (a `main/` split and a `shared/demo-seed.ts` extraction were landing mid-run, and
+  an in-flight `tests/components/__probe.test.tsx` exists that rewrites a fixture module on disk),
+  and **three of the reported failures — `adversarial-stress.test.ts`, `ai-e2e-contract.test.ts`
+  and `renderer-display-locale.test.ts` — pass when run alone** (61 passed / 61). The retired
+  figures (1056 passing, 36 test files; then "56 files, pass total not measured") are gone:
+  `find apps/tenders/tests -name "*.test.ts*" | wc -l` reports **57 files** on disk now, and the
+  pass total is **1604** on this machine at this moment. Both move while agents edit.
+- `npm run check:e2e-types` and `npx tsc --noEmit -p e2e/tsconfig.json`: run in the wave-3 pass,
+  both **clean (exit 0)** after the wave-3 spec edits.
+- Built-Electron E2E — **13 Tenders specs on disk** (`ls e2e/tenders-*.spec.ts | wc -l` → 13), plus
+  the shared modules `e2e/tenders-ai-fixtures.ts`, `e2e/tenders-discovery-fixtures.ts` and the new
+  `e2e/tenders-timing.ts`. The specs declare **59** `test(` cases statically
+  (`grep -h "^\s*test(" e2e/tenders-*.spec.ts | wc -l` → 59; `tenders-regression-smoke.spec.ts` is
+  one `test(` that drives 17 flows). The lane's own totals are **not** re-measured here — the
+  orchestrator runs the suite — and the last recorded run was **58 passing / 1 failing**, with the
+  one failure passing when run alone.
+- **The e2e lane's load sensitivity is now a documented contract, not folklore.**
+  `contracts-and-invariants.md` §7 and `e2e/tenders-timing.ts` record what was measured (a healthy
+  commit is observed by a poll in **under ~600 ms**; the slowest figure any journey covers is under
+  1 s), the three shared windows derived from it (`STORE_COMMIT_POLL_MS` = 12 000 — 20× the slowest
+  measured commit; `STORE_IMPORT_POLL_MS` = 30 000; `FIXTURE_SETTLE_POLL_MS` = 60 000), and every
+  per-spec figure they replaced. `fork/RUNBOOK.md` carries the operational rule: **a failure that
+  passes when run alone is a load artefact, not a regression.**
   `e2e/tenders-ai-extraction.spec.ts` (4 journeys over a local fake provider — AI off contacts
   nothing; AI on lands a marked unconfirmed suggestion; a failing/malformed reply degrades to
   the local extraction; an interrupted run leaves a usable tender and writes nothing),
@@ -125,6 +141,12 @@ deadline reminders`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e
     split proportion surviving reload.
   - Artifacts under `e2e/artifacts/` (`tenders-*-journey-*.json`, `tenders-regression-smoke-*.json`,
     screenshots, videos).
+  - **`e2e/tenders-timing.ts` declares the lane's poll windows and their justification** — one
+    `pollStore` / `readStore` / `storeFile` / `storeSignature` for the whole lane, plus
+    `STORE_COMMIT_POLL_MS` (12 000), `STORE_IMPORT_POLL_MS` (30 000) and `FIXTURE_SETTLE_POLL_MS`
+    (60 000). Eight specs import them instead of each carrying a hand-picked figure; the figures
+    they replaced, and the measurement behind the new ones, are in `contracts-and-invariants.md` §7.
+    It is a helper with no test case of its own, the same shape as `e2e/cli-control.spec.ts`.
 - Phase 3 corpus metrics (`apps/tenders/tests/fixtures/tenders-corpus/metrics.json`):
   critical-metadata accuracy **100%**, critical-requirement recall **100%**, pricing/BOQ
   recall **100%**, conflict detection **100%**, false-positive rate 0.32%, **false-readiness

@@ -23,6 +23,7 @@ import type { AppPage } from '../../shared/types'
 import { createSampleWorkspaceRecord, isSampleWorkspace } from '../mock/sample-workspace'
 import { useTendersStore } from '../store'
 import { CompanyFormDialog } from './CompanyFormDialog'
+import { ErrorBoundary } from './ErrorBoundary'
 import { FirstUsePage } from './FirstUsePage'
 import { GuidedTour } from './GuidedTour'
 import { LimitationsNotice } from './LimitationsNotice'
@@ -50,10 +51,21 @@ import { TutorialsPage } from './pages/TutorialsPage'
  */
 const DISCOVER_PAGE = 'discover'
 
+/** Sidebar labels, keyed by page — used for the nav and for the fallback's region. */
+const NAV_LABELS: Record<AppPage, string> = {
+  overview: 'Overview',
+  customers: 'Customers',
+  documents: 'Documents',
+  tenders: 'Tenders',
+  [DISCOVER_PAGE]: 'Discover',
+  profile: 'Company Profile',
+  tutorials: 'Tutorials',
+}
+
 const NAV_ITEMS: { page: AppPage; label: string; icon: React.ReactNode; tour?: string }[] = [
-  { page: 'overview', label: 'Overview', icon: <LayoutDashboard size={18} /> },
-  { page: 'customers', label: 'Customers', icon: <Users size={18} /> },
-  { page: 'documents', label: 'Documents', icon: <FileText size={18} /> },
+  { page: 'overview', label: NAV_LABELS.overview, icon: <LayoutDashboard size={18} /> },
+  { page: 'customers', label: NAV_LABELS.customers, icon: <Users size={18} /> },
+  { page: 'documents', label: NAV_LABELS.documents, icon: <FileText size={18} /> },
   { page: 'tenders', label: 'Tenders', icon: <BookOpen size={18} /> },
   // "Discover" rather than "Find tenders": the page says "Find tenders", but a
   // sidebar item whose name contains "Tenders" is ambiguous — for a reader
@@ -536,6 +548,12 @@ export function App() {
       )}
 
       {/* ── Main content ───────────────────────────────────────────────────── */}
+      {/* The page area is bounded on its own, and the sidebar above is its
+          SIBLING rather than a child. A boundary only at the root would take the
+          whole shell down with one bad view — the user would lose the navigation
+          and have no way anywhere — so the split is deliberate: a render throw
+          in a page leaves the chrome, the company switcher and the nav usable,
+          and the fallback says which region failed. */}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--canvas)]">
         {activeIsSample && (
           <div
@@ -560,13 +578,15 @@ export function App() {
             </button>
           </div>
         )}
-        {page === 'discover' && <DiscoverPage />}
-        {page === 'overview' && <OverviewPage />}
-        {page === 'customers' && <CustomersPage />}
-        {page === 'documents' && <DocumentsPage />}
-        {page === 'tenders' && <TendersPage />}
-        {page === 'profile' && <ProfilePage />}
-        {page === 'tutorials' && <TutorialsPage />}
+        <ErrorBoundary region={NAV_LABELS[page] ?? 'This page'}>
+          {page === 'discover' && <DiscoverPage />}
+          {page === 'overview' && <OverviewPage />}
+          {page === 'customers' && <CustomersPage />}
+          {page === 'documents' && <DocumentsPage />}
+          {page === 'tenders' && <TendersPage />}
+          {page === 'profile' && <ProfilePage />}
+          {page === 'tutorials' && <TutorialsPage />}
+        </ErrorBoundary>
       </main>
 
       {/* ── Onboarding: first-launch walkthrough + interactive tour ────────── */}

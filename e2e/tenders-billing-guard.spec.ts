@@ -25,7 +25,7 @@
  */
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -36,6 +36,7 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
+import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -165,29 +166,6 @@ async function scratchUserData(): Promise<string> {
 
 function storeFile(userDataDir: string): string {
   return join(userDataDir, 'tenders', 'tenders-data.json')
-}
-
-async function readStore(userDataDir: string): Promise<any | null> {
-  try {
-    return JSON.parse(await readFile(storeFile(userDataDir), 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-async function pollStore(
-  userDataDir: string,
-  predicate: (store: any) => boolean,
-  timeoutMs = 20_000,
-): Promise<any | null> {
-  const deadline = Date.now() + timeoutMs
-  let last: any | null = null
-  while (Date.now() < deadline) {
-    last = await readStore(userDataDir)
-    if (last && predicate(last)) return last
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return last
 }
 
 function findTender(store: any, reference: string): any | undefined {
@@ -415,7 +393,7 @@ test.describe('Tenders billing guards (Phase 4 follow-up)', () => {
         const committed = await pollStore(
           userDataDir,
           (s) => findTender(s, REF_WON)?.milestones?.[0]?.status === 'BILLED',
-          15_000,
+          STORE_IMPORT_POLL_MS,
         )
         milestone = findTender(committed, REF_WON)?.milestones?.[0]
         expect(milestone?.status, 'a success banner requires a BILLED milestone on disk').toBe(
@@ -443,7 +421,7 @@ test.describe('Tenders billing guards (Phase 4 follow-up)', () => {
           const committed = await pollStore(
             userDataDir,
             (s) => findTender(s, REF_WON)?.milestones?.[0]?.status === 'BILLED',
-            15_000,
+            STORE_IMPORT_POLL_MS,
           )
           expect(findTender(committed, REF_WON)?.milestones?.[0]?.status).toBe('BILLED')
         } else {
