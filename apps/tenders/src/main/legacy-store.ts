@@ -74,6 +74,17 @@ export const LEGACY_TENDERS_READ_FAILED =
 
 /** The v1 marker every payload this writer understands must carry, if it carries one. */
 const KNOWN_V1_VERSIONS = new Set<number>([0, 1])
+/** The `RequirementRecord.category` values this reader can vouch for. */
+const REQUIREMENT_CATEGORIES = new Set([
+  'MANDATORY_STAGE_1',
+  'FUNCTIONALITY_STAGE_2',
+  'FINANCIAL_STAGE_3',
+  'GENERAL_RETURNABLE',
+])
+
+/** The `RequirementRecord.riskLevel` values this reader can vouch for. */
+const RISK_LEVELS = new Set(['CRITICAL_DISQUALIFIER', 'POINT_SCORED', 'INFORMATIONAL'])
+
 
 /** The store file's name, shared with the v2 store so the two cannot disagree. */
 const LEGACY_STORE_FILE_NAME = TENDERS_PERSISTENCE_FILE_NAME
@@ -133,15 +144,33 @@ function legacyWriteRefusal(data: unknown): string | null {
  * key is named in `notes`, the field this app already shows the user for exactly
  * this kind of honest provenance.
  *
- * The line that stays where it was: a record with no `id`, no `title`, or a
- * non-list `suggestedVaultDocIds` has nothing to keep and nothing this reader may
- * invent, so it is still `null` — and the caller still refuses the tender loudly
- * rather than dropping the row.
+ * The line that stays where it was: a record with no `id`, no `title`, a
+ * non-list `suggestedVaultDocIds`, or a present `category`/`riskLevel` that is
+ * not one of the values this reader understands has nothing to keep and
+ * nothing this reader may invent, so it is still `null` — and the caller still
+ * refuses the tender loudly rather than dropping the row. A mis-typed enum
+ * value must not ship raw and silently fall out of every known group in the
+ * renderer; an ABSENT enum value is still defaulted below, exactly as before.
  */
 function parseLegacyRequirement(raw: unknown): RequirementRecord | null {
   if (!isRecord(raw)) return null
   if (typeof raw.id !== 'string' || !raw.id || typeof raw.title !== 'string') return null
   if (!Array.isArray(raw.suggestedVaultDocIds)) return null
+  // Enum values are validated, not cast: a mis-typed `category`/`riskLevel`
+  // used to pass through with a `??` default and a cast, then silently fall out
+  // of every known group in the renderer. Absent is still defaulted below;
+  // present-but-unknown is refused like any other shape this reader cannot
+  // vouch for, and the caller refuses the whole tender loudly.
+  const category = raw.category
+  const riskLevel = raw.riskLevel
+  if (
+    (category !== undefined &&
+      (typeof category !== 'string' || !REQUIREMENT_CATEGORIES.has(category))) ||
+    (riskLevel !== undefined &&
+      (typeof riskLevel !== 'string' || !RISK_LEVELS.has(riskLevel)))
+  ) {
+    return null
+  }
   const unknownKeys = Object.keys(raw).filter((key) => !LEGACY_REQUIREMENT_KEYS.has(key))
   const box = isRecord(raw.boundingBox) ? raw.boundingBox : null
   const knownNotes = typeof raw.notes === 'string' ? raw.notes : null

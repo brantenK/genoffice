@@ -744,6 +744,55 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
         )
       }
     })
+
+    it('refuses a requirement whose category or riskLevel is not a value it understands, rather than shipping it raw', () => {
+      // The reader carries only fields it has validated: a mis-typed enum value
+      // used to pass through with a `??` default and a cast, then silently fell
+      // out of every known group in the renderer. A present `category`/`riskLevel`
+      // that is not one of the typed union members is therefore unreadable, and
+      // the caller refuses the whole tender loudly rather than shipping it.
+      for (const corrupt of [
+        { ...syntheticRequirement('requirement-bad-category', 1), category: 123 },
+        { ...syntheticRequirement('requirement-bad-risk', 1), riskLevel: { bogus: true } },
+        { ...syntheticRequirement('requirement-unknown-category', 1), category: 'OTHER' },
+        { ...syntheticRequirement('requirement-unknown-risk', 1), riskLevel: 'UNKNOWN' },
+        { ...syntheticRequirement('requirement-null-category', 1), category: null },
+        { ...syntheticRequirement('requirement-null-risk', 1), riskLevel: null },
+      ]) {
+        expect(() => migrateAndValidateTenders(tenderWith([corrupt]))).toThrow(
+          LegacyTendersReadError,
+        )
+      }
+    })
+
+    it('passes every valid category and riskLevel through unchanged and defaults them only when absent', () => {
+      for (const category of [
+        'MANDATORY_STAGE_1',
+        'FUNCTIONALITY_STAGE_2',
+        'FINANCIAL_STAGE_3',
+        'GENERAL_RETURNABLE',
+      ] as const) {
+        for (const riskLevel of ['CRITICAL_DISQUALIFIER', 'POINT_SCORED', 'INFORMATIONAL'] as const) {
+          const requirement = syntheticRequirement('requirement-enum', 1)
+          requirement.category = category
+          requirement.riskLevel = riskLevel
+          const data = migrateAndValidateTenders(tenderWith([requirement]))
+          const kept = data.workspaces[0].tenders[0].requirements[0]
+          expect(kept.category).toBe(category)
+          expect(kept.riskLevel).toBe(riskLevel)
+        }
+      }
+
+      // Absent values still default to the documented fallbacks: the refusal is
+      // about a mis-typed value shipping raw, not about a tolerated omission.
+      const sparse = syntheticRequirement('requirement-sparse-enums', 1) as any
+      delete sparse.category
+      delete sparse.riskLevel
+      const data = migrateAndValidateTenders(tenderWith([sparse]))
+      const kept = data.workspaces[0].tenders[0].requirements[0]
+      expect(kept.category).toBe('GENERAL_RETURNABLE')
+      expect(kept.riskLevel).toBe('INFORMATIONAL')
+    })
   })
 
   describe('2. Atomic Write Persistence', () => {
