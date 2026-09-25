@@ -276,6 +276,30 @@ three tests each run, and Playwright `locator.click` never becoming "visible,
 enabled and stable". If a failure passes alone, treat the isolated run as the
 verdict and re-run the full suite serially; do not "fix" it.
 
+### OneDrive has deleted the working tree once — commit or stash early
+
+On 2026-09-25 a OneDrive sync cycle **deleted `apps/` and `packages/` from disk
+(≈3600 tracked files) and re-synced them from the cloud snapshot**. Tracked
+files came back byte-identical, but everything uncommitted was lost — in that
+event it destroyed another workstream's ~45 uncommitted files (irrecoverable
+from git; only OneDrive version history could hold them), plus gitignored
+generated assets such as `apps/sheets/fixtures/generated/`. The signature is a
+giant `git status` deletion list or "path does not exist" errors, followed by
+the tree silently returning. Consequences and rules:
+
+- **Uncommitted work on this disk is not safe.** Commit or stash early and
+  often; the git index survives a wipe, the worktree does not.
+- **Regenerate gitignored fixtures after any such event.** `apps/sheets`
+  fixtures vanished with the wipe and took `@genoffice/cli`'s sidecar tests
+  with them (they read `apps/sheets/fixtures/generated/…xlsx`; exit code 2 =
+  missing fixture). Restore with `npm run fixtures -w @genoffice/sheets`.
+- **Re-verify generated/native build artifacts** (`target/`, `out/`,
+  `node_modules/.bin`) before trusting a gate run after a wipe; `npm ci` may
+  be needed.
+- A `check:baseline` "REGRESSION" whose workspace is untouched by your change
+  is worth a 30-second fixture/existence check before it is reported as a
+  product regression.
+
 ### The Playwright e2e suite is load-sensitive, and a lone pass is the verdict
 
 **Measured wall times for the whole `e2e/` Playwright suite on this machine:**

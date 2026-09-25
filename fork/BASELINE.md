@@ -21,11 +21,13 @@ whole again, and a hand-edit of one entry (as here) is deliberately narrower.
 
 ## @genoffice/tenders
 
-1854 passed, 0 failed, 7 skipped — 58 test files, measured at `e634250` plus the
-three uncommitted remediation waves, twice (`npx vitest run` from `apps/tenders`,
-104 s and 103 s), both runs identical. The figure recorded here before was
-`1068 passed` at the older commit; the increase is those waves' new tests, not a
-recovery from failures.
+1929 passed, 0 failed, 7 skipped — 59 test files, measured at `8f68cef`
+(review-pass-3 fix wave complete), `npm run test -w @genoffice/tenders`, one clean
+run on 2026-09-25 (also reproduced by the baseline tool's own measurement:
+`@genoffice/tenders … 1929 passed, 0 failed`). The figure recorded here before
+was `1854 passed` at `e634250` plus the uncommitted structural waves; the increase
+is the intervening waves' new tests (F1–F8 pins, overlay-isolation suite, perf
+pins), not a recovery from failures.
 
 - (nothing failing)
 
