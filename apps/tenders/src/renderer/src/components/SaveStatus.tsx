@@ -6,7 +6,7 @@
 import type { JSX } from 'react'
 import { AlertTriangle, Check, Loader2 } from 'lucide-react'
 
-export type SaveStatusKind = 'loading' | 'saving' | 'saved' | 'error' | 'conflict'
+export type SaveStatusKind = 'loading' | 'saving' | 'saved' | 'error' | 'conflict' | 'no-bridge'
 
 export interface SaveStatusProps {
   status: SaveStatusKind
@@ -44,6 +44,9 @@ const LABEL: Record<SaveStatusKind, string> = {
   saved: 'Saved',
   error: 'Save failed',
   conflict: 'Conflict',
+  // Never "Saved", never "Unsaved": this build has no write path at all, and the
+  // label says the fact rather than the symptom.
+  'no-bridge': 'Cannot save',
 }
 
 // Whole-pill tone. Loading/saving/saved stay neutral; error uses the danger
@@ -56,6 +59,10 @@ const TONE: Record<SaveStatusKind, string> = {
   saved: 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]',
   error: 'border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-text)]',
   conflict: 'border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn)]',
+  // The no-write-path state is not a failure that might clear, but it must be
+  // impossible to mistake for a healthy one: the same danger tone the save
+  // failure uses, because that is what it is — a save that never happened.
+  'no-bridge': 'border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-text)]',
 }
 
 /**
@@ -94,7 +101,7 @@ export function SaveStatus({
   onReload,
   compact = false,
 }: SaveStatusProps): JSX.Element {
-  const isAlert = status === 'error' || status === 'conflict'
+  const isAlert = status === 'error' || status === 'conflict' || status === 'no-bridge'
   const detail = isAlert && message ? message : null
   // Advisory only once the status has settled: a spinner or an in-flight save
   // must not be replaced mid-flight, and an alert already owns the message.

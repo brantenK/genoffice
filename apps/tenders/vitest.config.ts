@@ -15,7 +15,9 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['tests/**/*.test.ts'],
+    // `.tsx` specs are component tests: they render the real renderer surfaces
+    // through `tests/helpers/render.tsx` (react-dom/client + act, no test library).
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     environment: 'jsdom',
     testTimeout: 20000,
   },

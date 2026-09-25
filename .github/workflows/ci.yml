@@ -4,12 +4,16 @@ name: CI
 # all workspaces, and the full unit-test suite (engine packages and app tests; the
 # sheets suite also runs the Rust xlsx-sidecar tests). Packaging/signing is handled
 # by separate release automation — this workflow never builds installers.
+#
+# `product` is the branch every Zanostack change lands on (see
+# `fork/RUNBOOK.md`), so both the push and the PR gates must cover it: a gate that
+# only ever ran on the upstream mirror would leave the fork's work ungated.
 
 on:
   push:
-    branches: [main, 'dev_*', 'release_*']
+    branches: [main, 'product', 'dev_*', 'release_*']
   pull_request:
-    branches: [main]
+    branches: [main, 'product']
   workflow_dispatch:
 
 concurrency:
@@ -266,4 +270,99 @@ jobs:
           path: |
             e2e/artifacts
             e2e/test-results
+          retention-days: 7
+
+  tenders-e2e:
+    # The Tenders specs (`e2e/tenders-*.spec.ts`: 59 tests in 13 files, per
+    # `npx playwright test --config e2e/playwright.config.ts tenders- --list`)
+    # drive the real built shell through `electron.launch`, so nothing but this
+    # job exercises them: the `test` job's unit suite stops at the renderer's
+    # module boundary, and the `e2e` job runs them only as part of the whole
+    # Playwright suite. Scoped to the specs that need this app's build (tenders,
+    # plus sheets, markdown and crm, which two of the cross-app specs open)
+    # instead of `build:all`, so the job stays affordable.
+    #
+    # COST: roughly 15 minutes warm (npm ci + the Rust xlsx sidecar + five
+    # electron-vite builds + 59 serial Electron launches); budget ~20 minutes on a
+    # cold cache. `timeout-minutes` leaves room for that. This is a real gate, so
+    # it is deliberately not path-filtered: a skipped run would leave the fork's
+    # branch ungated again.
+    #
+    # DISPLAY: this runner CAN run the suite headless — the `e2e` job runs the
+    # whole Playwright suite on this same image under xvfb, with the AppArmor
+    # userns knob lifted, and `e2e/helpers.ts` passes `--no-sandbox --disable-gpu`
+    # on Linux. Both prerequisites are repeated here rather than shared, because
+    # `needs: e2e` would make this gate wait for the whole ~45-minute suite,
+    # including the specs that have nothing to do with Tenders.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        # The sheets renderer the cross-app specs open is built with its Rust
+        # xlsx sidecar (`npm run native:build`).
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch, 2026-07
+        with:
+          toolchain: stable
+
+      - name: Cache cargo (xlsx-sidecar)
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: apps/sheets/native/xlsx-engine
+
+      - name: Cache electron binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/electron
+          key: electron-bin-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-bin-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate localized string chunks
+        run: npm run prebuild:locales
+
+      - name: Build the apps these specs drive
+        run: |
+          npm run build -w @genoffice/tenders
+          npm run build -w @genoffice/sheets
+          npm run build -w @genoffice/markdown
+          npm run build -w @genoffice/crm
+          npm run build -w @genoffice/shell
+
+      # Same reason as the `e2e` job: newer kernels block unprivileged user
+      # namespaces, which kills the Chromium zygote even with --no-sandbox (the
+      # window opens, the renderer never loads). Absent knob = skip.
+      - name: Allow unprivileged user namespaces (Electron)
+        run: |
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "kernel.apparmor_restrict_unprivileged_userns not present — skipping"
+          fi
+
+      - name: E2E (Tenders specs)
+        env:
+          DEBUG: 'pw:browser'
+        run: xvfb-run --auto-servernum -- npx playwright test --config e2e/playwright.config.ts tenders-
+
+      - name: Upload Tenders E2E artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tenders-e2e-artifacts
+          path: |
+            e2e/artifacts
+            e2e/test-results
+            e2e/playwright-report
           retention-days: 7

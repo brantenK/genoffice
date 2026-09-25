@@ -51,6 +51,7 @@ import { milestonesAllowed } from '../../../shared/lifecycle'
 import { formatRandAmount } from '../../../shared/money'
 import { PdfViewer } from './PdfViewer'
 import {
+  AI_SUGGESTION_ACCESSIBLE_NAME,
   AI_SUGGESTION_LABEL,
   AI_SUGGESTION_TITLE,
   ExtractionReview,
@@ -210,6 +211,15 @@ export function Workspace() {
   // app had opened.
   const [toolError, setToolError] = useState<ToolError | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  /**
+   * Which overflow item is the menu's active descendant.
+   *
+   * A `role="menu"` promises a roving tabindex: exactly one item is tabbable,
+   * Arrow/Home/End move between them, and a disabled item is never landed on.
+   * The index is kept here so the tabindex is rendered from state rather than
+   * written into the DOM behind React's back.
+   */
+  const [menuActiveIndex, setMenuActiveIndex] = useState(0)
   const [activePane, setActivePane] = useState<CompactPane>('requirements')
   const [matrixFraction, setMatrixFraction] = useState<number>(() => readStoredFraction())
   const [dragging, setDragging] = useState(false)
@@ -514,7 +524,9 @@ export function Workspace() {
   }, [tender, review, setTenderReview])
 
   // Overflow menu: Escape closes and restores focus to the trigger; a click
-  // outside closes; opening moves focus to the first action.
+  // outside closes. Escape lives on the document so it also closes the menu from
+  // the trigger itself; the menu's own Arrow/Home/End/Tab handling is bound to
+  // the menu element below, where those keys belong.
   useEffect(() => {
     if (!menuOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -534,11 +546,6 @@ export function Workspace() {
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('mousedown', onPointerDown)
     }
-  }, [menuOpen])
-
-  useEffect(() => {
-    if (!menuOpen) return
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
   }, [menuOpen])
 
   const handleReReadSource = useCallback(async () => {
@@ -638,6 +645,136 @@ export function Workspace() {
     }
   }, [tender?.id, tender?.fileUrl, pdfReloadToken, wordDocument])
 
+  // Everything the overflow menu needs to render and to drive its roving
+  // tabindex — including the `useEffect` below — is declared HERE, above the
+  // `!tender` early return. A hook behind that return runs on a render with an
+  // active tender and is skipped by the very next render without one, which React
+  // answers with "Rendered fewer hooks than expected" and a torn-down tree: the
+  // whole view went blank the moment the active tender disappeared (creating an
+  // own workspace from inside a tender workspace leaves the view on `'workspace'`
+  // with nothing selected). Every branch of this component must therefore reach
+  // the same hooks in the same order.
+  // Contract milestones and Books billing are only exposed for a won tender.
+  const canBill = tender ? milestonesAllowed(tender.status) : false
+
+  const closeMenuThen = (action: () => void) => () => {
+    setMenuOpen(false)
+    action()
+  }
+
+  // The overflow menu's items, in render order. Declared as data rather than as
+  // inline JSX so the menu can reason about its own items: which of them are
+  // enabled decides where Arrow/Home/End may land, and which one carries the
+  // roving tabindex. The visual result is byte-for-byte the same menu.
+  const menuItems: Array<{
+    testId: string
+    icon: React.ReactNode
+    label: string
+    onClick?: () => void
+    disabled?: boolean
+    title?: string
+  }> = [
+    {
+      testId: 'overflow-action-rerun-gap',
+      icon: <RefreshCw size={13} aria-hidden="true" />,
+      label: 'Re-run gap analysis',
+      onClick: closeMenuThen(rerunGap),
+    },
+    ...(compact
+      ? [
+          {
+            testId: 'overflow-action-sheets',
+            icon: <Table size={13} aria-hidden="true" />,
+            label: 'Export matrix to Sheets',
+            onClick: closeMenuThen(() => void runExportMatrix()),
+          },
+          {
+            testId: 'overflow-action-draft-docs',
+            icon: <FileText size={13} aria-hidden="true" />,
+            label: 'Draft proposal in Docs',
+            onClick: closeMenuThen(() => void runDraftProposal()),
+          },
+          sampleWritesBlocked
+            ? {
+                testId: 'overflow-action-crm',
+                icon: <Building2 size={13} aria-hidden="true" />,
+                label: 'CRM sync',
+                disabled: true,
+                title: SAMPLE_WRITE_BLOCKED_REASON,
+              }
+            : tender?.linkedCrmDealId
+              ? {
+                  testId: 'overflow-action-crm',
+                  icon: <Building2 size={13} aria-hidden="true" />,
+                  label: 'Open CRM deal',
+                  onClick: closeMenuThen(
+                    () => void openCrmDeal(tender.linkedCrmDealId || `deal-tender-${tender.id}`),
+                  ),
+                }
+              : {
+                  testId: 'overflow-action-crm',
+                  icon: <Building2 size={13} aria-hidden="true" />,
+                  label: 'Sync to CRM',
+                  disabled: crmBusy,
+                  onClick: closeMenuThen(() => void syncCrm()),
+                },
+          ...(canBill
+            ? [
+                {
+                  testId: 'overflow-action-milestones',
+                  icon: <Award size={13} aria-hidden="true" />,
+                  label: 'Contract milestones',
+                  onClick: closeMenuThen(() => setMilestonesOpen(true)),
+                },
+              ]
+            : []),
+        ]
+      : []),
+  ]
+  // A disabled action is never the active one, and the active index is resolved
+  // from what actually rendered, so a menu whose items changed under it (CRM
+  // going busy, billing becoming possible) cannot leave the roving tabindex on a
+  // control the user cannot use.
+  const enabledMenuIndexes = menuItems
+    .map((item, index) => (item.disabled === true ? -1 : index))
+    .filter((index) => index >= 0)
+  const activeMenuIndex = enabledMenuIndexes.includes(menuActiveIndex)
+    ? menuActiveIndex
+    : (enabledMenuIndexes[0] ?? 0)
+
+  /**
+   * The keyboard contract `role="menu"` promises, implemented over the enabled
+   * items: Down/Up move (wrapping), Home/End jump to the ends, Tab closes the
+   * menu and lets focus leave it. Enter and Space are the buttons' own click, so
+   * they need no handler here.
+   */
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Tab') {
+      setMenuOpen(false)
+      return
+    }
+    const count = enabledMenuIndexes.length
+    if (count === 0) return
+    const current = enabledMenuIndexes.indexOf(activeMenuIndex)
+    const at = (position: number): void => {
+      event.preventDefault()
+      setMenuActiveIndex(enabledMenuIndexes[((position % count) + count) % count] ?? 0)
+    }
+    if (event.key === 'ArrowDown') at(current + 1)
+    else if (event.key === 'ArrowUp') at(current - 1)
+    else if (event.key === 'Home') at(0)
+    else if (event.key === 'End') at(count - 1)
+  }
+
+  // Roving tabindex, the other half of the `role="menu"` promise: opening moves
+  // focus to the active item, and every move focuses the item it names. Only that
+  // item is tabbable, so Tab leaves the menu (and closes it) rather than walking
+  // the list. Declared here, above the early return, beside the items it indexes.
+  useEffect(() => {
+    if (!menuOpen) return
+    menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]')[activeMenuIndex]?.focus()
+  }, [menuOpen, activeMenuIndex])
+
   if (!tender) {
     return (
       <section
@@ -650,8 +787,6 @@ export function Workspace() {
   }
 
   const dl = deadlineStatus(tender.closingDate, now)
-  // Contract milestones and Books billing are only exposed for a won tender.
-  const canBill = milestonesAllowed(tender.status)
   const MethodIcon =
     tender.submissionMethod === 'EMAIL'
       ? Mail
@@ -693,11 +828,6 @@ export function Workspace() {
       url = URL.createObjectURL(file)
     }
     updateTender(tender.id, { fileUrl: url, fileName: file.name })
-  }
-
-  const closeMenuThen = (action: () => void) => () => {
-    setMenuOpen(false)
-    action()
   }
 
   return (
@@ -864,7 +994,12 @@ export function Workspace() {
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-controls="workspace-overflow-menu"
-              onClick={() => setMenuOpen((v) => !v)}
+              onClick={() => {
+                // Opening lands on the first action the user can actually use,
+                // which is where the roving tabindex then lives.
+                if (!menuOpen) setMenuActiveIndex(enabledMenuIndexes[0] ?? 0)
+                setMenuOpen(!menuOpen)
+              }}
               title="More actions and tender details"
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             >
@@ -922,74 +1057,25 @@ export function Workspace() {
                   </dl>
                 </div>
 
-                <div role="menu" aria-label="More actions" className="py-1">
-                  <MenuItem
-                    testId="overflow-action-rerun-gap"
-                    icon={<RefreshCw size={13} aria-hidden="true" />}
-                    onClick={closeMenuThen(rerunGap)}
-                  >
-                    Re-run gap analysis
-                  </MenuItem>
-
-                  {compact && (
-                    <>
-                      <MenuItem
-                        testId="overflow-action-sheets"
-                        icon={<Table size={13} aria-hidden="true" />}
-                        onClick={closeMenuThen(() => void runExportMatrix())}
-                      >
-                        Export matrix to Sheets
-                      </MenuItem>
-                      <MenuItem
-                        testId="overflow-action-draft-docs"
-                        icon={<FileText size={13} aria-hidden="true" />}
-                        onClick={closeMenuThen(() => void runDraftProposal())}
-                      >
-                        Draft proposal in Docs
-                      </MenuItem>
-                      {sampleWritesBlocked ? (
-                        <MenuItem
-                          testId="overflow-action-crm"
-                          icon={<Building2 size={13} aria-hidden="true" />}
-                          disabled
-                          title={SAMPLE_WRITE_BLOCKED_REASON}
-                        >
-                          CRM sync
-                        </MenuItem>
-                      ) : tender.linkedCrmDealId ? (
-                        <MenuItem
-                          testId="overflow-action-crm"
-                          icon={<Building2 size={13} aria-hidden="true" />}
-                          onClick={closeMenuThen(
-                            () =>
-                              void openCrmDeal(
-                                tender.linkedCrmDealId || `deal-tender-${tender.id}`,
-                              ),
-                          )}
-                        >
-                          Open CRM deal
-                        </MenuItem>
-                      ) : (
-                        <MenuItem
-                          testId="overflow-action-crm"
-                          icon={<Building2 size={13} aria-hidden="true" />}
-                          disabled={crmBusy}
-                          onClick={closeMenuThen(() => void syncCrm())}
-                        >
-                          Sync to CRM
-                        </MenuItem>
-                      )}
-                      {canBill && (
-                        <MenuItem
-                          testId="overflow-action-milestones"
-                          icon={<Award size={13} aria-hidden="true" />}
-                          onClick={closeMenuThen(() => setMilestonesOpen(true))}
-                        >
-                          Contract milestones
-                        </MenuItem>
-                      )}
-                    </>
-                  )}
+                <div
+                  role="menu"
+                  aria-label="More actions"
+                  onKeyDown={onMenuKeyDown}
+                  className="py-1"
+                >
+                  {menuItems.map((item, index) => (
+                    <MenuItem
+                      key={item.testId}
+                      testId={item.testId}
+                      icon={item.icon}
+                      tabIndex={index === activeMenuIndex ? 0 : -1}
+                      {...(item.onClick ? { onClick: item.onClick } : {})}
+                      {...(item.disabled === true ? { disabled: true } : {})}
+                      {...(item.title ? { title: item.title } : {})}
+                    >
+                      {item.label}
+                    </MenuItem>
+                  ))}
                 </div>
               </div>
             )}
@@ -1609,7 +1695,13 @@ function WordSourcePane({ tender }: { tender: TenderRecord }) {
                       p.{requirement.pageNumber}
                     </span>
                     {requirement.suggestedBy === 'ai' && (
-                      <span title={AI_SUGGESTION_TITLE}>
+                      /* Named, not just tooltipped: a screen reader has no hover,
+                         so the marker's meaning has to be its accessible name. */
+                      <span
+                        role="note"
+                        aria-label={AI_SUGGESTION_ACCESSIBLE_NAME}
+                        title={AI_SUGGESTION_TITLE}
+                      >
                         <Badge tone="violet">{AI_SUGGESTION_LABEL}</Badge>
                       </span>
                     )}
@@ -1637,7 +1729,13 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-/** One action in the overflow menu. */
+/**
+ * One action in the overflow menu.
+ *
+ * `tabIndex` is passed in rather than fixed here: the menu owns the roving
+ * tabindex (`role="menu"` promises exactly one tabbable item), so this component
+ * must not decide it.
+ */
 function MenuItem({
   testId,
   icon,
@@ -1645,6 +1743,7 @@ function MenuItem({
   onClick,
   disabled,
   title,
+  tabIndex = -1,
 }: {
   testId: string
   icon: React.ReactNode
@@ -1652,12 +1751,14 @@ function MenuItem({
   onClick?: () => void
   disabled?: boolean
   title?: string
+  tabIndex?: number
 }) {
   return (
     <button
       type="button"
       role="menuitem"
       data-testid={testId}
+      tabIndex={tabIndex}
       onClick={onClick}
       disabled={disabled}
       title={title}

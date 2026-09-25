@@ -16,7 +16,11 @@ export interface RunwayItem {
   title: string
   /** ISO instant of the event, in UTC */
   date: string
-  /** days from today (negative = overdue) */
+  /**
+   * Days from today in the South African civil calendar (negative = overdue) —
+   * a whole-day reading of the SA calendar, never a rounded 24-hour quotient.
+   * Every decision in this module compares instants; this is for display.
+   */
   daysAway: number
   /** "VAULT_EXPIRY" | "STALE_STAMP" | "TENDER_CLOSING" | "TENDER_SUBMIT_BY" */
   kind: RunwayKind
@@ -87,7 +91,11 @@ export function buildRunway(
     const closing = parseClosingDate(t.closingDate)
     if (!closing) continue
     const days = daysBetween(closing, now)
-    if (days >= -30) {
+    // A deadline that has passed is not a renewal task any more, so it drops off
+    // the runway. The test is on the INSTANT — the deadline is still upcoming
+    // until the closing instant itself — and the 30-day tail below is a civil-day
+    // reading of "recently closed", which is what the note renders.
+    if (now.getTime() <= closing.getTime() || days >= -30) {
       // `closing` is the real UTC instant of the RFP's SAST wall-clock deadline
       // (11:00 SAST → 09:00Z), so the ISO value below is both the instant the
       // `.ics` export must carry and the day the SA civil calendar shows.
@@ -167,12 +175,13 @@ function vevent(uid: string, start: Date, title: string, description: string): s
 }
 
 /** Render a full iCalendar file body for the given runway items. */
-export function buildIcs(
-  items: RunwayItem[],
-  onlyUpcoming = true,
-  _now: Date = new Date(),
-): string {
-  const selected = onlyUpcoming ? items.filter((i) => i.daysAway >= -1) : items
+export function buildIcs(items: RunwayItem[], onlyUpcoming = true, now: Date = new Date()): string {
+  // "Upcoming" is decided on the INSTANT, not on a rounded day: an event that has
+  // not happened yet is upcoming, so exporting the calendar from `now` can never
+  // hide an expiry or a deadline that is still ahead (`_now` is now used).
+  const selected = onlyUpcoming
+    ? items.filter((item) => new Date(item.date).getTime() >= now.getTime())
+    : items
 
   const lines: string[] = [
     'BEGIN:VCALENDAR',

@@ -56,6 +56,27 @@ function createMockDoc(overrides: Partial<VaultDoc> = {}): VaultDoc {
   }
 }
 
+function createMockTender(overrides: Partial<TenderRecord> = {}): TenderRecord {
+  return {
+    id: 'tender-1',
+    title: 'Municipal Works',
+    referenceNumber: 'RFP-01',
+    issuingBody: 'City of Ekurhuleni',
+    closingDate: '2026-12-31',
+    submissionMethod: 'PHYSICAL',
+    submissionAddress: 'Civic Centre',
+    signatureChecks: {},
+    status: 'IN_PROGRESS',
+    createdAt: '2026-08-01',
+    fileName: 'rfp.pdf',
+    fileUrl: 'documents/rfp.pdf',
+    numPages: 10,
+    ocrPages: 0,
+    requirements: [],
+    ...overrides,
+  }
+}
+
 describe('Compliance Gap Analysis & Document Health Evaluation', () => {
   describe('1. Document Health Assessment & Expiry Calculation', () => {
     it('calculates days between two dates accurately', () => {
@@ -486,6 +507,72 @@ describe('Compliance Gap Analysis & Document Health Evaluation', () => {
       const mismatches = checkCompanyDetails(tender, incompleteCompany)
       expect(mismatches.some((m) => m.field === 'Tax PIN')).toBe(true)
       expect(mismatches.some((m) => m.field === 'CSD supplier number')).toBe(true)
+    })
+
+    it('does not demand company details for an optional requirement whose clause quotes the keyword', () => {
+      // Both rule signals agree: the requirement's own rule key IS the catalogue
+      // rule (so the field is genuinely wanted), and it is optional (so nothing is
+      // demanded of the bidder). Optionality wins — the same test the rest of the
+      // gate applies.
+      const optionalTaxPin = checkCompanyDetails(
+        {
+          ...createMockTender({ closingDate: '2026-12-31' }),
+          requirements: [createMockReq({ id: 'r-1', ruleKey: 'tax_pin', isMandatory: false })],
+        },
+        { ...MOCK_COMPANY, taxPin: '' },
+      )
+      expect(optionalTaxPin).toEqual([])
+
+      // The quoted clause carries the keyword while the rule key is unrelated —
+      // text alone is never a demand.
+      const keywordOnly = checkCompanyDetails(
+        {
+          ...createMockTender({ closingDate: '2026-12-31' }),
+          requirements: [
+            createMockReq({
+              id: 'r-1',
+              ruleKey: 'methodology',
+              title: 'Methodology statement',
+              verbatimClause: 'Subcontractors must supply their own SARS tax clearance.',
+              isMandatory: false,
+            }),
+          ],
+        },
+        { ...MOCK_COMPANY, taxPin: '' },
+      )
+      expect(keywordOnly).toEqual([])
+    })
+
+    it('does not create a company blocker for a non-mandatory requirement the gate has forgiven', () => {
+      // A mandatory requirement the bidder justified as N/A is resolved, so the
+      // whole gate skips it — including company details.
+      const justified = checkCompanyDetails(
+        {
+          ...createMockTender({ closingDate: '2026-12-31' }),
+          requirements: [
+            createMockReq({
+              id: 'r-1',
+              ruleKey: 'tax_pin',
+              status: 'NOT_APPLICABLE',
+              notApplicableReason: 'The buyer waived proof of tax compliance for this bid.',
+            }),
+          ],
+        },
+        { ...MOCK_COMPANY, taxPin: '' },
+      )
+      expect(justified).toEqual([])
+
+      // Without that justification the same requirement still demands the detail.
+      const unjustified = checkCompanyDetails(
+        {
+          ...createMockTender({ closingDate: '2026-12-31' }),
+          requirements: [
+            createMockReq({ id: 'r-1', ruleKey: 'tax_pin', status: 'NOT_APPLICABLE' }),
+          ],
+        },
+        { ...MOCK_COMPANY, taxPin: '' },
+      )
+      expect(unjustified.some((m) => m.field === 'Tax PIN')).toBe(true)
     })
 
     it('calculates readiness score and determines ready status (false when blocking checks fail)', () => {

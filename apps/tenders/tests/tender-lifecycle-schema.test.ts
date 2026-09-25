@@ -348,6 +348,54 @@ describe('lifecycle schema compatibility', () => {
     )
   })
 
+  it('accepts a zero amount and refuses a negative one on both money fields', () => {
+    // Stored rand amounts must admit zero — the money PARSER's refusal of a `R 0`
+    // literal is about not confirming a zero valuation, not about storage.
+    // See `nonnegativeAmount` in `tenders-schema.ts`.
+    const zeroValue = documentV2(
+      tender({
+        estimatedValue: 0,
+        outcome: {
+          status: 'won',
+          noticeDate: null,
+          reason: null,
+          awardedValue: 0,
+          evidenceReference: null,
+          recordedAt: AT,
+        },
+      }),
+    )
+    const accepted = validateTendersDataV2(zeroValue)
+    expect(accepted.ok).toBe(true)
+    if (accepted.ok) {
+      const parsed = accepted.data.workspaces[0].tenders[0]
+      expect(parsed.estimatedValue).toBe(0)
+      expect(parsed.outcome?.awardedValue).toBe(0)
+    }
+
+    expectIssue(
+      validateTendersDataV2(documentV2(tender({ estimatedValue: -0.01 }))),
+      'workspaces.0.tenders.0.estimatedValue',
+    )
+    expectIssue(
+      validateTendersDataV2(
+        documentV2(
+          tender({
+            outcome: {
+              status: 'won',
+              noticeDate: null,
+              reason: null,
+              awardedValue: -0.01,
+              evidenceReference: null,
+              recordedAt: AT,
+            } as never,
+          }),
+        ),
+      ),
+      'workspaces.0.tenders.0.outcome.awardedValue',
+    )
+  })
+
   it('rejects uncapped lifecycle history and readiness blocker lists', () => {
     const tooManyEvents = Array.from({ length: MAX_TENDERS_LIFECYCLE_HISTORY + 1 }, () => ({
       at: AT,

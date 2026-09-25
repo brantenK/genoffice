@@ -455,6 +455,26 @@ function nonnegativeNumber(value: unknown, path: string, issues: Issues): number
   return parsed !== undefined && parsed >= 0 ? parsed : undefined
 }
 
+/**
+ * A rand amount that is already on the document, not a string a parser reads.
+ *
+ * Zero IS accepted here, on purpose, and this is the one truth the schema and the
+ * money parser share: `parseMoneyDetailed` refuses to READ a `R 0` literal ("a
+ * zero valuation must not look confirmed"), while a stored amount may legitimately
+ * be zero — a free-of-charge line, a milestone not yet priced, a tender whose
+ * value was withdrawn. Refusing it here would delete a stored figure without
+ * telling anybody, which is exactly the kind of silent value-invention this
+ * module exists to prevent.
+ *
+ * What zero must never do is look like a confirmed valuation. That is enforced
+ * once, on the confirmation, not by the storage bound: `assessPricing` in
+ * `proposal-generator` reads the value with `> 0` and drops the confirmation, so
+ * a zero is reported as an unconfirmed valuation rather than as `R 0,00`.
+ */
+function nonnegativeAmount(value: unknown, path: string, issues: Issues): number | undefined {
+  return nonnegativeNumber(value, path, issues)
+}
+
 function boundedUnit(value: unknown, path: string, issues: Issues): number | undefined {
   const parsed = finiteNumber(value, path, issues)
   if (parsed !== undefined && (parsed < 0 || parsed > 1))
@@ -928,7 +948,7 @@ function parseMilestone(
     ...(hasDefined(object, 'title') ? { title: optional('title') } : {}),
     ...(hasDefined(object, 'description') ? { description: optional('description') } : {}),
     amount:
-      nonnegativeNumber(required(object, 'amount', path, issues), `${path}.amount`, issues) ?? 0,
+      nonnegativeAmount(required(object, 'amount', path, issues), `${path}.amount`, issues) ?? 0,
     ...(hasDefined(object, 'dueDate') ? { dueDate: optional('dueDate') } : {}),
     ...(hasDefined(object, 'completedDate') ? { completedDate: optional('completedDate') } : {}),
     status: (enumValue(
@@ -1351,7 +1371,7 @@ function parseOutcome(
     awardedValue:
       awardedRaw === null
         ? null
-        : (nonnegativeNumber(awardedRaw, `${path}.awardedValue`, issues) ?? null),
+        : (nonnegativeAmount(awardedRaw, `${path}.awardedValue`, issues) ?? null),
     evidenceReference: requiredNullableString(object, 'evidenceReference', path, issues),
     recordedAt: typeof recordedAtRaw === 'string' ? recordedAtRaw : '',
   }
@@ -1501,7 +1521,7 @@ function parseTender(value: unknown, path: string, issues: Issues): TenderRecord
           estimatedValue:
             object.estimatedValue === null
               ? null
-              : (nonnegativeNumber(object.estimatedValue, `${path}.estimatedValue`, issues) ??
+              : (nonnegativeAmount(object.estimatedValue, `${path}.estimatedValue`, issues) ??
                 null),
         }
       : {}),

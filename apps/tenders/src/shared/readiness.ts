@@ -215,8 +215,21 @@ export interface DocHealthReport {
   stampDaysLeft: number | null
 }
 
+/**
+ * The instant every linked document was assessed against. `closingDate` being
+ * UNKNOWN or UNPARSEABLE withholds the instant: a document cannot be called
+ * valid or expired against a deadline nobody knows, and the app may not invent
+ * one.
+ */
+export type DocAtClosingClosingDate =
+  | { status: 'KNOWN'; raw: string; instant: Date }
+  | { status: 'UNKNOWN'; raw: string | null }
+  | { status: 'UNPARSEABLE'; raw: string }
+
 export interface DocAtClosing {
   doc: VaultDoc
+  closingDate: DocAtClosingClosingDate
+  /** `UNKNOWN` and `INVALID_DATE` mean "not assessed", never "assessed and clear". */
   healthAtClosing: DocHealthReport
   willFail: boolean
   requirementTitles: string[]
@@ -233,9 +246,24 @@ export interface MissingLinkedEvidence {
   linkedVaultDocId: string | null
 }
 
-/** Date difference in whole days, retaining the renderer's existing semantics. */
+/**
+ * DISPLAY-ONLY day difference, in the South African civil day.
+ *
+ * Both arguments are folded onto the SA civil calendar first, so the count is a
+ * whole-day reading of the SA calendar rather than a rounded 24-hour quotient —
+ * the two disagree whenever the gap is not a whole number of days (a 16:00
+ * deadline is 0 days away at 09:00 and 1 day away at 17:00 on the same civil
+ * day; `Math.round` over raw instants would say the opposite).
+ *
+ * A ranking or a go/no-go decision must NOT use this: compare instants
+ * (`a.getTime() < b.getTime()`) or compare civil days through
+ * `parseCivilDay`. See the deadline gate in `assessReadiness`.
+ */
 export function daysBetween(a: Date, b: Date): number {
-  return Math.round((a.getTime() - b.getTime()) / DAY_MS)
+  const civilA = civilDateFromDate(a)
+  const civilB = civilDateFromDate(b)
+  if (!civilA || !civilB) return 0
+  return civilDaysBetween(civilA, civilB)
 }
 
 /**
@@ -608,7 +636,19 @@ export function assessDocHealth(
   return { health: 'VALID', daysUntilExpiry, daysSinceCertified, stampDaysLeft }
 }
 
-/** A requirement is resolved only when N/A has an audit reason. */
+/**
+ * A requirement is resolved only when a person recorded the decision.
+ *
+ *  - `FULFILLED` — resolved. The evidence is the linked document / signature
+ *    check, which other checks police.
+ *  - `NOT_APPLICABLE` — resolved only with an explicit human justification in
+ *    `notApplicableReason`.
+ *
+ * `reason` is deliberately NOT accepted as that justification: it is the
+ * machine-written explanation (`applyGapToRequirement` fills it on every run),
+ * so accepting it would let an automated pass mark a requirement N/A without
+ * anybody deciding anything.
+ */
 export function isRequirementResolved(
   requirement: Pick<RequirementRecord, 'status' | 'reason' | 'notApplicableReason'>,
 ): boolean {
@@ -662,46 +702,70 @@ export function requiresDocumentEvidence(ruleKey: string): boolean {
   return RULE_BY_KEY[ruleKey]?.evidenceKind === 'DOCUMENT'
 }
 
+/**
+ * Company-profile fields the returnables require that the profile does not
+ * carry.
+ *
+ * Both rule signals are consulted and they mean the same thing — "an applicable
+ * requirement asks for this":
+ *  - the requirement's `ruleKey` resolves to that rule in the catalogue, and
+ *  - the requirement's own `title` / `verbatimClause` matches the field's
+ *    keyword.
+ *
+ * A requirement is applicable when it is not optional (`isMandatory !== false`)
+ * AND it is not justified N/A. That is deliberately the same test
+ * `docsAtClosing` and `missingLinkedEvidence` apply, so an optional requirement
+ * — or one the bidder has already justified as inapplicable — can never raise a
+ * company-details blocker the rest of the gate has forgiven.
+ *
+ * A quoted clause is NOT evidence the requirement is mandatory: "the following
+ * is not applicable to this bid: registration number …" carries the keyword in
+ * its text while demanding nothing.
+ */
 export function checkCompanyDetails(
   tender: TenderRecord,
   company: CompanyProfile,
 ): DetailMismatch[] {
   const applicableRequirements = tender.requirements.filter(
-    (requirement) => requirement.isMandatory !== false && requirement.status !== 'NOT_APPLICABLE',
+    (requirement) =>
+      requirement.isMandatory !== false &&
+      !(requirement.status === 'NOT_APPLICABLE' && isRequirementResolved(requirement)),
   )
-  const wants = (keyword: RegExp): boolean =>
-    applicableRequirements.some((r) => keyword.test(r.title) || keyword.test(r.verbatimClause))
+  const wants = (ruleKey: string, keyword: RegExp): boolean =>
+    applicableRequirements.some(
+      (r) => r.ruleKey === ruleKey || keyword.test(r.title) || keyword.test(r.verbatimClause),
+    )
 
   const mismatches: DetailMismatch[] = []
-  if (wants(/(registration|cipc|incorporat)/i) && !company.registrationNumber) {
+  if (wants('cipc', /(registration|cipc|incorporat)/i) && !company.registrationNumber) {
     mismatches.push({
       field: 'Registration number',
       tenderExpects: 'CIPC registration number',
       companyHas: company.registrationNumber,
     })
   }
-  if (wants(/(tax\s*pin|sars)/i) && !company.taxPin) {
+  if (wants('tax_pin', /(tax\s*pin|sars)/i) && !company.taxPin) {
     mismatches.push({
       field: 'Tax PIN',
       tenderExpects: 'SARS tax pin / TCS',
       companyHas: company.taxPin,
     })
   }
-  if (wants(/(vat)/i) && !company.vatNumber) {
+  if (wants('vat', /(vat)/i) && !company.vatNumber) {
     mismatches.push({
       field: 'VAT number',
       tenderExpects: 'VAT registration number',
       companyHas: company.vatNumber,
     })
   }
-  if (wants(/(bbbee|b-bbee|b-bbbee|broad[- ]based)/i) && !company.bbbeeLevel) {
+  if (wants('bbbee', /(bbbee|b-bbee|b-bbbee|broad[- ]based)/i) && !company.bbbeeLevel) {
     mismatches.push({
       field: 'B-BBEE level',
       tenderExpects: 'B-BBEE certificate / level',
       companyHas: company.bbbeeLevel,
     })
   }
-  if (wants(/(csd|central supplier)/i) && !company.csdSupplierNumber) {
+  if (wants('csd', /(csd|central supplier)/i) && !company.csdSupplierNumber) {
     mismatches.push({
       field: 'CSD supplier number',
       tenderExpects: 'CSD registration',
@@ -721,8 +785,54 @@ export function signatureRuleKeys(tender: TenderRecord): string[] {
     .filter((key) => SIGNATURE_RULE_KEYS.includes(key))
 }
 
+/**
+ * The instant a linked document is assessed against, as a closed union.
+ *
+ * `UNKNOWN` (no closing value at all) and `UNPARSEABLE` (a value the canonical
+ * parser rejects) carry no instant — see `docsAtClosing`.
+ */
+function closingDateForAssessment(raw: string | null | undefined): DocAtClosingClosingDate {
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  const instant = parseClosingDate(raw)
+  if (!instant) {
+    const hadText = Boolean(trimmed)
+    return hadText
+      ? { status: 'UNPARSEABLE', raw: trimmed }
+      : { status: 'UNKNOWN', raw: trimmed || null }
+  }
+  return {
+    status: 'KNOWN',
+    // The value exactly as stored, or the trimmed value when the field holds
+    // only whitespace around it.
+    raw: typeof raw === 'string' && raw.length > 0 ? raw : trimmed,
+    instant,
+  }
+}
+
+/**
+ * Every linked, still-applicable document assessed at the closing instant.
+ *
+ * When the tender carries no closing value the app does not have, `docsAtClosing`
+ * does NOT invent one: it used to assess every document against
+ * `Date.now() + 90 days`, so a bid with no deadline at all was told its documents
+ * "remain valid through closing" on a timeline nobody stated. Each entry now
+ * carries the instant it was assessed against in `closingDate`, and with no
+ * instant there is nothing to assess against — `healthAtClosing` is `UNKNOWN`
+ * ("not assessed" — the same state `healthWillFail` already fails closed on),
+ * `daysUntilExpiry` / `daysSinceCertified` / `stampDaysLeft` are `null` rather
+ * than a fabricated day count, and `willFail` is `true`, so the `docs-at-closing`
+ * gate blocks with a reason a person can act on.
+ */
 export function docsAtClosing(tender: TenderRecord, vault: VaultDoc[]): DocAtClosing[] {
-  const closing = parseClosingDate(tender.closingDate) ?? new Date(Date.now() + 90 * DAY_MS)
+  const closingDate = closingDateForAssessment(tender.closingDate)
+  const closingEntered = closingDate.status !== 'KNOWN'
+  /** Nothing can be assessed without a closing instant — not even a permanent document. */
+  const notAssessed: DocHealthReport = {
+    health: 'UNKNOWN',
+    daysUntilExpiry: null,
+    daysSinceCertified: null,
+    stampDaysLeft: null,
+  }
   const byDoc = new Map<string, DocAtClosing>()
   for (const requirement of tender.requirements) {
     if (requirement.status === 'NOT_APPLICABLE' && isRequirementResolved(requirement)) continue
@@ -731,7 +841,9 @@ export function docsAtClosing(tender: TenderRecord, vault: VaultDoc[]): DocAtClo
     const doc = vault.find((candidate) => candidate.id === docId)
     if (!doc || typeof doc.fileUrl !== 'string' || !doc.fileUrl.trim()) continue
     const rule = RULE_BY_KEY[requirement.ruleKey]
-    const healthAtClosing = assessDocHealth(doc, closing, rule?.validityKind)
+    const healthAtClosing = closingEntered
+      ? notAssessed
+      : assessDocHealth(doc, closingDate.instant, rule?.validityKind)
     const entry = byDoc.get(docId)
     if (entry) {
       entry.requirementTitles.push(requirement.title)
@@ -742,6 +854,7 @@ export function docsAtClosing(tender: TenderRecord, vault: VaultDoc[]): DocAtClo
     } else {
       byDoc.set(docId, {
         doc,
+        closingDate,
         healthAtClosing,
         willFail: healthWillFail(healthAtClosing.health),
         requirementTitles: [requirement.title],
@@ -822,11 +935,18 @@ export function assessReadiness(
   const missingEvidence = missingLinkedEvidence(tender, vault)
   const failing = docs.filter((doc) => doc.willFail)
   const docProblems = failing.length + missingEvidence.length
+  // Without a closing instant there is nothing to assess documents against, so
+  // the dimension cannot be evaluated at all. Only a KEYED doc entry can report
+  // this: with no keyed documents there is nothing the missing instant would
+  // have been used for, and the check stays exactly as it was.
+  const closingKnown = docs[0]?.closingDate ?? null
+  const closingUnevaluable = closingKnown !== null && closingKnown.status !== 'KNOWN'
   checks.push({
     id: 'docs-at-closing',
     label: 'Linked documents valid on the closing date',
-    detail:
-      docProblems === 0
+    detail: closingUnevaluable
+      ? `Cannot be evaluated: ${closingKnown.status === 'UNKNOWN' ? 'this tender has no closing date on file' : `the closing date "${closingKnown.raw}" could not be read`}, so there is no deadline to check ${docs.length} linked document(s) against. Confirm the closing date first.`
+      : docProblems === 0
         ? docs.length === 0
           ? 'No documents linked yet.'
           : `All ${docs.length} linked document(s) remain valid through closing.`
@@ -840,7 +960,7 @@ export function assessReadiness(
                 `${item.doc.title} — ${item.healthAtClosing.health === 'EXPIRED' ? `expires ${Math.abs(item.healthAtClosing.daysUntilExpiry ?? 0)} days before closing` : item.healthAtClosing.health === 'INVALID_DATE' || item.healthAtClosing.health === 'UNKNOWN' ? 'date information is invalid or unknown' : 'police stamp will exceed the 90-day window before closing'}`,
             ),
           ].join('; '),
-    passed: docProblems === 0,
+    passed: closingUnevaluable ? false : docProblems === 0,
     blocking: true,
   })
 
@@ -951,8 +1071,12 @@ export function assessReadiness(
 
   const progress: Record<string, number> = {
     requirements: reqs.length === 0 ? 0 : (reqs.length - unresolved.length) / reqs.length,
-    'docs-at-closing':
-      docs.length + missingEvidence.length === 0
+    // An unevaluable dimension earns nothing: no assessment happened, so there
+    // is no credit for it (the check's own `passed` is false for the same
+    // reason).
+    'docs-at-closing': closingUnevaluable
+      ? 0
+      : docs.length + missingEvidence.length === 0
         ? 0.6
         : 1 - docProblems / (docs.length + missingEvidence.length),
     signatures: sigKeys.length === 0 ? 1 : (sigKeys.length - sigMissing.length) / sigKeys.length,

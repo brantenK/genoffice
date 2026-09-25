@@ -539,7 +539,12 @@ const benchReport: Record<string, unknown> = {
 }
 
 interface ParsedMeasurement {
-  pages: number
+  /**
+   * Page count, when the point recorded one. A text-dense byte-stress point is
+   * measured in lines rather than pages, so it contributes bytes but no pages —
+   * `undefined` here means "not recorded", not zero pages.
+   */
+  pages?: number
   bytes: number
 }
 
@@ -569,7 +574,7 @@ function summarizeEnvelope(): void {
     ...(byteStress ? [byteStress] : []),
     ...(byteCeiling ? [byteCeiling] : []),
   ]
-  const largestPageCountParsed = parsed.reduce((max, entry) => Math.max(max, entry.pages), 0)
+  const largestPageCountParsed = parsed.reduce((max, entry) => Math.max(max, entry.pages ?? 0), 0)
   const largestBytesParsed = parsed.reduce((max, entry) => Math.max(max, entry.bytes), 0)
   benchReport.largestPageCountExercised = largestPageCountParsed
   benchReport.largestBytesParsed = largestBytesParsed
@@ -599,7 +604,10 @@ function summarizeEnvelope(): void {
   }
   benchReport.textDensity = textDensity
 
-  const bytesMeasured = Boolean(byteCeiling) && byteCeiling.bytes > 0
+  // `byteCeiling !== undefined` rather than `Boolean(byteCeiling)`: TypeScript
+  // does not narrow through a `Boolean(...)` call, and the point of this line is
+  // the narrowing (only a measured point with bytes can count as measured).
+  const bytesMeasured = byteCeiling !== undefined && byteCeiling.bytes > 0
   benchReport.limitAssessment = {
     maxPages: {
       limit: PDF_PREFLIGHT_LIMITS.maxPages,

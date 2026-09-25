@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -24,32 +32,50 @@ const {
    * the whole new IPC surface with no network, no real schedule and no wall
    * time — and each fake records exactly what main asked it to do.
    */
-  const reminderState = {
+  const reminderState: RemindersState = {
     settings: {
       enabled: true,
       thresholds: [{ id: '7d', label: '7 days', leadMs: 7 * 24 * 60 * 60 * 1000 }],
     },
-    ledger: { version: 1, entries: [] as unknown[] },
+    ledger: { version: 1, entries: [] },
+  }
+  /**
+   * A refresh reply as the real client builds one. The cache is non-nullable in
+   * `RefreshCacheSuccess`, so a default reply of `cache: null` was a shape the
+   * client cannot produce — this one is what `refreshCache` actually resolves to.
+   */
+  const emptyCache: DiscoveryCacheEnvelope = {
+    version: 1,
+    fetchedAt: '2026-09-01T08:00:00.000Z',
+    window: { from: '2026-08-25', to: '2026-09-01' },
+    source: 'ocds-api',
+    complete: true,
+    opportunities: [],
+    warnings: [],
   }
   const engineSeams = {
     /** The options main built the scheduler with — what proves the wiring. */
-    schedulerOptions: [] as any[],
+    schedulerOptions: [] as RemindersSchedulerOptions[],
     scheduler: {
-      start: vi.fn(),
-      stop: vi.fn(),
-      checkNow: vi.fn(async () => ({ fired: 0, reminders: [], ledger: reminderState.ledger })),
-      readState: vi.fn(async () => ({
-        settings: reminderState.settings,
+      start: vi.fn<RemindersScheduler['start']>(),
+      stop: vi.fn<RemindersScheduler['stop']>(),
+      checkNow: vi.fn<RemindersScheduler['checkNow']>(async () => ({
+        fired: 0,
+        reminders: [],
         ledger: reminderState.ledger,
       })),
-      writeSettings: vi.fn(async (patch: any) => ({ ...reminderState.settings, ...patch })),
-      setReadTenders: vi.fn(),
+      readState: vi.fn<RemindersScheduler['readState']>(async () => reminderState),
+      writeSettings: vi.fn<RemindersScheduler['writeSettings']>(async (patch) => ({
+        ...reminderState.settings,
+        ...patch,
+      })),
+      setReadTenders: vi.fn<RemindersScheduler['setReadTenders']>(),
     },
     reminderState,
     /** The options main built the discovery client with. */
-    clientOptions: [] as any[],
+    clientOptions: [] as DiscoveryClientOptions[],
     client: {
-      listOpportunities: vi.fn(async () => ({
+      listOpportunities: vi.fn<DiscoveryClient['listOpportunities']>(async () => ({
         ok: true,
         opportunities: [],
         issues: [],
@@ -59,13 +85,28 @@ const {
         source: 'ocds-api',
         truncated: false,
       })),
-      fetchRelease: vi.fn(async () => ({ ok: true, opportunity: null, issues: [], warnings: [] })),
-      refreshCache: vi.fn(async () => ({ ok: true, cache: null, complete: true, warnings: [] })),
-      readCache: vi.fn(async () => ({ ok: true, cache: null, stale: true, warnings: [] })),
+      fetchRelease: vi.fn<DiscoveryClient['fetchRelease']>(async () => ({
+        ok: true,
+        opportunity: null,
+        issues: [],
+        warnings: [],
+      })),
+      refreshCache: vi.fn<DiscoveryClient['refreshCache']>(async () => ({
+        ok: true,
+        cache: emptyCache,
+        complete: true,
+        warnings: [],
+      })),
+      readCache: vi.fn<DiscoveryClient['readCache']>(async () => ({
+        ok: true,
+        cache: null,
+        stale: true,
+        warnings: [],
+      })),
     },
     /** Every URL the document download asked for, and how it asked. */
-    documentFetchCalls: [] as Array<{ url: string; init?: any }>,
-    documentFetch: vi.fn(async (url: string): Promise<any> => {
+    documentFetchCalls: [] as Array<{ url: string; init?: DiscoveryFetchInit }>,
+    documentFetch: vi.fn<DiscoveryDocumentFetch>(async (url) => {
       throw new Error(`no document fetch was installed for ${url}`)
     }),
   }
@@ -186,21 +227,36 @@ import {
   repairSubmissionReadinessSnapshots,
   requestTendersClose,
   resetTendersIpcForTests,
+  resolveConfinedTendersPath,
   resolveSafeTendersPath,
   saveDocumentFile,
+  SEED_COMPANY_ID,
   SEED_TENDER_WTR_04,
   setTendersEngineOverrides,
+  setTendersDiagnosticsLogForTests,
   stopTendersReminders,
   unregisterTendersWebContents,
   writeTendersStore,
 } from '../src/main/tenders-main'
+import { MOCK_COMPANY } from '../src/renderer/src/mock/company'
+import { MOCK_CUSTOMERS } from '../src/renderer/src/mock/customers'
+import { MOCK_VAULT } from '../src/renderer/src/mock/vault'
 import type {
   DiscoveryClient,
-  DiscoveryDocumentFetch,
+  DiscoveryClientOptions,
   DiscoveryFetchInit,
   DiscoveryHttpResponse,
 } from '../src/main/discovery-client'
-import type { RemindersScheduler } from '../src/main/reminders-scheduler'
+import type { DiscoveryDocumentFetch } from '../src/main/tenders-main'
+import type { DiscoveryCacheEnvelope, Opportunity } from '../src/shared/discovery'
+import { normaliseOpportunity } from '../src/shared/discovery'
+import type { ReminderLedgerEntry } from '../src/shared/reminders'
+import type {
+  RemindersScheduler,
+  RemindersSchedulerOptions,
+  RemindersState,
+} from '../src/main/reminders-scheduler'
+import type { WebContents } from 'electron'
 // Wrap (do not replace) the real Books posting so the existing invoice-numbering
 // coverage still runs while F4 can assert the exact number of posts.
 vi.mock('../../books/src/main/books-core', async (importOriginal) => {
@@ -244,8 +300,37 @@ function validV2(revision = 0): TendersDataV2 {
   return { ...createEmptyTendersDataV2('2026-09-01T08:30:00.000Z'), revision }
 }
 
+/**
+ * The demo company/vault/tender fixture, built HERE rather than read out of
+ * `migrateAndValidateTenders(null)`.
+ *
+ * The reader used to synthesize this document for any empty payload, and the
+ * tests below leaned on that as a convenient fixture factory. It no longer does
+ * (see the main-process retirement note): an absent or unreadable store must not
+ * become a demo company on any path, so the fixture is stated explicitly by the
+ * test that wants it. Every assertion built on it is unchanged.
+ */
+function legacySeedFixture(): TendersDataV1 {
+  return {
+    version: 1,
+    updatedAt: '2026-08-01T08:00:00.000Z',
+    activeCompanyId: SEED_COMPANY_ID,
+    workspaces: [
+      {
+        id: SEED_COMPANY_ID,
+        name: 'Thabo Engineering (Pty) Ltd',
+        company: { ...MOCK_COMPANY },
+        customers: [...MOCK_CUSTOMERS],
+        vault: [...MOCK_VAULT],
+        tenders: [SEED_TENDER_WTR_04],
+      },
+    ],
+    issuerTemplates: [],
+  }
+}
+
 function validV1(): TendersDataV1 {
-  const data = migrateAndValidateTenders(null) as TendersDataV1
+  const data = structuredClone(legacySeedFixture())
   data.version = 1
   data.updatedAt = '2026-08-20T09:15:30.000Z'
   data.workspaces[0].company.tradingName = 'IPC migration marker'
@@ -347,6 +432,15 @@ function resolveTendersDir(): string {
   throw new Error(`Could not locate apps/tenders from ${process.cwd()}`)
 }
 
+/**
+ * The four members `main` touches on a renderer's `WebContents`.
+ *
+ * `WebContents` is a 140-member Electron class, so a test double for one is
+ * written against this shape and cast where it meets Electron — the cast is at
+ * the boundary, and the shape itself is checked wherever a double is written.
+ */
+type WebContentsDouble = Pick<WebContents, 'isDestroyed' | 'getURL' | 'once' | 'send'>
+
 function registeredWebContents(
   send: (channel: string, data: unknown) => void = vi.fn(),
   url: string = TRUSTED_RENDERER_URL,
@@ -381,6 +475,35 @@ function subFrame(): any {
 
 function event(sender: any, senderFrame: any = trustedFrame()): { sender: any; senderFrame: any } {
   return { sender, senderFrame }
+}
+
+/**
+ * A recording diagnostics sink, installed in place of the real one so no test
+ * writes to the data directory. `diagnosticsLogForTests()` installs (or
+ * re-installs) it and returns the entries it has collected, so each test starts
+ * from a known-empty log.
+ */
+const recordedDiagnostics: Array<{
+  level: 'info' | 'warn' | 'error'
+  source: string
+  message: string
+  detail?: Record<string, unknown>
+}> = []
+let diagnosticsSinkInstalled = false
+
+function diagnosticsLogForTests(): typeof recordedDiagnostics {
+  if (!diagnosticsSinkInstalled) {
+    setTendersDiagnosticsLogForTests({
+      record: (entry) => {
+        recordedDiagnostics.push(entry)
+      },
+      path: () => '/tmp/tenders-test-diagnostics.log',
+      flush: async () => {},
+    })
+    diagnosticsSinkInstalled = true
+  }
+  recordedDiagnostics.length = 0
+  return recordedDiagnostics
 }
 
 function deliveryRecorder(): {
@@ -546,9 +669,36 @@ const DUE_REMINDER = {
   skippedThresholdLabels: [],
 }
 
+/** The ledger entry a fired `DUE_REMINDER` leaves behind, as the core writes it. */
+function ledgerEntry(): ReminderLedgerEntry {
+  return {
+    tenderId: DUE_REMINDER.tenderId,
+    thresholdId: DUE_REMINDER.thresholdId,
+    closingAt: DUE_REMINDER.closingAt,
+    handledAt: '2026-10-31T19:59:00.000Z',
+    disposition: 'notified',
+  }
+}
+
+/**
+ * A real `Opportunity`, built through the app's own normaliser, so the fixture
+ * cannot drift from the shape the discovery client actually hands to main.
+ */
+function opportunityFixture(overrides: Partial<Opportunity> = {}): Opportunity {
+  const base = normaliseOpportunity({
+    ocid: 'ocds-abc-1',
+    tender: { title: 'Supply of water meters' },
+  })
+  if (base === null) throw new Error('the opportunity fixture did not normalise')
+  return { ...base, ...overrides }
+}
+
 describe('Electron IPC Handlers & Security Validation', () => {
   beforeAll(() => {
     mkdirSync(testDir, { recursive: true })
+    // The diagnostics sink goes in before anything can record through it, so no
+    // test in this file writes a line into the real data directory.
+    diagnosticsLogForTests()
     configureTendersRuntime({
       preloadPath: '',
       rendererUrl: TRUSTED_RENDERER_URL,
@@ -612,7 +762,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       registerTendersWebContents(fakeWc)
       expect(getActiveTendersWebContents()).toContain(fakeWc)
 
-      const testData: TendersData = migrateAndValidateTenders(null)
+      const testData: TendersData = legacySeedFixture()
       broadcastTendersData(testData)
 
       expect(received).toHaveLength(1)
@@ -638,7 +788,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       isDead = true
       expect(getActiveTendersWebContents()).not.toContain(fakeWc)
 
-      const testData: TendersData = migrateAndValidateTenders(null)
+      const testData: TendersData = legacySeedFixture()
       expect(() => broadcastTendersData(testData)).not.toThrow()
     })
 
@@ -701,7 +851,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
 
       // After writing store file
       const storeFile = join(testDir, 'tenders', 'tenders-data.json')
-      const data = migrateAndValidateTenders(null)
+      const data = legacySeedFixture()
       data.workspaces[0].company.tradingName = 'Thabo Engineering IPC Test'
       writeTendersStore(storeFile, data)
 
@@ -784,7 +934,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       const saveHandler = ipcHandlers.get(TENDERS_CHANNELS.saveStoredData)
       expect(saveHandler).toBeDefined()
       const unregisteredSender = { isDestroyed: () => false, send: vi.fn(), once: vi.fn() }
-      const payload = JSON.stringify(migrateAndValidateTenders(null))
+      const payload = JSON.stringify(legacySeedFixture())
 
       const result = await saveHandler!(event(unregisteredSender as any), payload)
 
@@ -1258,6 +1408,295 @@ describe('Electron IPC Handlers & Security Validation', () => {
       expect(check.safe).toBe(false)
       expect(check.error).toBe('Null byte detected in path')
     })
+
+    // The lexical checks above are necessary and not sufficient. `..` handling in
+    // text cannot see a symlink: a link planted at a managed leaf — or replacing
+    // `documents/` itself — passes every check above and still resolves outside
+    // the Tenders directory. These tests plant the links and prove the refusal.
+    it('refuses a leaf that is a symlink out of the base directory', async () => {
+      const saved = await saveDocumentFile(
+        { fileName: 'genuine.pdf', buffer: Buffer.from('genuine'), category: 'rfp' },
+        testDir,
+      )
+      expect(saved.ok).toBe(true)
+      const leaf = saved.storedPath!.replace('documents/', '')
+      const leafPath = join(getTendersDocumentsDir(testDir), leaf)
+      const secret = join(testDir, 'outside-secret.pdf')
+      writeFileSync(secret, 'outside bytes', 'utf8')
+
+      // A symlink the app did not write now sits where the managed document was.
+      rmSync(leafPath, { force: true })
+      symlinkSync(secret, leafPath, 'file')
+
+      // The lexical resolver still says "safe" — which is exactly why the
+      // confined resolver exists.
+      expect(resolveSafeTendersPath(saved.storedPath!, testDir).safe).toBe(true)
+      const confined = resolveConfinedTendersPath(saved.storedPath!, testDir)
+      expect(confined.safe).toBe(false)
+      expect(confined.error).toMatch(/link|outside the Tenders data directory|not a regular/i)
+
+      // And every read path refuses it: the bytes outside the store never cross
+      // IPC, and the file is never handed to the OS.
+      const read = await readDocumentFile({ storedPath: saved.storedPath! }, testDir)
+      expect(read.ok).toBe(false)
+      expect(read.buffer).toBeUndefined()
+      rmSync(leafPath, { force: true })
+      const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+      expect(opened.ok).toBe(false)
+      expect(openedPaths.some((p) => p === secret)).toBe(false)
+    })
+
+    it('refuses a documents/ directory that is itself a link out of the base directory', async () => {
+      const outsideDir = join(testDir, 'planted-documents')
+      rmSync(outsideDir, { recursive: true, force: true })
+      mkdirSync(outsideDir, { recursive: true })
+      const docsDir = join(testDir, 'tenders', 'documents')
+      rmSync(docsDir, { recursive: true, force: true })
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      symlinkSync(outsideDir, docsDir, 'dir')
+
+      // A save may not write into the link...
+      const saved = await saveDocumentFile(
+        { fileName: 'evil.pdf', buffer: Buffer.from('evil'), category: 'rfp' },
+        testDir,
+      )
+      expect(saved.ok).toBe(false)
+      expect(readdirSync(outsideDir)).toEqual([])
+
+      // ...and neither may a read resolve through it.
+      expect(resolveConfinedTendersPath('documents/evil.pdf', testDir)).toMatchObject({
+        safe: false,
+      })
+      rmSync(docsDir, { force: true })
+      rmSync(outsideDir, { recursive: true, force: true })
+    })
+
+    it.each(['.lnk', '.url', '.pif', '.scf'])(
+      'refuses to hand a %s launcher to shell.openPath',
+      async (extension) => {
+        const saved = await saveDocumentFile(
+          {
+            fileName: `shortcut${extension}`,
+            buffer: Buffer.from('not a document'),
+            category: 'rfp',
+          },
+          testDir,
+        )
+        expect(saved.ok).toBe(true)
+
+        const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+
+        expect(opened.ok).toBe(false)
+        expect(opened.error).toMatch(/launcher or shortcut/i)
+        // `shell.openPath` was never reached, so the OS never followed the link.
+        expect(openedPaths).toEqual([])
+      },
+    )
+  })
+
+  describe('4b. The legacy v1 stack is retired, not merely quiet', () => {
+    it('reads a genuine v1 file back without synthesizing any demo record', () => {
+      // A user who deleted every customer, vault document and tender keeps them
+      // deleted. The reader used to hand back MOCK_CUSTOMERS, MOCK_VAULT and
+      // SEED_TENDER_WTR_04 for this exact payload.
+      const emptied = {
+        version: 1,
+        updatedAt: '2026-08-20T09:15:30.000Z',
+        activeCompanyId: SEED_COMPANY_ID,
+        workspaces: [
+          {
+            id: SEED_COMPANY_ID,
+            name: 'Thabo Engineering (Pty) Ltd',
+            company: { ...MOCK_COMPANY },
+            customers: [],
+            vault: [],
+            tenders: [],
+          },
+        ],
+        issuerTemplates: [],
+      }
+
+      const read = migrateAndValidateTenders(emptied)
+
+      expect(read.workspaces).toHaveLength(1)
+      expect(read.workspaces[0].customers).toEqual([])
+      expect(read.workspaces[0].vault).toEqual([])
+      expect(read.workspaces[0].tenders).toEqual([])
+      expect(JSON.stringify(read)).not.toContain(SEED_TENDER_WTR_04.referenceNumber)
+    })
+
+    it.each([
+      { label: 'a null payload', payload: null },
+      { label: 'a non-object payload', payload: 12345 },
+      { label: 'an array', payload: [] },
+      { label: 'a version that is not a number', payload: { version: 'one' } },
+    ])('refuses to read $label into a document', ({ payload }) => {
+      expect(() => migrateAndValidateTenders(payload)).toThrow(/not a JSON document|version/i)
+    })
+
+    it('does not start the legacy file watcher during IPC registration', async () => {
+      // The watcher read `tenders-data.json` back on every change and broadcast it
+      // on `tenders:data-changed`, a channel with zero subscribers. Registration
+      // must not put a live `fs.watch` on the shipping process, so: write the
+      // legacy file and prove nothing is broadcast back.
+      resetTendersIpcForTests()
+      diagnosticsLogForTests()
+      configureTendersRuntime({
+        preloadPath: '',
+        rendererUrl: TRUSTED_RENDERER_URL,
+        rendererFile: '',
+      })
+      registerTendersIpc()
+
+      const deliveries: string[] = []
+      registerTendersWebContents(
+        registeredWebContents((channel: string) => deliveries.push(channel)),
+      )
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      writeFileSync(storeFile, JSON.stringify(legacySeedFixture(), null, 2), 'utf8')
+
+      // Comfortably past the watcher's 100 ms debounce.
+      await new Promise((resolve) => setTimeout(resolve, 350))
+
+      expect(deliveries).not.toContain(TENDERS_CHANNELS.dataChanged)
+      expect(mockBroadcasts.filter((b) => b.channel === TENDERS_CHANNELS.dataChanged)).toEqual([])
+    })
+  })
+
+  describe('4c. Diagnostics transport', () => {
+    it('records a renderer entry through the main sink and answers where the log is', async () => {
+      const recorded = diagnosticsLogForTests()
+      const record = ipcHandlers.get(TENDERS_CHANNELS.diagnosticsRecord)!
+      const path = ipcHandlers.get(TENDERS_CHANNELS.diagnosticsPath)!
+
+      const written = await record(event(trustedSender()), {
+        level: 'warn',
+        source: 'renderer-store',
+        message: 'A save was refused.',
+        detail: { code: 'STORE_REFUSED' },
+      })
+      expect(written).toEqual({ ok: true })
+      expect(recorded).toHaveLength(1)
+      expect(recorded[0]).toMatchObject({
+        level: 'warn',
+        source: 'renderer-store',
+        message: 'A save was refused.',
+      })
+
+      const location = await path(event(trustedSender()))
+      expect(location.ok).toBe(true)
+      expect(location.path).toBe('/tmp/tenders-test-diagnostics.log')
+    })
+
+    it.each([
+      { label: 'an unknown level', request: { level: 'fatal', source: 'a', message: 'b' } },
+      { label: 'an empty source', request: { level: 'info', source: '  ', message: 'b' } },
+      {
+        label: 'an over-long source',
+        request: { level: 'info', source: 'x'.repeat(65), message: 'b' },
+      },
+      { label: 'an empty message', request: { level: 'info', source: 'a', message: '' } },
+      {
+        label: 'an over-long message',
+        request: { level: 'info', source: 'a', message: 'x'.repeat(2001) },
+      },
+      {
+        label: 'a non-object detail',
+        request: { level: 'info', source: 'a', message: 'b', detail: 'nope' },
+      },
+      {
+        label: 'detail with too many keys',
+        request: {
+          level: 'info',
+          source: 'a',
+          message: 'b',
+          detail: Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, i])),
+        },
+      },
+    ])('refuses $label and records nothing', async ({ request }) => {
+      const recorded = diagnosticsLogForTests()
+      const record = ipcHandlers.get(TENDERS_CHANNELS.diagnosticsRecord)!
+
+      const result = await record(event(trustedSender()), request)
+
+      expect(result.ok).toBe(false)
+      expect(result.error).toBeTruthy()
+      expect(recorded).toHaveLength(0)
+    })
+
+    it('refuses every untrusted sender for both diagnostics channels', async () => {
+      const recorded = diagnosticsLogForTests()
+      for (const attempt of untrustedAttempts()) {
+        const record = await ipcHandlers.get(TENDERS_CHANNELS.diagnosticsRecord)!(
+          attempt.eventArg,
+          { level: 'info', source: 'a', message: 'b' },
+        )
+        const path = await ipcHandlers.get(TENDERS_CHANNELS.diagnosticsPath)!(attempt.eventArg)
+        expect.soft(record.ok, `${attempt.label} must not record`).toBe(false)
+        expect.soft(path.ok, `${attempt.label} must not read the path`).toBe(false)
+        expect.soft(path.path).toBeUndefined()
+      }
+      expect(recorded).toHaveLength(0)
+    })
+
+    it('reaches the sink for a read failure and a refused save on the store channels', async () => {
+      const recorded = diagnosticsLogForTests()
+      const loadHandler = ipcHandlers.get(TENDERS_CHANNELS.loadStoreV2)!
+      const saveHandler = ipcHandlers.get(TENDERS_CHANNELS.saveStoreV2)!
+      const sender = trustedSender()
+      await saveHandler(event(sender), { expectedRevision: 0, document: validV2(0) })
+
+      // Corrupt the primary: the load must report the failure AND leave a trace.
+      writeFileSync(storeFile, '{broken', 'utf8')
+      const load = await loadHandler(event(sender))
+      expect(load.ok).toBe(false)
+      expect(recorded.some((entry) => entry.source === 'store' && entry.level === 'error')).toBe(
+        true,
+      )
+
+      // A stale save is a refusal the user sees as "my edit did not stick".
+      recorded.length = 0
+      const stale = await saveHandler(event(sender), { expectedRevision: 0, document: validV2(0) })
+      expect(stale.ok).toBe(false)
+      expect(recorded.some((entry) => entry.source === 'store' && entry.level === 'warn')).toBe(
+        true,
+      )
+    })
+
+    it('fails the legacy read closed on an unreadable file and names a recovery copy', async () => {
+      const recorded = diagnosticsLogForTests()
+      const getStoredData = ipcHandlers.get(TENDERS_CHANNELS.getStoredData)!
+      const sender = trustedSender()
+
+      // No file at all is the one genuinely-empty answer: `null`, not a stub.
+      expect(await getStoredData(event(sender))).toBeNull()
+
+      // A file that exists but cannot be parsed is NOT reported as "no saved
+      // data" — that reads as data loss. It fails closed with the recovery shape.
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      writeFileSync(storeFile, '{ "version": 1, [BAD DATA]', 'utf8')
+
+      const result = await getStoredData(event(sender))
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          code: 'RECOVERY_REQUIRED',
+          message: expect.stringMatching(/could not be read/i),
+        },
+      })
+      expect(result).not.toBeNull()
+      expect(result.workspaces).toBeUndefined()
+      // The quarantined copy is what the user is pointed at, and the failure is
+      // in the diagnostics record.
+      expect(existsSync(`${storeFile}.corrupted.bak`)).toBe(true)
+      expect(result.recoveryCandidates?.[0]?.id).toBe('tenders-data.json.corrupted.bak')
+      expect(
+        recorded.some(
+          (entry) => entry.level === 'error' && /could not be read/i.test(entry.message),
+        ),
+      ).toBe(true)
+    })
   })
 
   describe('5. Cross-App Handlers: CRM, Sheets, Docs, and Books', () => {
@@ -1494,7 +1933,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       const currentBytes = JSON.stringify(current, null, 2)
       writeFileSync(storeFile, currentBytes, 'utf8')
 
-      const result = await billHandler(event(sender), {
+      const result = await billHandler!(event(sender), {
         tenderId: 'tender-wtr-04',
         milestoneId: 'ms-01',
         expectedRevision: 6,
@@ -1811,7 +2250,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
       registeredWebContents(trusted.send, TRUSTED_RENDERER_URL)
       registeredWebContents(untrusted.send, UNTRUSTED_RENDERER_URL)
 
-      broadcastTendersData(migrateAndValidateTenders(null))
+      broadcastTendersData(legacySeedFixture())
 
       expect(
         trusted.deliveries.filter((d) => d.channel === TENDERS_CHANNELS.dataChanged),
@@ -1896,12 +2335,16 @@ describe('Electron IPC Handlers & Security Validation', () => {
       configureTendersRuntime({ preloadPath: '', rendererUrl: '', rendererFile: '' })
       const sender = registeredWebContents()
       const delivered: string[] = []
-      const receiver = {
+      const double: WebContentsDouble = {
         isDestroyed: () => false,
         getURL: () => TRUSTED_RENDERER_URL,
         once: vi.fn(),
         send: (channel: string) => delivered.push(channel),
       }
+      // The double is written against the four members main touches; Electron's
+      // `WebContents` is a 140-member class, so this cast is the boundary where
+      // the partial double meets it (its shape is checked at the literal above).
+      const receiver = double as WebContents
       registerTendersWebContents(receiver)
 
       const load = await ipcHandlers.get(LOAD_STORE_V2_CHANNEL)!(event(sender))
@@ -1916,7 +2359,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
 
       // Broadcasts fail closed too: no configured origin ⇒ no delivery, even to
       // a registered WebContents that reports a URL.
-      broadcastTendersData(migrateAndValidateTenders(null))
+      broadcastTendersData(legacySeedFixture())
       expect(delivered).not.toContain(TENDERS_CHANNELS.dataChanged)
 
       unregisterTendersWebContents(receiver)
@@ -2485,7 +2928,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
     }
 
     function addCompany(store: typeof import('../src/renderer/src/store'), name: string): void {
-      const profile = (migrateAndValidateTenders(null) as TendersData).workspaces[0].company
+      const profile = legacySeedFixture().workspaces[0].company
       store.useTendersStore.getState().addCompany({ ...profile, name, tradingName: name })
     }
 
@@ -2695,7 +3138,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
     })
 
     it('lists opportunities through the client and returns its shapes unchanged', async () => {
-      const opportunity = { ocid: 'ocds-abc-1', title: 'Supply of water meters' }
+      const opportunity = opportunityFixture()
       engineSeams.client.listOpportunities.mockResolvedValueOnce({
         ok: true,
         opportunities: [opportunity],
@@ -2940,7 +3383,9 @@ describe('Electron IPC Handlers & Security Validation', () => {
       engineSeams.scheduler.checkNow.mockResolvedValueOnce({
         fired: 1,
         reminders: [DUE_REMINDER],
-        ledger: { version: 1, entries: [{ tenderId: SEED_TENDER_WTR_04.id }] },
+        // A real ledger entry (main's memory of what it already showed), so the
+        // test proves a ledger that exists is still withheld from the renderer.
+        ledger: { version: 1, entries: [ledgerEntry()] },
       })
       const handler = ipcHandlers.get(TENDERS_CHANNELS.remindersCheck)!
 
@@ -2990,7 +3435,9 @@ describe('Electron IPC Handlers & Security Validation', () => {
         document: v2WithSeedTender(0),
       })
       expect(committed.ok).toBe(true)
-      await expect(options.readTenders()).resolves.toEqual([
+      // `readTenders` is optional on the options; the assertion above proves main
+      // passed one, so this reads it the way main's own scheduler does.
+      await expect(options.readTenders!()).resolves.toEqual([
         {
           id: SEED_TENDER_WTR_04.id,
           title: SEED_TENDER_WTR_04.title,

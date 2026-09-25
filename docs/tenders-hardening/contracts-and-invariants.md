@@ -108,9 +108,12 @@ bound:
 `MAX_TENDERS_IPC_PAYLOAD_BYTES` stays strictly above it so the save-envelope check can never
 bind, and `MAX_TENDERS_AGGREGATE_STRING_CHARS` is held equal to it in characters so it can
 never bind either (it remains the backstop for the 8 MiB load path and the cycle guard). The
-same IPC constant is reused as the **byte** ceiling for the compliance-matrix export payload
-(`exportMatrixToSheets`), where it _is_ the binding check; that export's own bounds are the
-separate row/cell constants in `shared/ipc.ts` (table below).
+compliance-matrix export has its **own** byte ceiling, `MAX_TENDERS_MATRIX_EXPORT_BYTES`
+(4 MiB, `shared/ipc.ts`) — deliberately not this envelope's: a raised envelope once loosened
+that export for a reason that had nothing to do with it, and nothing then reported the change.
+There it _is_ the binding check, and it is held below the envelope on purpose so the export
+answers for itself (pinned by `tests/tenders-main-write-bounds.test.ts`); that export's
+row/cell bounds are the separate constants in `shared/ipc.ts` (table below).
 `MAX_TENDERS_MANAGED_FILES` was 20 000 while the 4 MiB index ceiling admitted only ~11 500
 records — the advertised capacity was unreachable, and a full index refused the user _below_
 it with a limit they could not count or plan for. `MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD`
@@ -118,11 +121,28 @@ it with a limit they could not count or plan for. `MAX_TENDERS_MANAGED_INDEX_BYT
 `MAX_TENDERS_MANAGED_FILE_NAME_CHARS` (80 characters), and that clamp is what keeps the
 record-count caps binding before the byte ceiling for every record the store writes.
 
+**That ceiling is a serialized-bytes GROWTH ceiling, not a bound on what the index costs to
+hold.** It is enforced only on a write that ADDS a record (`writeIndex`); trash, restore,
+empty-trash and `reconcile`'s missing/active flips are allowed past it, so a full index can
+never wedge the user out of deleting a document, and `readIndex` never refuses a large index —
+refusing to read would hide the very documents the user needs to delete. The cost of a parsed
+index is larger than its bytes: the live objects `JSON.parse` produces were **measured at
+5.05×** the serialized size for a 5 000-record index (~11.3 MB of heap for 2 328 931 serialized
+bytes), and an over-ceiling index is still read and rewritten by the non-growing paths above —
+measured at 4 194 795 serialized bytes, `listRecords` returned 9 004 records, and a read plus a
+trash/empty-trash cycle each finished in under 200 ms. The claim the constant supports is
+exactly the one `writeIndex` enforces: an index this large can no longer GROW through the app.
+What bounds the cost of a managed-document operation is `MAX_TENDERS_MANAGED_FILES` (5 000
+records), which is what a full store reports and what the user can count against. Pinned by
+`tests/tenders-persistence-bounds.test.ts` ("the managed-index ceiling is a serialized-bytes
+growth cap, not a memory cost").
+
 Also exported from `shared/ipc.ts`:
 
 | Constant                               | Value  |
 | -------------------------------------- | ------ |
 | `MAX_TENDERS_DOCUMENT_UPLOAD_BYTES`    | 25 MiB |
+| `MAX_TENDERS_MATRIX_EXPORT_BYTES`      | 4 MiB  |
 | `MAX_TENDERS_MATRIX_EXPORT_ROWS`       | 5000   |
 | `MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS` | 32768  |
 
@@ -163,6 +183,13 @@ score weight **0**.
   `pageContentObtained(state)` in `shared/types.ts`: `native`, `manually-reviewed` and
   `ai-extracted` are content-obtained; `ocr-required`, `ocr-unavailable` and `ocr-failed` are
   not. A page no method obtained still blocks readiness (§5a).
+- **`ai-extracted` is reachable only for a PDF source, and this list used to read as though it
+  were reachable for every source.** A Word `.docx` has no rendered page, so the vision pass
+  refuses it before it consults the model (§3d, `WORD_DOCUMENT_VISION_MESSAGE`) and `markModelReadPages`
+  is never given a page to mark; a picture-only Word page therefore leaves `ocr-required` only
+  through `manually-reviewed`. It keeps blocking with AI on or off, which is what §3d and
+  `README.md` say about it — the two sections now agree because this one names the condition
+  instead of implying the model can clear any flagged page.
 
 Review and page state are authoritative (persisted through the v2 store); the legacy
 `zanostack-tenders-review-v1` localStorage key is purged and never written.
@@ -210,6 +237,75 @@ Guarantees:
 - `load` `stat`s and rejects oversize before reading.
 - Deep-clone isolation in and out.
 
+### 2a. Renderer persistence state (the save pill must not claim more than happened)
+
+The renderer's own state machine over that store (`renderer/src/store.ts`,
+`renderer/src/components/SaveStatus.tsx`). Two names have to be known, because both exist to
+stop the UI describing a persistence path it does not have:
+
+- `hydrationMode: 'normal' | 'unavailable'` — **which kind** of hydration happened.
+  `'unavailable'` means the preload bridge is absent or stale (`window.tendersApi?.loadStoreV2`
+  is missing), so main was never asked, no document was read, and no save can ever succeed. It
+  is set with `hydrationStatus: 'ready'` on purpose: the workspace is usable, and explicitly
+  unable to save. Before this state existed that branch rendered `'ready'`/`'saved'`, so a user
+  could build a company, tenders and requirements that could never persist while the chrome
+  said "Saved".
+- `SaveStatus` = `'loading' | 'saving' | 'saved' | 'error' | 'conflict' | 'no-bridge'`, rendered
+  by `SaveStatus.tsx` as `Loading… / Saving… / Saved / Save failed (Retry) / Conflict /
+**Cannot save**`. `'no-bridge'` is `SaveStatus`'s own kind — `SaveStatusKind` mirrors it —
+  and it is never "Saved" and never "Unsaved": the label states the fact. It is an alert (the
+  danger tone, `role="alert"`), and it flips on **every** refused edit, not only the first, so
+  a bridge that disappears mid-session moves the pill to "Cannot save" at the moment the first
+  edit is refused. `'saved'` is the only status that reads as success, pinned by
+  `tests/components/save-status.test.tsx` ("prints 'Saved' for the saved state, and only for
+  the saved state"); the `'no-bridge'` transition, and its refusal to return to `'saved'`, are
+  pinned by `tests/diagnostics.test.ts` ("a build with no bridge cannot claim its work is
+  saved").
+- The store's own refusal vocabulary (`TendersSaveRefusalCode`: `NO_IPC_BRIDGE`,
+  `SAVE_BLOCKED_BY_CONFLICT`, `DOCUMENT_OVER_SIZE`, `SCHEMA_INVALID`, `REVISION_CONFLICT`,
+  `STORE_REFUSED`, `SAVE_THREW`) is **diagnostic only** — no state, no retry, no user-visible
+  copy — and a save that commits logs nothing at all, which is what keeps the log from becoming
+  noise (`renderer/src/store.ts`, §3e).
+
+### 2b. The legacy v1 stack is retired — what that does and does not mean
+
+The v1 stack (`tenders-main.ts`) is a **second** persistence architecture that used to run
+alongside the authoritative v2 store. It is retired, deliberately and in three parts. Two
+stack descriptions of the app are stale; this is the state now:
+
+- **No synthesis.** `migrateAndValidateTenders` reads back only what a v1 file actually
+  contains. It used to answer an empty or non-object payload with `createDefaultSeedWorkspaces()`
+  (demo company, customers, vault and the seeded RFP), which is the one thing the v2 path
+  promises never to do; a store whose vault had been emptied came back with seven compliance
+  documents in it. It also no longer rewrites legacy workspace or active-company ids — they are
+  read as written. A payload that is not an object throws `LegacyTendersReadError`; it is never
+  answered with a stub.
+- **No live watcher.** `registerTendersIpc` no longer starts the `fs.watch` over
+  `tenders-data.json` that re-read and re-broadcast the file on `tenders:data-changed` — a
+  channel with no subscribers since the v2 cutover, so it re-read and re-broadcast on every
+  write the v2 store made to a file only the legacy stack cared about.
+- **No writer.** `writeTendersStore` is reachable from no Tenders IPC handler, so within this
+  app the sole shipping writer of `tenders-data.json` is the authoritative v2 store.
+  `writeTendersStore`, `startTendersStoreWatcher`, `broadcastTendersData` and
+  `migrateAndValidateTenders` remain **exported for the tests that pin their own behaviour**
+  (`tests/ipc-handlers.test.ts` "4b. The legacy v1 stack is retired, not merely quiet";
+  `tests/store-migrations.test.ts`; `tests/adversarial-stress.test.ts`).
+
+What stays, and why: the **read** path. `readTendersStore` serves `getStoredData` (§3), which
+`e2e/tenders-regression-smoke.spec.ts` proves is reachable and which reads a genuine v1 file
+back. A missing file is still an empty envelope; a malformed primary throws
+`LegacyTendersReadError` after quarantining the bytes to `<path>.corrupted.bak` (§3, §1).
+
+**One caller of the legacy writer is outside this app, and it is the exception that keeps the
+"sole writer" sentence honest.** `apps/books/src/main/books-main.ts` (measured: the
+milestone-billing reconciliation around lines 706–728) dynamically `require`s
+`apps/tenders/src/main/tenders-main` and calls `readTendersStore` / `writeTendersStore` on
+`<userData>/tenders/tenders-data.json`, with a fallback that writes that file directly when the
+require fails. So the retirement is complete **within Tenders**: no Tenders surface writes the
+v1 file, and the file the v2 store owns is `<directory>/tenders-data.json` in the same
+directory. It is not true of the suite, and until that Books path is deleted the docs must not
+say otherwise. Tracked in §6 item 14 (a Books-owned change; not made here).
+
 ## 3. IPC + preload bridge
 
 Files: `apps/tenders/src/shared/ipc.ts`, `apps/tenders/src/preload/index.ts`,
@@ -218,15 +314,29 @@ Files: `apps/tenders/src/shared/ipc.ts`, `apps/tenders/src/preload/index.ts`,
 v2 channels: `tenders:load-store-v2`, `tenders:save-store-v2`, `tenders:store-changed-v2`.
 Preload API: `loadStoreV2`, `saveStoreV2`, `onStoreChangedV2` (direct objects, not JSON strings).
 
-Nine channels have since joined them: `tenders:close-flush-request` / `tenders:close-flush-result`
-(the shell dirty-close guard, §3e), the managed-document lifecycle
-(`tenders:list-document-trash`, `tenders:restore-document`, `tenders:replace-document`,
-`tenders:reconcile-documents`, `tenders:cleanup-document-trash`) and rotating-backup recovery
-(`tenders:list-recovery-candidates`, `tenders:restore-recovery-candidate`). All nine have
-preload pass-throughs (`onCloseFlushRequest`, `reportCloseFlush`, `listDocumentTrash` …
-`cleanupDocumentTrash`, `listRecoveryCandidates` / `restoreRecoveryCandidate`), and the
-document channels (`saveDocument` / `readDocument` / `openDocument` / `deleteDocument`) are
-wired too — validation, trust and path confinement all stay in main.
+**The arithmetic, stated once so it can be checked.** `TENDERS_CHANNELS` in `shared/ipc.ts`
+declares **36** channel constants; **33** of them have an `ipcMain.handle` in
+`apps/tenders/src/main/tenders-main.ts` (count it: `grep -c "ipcMain.handle" ` on that file
+returns 33). The three that do not are main→renderer pushes: `store-changed-v2` (the commit
+broadcast), `close-flush-request` (the shell's dirty-close guard, §3a) and the legacy
+`data-changed`. The 33 handlers break down as: 2 v2 store (`load-store-v2`, `save-store-v2`),
+1 close-flush reply (`close-flush-result`), 2 legacy (`get-stored-data`, `save-stored-data`),
+9 document lifecycle (`save-document`, `read-document`, `open-document`, `delete-document`,
+`list-document-trash`, `restore-document`, `replace-document`, `reconcile-documents`,
+`cleanup-document-trash`), 2 recovery (`list-recovery-candidates`,
+`restore-recovery-candidate`), 7 cross-app (`export-matrix-to-sheets`, `draft-proposal-doc`,
+`sync-with-crm`, `update-tender-outcome`, `open-in-crm`, `bill-milestone-in-books`,
+`open-books`), 5 discovery (§3b), 3 reminders (§3c), 2 diagnostics (§3e). The channel list has
+grown in waves — 3 v2 channels, then the 9 close-flush/document-lifecycle/recovery channels
+(`close-flush-request` / `close-flush-result`; `list-document-trash`, `restore-document`,
+`replace-document`, `reconcile-documents`, `cleanup-document-trash`; `list-recovery-candidates`,
+`restore-recovery-candidate`) plus the four document channels they sit beside; then the 8
+discovery/reminder channels (§3b, §3c); then the 2 diagnostics channels (§3e); and the legacy
+and cross-app channels that predate all of it — which is why a count stated as "3 + 9 + 8" was
+always going to be wrong. Every one of these has a preload pass-through (`onCloseFlushRequest`,
+`reportCloseFlush`, `listDocumentTrash` … `cleanupDocumentTrash`, `listRecoveryCandidates` /
+`restoreRecoveryCandidate`), and validation, trust and path confinement against the
+document channels all stay in main.
 
 The optional AI extraction pass adds **no channel and no handler** to this list: it goes
 through the shell's own `ai:*` channels (`AI_CHANNELS`), which Tenders only mirrors in the
@@ -257,7 +367,7 @@ from `getReminders` / `setReminders` / `checkReminders` (the members describe wh
 renderer asks for). The preload exposes these as **functions only** — it never exposes
 `ipcRenderer`, so a renderer cannot reach a channel that has no member above.
 
-Authorization (applies to **all 31 privileged handlers**, each calling `isTrustedTendersEvent`
+Authorization (applies to **all 33 privileged handlers**, each calling `isTrustedTendersEvent`
 **directly** — there is no central wrapper):
 
 - `isTrustedTendersEvent` requires: sender is a registered active Tenders WebContents,
@@ -265,8 +375,10 @@ Authorization (applies to **all 31 privileged handlers**, each calling `isTruste
   `runtime.rendererUrl` (or packaged `rendererFile` URL); falls back to
   `webContents.getURL()` when frame missing.
 - Rejection shape: `{ ok:false, error:{ code:'INVALID_REQUEST', message:/authoriz|trusted|registered/i } }`,
-  with no side effects. **Except `draftProposalDoc`**, which returns a bare string `error` with
-  no `code` — check for the string, not the envelope, when asserting on that one.
+  with no side effects — 30 of the 33 return exactly that (`unauthorizedTendersRequest()`).
+  **Three return a bare string `error` with no `code`**: `draftProposalDoc`, and the two
+  diagnostics handlers (`recordDiagnostics`, `diagnosticsPath`, §3e) — check for the string,
+  not the envelope, when asserting on those.
 - `isTrustedTendersWebContents` filters broadcast recipients for both `store-changed-v2`
   and legacy `dataChanged`.
 - Lifecycle helpers used by tests: `resetTendersIpcForTests()`,
@@ -276,13 +388,25 @@ Authorization (applies to **all 31 privileged handlers**, each calling `isTruste
   `vault/`, `.trash/`, `backups/` and `managed-documents.json`, so it must never be reachable
   from production code.
 
-Legacy channels (preload-only — no renderer module calls them any more):
+Legacy channels (preload-only — no renderer module calls them any more; the ledger and the
+regression smoke are their only consumers):
 
 - `getStoredData` / `saveStoredData` remain, now authorized.
 - `saveStoredData` accepts **only a schema-v2 document** (`validateTendersDataV2`) and commits
   it through the authoritative store at its own revision; v1, `schemaVersion: 3` and
   non-integer versions are all rejected. It can therefore never re-seed demo
   company/vault/tender data into, or overwrite, the user's store.
+- `getStoredData` answers with the file that is actually on disk, read by the legacy v1
+  envelope reader (`readTendersStore`), or `null` when **no file exists at all** — the one case
+  where "nothing" is the honest answer, because it is also what the read found. A file that
+  exists but cannot be read or parsed **fails closed**: it is quarantined to
+  `<path>.corrupted.bak` and the channel returns
+  `{ ok:false, error:{ code:'RECOVERY_REQUIRED', message: LEGACY_TENDERS_READ_FAILED }, recoveryCandidates? }`,
+  the same posture `loadStoreV2` takes. It used to return `null` — which the renderer shows as
+  "no saved data", i.e. apparent data loss with the real failure invisible — and, before that,
+  `{workspaces: []}`. `recoveryCandidates` comes from `listLegacyRecoveryCandidates()`, which
+  lists the `.corrupted.bak` copies **beside the live file** and deliberately not the v2
+  store's backups: offering those for a v1 file would restore the wrong document.
 - `syncWithCrm` and `billMilestoneInBooks` go through the authoritative store `mutate`,
   ignore renderer-supplied `tendersPath` / `crmDealsPath` / `userDataDir` (main resolves
   from `app.getPath('userData')`), accept optional `expectedRevision` (stale ⇒ conflict),
@@ -614,6 +738,7 @@ tender with no requirements. Cancellation is its own type (`DocxImportCancelledE
 | ------------------- | ------------------------------------------------------------------------------------------- |
 | `FILE_TOO_LARGE`    | Over `DOCX_PREFLIGHT_LIMITS.maxBytes` — refused **before** the buffer is read               |
 | `TOO_MANY_LINES`    | Over `maxLines` (24 600), checked once the line count is known and before the shredder runs |
+| `TOO_MUCH_TEXT`     | Over `maxTextChars` (12 000 000), checked beside the line budget and before the shredder    |
 | `ZIP_BOMB`          | Declared uncompressed size beyond `DOCX_ZIP_LIMITS` (zip bomb)                              |
 | `PROTECTED`         | A CFB/OLE container: password-protected, or a legacy `.doc` wearing a `.docx` name          |
 | `NOT_A_DOCX`        | Not a Word package at all (another format renamed, or no document part)                     |
@@ -622,10 +747,31 @@ tender with no requirements. Cancellation is its own type (`DocxImportCancelledE
 | `NO_TEXT`           | The document holds content but no text (pictures/drawings only)                             |
 
 `DOCX_PREFLIGHT_LIMITS` deliberately reuses the PDF path's published per-file ceiling
-(`PDF_PREFLIGHT_LIMITS.maxBytes`) and states its own line budget (24 600 — the PDF envelope's own
-~0.042 MB heap per extracted line at a 1 GB budget, the cost that clause reconstruction plus rule
-matching bounds). `DOCX_ZIP_LIMITS` belongs to the engine (`@genoffice/docx-engine`), so the
-conditions there are mapped onto the union rather than re-derived.
+(`PDF_PREFLIGHT_LIMITS.maxBytes`, 100 MiB) and states two budgets of its own:
+
+- `maxLines` = **24 600**. A `.docx` "line" is a whole paragraph or table row, so the reason the
+  PDF path needs a line budget applies here too, but not the PDF's own figure — the PDF's
+  ~0.042 MB heap per line was measured on visual lines of ~40 characters, and a DOCX paragraph
+  is 5–25× longer. What this path measured is a cost per LINE, because the parsed block model
+  (not the text) dominates: 24 500 lines / 4.77 M characters retained ~112 MB through parse →
+  `buildClauses` → `shredExtraction` in ~4.8 s, i.e. ~4.6 KB per line whether the line is 195 or
+  1 087 characters.
+- `maxTextChars` = **12 000 000**. `maxLines` alone does not bound what it looks like it bounds:
+  `blockUnits` splits at the engine's soft/column/page breaks, so a paragraph with no break is
+  ONE line of unbounded length, and a highly compressible `.docx` can declare up to
+  `DOCX_ZIP_LIMITS.maxPartBytes` (512 MiB) of `document.xml` in a single paragraph. Measured:
+  ~4.5 bytes of resident heap per extracted character and ~1 M characters per second through the
+  same path, so 12 000 000 characters is ~54 MB of heap and ~12 s — 2.5× the 4 766 389
+  characters of the 24 500-line realistic fixture, so the line budget still binds first for a
+  normal document and this one exists for the shape a line count cannot see. Both are refusals
+  before the shredder, never a truncation: a cut document would present a partial reading as a
+  complete one. `tests/docx-intake.test.ts` pins both ("refuses too much text on too few lines,
+  where a line count sees nothing"; "reports the extracted character count on the result"), and
+  `intakeLimitDisclosure()` publishes the figure the guard enforces
+  ("the advertised import limits are the enforced ones").
+
+`DOCX_ZIP_LIMITS` belongs to the engine (`@genoffice/docx-engine`), so the conditions there are
+mapped onto the union rather than re-derived.
 
 **The AI vision pass refuses a Word source, before it consults the model.** A `.docx` has no
 rendered page, so there is no page image to hand a model — whatever the configured model can do.
@@ -639,6 +785,74 @@ and marks them reviewed** — the same fail-closed rule as a scanned PDF page (�
 picture-only Word page is never called "scanned": no scanner ran, and the copy says so
 (`PAGE_STATUS_EXPLANATION_WORD`). Pinned by `tests/docx-intake-copy.test.ts` ("checks the document
 before the model, so a vision-capable model is not asked either").
+
+### 3e. Diagnostics (the local log a support engineer can read)
+
+The finding this answers is blunt: the app had **no log sink at all**. Every diagnostic in main
+(the reminders scheduler's `log` hook, the store's refusals) and in the renderer (the
+save-refusal warnings) went to a `console` a packaged Electron app gives the user no way to
+read — no devtools, no file — so a support request could only ever be answered by guesswork.
+
+Files:
+
+- `apps/tenders/src/main/diagnostics-log.ts` — the sink.
+  `createDiagnosticsLog({ dir, maxBytes?, maxFiles?, now? })` → `{ record(entry), path(), flush() }`.
+  `DEFAULT_DIAGNOSTICS_MAX_BYTES` = **1 MiB** on the live file, `DEFAULT_DIAGNOSTICS_MAX_FILES` =
+  **3** (the live file plus two rotated generations), so the directory can never hold more than
+  **3 MiB** however long the app runs. `record()` is synchronous, returns nothing, never throws,
+  and writes exactly one line per entry (a message's newlines are collapsed, so `tail -f` reads
+  whole entries). Rotation is `name → name.1 → name.2`, dropping the oldest, and it is disabled
+  for the rest of the session if a rotation fails, rather than retrying the same doomed rename on
+  every entry. `DIAGNOSTICS_MAX_MESSAGE_CHARS` = 2 000, `DIAGNOSTICS_MAX_DETAIL_CHARS` = 500,
+  24 detail keys.
+- **The path: `<userData>/tenders/tenders-diagnostics.log`.** `diagnosticsLogDir(userDataDir)` =
+  `<userData>/tenders` and `DIAGNOSTICS_FILE_NAME` = `tenders-diagnostics.log` — beside
+  `tenders-data.json`, not inside it.
+- **It never records document content**, and that is a property of the sink rather than a habit
+  of its callers: `detail` values must be primitives (an object or array is dropped, not
+  walked), every string is cut to 500 characters, and a list of keys that only ever carry
+  document text (`clause`, `verbatimClause`, `title`, `text`, `requirements`, `workspaces`,
+  `vault`, `buffer`, `html`, …) is refused outright.
+- The file lives on **this** machine. Nothing is uploaded, nothing is networked, and each
+  `record()` is a completed synchronous append, so closing the app cannot lose an entry already
+  written.
+- `apps/tenders/src/renderer/src/diagnostics.ts` — the renderer's half: `rendererDiagnostics`
+  (`info` / `warn` / `error` / `record`), `createRendererDiagnostics`, `tendersDiagnosticsBridge`,
+  `buildDiagnosticsEntry`, `sanitizeDiagnosticsDetail`. It mirrors every entry to `console` and
+  forwards it to main; an absent or partial bridge is a no-op rather than a throw, a rejected
+  `invoke` is swallowed, and the same content rule is applied on this side too. `store.ts`
+  routes its save-refusal diagnostics through it.
+
+Channels and preload members — both behind the same trusted-sender gate as every other handler,
+and both returning a bare string `error` when refused (§3):
+
+| preload member                                         | channel                               | direction                          |
+| ------------------------------------------------------ | ------------------------------------- | ---------------------------------- |
+| `recordDiagnostics(request: RecordDiagnosticsRequest)` | `tenders:diagnostics-record` (invoke) | renderer → main, one entry         |
+| `diagnosticsPath()`                                    | `tenders:diagnostics-path` (invoke)   | renderer → main, the live log path |
+
+- Main validates the shape and the bounds (`MAX_TENDERS_DIAGNOSTIC_MESSAGE_CHARS` = 2 000,
+  `MAX_TENDERS_DIAGNOSTIC_SOURCE_CHARS` = 64, `MAX_TENDERS_DIAGNOSTIC_DETAIL_KEYS` = 24) and
+  writes through the same rotating sink it uses itself. **The diagnostics surface is write-only
+  from the UI**: there is no reader channel, so a renderer can add to the record and can never
+  browse it.
+- Both members are typed **optional** on `TendersApi` (`recordDiagnostics?`, `diagnosticsPath?`),
+  because a stale preload legitimately lacks them and the renderer treats a partial bridge as no
+  bridge.
+- Main records its own failures through the same sink: a store read that failed (with its code
+  and how many recovery copies are visible), a refused `saveStoreV2` / legacy write (with the
+  code), a legacy read refusal, a recomputed readiness checkpoint, and the reminders
+  scheduler's own log events.
+- **What is built and what is not, stated because it is easy to over-claim:** the sink, the
+  channels and the renderer forwarder are built and pinned. `recordDiagnosticsStart(log, version)`
+  — the one line a fresh session should start with, so a file attached to a support request says
+  what wrote it — exists and is exercised by `tests/diagnostics.test.ts`, but **nothing in main
+  calls it yet**, so no such line is currently written in a real session; and no surface renders
+  `diagnosticsPath()` to the user yet, although the member is exposed for one to do so. §6 item
+  15 tracks both, each a small wiring change in files this documentation pass does not own.
+  Pinned by `tests/diagnostics.test.ts` (the sink's bounds and rotation, the content rule, the
+  renderer's no-op path, and the no-bridge save state) and `tests/ipc-handlers.test.ts`
+  ("4c. Diagnostics transport", including a refusal for every untrusted sender).
 
 ## 4. Canonical readiness
 
@@ -665,9 +879,13 @@ Files: `apps/tenders/src/shared/readiness.ts`, `apps/tenders/src/shared/rules.ts
 - `parseClosingDate` accepts strict RFC 3339 (with timezone) plus ISO civil, day-first
   named-month (incl. `11h00` and ordinal suffixes), month-first, and day-first slash dates,
   each optionally followed by a clock time. Semantics:
-  - Civil forms are **anchored in UTC** and a **missing time means 23:59** (end of day), so
-    day counts, expiry-at-closing and the runway are identical whatever timezone the app runs
-    in.
+  - Civil forms are **anchored in SAST (+02:00)**, and a **missing time means 23:59 SAST**
+    (end of the stated SA civil day, i.e. 21:59Z) — not UTC. Anchoring in UTC made every SA
+    deadline two hours late: "30 November 2026 at 11:00" is 09:00Z, the instant an 11:00 SAST
+    deadline actually passes (`SAST_OFFSET_MS`, `sastInstant`). A fixed offset, not a timezone
+    lookup, so day counts, expiry-at-closing and the runway are identical whatever timezone the
+    app runs in. (This section said "anchored in UTC" and contradicted §3c, which already said
+    the parser owns the SAST anchor; the code says SAST.)
   - **Tail tolerance.** Trailing noise carrying no date/time information — a parenthetical
     note, a timezone abbreviation, free text with no digit and no named month — is tolerated,
     so realistic RFP lines import. Trailing text carrying _any_ date/time information (a
@@ -676,6 +894,34 @@ Files: `apps/tenders/src/shared/readiness.ts`, `apps/tenders/src/shared/rules.ts
   - RFC 3339 is accepted only as a whole-string timestamp (offset required).
   - Impossible, ambiguous and timezone-less values return null — as do dash dates such as
     `30-11-2026`, which the pre-fix parser accepted.
+- **Day counts are civil-day readings, never rounded 24-hour quotients.** `daysBetween(a, b)`
+  (`shared/readiness.ts`) folds both arguments onto the SA civil calendar first, and the
+  runway's `daysAway` is that number: **1 November → 30 November is 29 days, not 30** (it used
+  to be `Math.round` over raw instants, which added the 21:59Z wall clock of an end-of-day
+  closing back onto the count). A 16:00 deadline is therefore 0 days away at 09:00 and 1 day
+  away at 17:00 on the same civil day. It is **display only**: no decision may use it — a
+  ranking or go/no-go compares instants, and the runway's own "recently closed" tail and its
+  `.ics` "upcoming" filter (`buildIcs`) are decided on the instant for that reason. Pinned by
+  `tests/readiness-invariants.test.ts` ("daysBetween is a civil-day reading, never a
+  decision") and `tests/closing-date-parser.test.ts` ("the runway uses the same closing
+  instant").
+- **`docsAtClosing(tender, vault)` never assesses a document against a deadline the app does
+  not have.** Every entry carries the instant it was assessed against, as a closed union —
+  `DocAtClosing.closingDate: { status: 'KNOWN'; raw; instant } | { status: 'UNKNOWN'; raw:
+string | null } | { status: 'UNPARSEABLE'; raw: string }`. With `UNKNOWN` (no closing value at
+  all) or `UNPARSEABLE` (a value the canonical parser rejects), there is no instant to assess
+  against, so `healthAtClosing.health` is `UNKNOWN` ("not assessed", the state `healthWillFail`
+  already fails closed on), `daysUntilExpiry` / `daysSinceCertified` / `stampDaysLeft` are `null`
+  rather than a fabricated day count, and `willFail` is `true`. The check says exactly why —
+  "Cannot be evaluated: this tender has no closing date on file" or "the closing date "<raw>"
+  could not be read", plus "Confirm the closing date first" — and earns **0** progress, because
+  no assessment happened. It used to assess every document against `Date.now() + 90 days`, so a
+  bid with no deadline at all was told its documents "remain valid through closing" on a
+  timeline nobody stated. Only a **keyed** document entry can report this: with no linked
+  document there is nothing the missing instant would have been used for, and the check is
+  unchanged. Pinned by `tests/readiness-invariants.test.ts` ("an unknown closing instant is
+  never fabricated"), `tests/intake-verification.test.ts` and
+  `tests/compliance-gap.test.ts`.
 
 ## 5. Proposal generation
 
@@ -762,7 +1008,8 @@ Files:
 `apps/shell/src/main/index.ts`), and Tenders runs as a WebContentsView inside that same process —
 so a second `ipcMain.handle` on any of them throws
 ("Attempted to register a second handler for 'ai:stream'"). Tenders therefore registers **zero**
-AI handlers, and §3's handler count stays **31**.
+AI handlers, and §3's handler count is **33** — every one of them a Tenders channel; none of them
+an `ai:*` channel.
 
 Preload pass-throughs (`TendersApi`, `apps/tenders/src/preload/index.ts`):
 
@@ -793,6 +1040,48 @@ The core never knows which provider answered: a caller wraps `chatForProvider` /
 read, is recorded in `outcomes` with an error and its pages stay unread — the run still returns
 every other chunk's output, which is what makes the pass additive: nothing a model does can
 remove or weaken the local engine's result.
+
+### The run's wall-clock budget — a published time figure that is enforced
+
+`chunkCount × per-request latency` was the quantity nothing bounded: a 500-page tender is many
+chunks, and against a slow provider each call may legitimately occupy its own absolute cap, so a
+run could last hours with only a manual Cancel. Two ceilings now bound it, both declared in
+`renderer/src/ai/extract-with-ai.ts` and both handed down to the transport:
+
+- `AI_EXTRACTION_CHUNK_BUDGET_MS` = **300 000** (5 minutes) — a ceiling on ONE model call, passed
+  to `createTendersCompletion` / `createVisionCompletion` as `callTimeoutMs`, so a single call is
+  stopped on a wall clock that wire activity cannot extend. It is a ceiling on one request, not a
+  promise about a slow one: the idle-silence watchdog (`AI_EXTRACTION_SILENCE_TIMEOUT_MS` = 240 s)
+  and the transport's own absolute cap (`AI_EXTRACTION_ABSOLUTE_TIMEOUT_MS` = 15 min) keep their
+  jobs, and a call is bounded by the smaller of the deadlines armed.
+- `AI_EXTRACTION_RUN_BUDGET_MS` = **900 000** (15 minutes) — a ceiling on the WHOLE run, text
+  chunks and vision reads together, however many chunks the document needs.
+
+The ceilings, the clock and the timers are all injectable (`AiRunBudget`, `DEFAULT_AI_RUN_BUDGET`),
+so a test drives a deadline with a fake clock — no network, no sleeping, no wall time. What a
+stopped run does follows the same rule as every other failure: the chunk that could not be sent is
+recorded with `RUN_DEADLINE_REASON` (or `CHUNK_BUDGET_REASON` for a call that outlived its share),
+its pages stay **unread** so they keep blocking readiness, and everything already extracted is
+kept. The budget aborts the run's own signal — the path a Cancel click already took — so a run
+stopped for time, a cancelled run and a superseded run all apply nothing. **The user is told, in
+the pass's own warnings:** `runDeadlineWarning(budgetMs)` is prepended to `merged.warnings` ("The
+AI extraction run reached its 15 minutes time budget and stopped. Everything it had read up to
+that point is kept; the chunks it did not reach were not read by AI."), which the pass panel
+renders. Pinned by `tests/ai-vision.test.ts` ("the run's wall-clock budget": one call bounded to
+its share while every other chunk's result is kept, the whole run stopping at its deadline and
+saying so, vision reads on the same clock with those pages left blocking, and a user's Cancel
+reported as a cancellation rather than as the budget) and `tests/ai-extraction-adapter.test.ts`
+("bounds one call on a wall clock the wire cannot extend, and cancels it in main").
+
+**A failed chunk's class reaches the user too.** The shell's `ai:stream` handler classifies an
+error chunk as `'timeout' | 'credits' | 'network' | 'overloaded'`; the transport turns that into
+`AI_EXTRACTION_ERROR_CLASS_MESSAGES[code]` followed by the provider's own words in brackets
+(`aiExtractionErrorMessage`), so a wrong key, an empty account, a rate limit and a dead connection
+stop reading as one identical sentence. An unclassified failure keeps the provider's raw text —
+except for a recognisable authentication failure, which gets the actionable
+`AI_EXTRACTION_AUTH_FAILURE_MESSAGE` with the provider's text still quoted, because "HTTP 401"
+alone tells a user nothing they can act on. None of these messages claims anything about the
+extraction: a failed chunk means those pages were not read.
 
 ### Provenance — a model suggestion is never the parser's own read
 
@@ -838,6 +1127,12 @@ the **review** gate.
   the complement of `pagesRead` (`{ pageNumber, method: 'native-text' | 'ai-vision', chunkIndex }`),
   and a page with no text layer is never sent as text — it is either read as an image or left
   unread.
+- **`ai-extracted` is reachable only for a PDF source.** The vision lane needs a page image, and
+  a Word `.docx` has no rendered page, so `importVision` refuses one before it consults the model
+  (§3d) and no read exists to mark. A picture-only Word page therefore keeps blocking with AI on
+  or off, and only a human review clears it — the one place where "a page a model read stops
+  blocking" does not apply, stated here so this section and §1a/§3d cannot be read against each
+  other.
 - The status is deliberately neither `native` (which claims the page has its own text layer) nor
   `manually-reviewed` (which claims a person read it): the content is available, nothing on it is
   confirmed. The renderer labels it "Model-read", gives it a non-human tone, and shows a model
@@ -1086,18 +1381,21 @@ Added during the Phase 2 gate (re-gate PASS; all non-blocking):
     cap is deliberately **not** mirrored: it sits strictly above the document ceiling, so it
     can never bind. **Must not regress** — this pre-check is what turns an unsaveable
     workspace into a visible, recoverable one.
-11. A duplicate non-null tender `referenceNumber` (e.g. re-importing the same RFP) still
-    fails `semanticChecks`; the renderer now surfaces the failing field path instead of
-    failing silently, but the shred/`addTender` path does not de-dupe or warn. Recommend a
-    shred-time duplicate-reference check so a re-import cannot leave a workspace unsavable
-    until the duplicate is removed.
+11. **CLOSED for the import path (AI wave).** `shredFile` (`components/TenderList.tsx`) runs the
+    extracted `referenceNumber` through `checkDuplicateReference` against the workspace's own
+    tenders and, on a collision, writes `null` instead of the colliding value and reports it
+    through `onDuplicateReference` — so a re-import can no longer leave a workspace unsavable,
+    and the user is told why. What the schema's own rule still does is the backstop: a duplicate
+    introduced **outside** the import path (a value typed into the extraction review, a
+    hand-edited document, a migration) still fails `semanticChecks` document-wide, with the
+    failing field path surfaced instead of a silent failure.
 12. `onStoreChangedV2` is not adopted while a save is in flight (`isSaveInFlight` /
     `isSavePending` / `isMigrating`); a genuine external write received in that window
     reconciles as a `REVISION_CONFLICT` on the next save (never a silent overwrite or
     loss). Alternative: exclude the originating WebContents in main's commit broadcast so
     external writes can be adopted immediately.
-13. **The AI core restates three bounds and the provider catalogue's credential facts instead of
-    importing them** (§5a): `MAX_REQUIREMENTS_PER_RESULT` (mirrors
+13. **CLOSED (remediation wave).** The AI core restates three bounds and the provider catalogue's credential
+    facts instead of importing them (§5a): `MAX_REQUIREMENTS_PER_RESULT` (mirrors
     `MAX_TENDERS_REQUIREMENTS_PER_TENDER`), `MAX_METADATA_CANDIDATES_PER_FIELD` (mirrors
     `MAX_TENDERS_REVIEW_CANDIDATES_PER_FIELD`), `MAX_ADDITIONAL_CLAUSES_PER_REQUIREMENT` (held far
     below `MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT`), and `AI_FALLBACK_PROVIDER` +
@@ -1105,6 +1403,20 @@ Added during the Phase 2 gate (re-gate PASS; all non-blocking):
     `AI_BASE_URL_PROVIDERS`, `AI_SIGN_IN_PROVIDERS`), which mirror the provider catalogue's
     `needsCliPath` / `needsBaseUrl` flags, the registry's auth (`codex-chatgpt`, `gsk-login`,
     `api-key`) and `activeProvider`'s fallback. The provider facts are pinned by
-    `tests/ai-extraction.test.ts`, which reads the catalogue source; the three numeric mirrors are
-    **not** pinned by any test yet, because the core may not import `tenders-persistence.ts` — a
-    test that compares the three pairs would close that gap.
+    `tests/ai-extraction.test.ts`, which reads the catalogue source, and **the three numeric
+    mirrors are now pinned too** — `tests/tenders-persistence-bounds.test.ts` reads
+    `shared/ai-extraction.ts` as text and compares each pair ("the AI core's numeric mirrors of
+    the persistence bounds"), which is how it avoids importing a module the core may not import.
+14. **The legacy v1 writer still has one caller outside Tenders** (§2b, measured): the milestone
+    billing reconciliation in `apps/books/src/main/books-main.ts` dynamically `require`s
+    `apps/tenders/src/main/tenders-main` and calls `readTendersStore` / `writeTendersStore` on
+    `<userData>/tenders/tenders-data.json`, falling back to writing that file itself when the
+    require fails. It is not a Tenders surface and it predates the v2 store, but it means
+    "`tenders-data.json` has exactly one writer" is true of this app only. Delete the path (Books
+    owns it) or route it through the Books port, and drop the qualifier in §2b.
+15. **Two diagnostics wiring gaps** (§3e), each small and neither a correctness risk: (a)
+    `recordDiagnosticsStart(log, version)` is exported and tested but **called from nowhere in
+    main**, so a real session's log does not open with the line that says what wrote it; (b) no
+    surface renders `diagnosticsPath()` yet, so the user is not told where the log is even though
+    the preload member exists for exactly that. Both are one-line changes in
+    `apps/tenders/src/main/tenders-main.ts` / a Tenders renderer surface.

@@ -816,6 +816,61 @@ describe('readiness intake-verification gate', () => {
     expect(report.ready).toBe(false)
   })
 
+  // ── a confirmed intake does not conjure the closing date ──────────────────
+  // The intake review can mark the closing-date field `not_stated` (the RFP really
+  // did not state one) or `confirmed` with a value the strict parser rejects. The
+  // intake gate then clears, because a person made an explicit decision — but the
+  // app still does not HAVE a closing instant, and `docs-at-closing` must not
+  // assess the linked evidence against one it invented.
+
+  it('does not assess linked evidence against a closing date the app does not have', () => {
+    const report = assessReadiness(
+      vulcanTender({
+        closingDate: null,
+        intakeVerification: confirmedIntake({
+          fields: {
+            ...confirmedIntake().fields,
+            closingDate: fieldReview({ extractedValue: null, state: 'not_stated' }),
+          },
+        }),
+      }),
+      readyVault(),
+      company(),
+      NOW,
+    )
+    const docsCheck = report.checks.find((candidate) => candidate.id === 'docs-at-closing')
+
+    expect(blockingIds(report)).toContain('docs-at-closing')
+    expect(docsCheck?.detail).toMatch(/no closing date on file/i)
+    expect(docsCheck?.detail).toMatch(/Confirm the closing date first/i)
+    // Nothing anywhere in the report claims the evidence is valid through closing.
+    expect(docsCheck?.detail).not.toMatch(/remain valid through closing/i)
+    expect(report.ready).toBe(false)
+  })
+
+  it('does not assess linked evidence against a closing value the parser rejected', () => {
+    const raw = 'as stated in the bid documents'
+    const report = assessReadiness(
+      vulcanTender({
+        closingDate: raw,
+        intakeVerification: confirmedIntake({
+          fields: {
+            ...confirmedIntake().fields,
+            closingDate: fieldReview({ extractedValue: raw, state: 'corrected' }),
+          },
+        }),
+      }),
+      readyVault(),
+      company(),
+      NOW,
+    )
+    const docsCheck = report.checks.find((candidate) => candidate.id === 'docs-at-closing')
+
+    expect(blockingIds(report)).toContain('docs-at-closing')
+    expect(docsCheck?.detail).toContain(`the closing date "${raw}" could not be read`)
+    expect(report.ready).toBe(false)
+  })
+
   // ── fail-closed unreadable-page gate (Oracle R2) ──────────────────────────
 
   /** A vault that satisfies the FULFILLED, expiry-required tax-clearance requirement. */

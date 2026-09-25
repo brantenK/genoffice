@@ -76,6 +76,17 @@ const AUTOSAVE_DEBOUNCE_MS = 300
  */
 const CLOSE_FLUSH_MARKER = 'e2e:tenders-close-flush-request'
 
+/**
+ * `source` value journey 7 sends over the app's own `tenders:diagnostics-record`
+ * channel to ask the main process to close the window. It exists so the close is
+ * requested from INSIDE the renderer, in the same task as the edit: a close
+ * asked for from this process put three Playwright round trips inside the
+ * debounce window the journey has to beat, which is what made the journey load
+ * dependent. The wrapped handler answers this exact source and nothing else, so
+ * a diagnostic the app records itself can never trigger a close.
+ */
+const CLOSE_REQUEST_SOURCE = 'e2e-cutover-close-request'
+
 const COMPANY_ONE = 'E2E Cutover Civils (Pty) Ltd'
 const COMPANY_TWO = 'E2E Second Company (Pty) Ltd'
 const COMPANY_THREE = 'E2E Third Company (Pty) Ltd'
@@ -226,6 +237,46 @@ function restoreSaveHandler(app: ElectronApplication): Promise<void> {
       map.set(channel, original as InvokeHandler)
     }
   }, SAVE_CHANNEL)
+}
+
+/**
+ * Route `tenders:diagnostics-record` so that one `source` value asks the shell
+ * window to close.
+ *
+ * The channel is a real, already-registered one the renderer may call at any
+ * moment, so the close is triggered from inside the page without adding a
+ * test-only IPC channel to the app. Everything else delegates to the registered
+ * handler unchanged. Used only by journey 7.
+ *
+ * Two choices here exist to keep the trigger path short, because it sits inside
+ * the debounce window the journey has to beat (measured on a loaded machine: 180
+ * ms when the close was asked for from the test process, 90 ms with these two
+ * changes still missing):
+ *
+ *   • `win.close()` rather than `app.quit()`: it is what the window's own close
+ *     button does, and it enters the shell's `win.on('close')` guard directly
+ *     instead of running the whole app-quit preamble first;
+ *   • the close runs BEFORE the diagnostic is delegated, not after: delegating
+ *     first would put the sink's own file append inside the measured window.
+ */
+function wrapDiagnosticsHandlerToCloseOn(app: ElectronApplication, source: string): Promise<void> {
+  return app.evaluate(({ ipcMain, BrowserWindow }, closeSource) => {
+    const map = (ipcMain as unknown as { _invokeHandlers: Map<string, InvokeHandler> })
+      ._invokeHandlers
+    const channel = 'tenders:diagnostics-record'
+    const original = map.get(channel)
+    if (!original) throw new Error('tenders:diagnostics-record handler is not registered')
+    map.set(channel, (event: unknown, entry: unknown) => {
+      const record = entry as { source?: unknown } | null
+      if (!record || record.source !== closeSource) return original(event, entry)
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      if (win && !win.isDestroyed()) win.close()
+      setImmediate(() => {
+        void original(event, entry)
+      })
+      return { ok: true }
+    })
+  }, source)
 }
 
 // ── shell navigation + UI helpers ─────────────────────────────────────────────
@@ -1147,13 +1198,31 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
    * that window used to drop the edit. The shell's window close guard now asks
    * the renderer to flush and waits for the commit before the window closes.
    *
-   * The edit is made and the quit requested inside the debounce window (no
-   * "Saved" wait), which is exactly the sequence that lost data before. Two
-   * things keep that claim honest rather than merely plausible: the close must be
-   * requested before the debounce elapses (measured, `closeRequestedMs`), and the
-   * guard's own flush request must be observed in the view. Without the guard the
-   * second never happens — the debounce alone would have to have committed the
-   * edit before the window died, which the first rules out.
+   * The edit is made and the close requested inside the debounce window (no
+   * "Saved" wait), which is exactly the sequence that lost data before. Both
+   * happen in one renderer task — the edit, then the close request, with the
+   * store's synchronous update in between — so nothing of this process's own
+   * latency sits inside the window the journey has to beat. Two things keep that
+   * claim honest rather than merely plausible, and BOTH are measured inside the
+   * view, on the view's own clock:
+   *
+   *   • `closeFlushFromScheduleMs` — the gap between the 300 ms debounce being
+   *     scheduled (the end of the edit's synchronous store update, which is where
+   *     that window truly starts) and the guard's flush request arriving in the
+   *     same page. It must be under the debounce, or the debounce may have been
+   *     what committed the edit;
+   *   • `closeFlushRequests` — the guard's flush request was observed at all.
+   *     Without the guard there is no request, the debounce would have to have
+   *     committed the edit before the window died, and the first measurement is
+   *     what rules that out.
+   *
+   * Measuring that gap across processes (edit timestamp in the page, quit
+   * timestamp in this process and main) measured the harness, not the app: two
+   * observed runs on a loaded machine put it at 328 ms and at exactly 300 ms
+   * while the app itself was behaving, so the journey was a coin flip rather than
+   * a signal. Both ends of the figure below are now taken inside the view, and
+   * the close itself is triggered from the page, so the only latency it can
+   * contain is the close path's own IPC hops.
    */
   test('journey 7: a close inside the autosave debounce still commits the edit', async () => {
     const userDataDir = await scratchUserData()
@@ -1205,37 +1274,99 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
 
       screenshots.push(await shot(tenders, 'cutover-j7-matrix-before-edit'))
 
-      // Watch for the shell's pre-close flush request from inside the view. The
-      // guard is the only thing that sends it, so observing it is what proves the
-      // guard — and not the 300 ms autosave debounce — committed the edit.
-      // Console messages reach this process while the page is still open (the
-      // guard holds the close until the flush answers), so the record survives
-      // the window's death.
+      // Watch for the shell's pre-close flush request from inside the view, and
+      // time the debounce window on the renderer's own clock. The guard is the
+      // only thing that sends that request, so observing it is what proves the
+      // guard — and not the 300 ms autosave debounce — committed the edit; and
+      // the timestamps recorded in the page are what put the request inside the
+      // debounce window without borrowing this process's latency. Console
+      // messages reach this process while the page is still open (the guard holds
+      // the close until the flush answers), so both records survive the window's
+      // death.
       const closeFlushRequests: string[] = []
       tenders.on('console', (msg) => {
         const text = msg.text()
         if (text.includes(CLOSE_FLUSH_MARKER)) closeFlushRequests.push(text)
       })
       await tenders.evaluate((marker) => {
+        const state: {
+          editAt: number | null
+          editValue: string | null
+          scheduledAt: number | null
+          sentAt: number | null
+        } = {
+          editAt: null,
+          editValue: null,
+          scheduledAt: null,
+          sentAt: null,
+        }
+        ;(window as unknown as { __e2eCloseGuard: typeof state }).__e2eCloseGuard = state
+        // Capture phase, so this runs BEFORE React's own change handler and can
+        // only ever timestamp the edit at or ahead of the moment the store
+        // schedules the 300 ms debounce — never behind it.
+        document.addEventListener(
+          'change',
+          (event) => {
+            if (state.editAt !== null) return
+            const target = event.target as { value?: unknown } | null
+            state.editAt = Date.now()
+            state.editValue = typeof target?.value === 'string' ? target.value : null
+          },
+          true,
+        )
         window.tendersApi?.onCloseFlushRequest(() => {
-          console.log(`${marker} ${Date.now()}`)
+          const at = Date.now()
+          // `fromEdit` is the whole sequence; `fromSchedule` starts where the
+          // debounce window itself starts (see the edit below), so it is the
+          // figure the guard's promptness is judged on.
+          const fromEdit = state.editAt === null ? -1 : at - state.editAt
+          const fromSchedule = state.scheduledAt === null ? -1 : at - state.scheduledAt
+          console.log(
+            `${marker} at=${at} value=${state.editValue ?? ''} fromEdit=${fromEdit} fromSchedule=${fromSchedule}`,
+          )
         })
       }, CLOSE_FLUSH_MARKER)
 
-      // Edit, then quit with nothing else awaited in between: the close has to
-      // land inside the autosave debounce, or the debounce could be what commits
-      // the edit and the journey would prove nothing. The elapsed time is
-      // asserted below, not assumed — a full-page screenshot used to sit between
-      // these two lines and ate the whole 300 ms window on this disk.
-      const editStartedAt = Date.now()
-      await statusSelect.selectOption(to)
-      await expect(statusSelect).toHaveValue(to)
-      const quitAt = await run1.app.evaluate(({ app }) => {
-        const at = Date.now()
-        app.quit()
-        return at
-      })
-      const closeRequestedMs = quitAt - editStartedAt
+      // Edit and ask for the close in ONE renderer task, so that the only
+      // latency inside the window the journey has to beat is the close path's own
+      // IPC hops. The change event above is dispatched by hand — the same value
+      // set and the same `change` event Playwright's own `selectOption` performs —
+      // and the close request leaves for main in the very next statement.
+      await wrapDiagnosticsHandlerToCloseOn(run1.app, CLOSE_REQUEST_SOURCE)
+      await tenders.evaluate(
+        ({ to: nextStatus, quitSource }) => {
+          const select = document.querySelector<HTMLSelectElement>(
+            'select:has(option[value="FULFILLED"])',
+          )
+          if (!select) throw new Error('the requirement status select is not on screen')
+          select.value = nextStatus
+          select.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
+          // The dispatch above runs React's change handler, the store update and
+          // the subscriber that schedules the 300 ms debounce, all synchronously —
+          // so this instant is that window's true start, and it is what
+          // `fromSchedule` is measured from. Anchoring instead on the `change`
+          // event itself would charge the guard for the store's own synchronous
+          // update, measured here at ~45 ms, which is not close-guard latency.
+          const guard = (
+            window as unknown as {
+              __e2eCloseGuard?: { scheduledAt: number | null; sentAt: number | null }
+            }
+          ).__e2eCloseGuard
+          if (guard) {
+            guard.scheduledAt = Date.now()
+            guard.sentAt = guard.scheduledAt
+          }
+          // A diagnostics entry is used as the trigger only because it is an
+          // existing channel the renderer may call at any time; the entry itself
+          // is inert.
+          void window.tendersApi?.recordDiagnostics?.({
+            level: 'info',
+            source: quitSource,
+            message: 'e2e: cutover journey 7 requests the window close',
+          })
+        },
+        { to, quitSource: CLOSE_REQUEST_SOURCE },
+      )
 
       const changedIds = (store: any): string[] =>
         idsWithStatus(store, to).filter((id) => !beforeIds.includes(id))
@@ -1246,15 +1377,44 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
       await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j7-run1').catch(() => undefined)
       run1 = undefined
 
+      // The marker line carries the renderer's own measurements, all on the
+      // renderer's clock: `fromSchedule=<ms>` between the debounce being scheduled
+      // and this flush request arriving, `fromEdit=<ms>` the same gap measured
+      // from the `change` event, and `value=<applied value>`.
+      const closeFlushFacts = closeFlushRequests
+        .map((text) => / value=(.*) fromEdit=(-?\d+) fromSchedule=(-?\d+)$/.exec(text))
+        .filter((match): match is RegExpExecArray => match !== null)
+        .map((match) => ({
+          value: match[1],
+          fromEditMs: Number(match[2]),
+          fromScheduleMs: Number(match[3]),
+        }))
+      const closeFlushValue = closeFlushFacts[0]?.value ?? null
+      const closeFlushFromScheduleMs = closeFlushFacts[0]?.fromScheduleMs ?? null
+      const closeFlushFromEditMs = closeFlushFacts[0]?.fromEditMs ?? null
+
       const guardFailures: string[] = []
-      if (closeRequestedMs >= AUTOSAVE_DEBOUNCE_MS) {
-        guardFailures.push(
-          `the close was requested ${closeRequestedMs} ms after the edit, at or past the ${AUTOSAVE_DEBOUNCE_MS} ms autosave debounce, so the debounce may have been what committed it`,
-        )
-      }
       if (closeFlushRequests.length === 0) {
         guardFailures.push(
           'no close-flush request reached the renderer, so the shell close guard never ran',
+        )
+      } else if (closeFlushFromScheduleMs === null) {
+        guardFailures.push(
+          'the close-flush request carried no timestamp, so the debounce window could not be measured',
+        )
+      } else if (closeFlushFromScheduleMs < 0) {
+        guardFailures.push(
+          'the close-flush request arrived before the edit was applied, so the guard could not be exercised',
+        )
+      } else if (closeFlushFromScheduleMs >= AUTOSAVE_DEBOUNCE_MS) {
+        guardFailures.push(
+          `the guard could not be exercised: the close-flush request reached the renderer ${closeFlushFromScheduleMs} ms after the ${
+            AUTOSAVE_DEBOUNCE_MS
+          } ms autosave debounce was scheduled (${closeFlushFromEditMs} ms after the edit itself), i.e. at or past that debounce, so the debounce may have been what committed the edit rather than the guard`,
+        )
+      } else if (closeFlushValue !== to) {
+        guardFailures.push(
+          `the edit that was pending at close time carried "${closeFlushValue}", not "${to}"`,
         )
       }
       if (!persisted || persisted.status !== to) {
@@ -1273,7 +1433,9 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
             from,
             to,
             committedRevision,
-            closeRequestedMs,
+            closeFlushFromScheduleMs,
+            closeFlushFromEditMs,
+            closeFlushValue,
             closeFlushRequests: closeFlushRequests.length,
           },
           screenshots,
@@ -1316,9 +1478,14 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           requirement: { id: persisted.id, title: persisted.title, from, to },
           committedRevision,
           // The two facts that make the claim above verifiable rather than
-          // assumed: the close was requested inside the debounce window, and the
-          // guard's flush request was the one the renderer answered.
-          closeRequestedMs,
+          // assumed: the guard's flush request was the one the renderer answered,
+          // and — timed in that same renderer, with no Playwright round trip and
+          // no store-update work inside the measurement — it arrived inside the
+          // 300 ms autosave debounce, so the debounce cannot have committed the
+          // edit.
+          closeFlushFromScheduleMs,
+          closeFlushFromEditMs,
+          closeFlushValue,
           closeFlushRequests: closeFlushRequests.length,
         },
         screenshots,

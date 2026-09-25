@@ -212,8 +212,10 @@ matters, so nobody has to remember the sequence:
    formatting, typecheck, **e2e typecheck**, baseline;
 4. only if all of those pass: `build:all`, then e2e.
 
-`--fast` stops after step 3. Heavy steps are skipped when a cheap gate fails, so a
-broken tree does not cost a 20-minute e2e run.
+`--fast` stops after step 3 (`fork/tools/verify-sync.mjs` reads that flag; there is no
+`--skip-heavy`). Heavy steps are skipped for **either** reason, and the tool says which: a cheap
+gate that failed (`Skipping build:all and e2e: N cheap gate(s) failed.`), or the flag
+(`Skipping build:all and e2e (--fast).`) — so a broken tree does not cost a 20-minute e2e run.
 
 **`e2e/` is typechecked separately** (`npm run check:e2e-types`). It sits outside
 every app's tsconfig because it drives _built_ apps rather than importing them —
@@ -235,10 +237,17 @@ they stop reappearing as new failures):
 node fork/tools/baseline.mjs --write --with-e2e --repeat 2
 ```
 
-Both lanes are stale right now. The Tenders hardening fix set adds 7 test files, modifies a
-dozen more, and modifies 8 e2e specs, so `check:baseline` reports both lanes as changed until
-it is re-recorded. The Tenders unit suite is green (1011 passed / 0 failed / 7 skipped);
-re-record once the Tenders e2e lane is green too.
+Both lanes are stale right now, and this paragraph used to quote counts that were never
+re-measured. What is verifiable without running a suite: HEAD is `7f7067b`, with an
+**uncommitted** remediation wave on top of it (the Tenders legacy v1 stack,
+`shared/readiness.ts`, `main/document-store.ts`, the diagnostics sink and more than a dozen
+Tenders unit files among the changes) plus a concurrent `apps/books` workstream, so
+`check:baseline` reports both lanes as changed until it is re-recorded. The old claim here
+("the Tenders unit suite is green: 1011 passed / 0 failed / 7 skipped") is withdrawn rather
+than restated: the unit suite's total was **not** re-measured, and the remediation wave
+changes behaviour several tests pinned, so treat the lane as unverified until
+`npm test -w @genoffice/tenders` is run and the baseline re-recorded once the Tenders e2e
+lane is green too.
 
 Before the _next_ sync, re-record it at the pre-merge commit. That comparison is
 the single highest-value thing this runbook asks for: in the 2026-09-22 sync it

@@ -4,11 +4,14 @@
  * coverage, and the 4 MiB index cap refused writes at ~11.5k records — well below
  * the advertised 20 000 — which wedged the user out of deleting documents too).
  *
- * The caps are one coherent set: the byte ceiling is the memory/IO bound (the
- * index is fully parsed and re-serialized on every managed-document operation)
- * and the record caps are derived to stay *reachable* inside it, so a full store
- * refuses on a limit the user can count rather than on an invisible byte budget
- * below it:
+ * The caps are one coherent set: the byte ceiling is a GROWTH cap on the
+ * serialized index (the exception below is the only way past it) and the record
+ * caps are derived to stay *reachable* inside it, so a full store refuses on a
+ * limit the user can count rather than on an invisible byte budget below it.
+ * It is NOT a memory bound: `JSON.parse` costs ~5.05× the serialized bytes in
+ * live objects (measured, `tenders-persistence-bounds.test.ts`), and an index
+ * over the ceiling is still read and written. The bound on the cost of one
+ * managed-document operation is `MAX_TENDERS_MANAGED_FILES` (5 000 records):
  *
  *   MAX_TENDERS_MANAGED_FILES × MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD
  *     ≤ MAX_TENDERS_MANAGED_INDEX_BYTES
@@ -74,7 +77,14 @@ async function tempBaseDir(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  // `maxRetries` because a recursive delete on Windows can fail with ENOTEMPTY
+  // while a handle the store just closed is still being released. Cleanup is not
+  // an assertion, and a cleanup flake must not be reported as a cap failure.
+  await Promise.all(
+    roots
+      .splice(0)
+      .map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })),
+  )
 })
 
 function store(baseDir: string) {
@@ -91,6 +101,29 @@ const SEED_HASH = 'a'.repeat(64)
 const SEED_TS = '2026-09-01T00:00:00.000Z'
 
 /**
+ * A raw managed-index payload as this file writes it: the fields the writer
+ * knows, plus whatever a fixture replaces or adds.
+ *
+ * Deliberately still open (`[key: string]: unknown`) — these tests write FILES,
+ * including malformed ones the store has to tolerate — but the known fields are
+ * NAMED, so a fixture that reads one back (`.id`, say) gets a real type instead
+ * of the index signature TypeScript drops when this object is spread.
+ */
+interface IndexRecordPayload {
+  id: string
+  category: string
+  relativePath: string
+  fileName: string
+  mimeType: string
+  size: number
+  hash: string
+  createdAt: string
+  updatedAt: string
+  state: string
+  [key: string]: unknown
+}
+
+/**
  * One index record in the compact on-disk shape the store writes (null-valued
  * optional fields omitted) and with the field sizes a real record has: a
  * 64-character SHA-256, a 37-character file name, ISO timestamps and a
@@ -98,10 +131,7 @@ const SEED_TS = '2026-09-01T00:00:00.000Z'
  * placeholders — is what lets the record-cap fixtures prove the count cap is
  * reachable inside the byte ceiling.
  */
-function seedRecord(
-  index: number,
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function seedRecord(index: number, overrides: Record<string, unknown> = {}): IndexRecordPayload {
   return {
     id: `mf-seed-${index}`,
     category: 'rfp',
@@ -120,7 +150,7 @@ function seedRecord(
 function seedTrashedRecord(
   index: number,
   overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+): IndexRecordPayload {
   return seedRecord(index, {
     state: 'trashed',
     trashedPath: `.trash/mf-seed-${index}__${SEED_FILE_NAME}`,
@@ -351,7 +381,15 @@ describe('MAX_TENDERS_MANAGED_INDEX_BYTES boundary', () => {
     expect(await managed.listTrash()).toHaveLength(0)
   })
 
-  it('measures the index cost per record against the byte cap', async () => {
+  // Budget, not an assertion: this test performs 100 real saves (each writing a
+  // document and re-serializing the index). Measured at 11 944 ms standalone —
+  // only 1.7× headroom under the 20 s default, which the full parallel suite
+  // consumes (observed: timed out at 20 000 ms in-suite) — and at 56 385 ms under
+  // the full suite once the budget allowed it to finish (a 4.7× load factor on
+  // the same work, with the whole file at 95 403 ms in-suite against 22 649 ms
+  // alone). 300 000 ms is 5.3× that worst observed cost, so the cap assertions
+  // below are unchanged and a genuinely hung store still fails.
+  it('measures the index cost per record against the byte cap', { timeout: 300_000 }, async () => {
     const baseDir = await tempBaseDir()
     const managed = store(baseDir)
     for (let index = 0; index < 100; index += 1) {
@@ -558,10 +596,15 @@ describe('MAX_TENDERS_MANAGED_FILES is an upper bound on the collection', () => 
 
 describe('the managed-document caps are one coherent set', () => {
   it('keeps the record caps reachable inside the index byte ceiling', () => {
-    // The byte ceiling is the memory/IO bound — the index is fully parsed and
-    // re-serialized on every managed-document operation — and the record caps are
-    // derived from it, not the other way round, so the count a full store reports
-    // is a limit the user can see and count.
+    // The byte ceiling is a GROWTH cap on the serialized index (a write that adds
+    // a record is refused above it; trash/restore/empty-trash and reconcile flips
+    // are allowed past it). It is not a memory bound: `JSON.parse` costs ~5.05×
+    // the serialized bytes in live objects (measured,
+    // `tenders-persistence-bounds.test.ts`), and an index over the ceiling is
+    // still read and written. The bound on the cost of one operation is
+    // `MAX_TENDERS_MANAGED_FILES` (5 000 records). The record caps are derived
+    // from that ceiling, not the other way round, so the count a full store
+    // reports is a limit the user can see and count.
     expect(
       MAX_TENDERS_MANAGED_FILES * MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD,
     ).toBeLessThanOrEqual(MAX_TENDERS_MANAGED_INDEX_BYTES)

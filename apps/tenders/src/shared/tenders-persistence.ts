@@ -40,6 +40,23 @@ export const MAX_TENDERS_WORKSPACES = 100
 export const MAX_TENDERS_CUSTOMERS_PER_WORKSPACE = 10_000
 export const MAX_TENDERS_VAULT_DOCS_PER_WORKSPACE = 10_000
 export const MAX_TENDERS_TENDERS_PER_WORKSPACE = 5_000
+/**
+ * Requirements one tender may hold.
+ *
+ * 5 000 is the ceiling the DOCUMENT bound was measured against: a tender at this
+ * cap plus per-page extraction state at its own cap plus 16 candidates for each of
+ * the eight readiness-critical fields serialises to 3 026 314 bytes (2.89 MiB),
+ * which is what `MAX_TENDERS_DOCUMENT_BYTES` was raised to hold with ~38% headroom
+ * (see its comment). It is deliberately NOT a bound on a single import: both intake
+ * readers emit AT MOST ONE ROW PER RULE KEY (`shredExtraction` iterates
+ * `TENDER_RULES`, and the AI core merges its requirement suggestions by
+ * `ruleKey`), so one import can add at most one row for each of the 27 catalogue
+ * rules. The cap is reachable only across many imports and manual edits, and the
+ * work it bounds is proportionate at that point: the indexed vault gap analysis
+ * over 5 000 requirements against a 10 000-document vault measured 272 ms
+ * (`tests/performance/results.json`, `vaultIndexSweep`) — 14× faster than the
+ * un-indexed path it replaced (4 059 ms).
+ */
 export const MAX_TENDERS_REQUIREMENTS_PER_TENDER = 5_000
 export const MAX_TENDERS_MILESTONES_PER_TENDER = 5_000
 export const MAX_TENDERS_REQUIRED_DOCS_PER_CUSTOMER = 1_000
@@ -71,6 +88,19 @@ export const MAX_TENDERS_RECOVERY_CANDIDATES = 64
  * clamp and the per-record cost below keep every record the store writes inside
  * `MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD`, so the record-count caps bind
  * first by construction.
+ *
+ * What it is NOT — and this was documented wrongly as a *memory/IO bound* — is a
+ * ceiling on what the index costs to hold. It measures the COMPACT SERIALIZED
+ * bytes; the live objects `JSON.parse` produces are larger, measured at **5.05×**
+ * the serialized size for a 5 000-record index (~11.3 MB of heap for 2 328 931
+ * serialized bytes). And because an over-ceiling index is still read and still
+ * written by the non-growing paths above, a fully parsed index can exceed 4 MiB of
+ * live objects — measured at 4 194 795 serialized bytes, `listRecords` returned
+ * 9 004 records and the read plus a trash/empty-trash cycle completed in under
+ * 200 ms each. The claim this constant supports is exactly the one `writeIndex`
+ * enforces: an index this large can no longer GROW through the app. The bound on
+ * what a managed-document operation costs is `MAX_TENDERS_MANAGED_FILES`
+ * (5 000 records), which is what the user can count and what a full store reports.
  */
 export const MAX_TENDERS_MANAGED_INDEX_BYTES = 4 * 1024 * 1024
 /**

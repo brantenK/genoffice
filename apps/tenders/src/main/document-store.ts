@@ -10,9 +10,9 @@
 // Metadata lives in `<baseDir>/managed-documents.json` (its own bounded, atomic
 // index), so the strict v2 authority document schema is untouched.
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
+import { mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { basename, join, resolve, sep } from 'node:path'
 import type { TendersDataV2 } from '../shared/types'
 import { MAX_TENDERS_DOCUMENT_UPLOAD_BYTES } from '../shared/ipc'
 import {
@@ -84,6 +84,118 @@ function toManagedTrashRelativePath(storedPath: unknown): string | null {
   if (directory !== MANAGED_DOCUMENTS_TRASH_DIR) return null
   if (!name || name === '.' || name === '..' || name.includes('..')) return null
   return `${directory}/${name}`
+}
+
+/**
+ * Real (symlink-resolved) root of a managed subdirectory. `mkdir` first, then
+ * `realpath`, so the root is a name the filesystem itself resolves rather than
+ * one this module composed. Returns `null` when the directory cannot be created
+ * or resolved, which callers treat as a refusal: a root that cannot be proven is
+ * not a root to write into.
+ */
+function realManagedRootSync(baseDir: string, directory: string): string | null {
+  const root = join(baseDir, directory)
+  try {
+    if (!existsSync(root)) mkdirSync(root, { recursive: true })
+    return realpathSync(root)
+  } catch {
+    return null
+  }
+}
+
+async function realManagedRoot(baseDir: string, directory: string): Promise<string | null> {
+  const root = join(baseDir, directory)
+  try {
+    await mkdir(root, { recursive: true })
+    return await realpath(root)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Is the managed root a directory the app may write into? `realpath` alone is
+ * not enough: it happily follows a symlink planted at `documents/` and reports
+ * the directory it points at, which is a real path outside the Tenders data
+ * directory that would then satisfy every prefix check downstream.
+ *
+ * So the check runs against the LEXICAL root — `<base>/documents`, `<base>/vault`,
+ * `<base>/.trash` — which is where a planted link would sit, and against the base
+ * directory above it. Both must exist and neither may be a link.
+ */
+export function assertRealManagedRoot(
+  baseDir: string,
+  directory: string,
+): { ok: true } | { ok: false } {
+  for (const candidate of [baseDir, join(baseDir, directory)]) {
+    try {
+      if (lstatSync(candidate).isSymbolicLink()) return { ok: false }
+    } catch {
+      return { ok: false }
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * `true` when `candidate` is strictly inside `root` once both are compared as
+ * real (symlink-resolved) paths, with neither `..` nor a drive prefix left in
+ * lexical form.
+ *
+ * Windows compares case-insensitively: `realpath` preserves the caller's case on
+ * the drive letter, so `c:\Users\x\Documents` and `C:\Users\x\Documents` are the
+ * same directory but not the same string. The same folder read through a
+ * `OneDrive` path and through its real location compares equal too, because both
+ * sides went through `realpath` first.
+ */
+export function isRealPathInside(root: string | null, candidate: string | null): boolean {
+  if (!root || !candidate) return false
+  const normalizedRoot = root.endsWith(sep) ? root : root + sep
+  const left = process.platform === 'win32' ? normalizedRoot.toLowerCase() : normalizedRoot
+  const right = process.platform === 'win32' ? candidate.toLowerCase() : candidate
+  if (right === (left.endsWith(sep) ? left.slice(0, -1) : left)) return false
+  return right.startsWith(left)
+}
+
+/**
+ * The real, confinement-checked path of one managed leaf (a document under
+ * `documents/` or `vault/`, or a trashed file under `.trash/`).
+ *
+ * Lexical confinement alone is not containment. A symlink or NTFS junction
+ * planted at one managed leaf — or replacing `documents/` itself — passes every
+ * text check and still resolves outside the Tenders directory. This product
+ * ingests untrusted third-party PDFs, so the check that matters is the one the
+ * filesystem makes: resolve the real path and re-assert the prefix.
+ *
+ * Rejection is the default. A leaf that resolves outside its root, or whose leaf
+ * component is a symlink (a link is never a document this app wrote: it writes
+ * with `flag: 'wx'` into a name it composed), is refused with `'escaped'`;
+ * `'missing'` means the leaf simply is not there yet.
+ */
+export function resolveConfinedManagedPath(
+  baseDir: string,
+  relativePath: string,
+  kind: 'file' | 'trash' = 'file',
+):
+  | { ok: true; path: string; root: string }
+  | { ok: false; reason: 'invalid' | 'escaped' | 'missing' } {
+  const confined =
+    kind === 'trash'
+      ? toManagedTrashRelativePath(relativePath)
+      : toManagedRelativePath(relativePath)
+  if (!confined) return { ok: false, reason: 'invalid' }
+  const directory = confined.split('/')[0]
+  const root = realManagedRootSync(baseDir, directory)
+  if (!root) return { ok: false, reason: 'escaped' }
+  const fullPath = resolve(root, confined.slice(directory.length + 1))
+  if (!isRealPathInside(root, fullPath)) return { ok: false, reason: 'escaped' }
+  if (!existsSync(fullPath)) return { ok: false, reason: 'missing' }
+  try {
+    if (lstatSync(fullPath).isSymbolicLink()) return { ok: false, reason: 'escaped' }
+  } catch {
+    return { ok: false, reason: 'missing' }
+  }
+  return { ok: true, path: fullPath, root }
 }
 
 /**
@@ -415,9 +527,14 @@ export function createManagedDocumentStore(
     await atomicWrite(indexPath, serialized)
   }
 
-  async function uniqueStoredName(directory: string, cleanName: string): Promise<string> {
+  /**
+   * A name no file under `root` already uses. `root` is the already-resolved real
+   * directory, so the probe is one `existsSync` — resolving it again per save
+   * would double the syscalls on the hot write path for no extra proof.
+   */
+  function uniqueStoredName(root: string, cleanName: string): string {
     const base = `${clock().getTime()}_${cleanName}`
-    if (!existsSync(join(baseDir, directory, base))) return base
+    if (!existsSync(join(root, base))) return base
     return `${clock().getTime()}_${randomUUID().slice(0, 8)}_${cleanName}`
   }
 
@@ -443,11 +560,28 @@ export function createManagedDocumentStore(
         return { ok: false, error: 'Managed-document metadata limit reached.' }
       }
       const directory = input.category === 'rfp' ? 'documents' : 'vault'
-      const storedName = await uniqueStoredName(directory, cleanName)
+      // `mkdir` first so a first-ever save still creates the directory, then take
+      // the REAL root: a symlink or junction planted at `documents/` passes every
+      // lexical check and still resolves outside the Tenders directory, so the
+      // prefix has to be re-asserted against the path the filesystem resolves.
+      // A root that cannot be proven is a refusal, not a write.
+      const root = await realManagedRoot(baseDir, directory)
+      if (!assertRealManagedRoot(baseDir, directory).ok) {
+        return {
+          ok: false,
+          error: 'The managed document directory could not be resolved for writing.',
+        }
+      }
+      const storedName = uniqueStoredName(root as string, cleanName)
       const relativePath = `${directory}/${storedName}`
-      const fullPath = join(baseDir, relativePath)
+      const fullPath = resolve(root as string, storedName)
+      if (!isRealPathInside(root, fullPath)) {
+        return {
+          ok: false,
+          error: 'The managed document path resolves outside the Tenders data directory.',
+        }
+      }
       try {
-        await mkdir(join(baseDir, directory), { recursive: true })
         await atomicWrite(fullPath, buffer)
       } catch (error: unknown) {
         return { ok: false, error: errorMessage(error, 'Failed to write document.') }
@@ -496,8 +630,19 @@ export function createManagedDocumentStore(
       const existing = index.records.find(
         (record) => record.relativePath === relativePath && record.state === 'active',
       )
-      const fullPath = join(baseDir, relativePath)
-      const fileExists = existsSync(fullPath)
+      // A link at the leaf is never a document this app wrote (`save` writes into
+      // a name it composed, with `flag: 'wx'`), so the move is refused for it —
+      // that is what stops a planted link from making the app relocate whatever
+      // it points at.
+      const confined = resolveConfinedManagedPath(baseDir, relativePath)
+      if (!confined.ok && confined.reason === 'escaped') {
+        return {
+          ok: false,
+          error: 'The document resolves to a link outside the Tenders data directory.',
+        }
+      }
+      const fullPath = confined.ok ? confined.path : join(baseDir, relativePath)
+      const fileExists = confined.ok
 
       // Idempotent: a second delete of a trashed (or already-missing) file is ok.
       if (!fileExists && !existing) return { ok: true }
@@ -564,11 +709,20 @@ export function createManagedDocumentStore(
         index.records.push(record)
       }
 
-      await mkdir(trashDir, { recursive: true })
+      // The trash destination is confined on the same terms: `mkdir` first, then
+      // re-assert the `.trash/` prefix against the resolved root.
+      const realTrashDir = await realManagedRoot(baseDir, MANAGED_DOCUMENTS_TRASH_DIR)
+      if (!assertRealManagedRoot(baseDir, MANAGED_DOCUMENTS_TRASH_DIR).ok) {
+        return { ok: false, error: 'The document trash directory could not be resolved.' }
+      }
       const trashName = await uniqueTrashName(record.id, record.fileName)
       const trashedPath = `${MANAGED_DOCUMENTS_TRASH_DIR}/${trashName}`
+      const trashedFull = resolve(realTrashDir as string, trashName)
+      if (!isRealPathInside(realTrashDir, trashedFull)) {
+        return { ok: false, error: 'The trash path resolves outside the Tenders data directory.' }
+      }
       try {
-        await rename(fullPath, join(baseDir, trashedPath))
+        await rename(fullPath, trashedFull)
       } catch (error: unknown) {
         return { ok: false, error: errorMessage(error, 'Failed to move document to trash.') }
       }
@@ -584,7 +738,7 @@ export function createManagedDocumentStore(
       } catch (error: unknown) {
         // Roll the move back so a failed metadata commit cannot lose the file.
         try {
-          await rename(join(baseDir, trashedPath), fullPath)
+          await rename(trashedFull, fullPath)
         } catch {
           // best effort
         }
@@ -607,8 +761,14 @@ export function createManagedDocumentStore(
       if (!record || !record.trashedPath) {
         return { ok: false, error: 'Trash entry not found.' }
       }
-      const trashedFull = join(baseDir, record.trashedPath)
-      if (!existsSync(trashedFull)) {
+      const trashed = resolveConfinedManagedPath(baseDir, record.trashedPath, 'trash')
+      if (!trashed.ok) {
+        if (trashed.reason === 'escaped') {
+          return {
+            ok: false,
+            error: 'The trash entry resolves to a link outside the Tenders data directory.',
+          }
+        }
         const now = clockIso()
         record.state = 'missing'
         record.missingAt = now
@@ -616,14 +776,31 @@ export function createManagedDocumentStore(
         await writeIndex(index, recordsBefore)
         return { ok: false, error: 'Trashed file is missing.' }
       }
+      const trashedFull = trashed.path
       let targetRelative = record.relativePath
-      if (existsSync(join(baseDir, targetRelative))) {
+      const unresolvable = {
+        ok: false as const,
+        error: 'The managed document directory could not be resolved.',
+      }
+      let targetRoot = await realManagedRoot(baseDir, targetRelative.split('/')[0])
+      if (!assertRealManagedRoot(baseDir, targetRelative.split('/')[0]).ok) return unresolvable
+      if (
+        isRealPathInside(
+          targetRoot,
+          resolve(targetRoot as string, targetRelative.split('/')[1] ?? ''),
+        )
+      ) {
         const directory = targetRelative.split('/')[0]
         targetRelative = `${directory}/${clock().getTime()}_${randomUUID().slice(0, 8)}_${record.fileName}`
+        targetRoot = await realManagedRoot(baseDir, directory)
+        if (!assertRealManagedRoot(baseDir, targetRelative.split('/')[0]).ok) return unresolvable
       }
-      await mkdir(join(baseDir, targetRelative.split('/')[0]), { recursive: true })
+      const restoredFull = resolve(targetRoot as string, targetRelative.split('/')[1] ?? '')
+      if (!isRealPathInside(targetRoot, restoredFull)) {
+        return { ok: false, error: 'The restore path resolves outside the Tenders data directory.' }
+      }
       try {
-        await rename(trashedFull, join(baseDir, targetRelative))
+        await rename(trashedFull, restoredFull)
       } catch (error: unknown) {
         return { ok: false, error: errorMessage(error, 'Failed to restore document.') }
       }
@@ -638,7 +815,7 @@ export function createManagedDocumentStore(
         await writeIndex(index, recordsBefore)
       } catch (error: unknown) {
         try {
-          await rename(join(baseDir, targetRelative), trashedFull)
+          await rename(restoredFull, trashedFull)
         } catch {
           // best effort
         }
@@ -697,7 +874,26 @@ export function createManagedDocumentStore(
         let changed = false
         for (const record of index.records) {
           if (record.state === 'trashed') continue
-          const present = existsSync(join(baseDir, record.relativePath))
+          // A record whose leaf is a link (or whose directory resolves outside
+          // the Tenders data directory) is not a readable document and must not
+          // report as `active`: the same confinement every read path applies.
+          const confined = resolveConfinedManagedPath(baseDir, record.relativePath)
+          if (confined.ok === false && confined.reason === 'escaped') {
+            if (record.state === 'missing') continue
+            const now = clockIso()
+            record.state = 'missing'
+            record.missingAt = now
+            record.updatedAt = now
+            changed = true
+            missing.push({
+              id: record.id,
+              relativePath: record.relativePath,
+              fileName: record.fileName,
+              lastSeenAt: now,
+            })
+            continue
+          }
+          const present = confined.ok
           if (record.state === 'missing') {
             // Symmetric heal: a file that comes back (restored from a backup, an
             // undelete, a sync that caught up) returns its record to `active`
@@ -763,10 +959,16 @@ export function createManagedDocumentStore(
                 Number.isFinite(olderThanMs) &&
                 Date.now() - trashedAt >= olderThanMs)
             if (eligible) {
-              try {
-                await unlink(join(baseDir, record.trashedPath))
-              } catch {
-                // already gone
+              // Purge only the file the confined path proves is this entry, so a
+              // link planted at a trashed leaf can never make the cleanup unlink
+              // whatever it points at.
+              const target = resolveConfinedManagedPath(baseDir, record.trashedPath, 'trash')
+              if (target.ok) {
+                try {
+                  await unlink(target.path)
+                } catch {
+                  // already gone
+                }
               }
               removed += 1
               continue

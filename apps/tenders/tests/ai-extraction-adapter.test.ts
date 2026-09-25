@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiSettings } from '@genoffice/ai-provider/browser'
 import {
   buildExtractionChunks,
+  MAX_PARSED_ITEMS_PER_CHUNK,
   runAiExtraction,
   type AiCompletion,
   type ExtractionChunking,
@@ -365,9 +366,11 @@ describe('AI extraction adapter — provenance', () => {
         candidates: {
           referenceNumber: [
             toReviewCandidate({
+              field: 'referenceNumber',
               value: 'ICT/2026/042',
               pageNumber: 1,
               sourceClause: 'Reference Number: ICT/2026/042',
+              confidence: 0.8,
               score: 0.8,
             }),
           ],
@@ -683,9 +686,11 @@ describe('AI extraction adapter — merging into the review', () => {
     // 40 suggestions for one field collapse to the schema's per-field ceiling.
     const many = Array.from({ length: 40 }, (_, index) =>
       toReviewCandidate({
+        field: 'title',
         value: `candidate-${index}`,
         pageNumber: 1,
         sourceClause: null,
+        confidence: null,
         score: 0.5,
       }),
     )
@@ -792,6 +797,54 @@ describe('AI extraction path with an injected model call (no network)', () => {
     expect(merged.unreadPages, 'a page no reader obtained must keep blocking readiness').toEqual([
       1,
     ])
+  })
+
+  it('cannot drive the document past one requirement per rule, whatever a reply contains', async () => {
+    // The real ceiling on what an AI run can add, and the reason the core's
+    // `MAX_REQUIREMENTS_PER_RESULT` (5 000, mirroring the tender cap) can never be
+    // the binding constraint: a reply may name at most the 27 catalogue rules once
+    // each, a rule key the catalogue does not hold is REFUSED, and the merge emits
+    // one row per rule key. So the prompt cannot be made to produce a
+    // several-thousand-row document by volume alone, and the cost of the cap is the
+    // document's own (measured in `apps/tenders/tests/performance/results.json`).
+    const ruleCount = TENDER_RULES.length
+    const flooded = JSON.stringify({
+      metadata: [],
+      requirements: Array.from({ length: ruleCount * 40 }, (_, index) => {
+        const rule = TENDER_RULES[index % ruleCount]!
+        return {
+          id: `flood-${index}`,
+          ruleKey: rule.key,
+          title: `Filler ${index}`,
+          verbatimClause: `The bidder must submit the item required by ${rule.key}.`,
+          pageNumber: 1,
+          boundingBox: { top: 0.1, left: 0.1, width: 0.5, height: 0.05 },
+          confidence: 0.5,
+        }
+      }),
+    })
+    const merged = await mergedFrom(async () => flooded)
+    expect(merged.requirements).toHaveLength(ruleCount)
+    expect(new Set(merged.requirements.map((item) => item.ruleKey)).size).toBe(ruleCount)
+    // ...and the same reply naming rules the catalogue does not hold adds none.
+    const unknown = JSON.stringify({
+      metadata: [],
+      requirements: Array.from({ length: 200 }, (_, index) => ({
+        id: `unknown-${index}`,
+        ruleKey: `invented_rule_${index}`,
+        title: `Invented ${index}`,
+        verbatimClause: 'The bidder must submit something no rule describes.',
+        pageNumber: 1,
+        boundingBox: { top: 0.1, left: 0.1, width: 0.5, height: 0.05 },
+        confidence: 0.9,
+      })),
+    })
+    const refused = await mergedFrom(async () => unknown)
+    expect(refused.requirements).toEqual([])
+    expect(refused.rejections.length).toBeGreaterThan(0)
+    // ...and the flood is itself bounded per chunk before validation sees it.
+    expect(refused.rejections.length).toBeLessThanOrEqual(MAX_PARSED_ITEMS_PER_CHUNK)
+    expect(refused.rejections.every((item) => /not a known rule key/.test(item.reason))).toBe(true)
   })
 
   it('stops sending chunks once the run is cancelled', async () => {
@@ -1051,6 +1104,59 @@ describe('the AI transport', () => {
     ).rejects.toThrow('window closed')
     expect(rejecting.listeners()).toBe(0)
   })
+
+  it('bounds one call on a wall clock the wire cannot extend, and cancels it in main', async () => {
+    // The per-call ceiling the extraction RUN hands down. Without it a chunk could
+    // occupy the transport's full 15-minute absolute cap, so `chunkCount × cap` was
+    // the run's real (and unbounded) worst case. The ceiling is injected, so this
+    // runs in milliseconds with no sleeping.
+    vi.useFakeTimers()
+    try {
+      const bridge = makeBridge()
+      const completion = createTendersCompletion({
+        bridge,
+        settings: SETTINGS,
+        newRequestId: () => 'req-deadline',
+        callTimeoutMs: 250,
+      })
+      const promise = completion({ system: 's', user: 'u' })
+      // The stream starts and then says nothing at all for the whole ceiling.
+      expect(bridge.requests).toHaveLength(1)
+      vi.advanceTimersByTime(250)
+      await expect(promise).rejects.toThrow(/250 ms/)
+      await expect(promise).rejects.toThrow(/without finishing/)
+      // Cancelled in main, so the provider stops working on a chunk the run has
+      // already given up on — and the listener is released.
+      expect(bridge.cancels).toEqual(['req-deadline'])
+      expect(bridge.listeners()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('leaves a call that answers inside its ceiling untouched', async () => {
+    vi.useFakeTimers()
+    try {
+      const bridge = makeBridge()
+      const completion = createTendersCompletion({
+        bridge,
+        settings: SETTINGS,
+        newRequestId: () => 'req-fast',
+        callTimeoutMs: 250,
+      })
+      const promise = completion({ system: 's', user: 'u' })
+      bridge.emit({ requestId: 'req-fast', type: 'delta', text: '{"a":1}' })
+      bridge.emit({ requestId: 'req-fast', type: 'done' })
+      await expect(promise).resolves.toBe('{"a":1}')
+      // Well past the ceiling, and nothing is left armed or cancelled: the timer
+      // was cleared when the call settled.
+      vi.advanceTimersByTime(10_000)
+      expect(bridge.cancels).toEqual([])
+      expect(bridge.listeners()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 // ── readiness, the bridge and the opt-in preference ───────────────────────────
@@ -1172,10 +1278,15 @@ describe('AI readiness and the opt-in preference', () => {
 
 describe('AI extraction adapter — the translation helpers', () => {
   it('translate one item without inventing or dropping a member', () => {
+    // The input carries the core's own `field` and `confidence` members; neither
+    // is a member of the schema's candidate, so `toEqual` below is what proves
+    // they are dropped rather than spread into the document.
     const candidate = toReviewCandidate({
+      field: 'referenceNumber',
       value: 'ICT/2026/042',
       pageNumber: null,
       sourceClause: null,
+      confidence: 0.9,
       score: 0.5,
     })
     expect(candidate).toEqual({

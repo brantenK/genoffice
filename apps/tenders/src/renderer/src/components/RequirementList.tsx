@@ -45,6 +45,7 @@ import {
 } from '../../shared/types'
 import { useTendersStore } from '../store'
 import {
+  AI_SUGGESTION_ACCESSIBLE_NAME,
   AI_SUGGESTION_LABEL,
   AI_SUGGESTION_TITLE,
   isWordDocumentName,
@@ -513,9 +514,18 @@ function RequirementRow({
         </button>
         {req.isMandatory && <Badge tone="violet">Mandatory</Badge>}
         {aiSuggested && (
-          <span className="inline-flex" title={AI_SUGGESTION_TITLE}>
+          /* Named, not just tooltipped: a screen reader has no hover, so the
+             marker's meaning has to be its accessible name — the same treatment
+             `Workspace`'s identical marker carries. The label and the caveat are
+             imported from `ExtractionReview`, so the two surfaces cannot drift. */
+          <span
+            className="inline-flex"
+            role="note"
+            aria-label={AI_SUGGESTION_ACCESSIBLE_NAME}
+            title={AI_SUGGESTION_TITLE}
+          >
             <Badge tone="indigo">
-              <Sparkles size={11} /> {AI_SUGGESTION_LABEL}
+              <Sparkles size={11} aria-hidden="true" /> {AI_SUGGESTION_LABEL}
             </Badge>
           </span>
         )}

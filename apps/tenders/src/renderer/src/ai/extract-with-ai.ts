@@ -28,6 +28,7 @@
 
 import type {
   AiCompletion,
+  AiExtractionRun,
   AiRequirementSuggestion,
   ChunkExtractionOutcome,
   ExtractionChunking,
@@ -522,6 +523,8 @@ export interface CreateVisionCompletionOptions {
   newRequestId?: () => string
   /** Overrides the transport's reply ceiling. */
   maxChars?: number
+  /** Ceiling on one page read, on a wall clock the wire cannot extend. */
+  callTimeoutMs?: number
 }
 
 /**
@@ -559,6 +562,122 @@ export interface AiPassProgress {
   pageNumbers: number[]
 }
 
+// ── the run's wall-clock budget ──────────────────────────────────────────────
+//
+// `chunkCount × per-request latency` is the quantity nothing bounded. A 500-page
+// tender is many chunks (see `buildExtractionChunks`), and against a slow or
+// stalling provider each chunk's call may legitimately occupy its own absolute
+// cap — so the total could run for hours with only a manual Cancel. The budget
+// below is what makes the published figure the ENFORCED one:
+//
+//   * every single call is capped at `AI_EXTRACTION_CHUNK_BUDGET_MS` (5 minutes),
+//     which is a ceiling on ONE request, not a promise about a slow one — the
+//     idle watchdog and the transport's own absolute cap keep their jobs;
+//   * the whole run is capped at `AI_EXTRACTION_RUN_BUDGET_MS` (15 minutes), so a
+//     document of any length finishes or stops in a bounded time.
+//
+// What a stopped run does is decided by the same rule every other failure
+// follows: the chunk that could not be sent is recorded with the reason, its
+// pages stay UNREAD (so they keep blocking readiness), and everything already
+// extracted is kept. The local engine's own result is untouched, and a run the
+// user cancelled or a newer import superseded still applies nothing — the budget
+// aborts the run's own signal, which is the path that already existed.
+
+/** Ceiling on ONE model call. The shared transport's own absolute cap is 15 min. */
+export const AI_EXTRACTION_CHUNK_BUDGET_MS = 5 * 60_000
+
+/** Ceiling on the WHOLE run, however many chunks the document needs. */
+export const AI_EXTRACTION_RUN_BUDGET_MS = 15 * 60_000
+
+/** Why a chunk was not sent at all: the run had already spent its budget. */
+export const RUN_DEADLINE_REASON = 'the run reached its time budget before this chunk was sent'
+
+/** Why a chunk's own call was stopped: it outlived its share of the run. */
+export const CHUNK_BUDGET_REASON =
+  'the model call outlived its share of the run’s time budget and was stopped'
+
+/** Why a vision read did not happen: the run had already spent its budget. */
+export const VISION_DEADLINE_REASON =
+  'The run reached its time budget before this page’s turn came, so this page was not read.'
+
+/** The run reached its wall-clock budget. Reported with what it did produce. */
+export function runDeadlineWarning(budgetMs: number): string {
+  return `The AI extraction run reached its ${describeBudget(budgetMs)} time budget and stopped. Everything it had read up to that point is kept; the chunks it did not reach were not read by AI.`
+}
+
+/** "5 minutes" / "1 minute" / "90 seconds": the budget as a user reads it. */
+function describeBudget(milliseconds: number): string {
+  if (milliseconds < 60_000) {
+    const seconds = Math.max(1, Math.round(milliseconds / 1_000))
+    return `${seconds} second${seconds === 1 ? '' : 's'}`
+  }
+  const minutes = Math.round(milliseconds / 60_000)
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`
+}
+
+/** A monotonically increasing reading of the wall clock, in milliseconds. */
+export type TendersClock = () => number
+
+/** A one-shot timer; `setTimeout` in production, a test's own in a test. */
+export type TendersTimer = (callback: () => void, milliseconds: number) => unknown
+/** Cancels a `TendersTimer`; `clearTimeout` in production. */
+export type TendersClearTimer = (handle: unknown) => void
+
+/**
+ * The ceilings for one run: how long a single call may take, and how long the
+ * whole run may take across every phase.
+ *
+ * The clock and the timer are both injected so a test can drive the deadline
+ * deterministically — with a fake clock and a timer it fires on demand, a budget
+ * test needs no network, no sleeping and no wall time at all.
+ */
+export interface AiRunBudget {
+  /** Ceiling on one model call. */
+  chunkBudgetMs: number
+  /** Ceiling on the whole run, text chunks and vision reads together. */
+  runBudgetMs: number
+  /** The clock both are measured against; defaults to `Date.now`. */
+  now?: TendersClock
+  /** Arms the per-call deadline; defaults to `setTimeout`. */
+  setTimer?: TendersTimer
+  /** Cancels a timer the run no longer needs; defaults to `clearTimeout`. */
+  clearTimer?: TendersClearTimer
+}
+
+type ResolvedAiRunBudget = {
+  chunkBudgetMs: number
+  runBudgetMs: number
+  now: TendersClock
+  setTimer: TendersTimer
+  clearTimer: TendersClearTimer
+}
+
+export const DEFAULT_AI_RUN_BUDGET: AiRunBudget = {
+  chunkBudgetMs: AI_EXTRACTION_CHUNK_BUDGET_MS,
+  runBudgetMs: AI_EXTRACTION_RUN_BUDGET_MS,
+}
+
+/** A positive, finite ceiling, or the documented default. */
+function resolveBudgetMs(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
+}
+
+function resolveBudget(budget: AiRunBudget | undefined): ResolvedAiRunBudget {
+  const now = budget?.now ?? ((): number => Date.now())
+  return {
+    chunkBudgetMs: resolveBudgetMs(budget?.chunkBudgetMs, AI_EXTRACTION_CHUNK_BUDGET_MS),
+    runBudgetMs: resolveBudgetMs(budget?.runBudgetMs, AI_EXTRACTION_RUN_BUDGET_MS),
+    now: (): number => {
+      const read = now()
+      return Number.isFinite(read) ? read : 0
+    },
+    setTimer:
+      budget?.setTimer ?? ((callback, milliseconds): unknown => setTimeout(callback, milliseconds)),
+    clearTimer: budget?.clearTimer ?? ((handle): void => clearTimeout(handle as never)),
+  }
+}
+
 /** How the pages without a text layer are read; absent means no vision read. */
 export type TenderAiPassVision =
   | {
@@ -566,6 +685,14 @@ export type TenderAiPassVision =
       completion: AiVisionCompletion
       /** Render one document page to an image; a rejection is that page's reason. */
       renderPageImage: (pageNumber: number) => Promise<AiPageImage>
+      /**
+       * Ceilings for the pages of a pass that has no injected budget of its own.
+       * `runTenderAiPass` hands the reader the run's remaining budget, and this is
+       * the fallback for a caller that builds the completion itself: one page with
+       * the per-call ceiling, and two per-call ceilings for the extraction pass
+       * that follows the readings — never an unbounded number of minutes.
+       */
+      budget?: AiRunBudget
     }
   | { available: false; reason: string }
 
@@ -596,6 +723,12 @@ export interface TenderAiPassInput {
   /** how pages without a text layer are read; absent means no vision read */
   vision?: TenderAiPassVision
   onProgress?: (progress: AiPassProgress) => void
+  /**
+   * The run's wall-clock ceilings. Absent means the documented defaults
+   * (`AI_EXTRACTION_CHUNK_BUDGET_MS` per call, `AI_EXTRACTION_RUN_BUDGET_MS`
+   * for the whole run); `now` is injected so a test can drive the clock.
+   */
+  budget?: AiRunBudget
 }
 
 export interface TenderAiPassResult {
@@ -650,6 +783,8 @@ async function readScannedPages(
   context: ExtractionContext,
   scannedPages: readonly number[],
   chunkOffset: number,
+  budget: ResolvedAiRunBudget,
+  runEndsAt: number,
 ): Promise<VisionReadOutcome> {
   const empty: AiVisionPassSummary = {
     scannedPages: [...scannedPages],
@@ -688,6 +823,15 @@ async function readScannedPages(
     if (input.signal?.aborted === true) {
       for (const rest of scannedPages.slice(index)) {
         unread.push({ pageNumber: rest, reason: VISION_CANCELLED_REASON })
+      }
+      break
+    }
+    // The run's budget, checked before a page is actually asked for: the pages
+    // it never reached stay unread (and keep blocking readiness) and say why,
+    // exactly as a cancelled run's remaining pages do.
+    if (budget.now() >= runEndsAt) {
+      for (const rest of scannedPages.slice(index)) {
+        unread.push({ pageNumber: rest, reason: VISION_DEADLINE_REASON })
       }
       break
     }
@@ -744,7 +888,9 @@ async function readScannedPages(
   }
 
   // The model's readings are the pages' text, so they go through the SAME
-  // chunking and the same extraction path a text layer would.
+  // chunking and the same extraction path a text layer would — and inside the
+  // same budget: each chunk of the readings gets nothing more than what is left
+  // of the run, and the pages it never reached stay unread.
   const visionChunking = buildExtractionChunks({
     pages: readPages.map((pageNumber) => ({
       pageNumber,
@@ -752,31 +898,49 @@ async function readScannedPages(
     })),
     numPages: input.numPages,
   })
-  const visionRun = await runAiExtraction({
-    completion: input.completion,
-    chunking: visionChunking,
-    context,
-    fileName: input.fileName ?? null,
-    tenderTitle: input.tenderTitle ?? null,
-    ...(input.signal ? { signal: input.signal } : {}),
-    ...(input.onProgress
-      ? {
-          onChunk: (info: { chunkIndex: number; chunkCount: number; pageNumbers: number[] }) =>
-            input.onProgress?.({
-              phase: 'vision-extract',
-              index: info.chunkIndex,
-              total: info.chunkCount,
-              pageNumbers: info.pageNumbers,
-            }),
-        }
-      : {}),
-  })
+  const visionOutcomes: ChunkExtractionOutcome[] = []
+  for (const chunk of visionChunking.chunks) {
+    const pageNumbers = chunk.pages.map((page) => page.pageNumber)
+    if (input.signal?.aborted === true || budget.now() >= runEndsAt) {
+      visionOutcomes.push({
+        chunkIndex: chunk.index,
+        pageNumbers,
+        validation: null,
+        error: RUN_DEADLINE_REASON,
+      })
+      continue
+    }
+    input.onProgress?.({
+      phase: 'vision-extract',
+      index: chunk.index,
+      total: visionChunking.chunks.length,
+      pageNumbers,
+    })
+    const remaining = Math.min(budget.chunkBudgetMs, runEndsAt - budget.now())
+    const oneChunk: ExtractionChunking = {
+      chunks: [chunk],
+      numPages: visionChunking.numPages,
+      inputPages: visionChunking.inputPages,
+      textlessPages: visionChunking.textlessPages,
+      truncatedPages: visionChunking.truncatedPages,
+      warnings: [],
+    }
+    const run = await runAiExtraction({
+      completion: withCallBudget(input.completion, remaining, budget),
+      chunking: oneChunk,
+      context,
+      fileName: input.fileName ?? null,
+      tenderTitle: input.tenderTitle ?? null,
+      ...(input.signal ? { signal: input.signal } : {}),
+    })
+    visionOutcomes.push(...run.outcomes)
+  }
 
   return {
     // A vision chunk is stamped `ai-vision` so the merge can never record its
     // pages as `native-text` — which would claim a text layer they do not have —
     // and its indices are offset so they order after the text pass.
-    outcomes: visionRun.outcomes.map((outcome) => ({
+    outcomes: visionOutcomes.map((outcome) => ({
       ...outcome,
       chunkIndex: outcome.chunkIndex + chunkOffset,
       method: AI_VISION_METHOD,
@@ -788,14 +952,25 @@ async function readScannedPages(
 
 /**
  * The whole optional pass: the text chunks, then a vision read of every page the
- * parser flagged `needsOcr`, then one merge of both.
+ * parser flagged `needsOcr`, then one merge of both — all inside one wall-clock
+ * budget (see `AiRunBudget`).
  *
- * Never throws for a model's sake: a failed chunk or a failed page read is
- * recorded and everything else is kept, so the pass can only ever ADD to what the
- * local engine found. `merged.unreadPages` remains the honest complement of what
- * was actually read, which is what keeps an unread page blocking readiness.
+ * Never throws for a model's sake: a failed chunk, a failed page read or the run
+ * running out of time is recorded and everything else is kept, so the pass can
+ * only ever ADD to what the local engine found. `merged.unreadPages` remains the
+ * honest complement of what was actually read, which is what keeps an unread page
+ * blocking readiness.
+ *
+ * The budget is enforced by aborting this run's own signal — the same path a
+ * Cancel click takes — so a run that started with an abort signal is left
+ * cancelled and superseded by the store: a run stopped for time applies nothing
+ * either. A caller that passed no signal gets the run's budget as hard as any
+ * other caller: a chunk that cannot start is a failure with its pages unread,
+ * never a silently kept model value.
  */
 export async function runTenderAiPass(input: TenderAiPassInput): Promise<TenderAiPassResult> {
+  const budget = resolveBudget(input.budget)
+  const runEndsAt = budget.now() + budget.runBudgetMs
   const context: ExtractionContext = {
     rules: input.rules,
     numPages: input.numPages,
@@ -815,31 +990,24 @@ export async function runTenderAiPass(input: TenderAiPassInput): Promise<TenderA
     ),
     numPages: input.numPages,
   })
-  const textRun = await runAiExtraction({
-    completion: input.completion,
-    chunking,
-    context,
-    fileName: input.fileName ?? null,
-    tenderTitle: input.tenderTitle ?? null,
-    ...(input.signal ? { signal: input.signal } : {}),
-    ...(input.onProgress
-      ? {
-          onChunk: (info: { chunkIndex: number; chunkCount: number; pageNumbers: number[] }) =>
-            input.onProgress?.({
-              phase: 'text',
-              index: info.chunkIndex,
-              total: info.chunkCount,
-              pageNumbers: info.pageNumbers,
-            }),
-        }
-      : {}),
-  })
+  const textRun = await runChunksWithinBudget(input, budget, runEndsAt, chunking)
 
+  // The vision reader is given the run's remaining budget, so the readings it
+  // performs itself are bounded by the same clock as the text pass. The budget it
+  // hands a caller that built its own completion is its own fallback (see
+  // `TenderAiPassVision.budget`), which does not depend on the clock at all.
   const vision = await readScannedPages(
-    input,
+    {
+      ...input,
+      ...(input.vision?.available === true
+        ? { vision: { ...input.vision, budget: input.vision.budget ?? input.budget } }
+        : {}),
+    },
     context,
     chunking.textlessPages.filter((page) => flagged.has(page)),
     chunking.chunks.length,
+    budget,
+    runEndsAt,
   )
 
   // The outcomes come from two chunkings — the text pass and the pass over the
@@ -856,10 +1024,139 @@ export async function runTenderAiPass(input: TenderAiPassInput): Promise<TenderA
     ...chunking,
     warnings: [...textWarnings, ...vision.chunkingWarnings],
   }
-  const outcomes = [...textRun.outcomes, ...vision.outcomes]
+  const deadlineWarning = textRun.ranOutOfTime ? runDeadlineWarning(budget.runBudgetMs) : null
+  const outcomes = [...textRun.run.outcomes, ...vision.outcomes]
   const merged = mergeExtractionChunks(outcomes, { ...context, chunking: mergeChunking })
 
+  // The run's own sentence about its budget goes first: it explains why some
+  // pages were never sent, and every other warning is read in its light.
+  if (deadlineWarning !== null) merged.warnings = [deadlineWarning, ...merged.warnings]
+
   return { merged, outcomes, vision: vision.summary }
+}
+
+/**
+ * Send the text chunks under one wall-clock budget.
+ *
+ * The core's own `runAiExtraction` reports the reason only in the outcome, so
+ * the loop is driven from here: this is the one place that can both stop the run
+ * AND tell the caller it stopped for time. Each chunk gets nothing more than the
+ * run's remaining budget, so a single slow call cannot carry the run past its
+ * deadline, and the deadline is re-read after every chunk (the clock is not
+ * assumed to advance only inside a model call).
+ *
+ * Every decision the core made about a reply — parse, validate, provenance,
+ * bounds — is made by it either way: the only thing this loop does differently is
+ * whether the next chunk is sent at all.
+ */
+async function runChunksWithinBudget(
+  input: TenderAiPassInput,
+  budget: ResolvedAiRunBudget,
+  runEndsAt: number,
+  chunks: ExtractionChunking,
+): Promise<{ run: AiExtractionRun; ranOutOfTime: boolean }> {
+  const outcomes: ChunkExtractionOutcome[] = []
+  const context: ExtractionContext = {
+    rules: input.rules,
+    numPages: input.numPages,
+    ...(input.metadataFields ? { metadataFields: input.metadataFields } : {}),
+  }
+  let ranOutOfTime = false
+  for (const chunk of chunks.chunks) {
+    const pageNumbers = chunk.pages.map((page) => page.pageNumber)
+    if (input.signal?.aborted === true) {
+      outcomes.push({
+        chunkIndex: chunk.index,
+        pageNumbers,
+        validation: null,
+        error: 'the extraction was cancelled before this chunk was sent',
+      })
+      continue
+    }
+    if (budget.now() >= runEndsAt) {
+      // Reported as a chunk that was never sent, which is exactly what it is:
+      // its pages stay unread and keep blocking readiness.
+      ranOutOfTime = true
+      outcomes.push({
+        chunkIndex: chunk.index,
+        pageNumbers,
+        validation: null,
+        error: RUN_DEADLINE_REASON,
+      })
+      continue
+    }
+    input.onProgress?.({
+      phase: 'text',
+      index: chunk.index,
+      total: chunks.chunks.length,
+      pageNumbers,
+    })
+    const remaining = Math.min(budget.chunkBudgetMs, runEndsAt - budget.now())
+    const oneChunk: ExtractionChunking = {
+      chunks: [chunk],
+      numPages: chunks.numPages,
+      inputPages: chunks.inputPages,
+      textlessPages: chunks.textlessPages,
+      truncatedPages: chunks.truncatedPages,
+      warnings: [],
+    }
+    const run = await runAiExtraction({
+      completion: withCallBudget(input.completion, remaining, budget),
+      chunking: oneChunk,
+      context,
+      fileName: input.fileName ?? null,
+      tenderTitle: input.tenderTitle ?? null,
+      ...(input.signal ? { signal: input.signal } : {}),
+    })
+    outcomes.push(...run.outcomes)
+  }
+
+  // The merge is the core's, over this loop's outcomes: one implementation of
+  // dedup, validation and the unread-page accounting for both drivers.
+  const merged = mergeExtractionChunks(outcomes, { ...context, chunking: chunks })
+  return { run: { merged, outcomes }, ranOutOfTime }
+}
+
+/**
+ * One right of reply: a model call that cannot outlive the deadline it is given.
+ *
+ * The deadline is armed on the run's injected timer and measured against its
+ * injected clock, so in a test it fires exactly when the test says — no sleeping,
+ * no network, no wall time. The timer is what makes the ceiling real rather than
+ * advisory: without it `remaining` would be a number nothing acted on.
+ *
+ * The call underneath is not abandoned: the transport's own per-call ceiling
+ * (armed by its caller with the same figure) cancels the request in the main
+ * process, so a provider cannot go on streaming into nothing. This wrapper
+ * settles FIRST, with the reason a user can read, and the transport's later
+ * rejection is swallowed here rather than becoming an unhandled one.
+ *
+ * A caller's `signal` is passed through untouched: a Cancel click must still be
+ * reported as a cancellation, not as a budget stop.
+ */
+function withCallBudget(
+  completion: AiCompletion,
+  remainingMs: number,
+  budget: ResolvedAiRunBudget,
+): AiCompletion {
+  return async (args) => {
+    return await new Promise<string>((resolve, reject) => {
+      let settled = false
+      let handle: unknown = null
+      const finish = (outcome: { ok: true; text: string } | { ok: false; error: string }): void => {
+        if (settled) return
+        settled = true
+        if (handle !== null) budget.clearTimer(handle)
+        if (outcome.ok) resolve(outcome.text)
+        else reject(new Error(outcome.error))
+      }
+      handle = budget.setTimer(() => finish({ ok: false, error: CHUNK_BUDGET_REASON }), remainingMs)
+      void Promise.resolve(completion(args)).then(
+        (text) => finish({ ok: true, text }),
+        (error: unknown) => finish({ ok: false, error: messageOf(error) }),
+      )
+    })
+  }
 }
 
 /**

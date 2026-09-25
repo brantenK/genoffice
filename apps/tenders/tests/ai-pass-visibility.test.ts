@@ -376,12 +376,27 @@ describe('the run’s state is UI state, and never the document', () => {
 
 describe('the progress copy names the model, and claims no reader for scanned pages', () => {
   it('the vision step says whose reading it is', () => {
-    const label = aiRunLabel({ phase: 'vision-read', index: 0, total: 3, pageNumbers: [4] })
+    // A vision phase carries no received characters — `TenderList` zeroes `chars`
+    // when the pass moves to an image read (`emitAiPass`), so these are the
+    // progress objects the app really produces.
+    const label = aiRunLabel({
+      phase: 'vision-read',
+      index: 0,
+      total: 3,
+      pageNumbers: [4],
+      chars: 0,
+    })
     expect(label, 'a phase label is copy a user reads').toMatch(/model/i)
     expect(label).toMatch(/page 4/)
     expect(label).not.toMatch(SCANNED_CLAIM_SHAPE)
     expect(
-      aiRunLabel({ phase: 'vision-extract', index: 0, total: 2, pageNumbers: [4, 5] }),
+      aiRunLabel({
+        phase: 'vision-extract',
+        index: 0,
+        total: 2,
+        pageNumbers: [4, 5],
+        chars: 0,
+      }),
     ).toMatch(/model/i)
   })
 

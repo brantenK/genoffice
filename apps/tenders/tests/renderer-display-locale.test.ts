@@ -23,12 +23,32 @@
  *     while `shared/ai-extraction.ts` exports the documented single answer,
  *     `aiExtractionAvailability`.
  *
- * No rendered-component harness exists by design, so the JSX-level claims are
- * asserted against comment-stripped source — the pattern `milestones-copy-honesty`
- * and `ocr-honesty-copy` already use — and the formatting claim against the
- * formatter itself. The claims that ARE behaviour (the provenance predicate, the
- * availability decision, the transport's watchdogs) are tested as real functions
- * with no network and no component tree.
+ * Two later findings live here too, because both are about a value the renderer
+ * held and then threw away:
+ *   * the failure CLASS was one of them. The shell's `ai:stream` handler marks an
+ *     error chunk `'timeout' | 'credits' | 'network' | 'overloaded'` — the four a
+ *     BYOK user must tell apart — and the transport dropped `chunk.errorCode` at
+ *     its last hop, so a wrong key, an empty account, a rate limit and a dead
+ *     connection all arrived as one sentence (see the error-class section below,
+ *     which drives the real stream);
+ *   * machine provenance rode on a `title`. A screen reader has no hover, so
+ *     "AI-suggested" existed for sighted users and not for them. The guards below
+ *     pin the accessible name and the field description; the executed proof is
+ *     the accessibility tree in `e2e/tenders-a11y-theme.spec.ts` (journey 9).
+ *
+ * HOW THE JSX CLAIMS ARE CHECKED: a rendered-component harness now exists
+ * (`tests/helpers/render.tsx`, `react-dom/client` + `act`, no test library), so
+ * the claims that are behaviour of a rendered tree are asserted by rendering the
+ * real components — see `tests/components/extraction-review.test.tsx` (the
+ * provenance marker at every site it is shown, and that a parser value carries
+ * none) and `tests/components/requirement-list.test.tsx` (a requirement's number
+ * named after whoever produced it). Those files replace the source guards that
+ * used to stand in for them here; the guards below are the ones that remain the
+ * only way to check a STATIC property (one label defined once and imported by the
+ * other surface, the marker's accessible-name derivation, no `toLocaleString` on
+ * a money surface, one `<main>`, every date pinned to SAST), plus the
+ * real-function tests (the provenance predicate, the availability decision, the
+ * transport's watchdogs and failure classes) that never needed a tree.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
@@ -39,7 +59,10 @@ import type { AiStreamChunk } from '../src/shared/ipc'
 import { valueProvenance } from '../src/shared/types'
 import { aiExtractionAvailability } from '../src/shared/ai-extraction'
 import {
+  AI_EXTRACTION_AUTH_FAILURE_MESSAGE,
+  AI_EXTRACTION_ERROR_CLASS_MESSAGES,
   aiAvailabilityFor,
+  aiExtractionErrorMessage,
   aiExtractionTimeoutMessage,
   createTendersCompletion,
   modelIsConfigured,
@@ -226,83 +249,108 @@ describe('value provenance', () => {
 })
 
 /**
- * Source-order guards, because the marker's honesty lives in where it is
- * rendered and behind which test — not in a value this lane can compute.
+ * What is left of the marker guards here: the part no render can check.
+ *
+ * WHERE the marker is rendered, WHICH values it appears on, and what a model's
+ * number is called are all behaviour of the rendered tree, so they are asserted
+ * by rendering the real components (see this file's header):
+ *   * `tests/components/extraction-review.test.tsx` — the marker as visible text
+ *     on a model-produced field, nothing at all for a parser value, the
+ *     provenance predicate applied per candidate (a mixed candidate set keeps the
+ *     parser's read unmarked), the single suggestion beside the field, and the
+ *     requirement row;
+ *   * `tests/components/requirement-list.test.tsx` — a requirement's number named
+ *     after whoever produced it, at both the badge and the expanded row, for a
+ *     model-suggested and for a parser-read requirement, including that the
+ *     model's number is never printed as "Parser confidence".
+ *
+ * What remains here is the one claim a render cannot make: that there is a single
+ * label and a single vocabulary, defined once and imported rather than re-spelled
+ * — a rendering test would pass just as happily against two identical strings.
  */
-describe("a model's suggestion is marked wherever its origin is shown", () => {
+describe('one label, one vocabulary, shared by the surfaces that show it', () => {
   const review = codeText(readSurface('components/ExtractionReview.tsx'))
   const list = codeText(readSurface('components/RequirementList.tsx'))
 
-  it('renders the marker as visible chip text, never as a hover-only affordance', () => {
-    expect(review, 'the field marker must be visible chip text').toContain('{AI_SUGGESTION_LABEL}')
-    expect(review, 'the label is never carried by a tooltip alone').not.toContain(
-      'title={AI_SUGGESTION_LABEL}',
-    )
-    expect(review, 'the tooltip explains the label, it does not replace it').toMatch(
-      /title=\{AI_SUGGESTION_TITLE\}/,
-    )
-    expect(list, 'the requirement marker must be visible badge text').toContain(
-      '{AI_SUGGESTION_LABEL}',
-    )
-  })
-
-  it('renders it behind the provenance predicate, so a parser value is never labelled', () => {
-    expect(review, 'the chip renders nothing unless the value is a model suggestion').toMatch(
-      /if \(valueProvenance\(carrier\) !== 'ai'\) return null/,
-    )
-    expect(list, 'the row reads the requirement’s own provenance').toMatch(
-      /const aiSuggested = valueProvenance\(req\) === 'ai'/,
-    )
-    expect(list, 'and guards the badge on it').toMatch(/\{aiSuggested && \(/)
-  })
-
-  it('marks every place an origin is shown: field, candidate, suggestion and requirement', () => {
-    for (const site of [
-      '<ProvenanceChip carrier={detail} />',
-      '<ProvenanceChip carrier={topSuggestion} />',
-      '<ProvenanceChip carrier={candidate} />',
-      '<ProvenanceChip carrier={requirement} />',
-    ]) {
-      expect(review, `${site} must be rendered`).toContain(site)
-    }
-  })
-
-  it('keeps ONE label and one vocabulary, shared by both surfaces', () => {
-    // Defined exactly once, in the review component…
+  it('defines the label once, in the review component', () => {
     expect(review.match(/'AI-suggested'/g) ?? [], 'the label is defined once').toHaveLength(1)
-    // …and imported, never re-spelled, by the requirement row.
+  })
+
+  it('imports it into the requirement row instead of re-spelling it', () => {
     expect(list, 'the requirement row must not invent a second label').not.toContain(
       "'AI-suggested'",
     )
     expect(list, 'it imports the one label').toMatch(
       /import \{[^}]*AI_SUGGESTION_LABEL[^}]*\} from '\.\/ExtractionReview'/,
     )
-  })
-
-  it('names a requirement’s number after whoever produced it', () => {
-    // The row used to print "Parser confidence N%" unconditionally, which is a
-    // false attribution the moment the model supplied the requirement.
-    expect(list, 'the expanded row names the model’s own number').toMatch(
-      /\{aiSuggested \? 'Model' : 'Parser'\} confidence/,
+    expect(list, 'and the one explanation').toMatch(
+      /import \{[^}]*AI_SUGGESTION_TITLE[^}]*\} from '\.\/ExtractionReview'/,
     )
-    expect(list, 'the badge names it too').toMatch(
-      /\{aiSuggested \? 'model' : 'match'\} confidence/,
+    // The row's marker now carries the name too (its accessible name, not only
+    // the tooltip): a render can show that the name is right, but only this can
+    // show it is the ONE name rather than an identical string spelled again here.
+    expect(list, 'and the one accessible name').toMatch(
+      /import \{[^}]*AI_SUGGESTION_ACCESSIBLE_NAME[^}]*\} from '\.\/ExtractionReview'/,
+    )
+  })
+})
+
+/**
+ * Machine provenance must be in the ACCESSIBLE NAME, not only in the tooltip.
+ *
+ * A source guard, and marked as one: the executed proof is the rendered
+ * accessibility tree in `e2e/tenders-a11y-theme.spec.ts` (journey 9), which opens
+ * the real review panel on a model-suggested field and reads the marker's
+ * accessible name plus the control's accessible description out of Chromium.
+ * What is checked here is the part a render cannot show: that the marker's name
+ * is derived from the one label and the one caveat, and that no surface re-spells
+ * them.
+ */
+describe('machine provenance is part of the accessible name, not only the tooltip', () => {
+  const review = codeText(readSurface('components/ExtractionReview.tsx'))
+  const workspace = codeText(readSurface('components/Workspace.tsx'))
+
+  it('names the marker from the label and the caveat, and describes the field', () => {
+    expect(
+      review,
+      'the marker’s name must be built from the label, so the two cannot drift',
+    ).toMatch(
+      /AI_SUGGESTION_ACCESSIBLE_NAME = `\$\{AI_SUGGESTION_LABEL\}\. \$\{AI_SUGGESTION_TITLE\}`/,
+    )
+    expect(review, 'the chip must carry that name into the accessibility tree').toMatch(
+      /ariaLabel=\{AI_SUGGESTION_ACCESSIBLE_NAME\}/,
     )
     expect(
-      list,
-      'an unconditional parser attribution is exactly the defect this replaced',
-    ).not.toMatch(/\bParser confidence\b/)
+      review,
+      'a bare span has no accessible name, so the chip needs a role that can carry one',
+    ).toMatch(/'aria-label': ariaLabel/)
+    expect(
+      review,
+      'the field control must describe the provenance (its aria-describedby paragraph)',
+    ).toMatch(
+      /\{aiSuggested && <span className="sr-only">\{AI_SUGGESTION_FIELD_DESCRIPTION\}<\/span>\}/,
+    )
+    const description =
+      /AI_SUGGESTION_FIELD_DESCRIPTION =\s*\n?\s*'([^']+)'/.exec(review)?.[1] ?? ''
+    expect(description, 'the description must say who produced the value').toMatch(/model/)
+    expect(description, 'and must never call the suggestion a fact').toContain(
+      'not a verified fact',
+    )
   })
 
-  it('the guards are not vacuous: the pre-fix shapes are caught', () => {
-    // The attribution the row shipped, and the label a second surface would
-    // have had to re-spell.
-    expect('Parser confidence {Math.round(req.confidence * 100)}% · source p.1').toMatch(
-      /\bParser confidence\b/,
+  it('the workspace’s own marker is named too', () => {
+    expect(workspace, 'the workspace marker must not be tooltip-only').toMatch(
+      /role="note"[\s\S]{0,120}aria-label=\{AI_SUGGESTION_ACCESSIBLE_NAME\}/,
     )
-    expect("export const LABEL = 'AI-suggested'").toContain("'AI-suggested'")
-    expect('{Math.round(req.confidence * 100)}% match confidence').not.toMatch(
-      /\{aiSuggested \? 'model' : 'match'\} confidence/,
+  })
+
+  it('the guards are not vacuous: the pre-fix shape is caught', () => {
+    // What the chip shipped: the caveat in a tooltip, and no name at all.
+    expect('<Chip tone="accent" title={AI_SUGGESTION_TITLE}>').not.toMatch(
+      /ariaLabel=\{AI_SUGGESTION_ACCESSIBLE_NAME\}/,
+    )
+    expect('<span title={AI_SUGGESTION_TITLE}>').not.toMatch(
+      /role="note"[\s\S]{0,120}aria-label=\{AI_SUGGESTION_ACCESSIBLE_NAME\}/,
     )
   })
 })
@@ -588,5 +636,101 @@ describe('a model stream that dies is cancelled, not left hanging', () => {
         /verified|accurate|confirmed by/i,
       )
     }
+  })
+})
+
+// ── one failure class per failure ─────────────────────────────────────────────
+//
+// The shell's `ai:stream` handler classifies an error chunk as
+// `'timeout' | 'credits' | 'network' | 'overloaded'` (`chunk.errorCode`), which
+// is exactly the set a BYOK user has to tell apart. The transport used to use
+// only `chunk.error`, so those four arrived as one indistinguishable sentence —
+// the class was thrown away at the last hop before the user.
+
+describe('a BYOK failure is reported by class, not as one sentence', () => {
+  const CLASSES = ['timeout', 'credits', 'network', 'overloaded'] as const
+
+  it('leads with the class and keeps the provider’s own words after it', () => {
+    for (const code of CLASSES) {
+      const message = aiExtractionErrorMessage(code, 'HTTP 402: credit balance is too low')
+      expect(message, `the message must name the ${code} class`).toContain(
+        AI_EXTRACTION_ERROR_CLASS_MESSAGES[code],
+      )
+      expect(
+        message,
+        'the provider’s own text must survive, so support can still see it',
+      ).toContain('HTTP 402: credit balance is too low')
+      expect(message, 'and nothing is invented about the extraction').not.toMatch(
+        /verified|accurate|confirmed by/i,
+      )
+    }
+    // The whole defect in one assertion: four failures, four different sentences.
+    const messages = CLASSES.map((code) => aiExtractionErrorMessage(code, 'same provider text'))
+    expect(new Set(messages).size, 'each class must read differently').toBe(CLASSES.length)
+  })
+
+  it('passes an unclassified reason through untouched, except a 401', () => {
+    expect(
+      aiExtractionErrorMessage(undefined, 'The model returned something odd.'),
+      'an unknown reason is the provider’s text, unedited',
+    ).toBe('The model returned something odd.')
+    for (const raw of [
+      'HTTP 401: {"error":{"type":"authentication_error"}}',
+      'Claude HTTP 401: invalid x-api-key',
+      'Gemini HTTP 401: API key not valid. Please pass a valid API key.',
+    ]) {
+      const message = aiExtractionErrorMessage(undefined, raw)
+      expect(message, `a 401 must be actionable (${raw})`).toContain(
+        AI_EXTRACTION_AUTH_FAILURE_MESSAGE,
+      )
+      expect(message, 'and must still quote what the provider said').toContain(raw)
+    }
+    // A classified failure is never rewritten as an auth failure.
+    expect(aiExtractionErrorMessage('overloaded', 'HTTP 401 lookalike')).toContain(
+      AI_EXTRACTION_ERROR_CLASS_MESSAGES.overloaded,
+    )
+  })
+
+  it('the class reaches the caller through the stream, not only the pure helper', async () => {
+    const harness = bridgeDouble()
+    const completion = createTendersCompletion({
+      bridge: harness.bridge,
+      settings: SETTINGS,
+      newRequestId: () => 'req-402',
+      silenceTimeoutMs: 600_000,
+      absoluteTimeoutMs: 600_000,
+    })
+    const promise = completion({ system: 's', user: 'u' })
+    const outcome = expect(promise).rejects.toThrow(
+      /no credit left.*\(HTTP 402: credit balance is too low\)/s,
+    )
+    harness.emit({
+      requestId: 'req-402',
+      type: 'error',
+      error: 'HTTP 402: credit balance is too low',
+      errorCode: 'credits',
+    })
+    await outcome
+    expect(harness.listeners(), 'the failed call releases its listener').toBe(0)
+
+    // …and the same stream without a class keeps today's behaviour exactly.
+    const plain = bridgeDouble()
+    const plainCompletion = createTendersCompletion({
+      bridge: plain.bridge,
+      settings: SETTINGS,
+      newRequestId: () => 'req-plain',
+      silenceTimeoutMs: 600_000,
+      absoluteTimeoutMs: 600_000,
+    })
+    const plainPromise = plainCompletion({ system: 's', user: 'u' })
+    const plainOutcome = expect(plainPromise).rejects.toThrow(
+      'The model sent a reply this run could not use.',
+    )
+    plain.emit({
+      requestId: 'req-plain',
+      type: 'error',
+      error: 'The model sent a reply this run could not use.',
+    })
+    await plainOutcome
   })
 })

@@ -5,9 +5,16 @@ trustworthy paid local-first desktop tender product. Written so a **new session 
 resume without re-discovery**.
 
 - Repo: `C:\Users\brant\OneDrive\Documents\GenOffice\genoffice`
-- Branch: `product` — the Phase 1–5 work landed as `ff822c0`, with the fork/e2e commits
-  `284c312`…`5711775` on top of it (`5711775` is HEAD); the five-wave hardening fix set is
-  uncommitted on top of `5711775`
+- Branch: `product`. **HEAD is `7f7067b`** (`feat(tenders): DOCX intake, tender discovery and
+deadline reminders`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
+  `284c312`…`5711775` on top of it; the five-wave hardening fix set is **committed** as
+  `a22b5e6`, the optional-AI wave as `c188470`, and the DOCX/discovery/reminders wave as
+  `7f7067b`. A **remediation wave is uncommitted** on top of `7f7067b`, alongside a
+  concurrent, unrelated `apps/books` + `.agents/` workstream. Measured during this documentation
+  pass, `git status --porcelain` reported **70 entries — 52 modified, 18 untracked**; that
+  number moves while agents edit, so run the command rather than quoting a figure. (The earlier
+  text here said the five-wave set was uncommitted on top of `5711775` with "72 modified + 12
+  untracked": wrong on the commit and stale on the count.)
 - Deepwork coordination state: `.slim/deepwork/tenders-9of10.md` (git-local; read it too)
 - Original audit artifacts: `C:\Users\brant\AppData\Local\Temp\opencode\tenders-live-audit-Lpyf1l\`
 - Full 15-work-package roadmap + release gates: produced by planner `pla-1`, pressure-tested
@@ -38,68 +45,82 @@ resume without re-discovery**.
 
 - **The four newest features — DOCX intake, tender discovery, deadline reminders and optional AI
   extraction — are documented in `contracts-and-invariants.md` §3b (discovery), §3c (reminders),
-  §3d (DOCX intake) and §5a (AI).** The privileged handler count is **31**, not 23: every
-  `ipcMain.handle` in `apps/tenders/src/main/tenders-main.ts` still begins with
-  `isTrustedTendersEvent`, and the eight discovery/reminder channels are in §3's list with their
+  §3d (DOCX intake), §3e (diagnostics) and §5a (AI).** The privileged handler count is **33**
+  (it was stated as 14, then 23, then 31 as channels were added — §3 now shows the arithmetic
+  and the command that counts it): every one of the 33 `ipcMain.handle` calls in
+  `apps/tenders/src/main/tenders-main.ts` begins with `isTrustedTendersEvent`, and the eight
+  discovery/reminder channels plus the two diagnostics channels are in §3's list with their
   preload member names.
-- Full Tenders suite: **1056 passing**, 0 failed, 7 skipped, **36 test files** (the 7 skipped
-  are the gated benchmark tests unless `TENDERS_BENCH=1`). These figures were recorded **before**
-  the AI-extraction wave, which adds test files (`tests/ai-extraction.test.ts`,
-  `tests/ai-honesty-copy.test.ts`) and modifies several others — re-run
-  `npm test -w @genoffice/tenders` for the current totals. **The AI wave was followed by a
-  second wave that added eight more test files** (`tests/discovery.test.ts`,
-  `tests/discovery-client.test.ts`, `tests/discovery-pane.test.ts`, `tests/docx-intake.test.ts`,
-  `tests/docx-intake-copy.test.ts`, `tests/reminders.test.ts`, `tests/reminders-scheduler.test.ts`,
-  `tests/reminders-settings-copy.test.ts` — 52 unit test files on disk in total), so **no number
-  in this bullet was re-measured in the documentation wave that wrote it**; rerun the command
-  rather than quoting it.
-- `npm run typecheck` (all 28 workspaces) and `npm run typecheck -w @genoffice/tenders`: clean.
-- `npm run build:all`: clean (exit 0).
-- All six repo guards pass: `npm run check:theme-colors`, `npm run check:english-comments`,
-  `npm run check:brand`, `npm run check:app-chrome`, `npm run check:skill-version`,
-  `npm run check:e2e-types`; `npm run format:check` and `git diff --check` pass too.
-- Built-Electron E2E — **13 Tenders specs on disk** (`e2e/tenders-*.spec.ts`); the recorded run
-  covered 10 specs / 48 tests: **48 passed / 0 failed**, exit 0. At handoff the lane stood at 44
-  passed / 4 failed; the fix set closed those four and that lane passed in full. **Two specs were
-  added after that run and their counts are NOT recorded here**: `e2e/tenders-docx-intake.spec.ts`
-  (2 journeys — a Word `.docx` imports through the file input, populates the matrix and persists;
-  a file that is not a real `.docx` is refused with a reason rather than shredded) and
-  `e2e/tenders-discovery.spec.ts` with `e2e/tenders-discovery-fixtures.ts` (2 journeys — the saved
-  list with its limits and filters plus a refused document download; a saved list that cannot be
-  read reports the failure and never an empty list). Re-run the lane for the current totals.
-  - `e2e/tenders-regression-smoke.spec.ts` — 17/17 flows, `unauthorizedOrInvalidRequest: []`.
-  - `e2e/tenders-persistence-cutover.spec.ts` — 8/8 journeys: hydrate→edit→save→restart;
+- Full Tenders suite — **the numbers that were here (1056 passing, 36 test files) are retired,
+  and the pass total was NOT re-measured in this documentation pass.** What was measured, with
+  `find apps/tenders/tests -name "*.test.ts*" | wc -l`, is **56 unit test files on disk** at the
+  moment of this pass: 53 top-level `.test.ts`, `tests/performance/scale.test.ts` (whose measured
+  benchmarks stay gated behind `TENDERS_BENCH=1`), and the `tests/components/*.test.tsx` component
+  specs that `apps/tenders/vitest.config.ts` now includes. **Even that file count is moving** —
+  the same command reports more a few minutes later, because other agents are adding specs — and
+  the remediation wave changes behaviour several tests pinned, so the pass total is in flux: run
+  `npm test -w @genoffice/tenders` and quote that, never a figure from this file.
+- `npm run typecheck` (all 28 workspaces) and `npm run typecheck -w @genoffice/tenders`: recorded
+  clean in the wave-1 handoff. **Not re-run in this documentation pass** (a repo-wide typecheck
+  is out of its scope), so treat it as a record and re-run before relying on it.
+- `npm run build:all`: recorded clean (exit 0) in the wave-1 handoff; not re-run here.
+- Repo guards: `npm run check:english-comments` and `git diff --check` were re-run for this pass
+  (both clean) together with `npx prettier --check` on the six files this pass owns. The other
+  guards — `check:theme-colors`, `check:brand`, `check:app-chrome`, `check:skill-version`,
+  `check:e2e-types`, `format:check` — were **recorded** as passing in the wave-1 handoff and were
+  not re-run here; the concurrent `apps/books` workstream can change `format:check` on its own.
+- Built-Electron E2E — **13 Tenders specs on disk** (measured: `ls e2e/tenders-*.spec.ts | wc -l`
+  → 13), together declaring **59** `test(` cases at the moment this line was written (measured
+  statically, not run: `grep -h "^\s*test(" e2e/tenders-*.spec.ts | wc -l` → 59, a number that
+  moves while other agents edit those specs; `tenders-regression-smoke.spec.ts` is one `test(`
+  that drives 17 flows). **The lane's pass/fail totals were NOT re-measured in this documentation
+  pass** — the figures that used to sit here ("the recorded run covered 10 specs / 48 tests:
+  48 passed / 0 failed") are a record of an earlier run, and three specs have been added since:
+  `e2e/tenders-ai-extraction.spec.ts` (4 journeys over a local fake provider — AI off contacts
+  nothing; AI on lands a marked unconfirmed suggestion; a failing/malformed reply degrades to
+  the local extraction; an interrupted run leaves a usable tender and writes nothing),
+  `e2e/tenders-docx-intake.spec.ts` (2 journeys — a Word `.docx` imports through the file input,
+  populates the matrix and persists; a file that is not a real `.docx` is refused with a reason
+  rather than shredded) and `e2e/tenders-discovery.spec.ts` with `e2e/tenders-discovery-fixtures.ts`
+  (2 journeys — the saved list with its limits and filters plus a refused document download; a
+  saved list that cannot be read reports the failure and never an empty list). Re-run the lane
+  (`npm run test:e2e`, Tenders specs only) for the current totals rather than quoting any of this.
+  - What each spec covers, with the journey counts declared on disk today (a static count again,
+    not a run result — the recorded per-spec counts this list used to carry have drifted):
+  - `e2e/tenders-regression-smoke.spec.ts` — 17 flows in one `test(`,
+    `unauthorizedOrInvalidRequest: []`.
+  - `e2e/tenders-persistence-cutover.spec.ts` — 8 journeys: hydrate→edit→save→restart;
     vault-entity restart (1b); v1 migrate-once→v2; forced save failure + Retry; forced
     `REVISION_CONFLICT` + Reload (no overwrite); localStorage UI-only; a schema-rejected
     closing-date no-brick regression (with a valid-date control); and journey 7 — a close
     inside the autosave debounce still commits the edit.
-  - `e2e/tenders-intake-review.spec.ts` — 5/5 scenarios: mandatory review gate on import;
+  - `e2e/tenders-intake-review.spec.ts` — 5 scenarios: mandatory review gate on import;
     correct/reclassify/add/not-stated; readiness blocked then cleared with no false clear;
     a textless scanned page classified OCR-required and blocked until reviewed; review
     state survives restart.
-  - `e2e/tenders-first-use-crud.spec.ts` — 4/4: first-use choice, company + customer
+  - `e2e/tenders-first-use-crud.spec.ts` — 4: first-use choice, company + customer
     create/edit/archive/restore with required-document definitions across restart, a tender
     opened by keyboard alone (Tab+Enter / Tab+Space), and demo-import labelling.
-  - `e2e/tenders-demo-isolation.spec.ts` — 3/3: sample workspace labelled with
+  - `e2e/tenders-demo-isolation.spec.ts` — 3: sample workspace labelled with
     `dataOrigin:'demo'`, never a recovery fallback, cross-app writes gated, and the
     copy-into-own-workspace path persists with no dangling vault references.
-  - `e2e/tenders-lifecycle.spec.ts` — 2/2: reasoned transitions, override submission with a
+  - `e2e/tenders-lifecycle.spec.ts` — 2: reasoned transitions, override submission with a
     preserved blocker snapshot (never "cleared"), evidence step, won/lost outcomes with
     milestone gating, all persisting across restart.
-  - `e2e/tenders-billing-guard.spec.ts` — 3/3: no billing affordance on a non-won tender;
+  - `e2e/tenders-billing-guard.spec.ts` — 3: no billing affordance on a non-won tender;
     a real inline billing attempt surfaces success or a visible error + Retry (never
     silence); main-side typed rejections for non-won and demo workspaces with no writes.
-  - `e2e/tenders-durability.spec.ts` — 9/9: soft-delete to `.trash` + restore across restart;
+  - `e2e/tenders-durability.spec.ts` — 9: soft-delete to `.trash` + restore across restart;
     link-aware delete warnings; replace-then-trash ordering; recovery is never automatic;
     reconciliation reports without deleting; a failed `saveDocument` never presented as
     durable; tender removal soft-deletes its RFP (and is fail-closed on failure); vault
     re-attach replaces and trashes.
-  - `e2e/tenders-a11y-theme.spec.ts` — 8/8: system/light/dark token sets and relaunch
+  - `e2e/tenders-a11y-theme.spec.ts` — 9: system/light/dark token sets and relaunch
     survival; PDF rendering unaffected by the UI theme; axe scan on core pages and overlays;
     dialog/drawer semantics with focus trap + restore; named icon controls ≥ 24px and a
     keyboard-only journey; every `Drawer` aside starts below the workspace toolbar so its
     close control is hit-testable; theme-token sidebar chrome in dark.
-  - `e2e/tenders-responsive.spec.ts` — 5/5: 1280×800 wide split, 1024×768 compact pane
+  - `e2e/tenders-responsive.spec.ts` — 5: 1280×800 wide split, 1024×768 compact pane
     switch, 800×600 with no unreachable controls, 200 % text zoom, and a keyboard-resized
     split proportion surviving reload.
   - Artifacts under `e2e/artifacts/` (`tenders-*-journey-*.json`, `tenders-regression-smoke-*.json`,
@@ -107,8 +128,19 @@ resume without re-discovery**.
 - Phase 3 corpus metrics (`apps/tenders/tests/fixtures/tenders-corpus/metrics.json`):
   critical-metadata accuracy **100%**, critical-requirement recall **100%**, pricing/BOQ
   recall **100%**, conflict detection **100%**, false-positive rate 0.32%, **false-readiness
-  0**. The new mandatory-review/OCR gate cannot be bypassed: readiness blocks while any
-  readiness-critical field is unconfirmed or any OCR-required page is unreviewed.
+  0**. **How that "0" is derived, and what it therefore does not prove:** the figure is a
+  **harness predicate over the synthetic corpus**, computed by `computeMetrics` in
+  `tools/tenders-corpus/metrics.mjs` from the parser's own output versus gold annotations that
+  are themselves generated from the same rule catalogue that renders the fixtures
+  (`tools/tenders-corpus/corpus.mjs`) — it is a deterministic regression gate, **not** a run of
+  `assessReadiness` over real tenders and **not** a measurement of the app's accuracy on a
+  document a bidder would actually receive. The one claim it supports is the one the suite
+  enforces: on 30 code-generated fixtures the parser never produced a "trusted-clear" reading of
+  a fixture the gold says is not clearable, and never missed a mandatory/disqualifier
+  requirement. The gate cannot be bypassed by weakening it, and two things hold independently
+  of it: the new mandatory-review/OCR gate blocks readiness while any readiness-critical field
+  is unconfirmed or any OCR-required page is unreviewed, and no automated path may write
+  `confirmed`.
 - **Known limitation (unchanged, and it still governs every accuracy claim):** the Phase 3 corpus
   is **synthetic** (code-generated), not real/anonymised tender documents. Criterion #1 is met on
   synthetic data only; real-world accuracy still needs user-supplied tenders before any paid-release
@@ -130,7 +162,9 @@ resume without re-discovery**.
   whatever the configured model can do (`WORD_DOCUMENT_VISION_MESSAGE`,
   `contracts-and-invariants.md` §3d). A picture-only Word page therefore stays flagged and keeps
   **blocking** until a person compares it against the original and marks it reviewed, with AI on
-  or off, and no surface may call such a page "scanned". Both directions are guarded:
+  or off — the page gate in `contracts-and-invariants.md` §1a states the same condition
+  (`ai-extracted` is reachable only for a PDF source) — and no surface may call such a page
+  "scanned". Both directions are guarded:
   `tests/ocr-honesty-copy.test.ts` fails when a surface says scanned pages are read without
   naming AI as the reader (or claims the text layer of every page is extracted),
   `tests/ai-honesty-copy.test.ts` fails when a surface calls the app entirely offline without
@@ -143,9 +177,20 @@ resume without re-discovery**.
   A `.docx` has no pages, so only the page breaks the document **itself declares** are counted and
   a flowing document is presented as one continuous block of text rather than as "1 page"
   (`contracts-and-invariants.md` §3d). Every preflight failure is typed and user-visible
-  (`FILE_TOO_LARGE` / `TOO_MANY_LINES` / `ZIP_BOMB` / `PROTECTED` / `NOT_A_DOCX` / `CORRUPT` /
-  `EMPTY_DOCUMENT` / `NO_TEXT`); nothing returns a silent empty extraction, and a refused file is
-  never shredded.
+  (`FILE_TOO_LARGE` / `TOO_MANY_LINES` / `TOO_MUCH_TEXT` / `ZIP_BOMB` / `PROTECTED` / `NOT_A_DOCX` /
+  `CORRUPT` / `EMPTY_DOCUMENT` / `NO_TEXT`); nothing returns a silent empty extraction, and a
+  refused file is never shredded.
+- **The import limits are published as the ones that are enforced, including the smaller bound
+  that decides whether a document can be kept.** 500 pages / 100 MiB per PDF
+  (`PDF_PREFLIGHT_LIMITS`); 24 600 text lines / 100 MiB per `.docx`, plus 12 000 000 characters of
+  extracted text (`DOCX_PREFLIGHT_LIMITS.maxLines` / `maxTextChars` — a line count cannot see a
+  single unbounded paragraph, which is the shape the character budget exists for); and a **25 MiB
+  per-document save ceiling** (`MAX_TENDERS_DOCUMENT_UPLOAD_BYTES`), which a document between it
+  and the 100 MiB import ceiling exceeds — such a file **still imports and is shredded**, but
+  cannot be saved into the workspace and lives in the session only. `intakeLimitDisclosure()`
+  says exactly that on the dropzone, and `tests/docx-intake.test.ts` ("the advertised import
+  limits are the enforced ones") fails if any published figure drifts from the constant that
+  enforces it. `contracts-and-invariants.md` §1 and §3d carry the same numbers.
 - **A "no reminders" gap is closed — with a caveat that must be carried by the copy.** Before
   the reminders wave the app had no reminder mechanism at all beyond a manual `.ics` export and an
   on-screen countdown, so a user who closed the app was never warned about a closing time. Main
@@ -178,7 +223,7 @@ resume without re-discovery**.
 All five phases are complete, and each phase passed its Oracle gate (Phase 1, Phase 2
 re-gate, Phase 3 re-gate, Phase 4, Phase 5 re-gate — all `ora-1`).
 
-**Resolved by the five-wave hardening fix set (uncommitted, on top of `5711775`).** Four fix
+**Resolved by the five-wave hardening fix set (committed as `a22b5e6`).** Four fix
 waves built the set; an eight-reviewer adversarial pass over that work produced further
 findings, and the fifth wave closed them — each closure with a test or an e2e journey behind
 it:
@@ -195,8 +240,8 @@ it:
   `shared/money.ts` (`parseMoney` / `formatRandAmount`), so the amount printed in a proposal
   and the amount parsed from an edit cannot drift apart.
 - **Dirty-close data loss.** The shell now flushes a Tenders view before the window closes
-  (see §3e of `contracts-and-invariants.md`), so an edit inside the autosave debounce is
-  committed or explicitly prompted for — never dropped silently.
+  (see §3a of `contracts-and-invariants.md` — the shell dirty-close guard), so an edit inside
+  the autosave debounce is committed or explicitly prompted for — never dropped silently.
 - **The size-ceiling wedge.** The document ceiling was below what a fully reviewed tender
   serialises to. The ceilings were raised and the renderer now pre-checks both of them,
   reporting a refusal with a way forward (limits table, `contracts-and-invariants.md` §1).
@@ -206,6 +251,33 @@ it:
 - **Third-party notice coverage.** `tools/gen-third-party-notices.mjs` now scans the fork-only
   `apps/books`, `apps/crm` and `apps/tenders` trees, so libraries that ship inside `app.asar`
   (lucide-react, zustand) finally have notice entries.
+
+**The uncommitted remediation wave (on top of `7f7067b`) — what it changes, each with a test.**
+The set above left a further round of findings; this wave closes them, and every line here is
+documented in `contracts-and-invariants.md`:
+
+- **A fabricated closing date is gone** (§4). `docsAtClosing` no longer assesses linked
+  documents against `Date.now() + 90 days`: each entry carries the instant it was assessed
+  against as a closed union (`KNOWN | UNKNOWN | UNPARSEABLE`), and with no known closing date
+  the dimension reports `UNKNOWN`, the `docs-at-closing` check fails with an explicit reason and
+  the runway's `daysAway` is a civil-day reading (1 Nov → 30 Nov is 29).
+- **The legacy v1 persistence stack is retired** (§2b, §3) — no synthesis, no watcher, no
+  writer inside Tenders; `readTendersStore` quarantines a malformed primary to
+  `.corrupted.bak` and throws `LegacyTendersReadError` instead of degrading to
+  `{workspaces: []}`, while a missing file is still `null`.
+- **Path confinement does real `realpath` + `lstat` checks** (`main/document-store.ts`),
+  including links out of the managed root and a `.trash/` directory that became a link.
+- **A diagnostics log exists** (§3e): `<userData>/tenders/tenders-diagnostics.log`, bounded at
+  1 MiB × 3 files, writing counts and codes and never document content, with
+  `tenders:diagnostics-record` / `tenders:diagnostics-path`.
+- **A build with no bridge can no longer claim its work is saved** (§2a): `hydrationMode:
+'unavailable'` and the `Cannot save` pill replace the old "Saved" over a persistence path
+  that did not exist.
+- **AI runs have wall-clock budgets** (§5a): 300 000 ms per call, 900 000 ms per run, with the
+  deadline warning shown to the user and the unreached pages left blocking.
+- **The published import limits are the enforced ones** (§1, §3d): 500 pages / 100 MiB PDF,
+  24 600 lines / 100 MiB `.docx`, the new `maxTextChars` (12 000 000) with `TOO_MUCH_TEXT`, and
+  the 25 MiB per-document save ceiling that the dropzone now discloses.
 
 **DOCX intake, tender discovery and deadline reminders (this batch — two new external reaches
 and one new source format).** Three features landed after the AI wave. Their contracts are in
@@ -267,10 +339,14 @@ Product-boundary reminder above; the contracts are in `contracts-and-invariants.
   on a given platform — the scheduler records and reports a notification it could not show rather
   than re-arming it (`contracts-and-invariants.md` §3c), so a silent platform degrades visibly but
   is not covered by a test here.
-- **Optional line-count guard.** The published byte ceiling is measured (a 91.6 MB
-  image-heavy PDF parses in ~0.66 s), but text density drives memory (~0.042 MB heap per
-  extracted text line, ~24 600 lines at a 1 GB budget); a line-count guard alongside the
-  byte/page guards is recommended, not required.
+- **The PDF path still has no line-count guard.** The published byte ceiling is measured (a
+  91.6 MB image-heavy PDF parses in ~0.66 s), but text density drives memory (~0.042 MB heap per
+  extracted text line, ~24 600 lines at a 1 GB budget), and the PDF preflight bounds only bytes
+  and pages. The **DOCX** path closed its half of this in the remediation wave: it now enforces
+  a line budget (24 600, the same figure) **and** a character budget (12 000 000), because a
+  single unbounded paragraph defeats a line count
+  (`contracts-and-invariants.md` §3d). A PDF line-count guard alongside the byte/page guards is
+  still recommended, not required.
 - **Workspace-level `dataOrigin` trust.** The per-tender `dataOrigin` field is closed (only
   `'demo'` is representable), but billing/CRM privilege is gated on the **workspace** field,
   which the renderer still writes through `saveStoreV2` and which defaults to the permissive
@@ -348,47 +424,59 @@ npm run test:e2e
 - Root-level `npm test` has pre-existing failures recorded in `fork/BASELINE.md`
   (`npm run check:baseline` fails only on failures the baseline does not list, so read that
   instead of a raw failure count); root `npm run typecheck` is clean across all 28
-  workspaces. Prefer the Tenders workspace commands above for a fast inner loop.
+  workspaces. **`fork/BASELINE.md` is currently stale** — it was recorded before the Tenders
+  hardening and the file's own note says so (`fork/RUNBOOK.md`); another agent owns it.
+  Prefer the Tenders workspace commands above for a fast inner loop.
 - Shell: PowerShell 5.1 — no `&&`; use `;` or `if ($?) { ... }`.
 - Theming rule: renderer CSS must not introduce raw `#hex`/`rgb()` chrome colors; CI
   enforces `tools/check-theme-colors.mjs`.
 - Unrelated dirty baseline left untouched: `apps/crm/src/renderer/src/styles/crm.css`
   (modified) and `.ignore` (untracked).
 
-## Uncommitted change set (as of this handoff)
+## Uncommitted change set (as of this documentation pass)
 
 The Phase 1–5 work is **committed** as `ff822c0` (`feat(tenders): harden app to
-production-ready across phases 1-5`), with the fork/e2e commits `284c312`…`5711775`
-(`5711775` is HEAD) on top of it. The **five-wave hardening fix set is uncommitted** on top of
-`5711775`: 72 modified + 12 untracked files. The fix waves ran their agents concurrently, so
-re-run `git status --porcelain` for the exact list; the shape is:
+production-ready across phases 1-5`), with the fork/e2e commits `284c312`…`5711775` on top of
+it, the five-wave hardening fix set as `a22b5e6`, the AI wave as `c188470`, and the DOCX /
+discovery / reminders wave as `7f7067b` — **which is HEAD**. On top of HEAD there is
+**uncommitted work in two independent streams**, and a second agent is editing the tree while
+this is written, so re-run `git status --porcelain` for the exact list rather than trusting a
+count: measured here it was **70 entries — 52 modified, 18 untracked**, of which roughly 28
+modified + 15 untracked belong to the concurrent `apps/books` + `.agents` workstream that this
+documentation pass must not touch.
 
-- **Tenders main / preload / shared** — `main/tenders-main.ts`, `main/tenders-store.ts`,
-  `main/document-store.ts`, `main/proposal-generator.ts`, `preload/index.ts`,
-  `shared/ipc.ts`, `shared/types.ts`, `shared/tenders-schema.ts`,
-  `shared/tenders-persistence.ts`, `shared/readiness.ts`, and the new `shared/money.ts`.
-- **Tenders renderer** — `store.ts`, `App.tsx`, `Workspace.tsx`, `Drawer.tsx`, the drawers and
-  dialogs (`VaultDrawer`, `TrashDrawer`, `MilestonesDrawer`, `SubmissionDialog`,
-  `OutcomeDialog`, `ExtractionReview`, `GuidedTour`, `OnboardingModal`, `SaveStatus`,
-  `TenderList`), the `pages/` components (`FirstUsePage`, `CustomersPage`, `DocumentsPage`,
-  `OverviewPage`, `ProfilePage`, `TutorialsPage`), `calendar.ts`, `deadline.ts`, `gap.ts`,
-  `mock/vault.ts`, `styles/responsive.css`, `renderer/index.html` and both vite configs.
-- **Shell and tooling** — `src/main/index.ts`, `src/main/tab-manager.ts`,
-  `electron-builder.cjs`, `package.json`, and `tools/gen-third-party-notices.mjs`.
-- **Tests** — 7 new Tenders unit files plus a dozen modified ones, and 8 modified e2e specs
-  (the fix waves touched the same files, so take the exact set from `git status`). **The later AI
-  / DOCX / discovery / reminders waves add eight more unit files** —
+The **Tenders remediation** (the stream these docs describe) changes:
+
+- **Tenders main / preload / shared** — `main/tenders-main.ts` (the legacy v1 stack retired:
+  no synthesis, no watcher, no writer; `getStoredData` fails closed on an unreadable file; the
+  two new diagnostics handlers), `main/document-store.ts`, `preload/index.ts`, `shared/ipc.ts`
+  (the two diagnostics channels and their bound constants), `shared/readiness.ts`
+  (`DocAtClosing.closingDate` and the civil-day `daysBetween`), `shared/tenders-schema.ts`,
+  `shared/tenders-persistence.ts` (the growth-ceiling and per-record-cost wording), and the
+  **new** `main/diagnostics-log.ts`.
+- **Tenders renderer** — `renderer/src/store.ts` (`hydrationMode`, the `'no-bridge'` save
+  status), `renderer/src/components/SaveStatus.tsx` (the `Cannot save` kind),
+  `renderer/src/components/TenderList.tsx` (one read of the file buffer per import; the
+  advertised import limits), `renderer/src/intake/docx.ts` (`maxTextChars` / `TOO_MUCH_TEXT`),
+  `renderer/src/calendar.ts` (civil-day `daysAway`), `renderer/src/ai/extract-with-ai.ts` and
+  `renderer/src/ai/transport.ts` (the run budget and the failure-class messages), and the
+  **new** `renderer/src/diagnostics.ts`.
+- **Tests** — a dozen-plus modified Tenders unit files (the count moves as agents edit) plus the
+  **new** `tests/diagnostics.test.ts`,
+  `tests/components/*.test.tsx` and `tests/helpers/render.tsx` (the `.tsx` specs are new to
+  `vitest.config.ts`). The AI / DOCX / discovery / reminders waves (committed at `c188470` and
+  `7f7067b`) added these unit files —
+  `tests/ai-extraction.test.ts`, `tests/ai-honesty-copy.test.ts`, `tests/ocr-honesty-copy.test.ts`,
   `tests/discovery.test.ts`, `tests/discovery-client.test.ts`, `tests/discovery-pane.test.ts`,
   `tests/docx-intake.test.ts`, `tests/docx-intake-copy.test.ts`, `tests/reminders.test.ts`,
-  `tests/reminders-scheduler.test.ts`, `tests/reminders-settings-copy.test.ts` — **and two e2e
-  specs** (`e2e/tenders-docx-intake.spec.ts`, `e2e/tenders-discovery.spec.ts` with
-  `e2e/tenders-discovery-fixtures.ts`).
-- **New source for those waves** — `shared/discovery.ts`, `shared/reminders.ts`,
-  `main/discovery-client.ts`, `main/reminders-scheduler.ts`, `renderer/src/intake/docx.ts`,
-  `renderer/src/components/pages/DiscoverPage.tsx`.
-- **Docs** — this folder (the final documentation-drift pass).
+  `tests/reminders-scheduler.test.ts`, `tests/reminders-settings-copy.test.ts` — **and three e2e
+  specs** (`e2e/tenders-ai-extraction.spec.ts`, `e2e/tenders-docx-intake.spec.ts`,
+  `e2e/tenders-discovery.spec.ts` with `e2e/tenders-discovery-fixtures.ts`).
+- **Docs** — this folder (`README.md`, `contracts-and-invariants.md`, `phase-2-remaining.md`,
+  `phase-5-product.md`) plus `fork/COMPLIANCE.md`, `fork/RUNBOOK.md`.
 - **Unrelated dirty baseline left untouched** — `apps/crm/src/renderer/src/styles/crm.css`
-  (modified) and `.ignore` (untracked).
+  (modified), `.ignore` (untracked), and the whole `apps/books` + `.agents/books_hardening/`
+  workstream.
 
 Do not commit unless the user explicitly asks. `fork/BASELINE.md` must be re-recorded before
 the next sync — see `fork/RUNBOOK.md`.

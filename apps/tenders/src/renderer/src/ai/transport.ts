@@ -37,6 +37,14 @@
 //  * **A failure is a rejection, never a partial value.** The core records the
 //    reason and keeps every other chunk's output, which is what makes the AI
 //    pass additive: nothing a model does can remove the local engine's result.
+//  * **The failure's CLASS survives to the user.** The shell's `ai:stream`
+//    handler classifies an error chunk as `'timeout' | 'credits' | 'network' |
+//    'overloaded'` (see the `ai:stream` handler in `apps/docs/src/main/docs-main.ts`).
+//    Those are exactly the four failures a BYOK user has to tell apart — an
+//    account with no credit, a provider that is rate-limiting, a dead
+//    connection, a provider that stopped answering — so the class message leads
+//    the error and the provider's own words follow it in brackets, instead of
+//    one indistinguishable sentence for all four.
 //  * **One availability decision.** `aiAvailabilityFor` delegates to
 //    `aiExtractionAvailability` in `../../shared/ai-extraction`, which owns the
 //    answer, its reason vocabulary and the message that goes with each reason.
@@ -115,6 +123,69 @@ export const AI_EXTRACTION_TRUNCATED_MESSAGE =
 
 /** An error chunk arrived with no message of its own. */
 export const AI_EXTRACTION_UNKNOWN_ERROR_MESSAGE = 'The model request failed.'
+
+/**
+ * The failure classes the shell's `ai:stream` handler classifies an error chunk
+ * into (`errorCode` on `AiStreamChunk`, from `@genoffice/ai-provider`). Exactly
+ * the four a BYOK user has to be able to tell apart.
+ */
+export type AiExtractionErrorClass = NonNullable<AiStreamChunk['errorCode']>
+
+/**
+ * What each classified failure means, for a user who runs their own key.
+ *
+ * The wording follows the classifier it comes from, never beyond it: the class is
+ * the shell's own answer (a credits notice, a 429/overload, a connectivity error
+ * code, a provider call that hit its timeout), and the provider's raw text is
+ * kept in brackets beside it so a support engineer still sees what the provider
+ * actually said. None of these messages claims anything about the extraction —
+ * a failed chunk means those pages were not read, which the core's own warning
+ * says in its own words.
+ */
+export const AI_EXTRACTION_ERROR_CLASS_MESSAGES: Record<AiExtractionErrorClass, string> = {
+  timeout: 'The AI provider stopped responding, so the request timed out.',
+  credits:
+    'Your AI provider account has no credit left, so it refused the request. Top up the account or switch provider in Settings.',
+  network:
+    'The suite could not reach the AI provider — a connectivity failure (DNS, a refused or dropped connection, or a proxy/VPN), not a problem with the document.',
+  overloaded:
+    'The AI provider is at capacity or rate-limiting requests right now, so it refused this one. That is usually temporary — try again shortly.',
+}
+
+/**
+ * The provider layer classifies `timeout`/`credits`/`network`/`overloaded` and
+ * nothing else, so an authentication failure arrives unclassified, as the
+ * protocol layers' own text (`HTTP 401: …`, `Claude HTTP 401: …`). That text is
+ * accurate and useless: a 401 always means the same thing and always has the
+ * same fix, so it is the one raw reason this file rewrites — into a statement of
+ * what the provider said plus the two things the user can check.
+ */
+const AUTH_FAILURE_PATTERN =
+  /\b401\b|\bunauthor(?:ized|ised)\b|\binvalid[_ ]?api[_ ]?key\b|\bapi[_ ]?key[_ ]?not valid\b|\bauthentication_error\b/i
+
+/** The actionable sentence a recognisable authentication failure gets. */
+export const AI_EXTRACTION_AUTH_FAILURE_MESSAGE =
+  'The AI provider rejected the request as unauthorised (HTTP 401). Check that the API key in Settings is the one for this provider, and that it is allowed to use this model.'
+
+/**
+ * What one failed chunk reports.
+ *
+ * A classified failure says which class it is and repeats the provider's own
+ * words after it, so a wrong key, an empty account, a rate limit and a dead
+ * connection stop looking identical. An unclassified failure is the provider's
+ * own text — except for a recognisable authentication failure, which gets the
+ * actionable sentence above (with the provider's text still quoted, so nothing
+ * is hidden), because "HTTP 401" alone tells a user nothing they can do.
+ */
+export function aiExtractionErrorMessage(
+  code: AiExtractionErrorClass | undefined,
+  reason: string,
+): string {
+  if (code !== undefined) return `${AI_EXTRACTION_ERROR_CLASS_MESSAGES[code]} (${reason})`
+  return AUTH_FAILURE_PATTERN.test(reason)
+    ? `${AI_EXTRACTION_AUTH_FAILURE_MESSAGE} The provider said: "${reason}"`
+    : reason
+}
 
 /**
  * Silence watchdog for one chunk's call: no wire activity at all for this long
@@ -290,6 +361,13 @@ export interface CreateTendersCompletionOptions {
   silenceTimeoutMs?: number
   /** Overrides `AI_EXTRACTION_ABSOLUTE_TIMEOUT_MS`. A non-positive value is ignored. */
   absoluteTimeoutMs?: number
+  /**
+   * Ceiling on THIS call, on a wall clock that wire activity cannot extend. The
+   * extraction run hands down its remaining budget through this option, so one
+   * slow chunk cannot carry the whole run past its deadline; absent means
+   * `AI_EXTRACTION_ABSOLUTE_TIMEOUT_MS`. A non-positive value is ignored.
+   */
+  callTimeoutMs?: number
   /** Called on every delta, so the caller can show the reply growing. */
   onProgress?: (progress: AiCompletionProgress) => void
 }
@@ -370,6 +448,10 @@ export function createTendersCompletion(
     options.absoluteTimeoutMs,
     AI_EXTRACTION_ABSOLUTE_TIMEOUT_MS,
   )
+  // The per-call ceiling the extraction run hands down, so a slow call cannot
+  // occupy more than its share of the run's budget. Both are bounded, so the
+  // call is bounded by the smaller of them.
+  const callTimeoutMs = resolveTimeout(options.callTimeoutMs, AI_EXTRACTION_ABSOLUTE_TIMEOUT_MS)
   const newRequestId =
     options.newRequestId ??
     ((): string =>
@@ -389,12 +471,15 @@ export function createTendersCompletion(
       let unsubscribe: (() => void) | null = null
       let silenceTimer: ReturnType<typeof setTimeout> | null = null
       let absoluteTimer: ReturnType<typeof setTimeout> | null = null
+      let callTimer: ReturnType<typeof setTimeout> | null = null
 
       const clearWatchdogs = (): void => {
         if (silenceTimer !== null) clearTimeout(silenceTimer)
         if (absoluteTimer !== null) clearTimeout(absoluteTimer)
+        if (callTimer !== null) clearTimeout(callTimer)
         silenceTimer = null
         absoluteTimer = null
+        callTimer = null
       }
 
       const settle = (outcome: { ok: true; text: string } | { ok: false; error: string }): void => {
@@ -479,9 +564,15 @@ export function createTendersCompletion(
           }
           if (chunk.type === 'error') {
             const reason = chunk.error?.trim()
+            // The class the shell put on the chunk is carried into the reason,
+            // so the same failure is not reported as one indistinguishable
+            // sentence for a wrong key, an empty account and a rate limit.
             settle({
               ok: false,
-              error: reason && reason.length > 0 ? reason : AI_EXTRACTION_UNKNOWN_ERROR_MESSAGE,
+              error: aiExtractionErrorMessage(
+                chunk.errorCode,
+                reason && reason.length > 0 ? reason : AI_EXTRACTION_UNKNOWN_ERROR_MESSAGE,
+              ),
             })
           }
           // 'reasoning' is the model thinking and 'tool-call'/'ping' carry no
@@ -499,6 +590,11 @@ export function createTendersCompletion(
       // is bounded too — not only one that dies mid-reply.
       armSilence()
       absoluteTimer = setTimeout(() => onTimeout('absolute', absoluteTimeoutMs), absoluteTimeoutMs)
+      // …and the per-call ceiling the extraction run hands down, so one slow chunk
+      // cannot occupy more than its share of the run's budget. It cancels the
+      // request in main exactly as the absolute cap does, which is what stops a
+      // provider from streaming on after the run has given up on that chunk.
+      callTimer = setTimeout(() => onTimeout('absolute', callTimeoutMs), callTimeoutMs)
       const attached = images === undefined ? [] : [...images]
       const request: AiStreamRequest = {
         requestId,

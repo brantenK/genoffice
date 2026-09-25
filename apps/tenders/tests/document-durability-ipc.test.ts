@@ -3,7 +3,15 @@
  * recovery). Every new channel is behind the same `isTrustedTendersEvent` gate;
  * untrusted callers are rejected with no side effects. Electron is mocked.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -203,6 +211,103 @@ describe('managed-file + recovery IPC', () => {
       id: '../../secret.json',
     })
     expect(traversal).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } })
+  })
+
+  // Path confinement is enforced on the REAL filesystem, not the text. A symlink
+  // planted at a managed leaf — or replacing `documents/` itself — passes every
+  // lexical check in `resolveSafeTendersPath`, so these tests plant the links and
+  // prove each lifecycle transition refuses rather than resolving through them.
+  describe('symlink confinement holds across the document lifecycle', () => {
+    it('refuses a save when documents/ is a link out of the base directory', async () => {
+      const outsideDir = join(testDir, 'planted')
+      mkdirSync(outsideDir, { recursive: true })
+      rmSync(join(tendersBaseDir(), 'documents'), { recursive: true, force: true })
+      mkdirSync(tendersBaseDir(), { recursive: true })
+      symlinkSync(outsideDir, join(tendersBaseDir(), 'documents'), 'dir')
+
+      const saved = await handler(TENDERS_CHANNELS.saveDocument)(trustedEvent(), {
+        fileName: 'evil.pdf',
+        buffer: Buffer.from('evil'),
+        category: 'rfp',
+      })
+
+      expect(saved.ok).toBe(false)
+      expect(saved.error).toMatch(/could not be resolved/i)
+      expect(readdirSync(outsideDir)).toEqual([])
+    })
+
+    it('refuses to trash, restore or purge a leaf that is a link', async () => {
+      const saved = await handler(TENDERS_CHANNELS.saveDocument)(trustedEvent(), {
+        fileName: 'real.pdf',
+        buffer: Buffer.from('real bytes'),
+        category: 'rfp',
+      })
+      expect(saved.ok).toBe(true)
+      const leaf = join(tendersBaseDir(), saved.storedPath)
+      const secret = join(testDir, 'outside-secret.pdf')
+      writeFileSync(secret, 'outside bytes', 'utf8')
+      rmSync(leaf, { force: true })
+      symlinkSync(secret, leaf, 'file')
+
+      // Soft-delete is refused rather than relocating whatever the link points at.
+      const trashed = await handler(TENDERS_CHANNELS.deleteDocument)(trustedEvent(), {
+        storedPath: saved.storedPath,
+      })
+      expect(trashed.ok).toBe(false)
+      expect(trashed.error).toMatch(/link|outside/i)
+      expect(existsSync(secret)).toBe(true)
+      expect(readFileSync(secret, 'utf8')).toBe('outside bytes')
+
+      // Reconciliation reports it as missing rather than as a readable active file.
+      const reconciled = await handler(TENDERS_CHANNELS.reconcileDocuments)(trustedEvent())
+      expect(reconciled.ok).toBe(true)
+      expect(reconciled.reconciliation.activeCount).toBe(0)
+      expect(reconciled.reconciliation.missing.map((entry: any) => entry.relativePath)).toContain(
+        saved.storedPath,
+      )
+      expect(existsSync(secret)).toBe(true)
+    })
+
+    it('does not purge through a .trash directory that became a link', async () => {
+      const saved = await handler(TENDERS_CHANNELS.saveDocument)(trustedEvent(), {
+        fileName: 'purge-me.pdf',
+        buffer: Buffer.from('purge me'),
+        category: 'rfp',
+      })
+      const removed = await handler(TENDERS_CHANNELS.deleteDocument)(trustedEvent(), {
+        id: saved.id,
+      })
+      expect(removed.ok).toBe(true)
+      const trashedName = (await handler(TENDERS_CHANNELS.listDocumentTrash)(trustedEvent()))
+        .entries[0].id
+
+      // Replace the real `.trash/` with a link to a directory outside the store,
+      // and put a victim file inside it under the name the index records. The old
+      // purge did `unlink(join(baseDir, record.trashedPath))`; the OS resolves the
+      // intermediate symlink, so it would have unlinked the victim.
+      const outsideDir = join(testDir, 'outside-trash')
+      mkdirSync(outsideDir, { recursive: true })
+      const victim = join(outsideDir, 'victim.txt')
+      writeFileSync(victim, 'must survive', 'utf8')
+      rmSync(join(tendersBaseDir(), '.trash'), { recursive: true, force: true })
+      symlinkSync(outsideDir, join(tendersBaseDir(), '.trash'), 'dir')
+      expect(trashedName).toBeTruthy()
+
+      const cleaned = await handler(TENDERS_CHANNELS.cleanupDocumentTrash)(trustedEvent(), {
+        all: true,
+      })
+
+      expect(cleaned.ok).toBe(true)
+      // The entry is gone from the index, but nothing outside the store was
+      // touched.
+      expect(existsSync(victim)).toBe(true)
+      expect(readFileSync(victim, 'utf8')).toBe('must survive')
+      expect(
+        readdirSync(outsideDir).filter((name) => name !== 'victim.txt'),
+        'no file outside the Tenders directory may be unlinked',
+      ).not.toContain(trashedName)
+      rmSync(join(tendersBaseDir(), '.trash'), { force: true })
+    })
   })
 
   it('deletes by managed record id, which takes precedence over the stored path', async () => {

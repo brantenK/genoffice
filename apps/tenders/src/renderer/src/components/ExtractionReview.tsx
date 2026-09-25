@@ -197,6 +197,22 @@ const PAGE_STATUS_EXPLANATION_WORD: Partial<Record<PageExtractionStatus, string>
     'This page holds no text and no text-reading method is available here, so nothing on it was extracted.',
 }
 
+/**
+ * The same page statuses for a Word .docx, whose labels cannot be borrowed
+ * either: a .docx page has no "text layer" to name (`native`), and a page of one
+ * that holds no text holds a picture rather than a scan — the vocabulary
+ * `PAGE_STATUS_EXPLANATION_WORD` above already explains in full.
+ *
+ * Partial on purpose: the states not listed here ('ocr-failed' → "No usable
+ * text", 'manually-reviewed' → "Reviewed", 'ai-extracted' → "Model-read") name
+ * no mechanism that never ran on a .docx, so the PDF label is already true of it.
+ */
+const PAGE_STATUS_LABEL_WORD: Partial<Record<PageExtractionStatus, string>> = {
+  native: 'Has text',
+  'ocr-required': 'Picture-only',
+  'ocr-unavailable': 'No text',
+}
+
 /** One page row's explanation, in the vocabulary of the source it came from. */
 export function pageStatusExplanation(state: PageExtractionStatus, wordDocument = false): string {
   if (wordDocument) {
@@ -204,6 +220,15 @@ export function pageStatusExplanation(state: PageExtractionStatus, wordDocument 
     if (word) return word
   }
   return PAGE_STATUS_EXPLANATION[state]
+}
+
+/** One page row's status chip, in the vocabulary of the source it came from. */
+export function pageStatusLabel(state: PageExtractionStatus, wordDocument = false): string {
+  if (wordDocument) {
+    const word = PAGE_STATUS_LABEL_WORD[state]
+    if (word) return word
+  }
+  return PAGE_STATUS_LABEL[state]
 }
 
 // ── which kind of source document this is ────────────────────────────────────
@@ -868,14 +893,22 @@ export function summarizeReview(
 function Chip({
   tone,
   title,
+  ariaLabel,
   children,
 }: {
   tone: Tone
   title?: string
+  /**
+   * The chip's accessible name. A bare `<span>` has none, so without this the
+   * chip's meaning lives in the tooltip and in unnamed static text — the layer
+   * below the accessibility tree's controls.
+   */
+  ariaLabel?: string
   children: React.ReactNode
 }) {
   return (
     <span
+      {...(ariaLabel === undefined ? {} : { role: 'note' as const, 'aria-label': ariaLabel })}
       title={title}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${TONE_CLASS[tone]}`}
     >
@@ -899,6 +932,25 @@ export const AI_SUGGESTION_LABEL = 'AI-suggested'
 export const AI_SUGGESTION_TITLE =
   'A model you configured suggested this value. It is a suggestion, not a verified fact — confirm or correct it yourself.'
 
+/**
+ * The marker's ACCESSIBLE NAME: the visible words followed by what they mean.
+ *
+ * A screen reader user cannot hover, so a `title`-only caveat does not exist for
+ * them — and a chip with no name exposes the marker as unnamed text beside a
+ * field whose own name is just the field label. Naming the chip is what makes
+ * "this value came from a model" reachable at the moment it matters.
+ */
+export const AI_SUGGESTION_ACCESSIBLE_NAME = `${AI_SUGGESTION_LABEL}. ${AI_SUGGESTION_TITLE}`
+
+/**
+ * The line a screen reader hears for the field control itself, through the
+ * field's existing `aria-describedby`. The field's own name must stay the field's
+ * name; the provenance belongs in its description, where a user confirming the
+ * value cannot miss it.
+ */
+export const AI_SUGGESTION_FIELD_DESCRIPTION =
+  'This value was suggested by a model you configured. It is a suggestion, not a verified fact — check it against the source before you confirm it.'
+
 /** The AI-suggested marker, or nothing at all for a parser value. */
 function ProvenanceChip({
   carrier,
@@ -907,7 +959,7 @@ function ProvenanceChip({
 }) {
   if (valueProvenance(carrier) !== 'ai') return null
   return (
-    <Chip tone="accent" title={AI_SUGGESTION_TITLE}>
+    <Chip tone="accent" title={AI_SUGGESTION_TITLE} ariaLabel={AI_SUGGESTION_ACCESSIBLE_NAME}>
       <Sparkles size={11} aria-hidden="true" /> {AI_SUGGESTION_LABEL}
     </Chip>
   )
@@ -1245,7 +1297,7 @@ function PagesSection({
                       tone={PAGE_STATUS_TONE[page.state]}
                       title={pageStatusExplanation(page.state, wordDocument)}
                     >
-                      {PAGE_STATUS_LABEL[page.state]}
+                      {pageStatusLabel(page.state, wordDocument)}
                     </Chip>
                     {page.method && (
                       <span className="text-[11px] text-[var(--text-tertiary)]">{page.method}</span>
@@ -1316,7 +1368,7 @@ function PagesSection({
                       tone={PAGE_STATUS_TONE[page.state]}
                       title={pageStatusExplanation(page.state, wordDocument)}
                     >
-                      {PAGE_STATUS_LABEL[page.state]}
+                      {pageStatusLabel(page.state, wordDocument)}
                     </Chip>
                     {page.method && (
                       <span className="text-[11px] text-[var(--text-tertiary)]">{page.method}</span>
@@ -2119,6 +2171,10 @@ function FieldCard({
         id={provenanceId}
         className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]"
       >
+        {/* The control's accessible description (this paragraph is its
+            `aria-describedby`), so a screen-reader user confirming the value
+            hears who produced it — not only a sighted user hovering the chip. */}
+        {aiSuggested && <span className="sr-only">{AI_SUGGESTION_FIELD_DESCRIPTION}</span>}
         {sourcePage ? (
           <>
             <button

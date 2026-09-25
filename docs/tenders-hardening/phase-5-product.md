@@ -86,8 +86,18 @@ Status at the Phase 5 gate: items 2–5 are **closed** — see §6 items 4–6 a
 `contracts-and-invariants.md` — as is item 6 (CSV formula neutralisation in the matrix export,
 pinned by `tests/ipc-handlers.test.ts`); item 7 is addressed on the persistence and billing
 paths (`SaveStatus` / inline errors). Item 1 (centralize authorization) is **still open**: the
-privileged handler set grew to **23** channels and the guard is hand-written at every site.
-Item 8 (diagnostic export) was not built.
+privileged handler set is now **33** `ipcMain.handle` sites (it was 23 at this gate; the count
+and its breakdown are in §3 of `contracts-and-invariants.md`) and the guard is still hand-written
+at every site — each handler begins with `isTrustedTendersEvent` directly, which is deliberate
+but is not the central wrapper this item asked for.
+Item 8 (diagnostic export) is now **partly** addressed and still not an export: main owns a
+bounded local log (`<userData>/tenders/tenders-diagnostics.log`, 1 MiB × 3, counts and codes and
+never document content) with a write-only `tenders:diagnostics-record` channel and a
+`tenders:diagnostics-path` member, and it records store failures, legacy-read refusals, recomputed
+readiness checkpoints and the reminders scheduler's events (`contracts-and-invariants.md` §3e).
+What is still missing for a support bundle — versions, counts, failure codes, redacted paths
+gathered into one file the user can attach — remains unbuilt, and a second gap is recorded in §6
+item 15 (`recordDiagnosticsStart` is never called, and no surface renders the log's path yet).
 
 Files: `shared/ipc.ts`, `main/tenders-main.ts`, `shared/validation.ts` (if added),
 `main/ipc-handlers.ts` (if the main file is split), tests.

@@ -131,7 +131,51 @@ export const TENDERS_CHANNELS = {
   remindersGet: 'tenders:reminders-get',
   remindersSet: 'tenders:reminders-set',
   remindersCheck: 'tenders:reminders-check',
+  /**
+   * Diagnostics. The renderer reports a failure it can see but main cannot (a
+   * renderer-side refusal, a dropped extraction), and reads back where the log
+   * lives so the user can be told. Both are behind the same trusted-sender gate
+   * as every other handler; neither can read the log back, so a renderer can add
+   * to the record and never browse it.
+   */
+  diagnosticsRecord: 'tenders:diagnostics-record',
+  diagnosticsPath: 'tenders:diagnostics-path',
 } as const
+
+/**
+ * The levels a renderer may report at. Identical to the sink's own
+ * `DiagnosticsLevel`; restated here because `shared/` must not reach into
+ * `main/` (the sink is a main-process module).
+ */
+export type TendersDiagnosticsLevel = 'info' | 'warn' | 'error'
+
+/** Longest message the diagnostics channel will carry, in characters. */
+export const MAX_TENDERS_DIAGNOSTIC_MESSAGE_CHARS = 2_000
+
+/** Longest `source` the diagnostics channel will carry, in characters. */
+export const MAX_TENDERS_DIAGNOSTIC_SOURCE_CHARS = 64
+
+/** Most `detail` keys the diagnostics channel will carry. */
+export const MAX_TENDERS_DIAGNOSTIC_DETAIL_KEYS = 24
+
+export interface RecordDiagnosticsRequest {
+  level: TendersDiagnosticsLevel
+  source: string
+  message: string
+  detail?: Record<string, unknown>
+}
+
+export interface RecordDiagnosticsResponse {
+  ok: boolean
+  error?: string
+}
+
+export interface DiagnosticsPathResponse {
+  ok: boolean
+  /** Absolute path of the live log. Present only when `ok`. */
+  path?: string
+  error?: string
+}
 
 export interface SaveDocumentRequest {
   fileName: string
@@ -675,6 +719,14 @@ export interface TendersApi extends TendersApiBridge {
   setReminders: (settings: RemindersSetRequest) => Promise<RemindersSetResponse>
   /** Run one reminder check now (the settings surface's "check now"). */
   checkReminders: () => Promise<RemindersCheckResponse>
+  /**
+   * Record one diagnostic entry from the renderer. Main validates the shape and
+   * the bounds and writes it through the same rotating sink it uses itself; the
+   * renderer never sees a path, a file handle or a log reader.
+   */
+  recordDiagnostics?: (request: RecordDiagnosticsRequest) => Promise<RecordDiagnosticsResponse>
+  /** Where the diagnostics log is, so the UI can tell the user. */
+  diagnosticsPath?: () => Promise<DiagnosticsPathResponse>
 }
 
 declare global {

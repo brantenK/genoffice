@@ -1,7 +1,10 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -10,7 +13,7 @@ import {
   watch,
   type FSWatcher,
 } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { extname, join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -20,6 +23,9 @@ import {
   MAX_DISCOVERY_DOCUMENT_FILE_NAME_CHARS,
   MAX_DISCOVERY_DOCUMENT_URL_CHARS,
   MAX_DISCOVERY_DOWNLOAD_BYTES,
+  MAX_TENDERS_DIAGNOSTIC_DETAIL_KEYS,
+  MAX_TENDERS_DIAGNOSTIC_MESSAGE_CHARS,
+  MAX_TENDERS_DIAGNOSTIC_SOURCE_CHARS,
   MAX_TENDERS_DOCUMENT_UPLOAD_BYTES,
   MAX_TENDERS_MATRIX_EXPORT_BYTES,
   MAX_TENDERS_MATRIX_EXPORT_CELL_CHARS,
@@ -34,6 +40,7 @@ import {
   type CleanupDocumentTrashResponse,
   type DeleteDocumentRequest,
   type DeleteDocumentResponse,
+  type DiagnosticsPathResponse,
   type DiscoveryDownloadDocumentRequest,
   type DiscoveryDownloadDocumentResponse,
   type DiscoveryListRequest,
@@ -50,6 +57,7 @@ import {
   type ReadDocumentRequest,
   type ReadDocumentResponse,
   type ReconcileDocumentsResponse,
+  type RecordDiagnosticsResponse,
   type RemindersCheckResponse,
   type RemindersSetRequest,
   type RemindersSetResponse,
@@ -68,6 +76,7 @@ import {
 import type {
   CompanyWorkspace,
   ContractMilestone,
+  RequirementRecord,
   TenderReadinessSnapshot,
   TenderRecord,
   TendersData,
@@ -82,6 +91,7 @@ import type {
   ManagedFileLink,
   SaveTendersRequest,
   TendersPersistenceError,
+  TendersRecoveryCandidate,
 } from '../shared/tenders-persistence'
 import {
   expectedReadinessBinding,
@@ -124,6 +134,12 @@ import {
 } from './reminders-scheduler'
 import { isAllowedDiscoveryUrl, DISCOVERY_ALLOWED_HOSTS } from '../shared/discovery'
 import type { ReminderSettings, ReminderTender } from '../shared/reminders'
+import {
+  createDiagnosticsLog,
+  diagnosticsLogDir,
+  recordDiagnosticsStart,
+  type DiagnosticsLog,
+} from './diagnostics-log'
 import { MOCK_COMPANY } from '../renderer/src/mock/company'
 import { MOCK_CUSTOMERS } from '../renderer/src/mock/customers'
 import { MOCK_VAULT } from '../renderer/src/mock/vault'
@@ -171,6 +187,10 @@ export const SEED_TENDER_WTR_04: TenderRecord = {
   requirements: [],
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 export function createDefaultSeedWorkspaces(): CompanyWorkspace[] {
   return [
     {
@@ -184,76 +204,186 @@ export function createDefaultSeedWorkspaces(): CompanyWorkspace[] {
   ]
 }
 
-export function migrateAndValidateTenders(raw: unknown): TendersData {
-  const now = new Date().toISOString()
-  if (!raw || typeof raw !== 'object') {
-    return {
-      version: CURRENT_TENDERS_SCHEMA_VERSION,
-      updatedAt: now,
-      activeCompanyId: SEED_COMPANY_ID,
-      workspaces: createDefaultSeedWorkspaces(),
-      issuerTemplates: [],
-    }
-  }
+// ── The legacy v1 read path (retired) ────────────────────────────────────────
+//
+// The v1 stack is a SECOND persistence architecture that used to run alongside
+// the authoritative v2 store. It is retired, deliberately and in two parts:
+//
+//  * **No synthesis.** The reader used to answer an empty or non-object payload
+//    with `createDefaultSeedWorkspaces()` — demo company, customers, vault and
+//    the seeded RFP — which is exactly the behaviour the v2 path promises never
+//    to do. It now reads back only what a v1 file actually contains. Nothing on
+//    a shipping path can invent a customer, a compliance document or a tender.
+//  * **No live watcher.** `registerTendersIpc` used to start a `fs.watch` over
+//    `tenders-data.json` and broadcast the re-read document on
+//    `tenders:data-changed`, which nothing subscribed to any more. The watcher
+//    is no longer started in production: a background reader whose result no
+//    consumer sees is pure risk (it re-read and re-broadcast on every write the
+//    v2 store made to a file only the legacy stack cared about).
+//
+// What stays: `getStoredData` still answers with the on-disk document, because
+// `e2e/tenders-regression-smoke.spec.ts` proves the channel is reachable and
+// `tests/adversarial-stress.test.ts` reads a genuine v1 file back through it.
+// `createDefaultSeedWorkspaces` / `startTendersStoreWatcher` / `broadcastTendersData`
+// remain exported for the tests that pin their independent behaviour.
+//
+// This is the LAST writer removed from the legacy stack: `writeTendersStore` is
+// no longer reachable from any IPC handler, and the sole shipping writer of
+// `tenders-data.json` is the authoritative v2 store.
 
-  const r = raw as Record<string, unknown>
-  const version =
-    typeof r.version === 'number' && r.version >= 1 ? r.version : CURRENT_TENDERS_SCHEMA_VERSION
-  const updatedAt = typeof r.updatedAt === 'string' && r.updatedAt.trim() ? r.updatedAt : now
-  let workspaces = Array.isArray(r.workspaces) ? (r.workspaces as any[]) : []
-  if (workspaces.length === 0) {
-    workspaces = createDefaultSeedWorkspaces()
-  } else {
-    workspaces = workspaces.map((ws) => {
-      const isSeedCompany = ws.id === SEED_COMPANY_ID || ws.id === 'ws-ekurhuleni-01'
-      const company = ws.company && ws.company.name ? ws.company : { ...MOCK_COMPANY }
-      const customers =
-        Array.isArray(ws.customers) && ws.customers.length > 0
-          ? ws.customers
-          : isSeedCompany
-            ? [...MOCK_CUSTOMERS]
-            : Array.isArray(ws.customers)
-              ? ws.customers
-              : []
-      const vault =
-        Array.isArray(ws.vault) && ws.vault.length > 0
-          ? ws.vault
-          : isSeedCompany
-            ? [...MOCK_VAULT]
-            : Array.isArray(ws.vault)
-              ? ws.vault
-              : []
-      const tenders =
-        Array.isArray(ws.tenders) && ws.tenders.length > 0
-          ? ws.tenders
-          : isSeedCompany
-            ? [SEED_TENDER_WTR_04]
-            : Array.isArray(ws.tenders)
-              ? ws.tenders
-              : []
-      return {
-        ...ws,
-        id: ws.id === 'ws-ekurhuleni-01' ? SEED_COMPANY_ID : ws.id,
-        name: ws.name || company.tradingName || company.name,
-        company,
-        customers,
-        vault,
-        tenders,
+export const LEGACY_TENDERS_READ_FAILED =
+  'The saved Tenders file could not be read. It was left exactly as it is; restore a recovery copy or repair the file before saving.'
+
+/** One v1 requirement, field by field, or `null` when it cannot be read honestly. */
+function parseLegacyRequirement(raw: unknown): RequirementRecord | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.id !== 'string' || !raw.id || typeof raw.title !== 'string') return null
+  if (!Array.isArray(raw.suggestedVaultDocIds)) return null
+  // Unknown keys are refused rather than dropped: a field this reader does not
+  // understand is a field it cannot vouch for, so the whole record fails to read.
+  if (!Object.keys(raw).every((key) => LEGACY_REQUIREMENT_KEYS.has(key))) return null
+  const box = isRecord(raw.boundingBox) ? raw.boundingBox : null
+  return {
+    ...(raw as unknown as RequirementRecord),
+    category: (raw.category ?? 'GENERAL_RETURNABLE') as RequirementRecord['category'],
+    isMandatory: raw.isMandatory === true,
+    riskLevel: (raw.riskLevel ?? 'INFORMATIONAL') as RequirementRecord['riskLevel'],
+    boundingBox: {
+      top: typeof box?.top === 'number' ? box.top : 0,
+      left: typeof box?.left === 'number' ? box.left : 0,
+      width: typeof box?.width === 'number' ? box.width : 0,
+      height: typeof box?.height === 'number' ? box.height : 0,
+    },
+    linkedVaultDocId: typeof raw.linkedVaultDocId === 'string' ? raw.linkedVaultDocId : null,
+    reason: typeof raw.reason === 'string' ? raw.reason : null,
+    suggestedVaultDocIds: raw.suggestedVaultDocIds.filter(
+      (id): id is string => typeof id === 'string',
+    ),
+  }
+}
+
+const LEGACY_REQUIREMENT_KEYS = new Set([
+  'id',
+  'ruleKey',
+  'title',
+  'category',
+  'isMandatory',
+  'verbatimClause',
+  'pageNumber',
+  'boundingBox',
+  'riskLevel',
+  'order',
+  'additionalClauses',
+  'confidence',
+  'notes',
+  'suggestedBy',
+  'status',
+  'linkedVaultDocId',
+  'reason',
+  'notApplicableReason',
+  'suggestedVaultDocIds',
+])
+
+/**
+ * Read a workspace list back from a v1 file without inventing anything.
+ *
+ * The distinction this function draws is the one that matters: a missing
+ * CONTAINER (`workspaces`, `customers`, `vault`, `tenders`, a tender's
+ * `requirements`) reads as an empty list, because that is what the file says —
+ * the user really has none. A missing PIECE OF DEMO DATA is not replaced with
+ * `MOCK_CUSTOMERS`, `MOCK_VAULT` or `SEED_TENDER_WTR_04`, because those are
+ * values the file does not contain. `migrateAndValidateTenders` used to do the
+ * latter for the seeded company, which meant a store whose vault had been
+ * emptied came back with seven compliance documents in it.
+ *
+ * A workspace still needs an id (it is the key every caller looks it up by) and,
+ * for a tender, a `referenceNumber` is kept as it is written (including absent).
+ */
+function parseLegacyWorkspaces(raw: unknown, now: string): CompanyWorkspace[] {
+  if (!Array.isArray(raw)) return []
+  const workspaces: CompanyWorkspace[] = []
+  for (const candidate of raw) {
+    if (!isRecord(candidate) || typeof candidate.id !== 'string' || !candidate.id) continue
+    const company = isRecord(candidate.company) ? candidate.company : {}
+    const tenders: TenderRecord[] = []
+    if (Array.isArray(candidate.tenders)) {
+      for (const tender of candidate.tenders) {
+        if (!isRecord(tender) || typeof tender.id !== 'string' || !tender.id) continue
+        const rawRequirements = Array.isArray(tender.requirements) ? tender.requirements : []
+        const requirements = rawRequirements
+          .map(parseLegacyRequirement)
+          .filter((item): item is RequirementRecord => item !== null)
+        if (requirements.length !== rawRequirements.length) continue
+        tenders.push({
+          ...(tender as unknown as TenderRecord),
+          closingDate: typeof tender.closingDate === 'string' ? tender.closingDate : '',
+          submissionMethod:
+            (tender.submissionMethod as TenderRecord['submissionMethod']) ?? 'ELECTRONIC',
+          signatureChecks: isRecord(tender.signatureChecks)
+            ? (tender.signatureChecks as Record<string, boolean>)
+            : {},
+          status: (tender.status as TenderRecord['status']) ?? 'IN_PROGRESS',
+          createdAt: typeof tender.createdAt === 'string' ? tender.createdAt : now,
+          fileName: typeof tender.fileName === 'string' ? tender.fileName : '',
+          fileUrl: typeof tender.fileUrl === 'string' ? tender.fileUrl : '',
+          numPages: typeof tender.numPages === 'number' ? tender.numPages : 0,
+          ocrPages: typeof tender.ocrPages === 'number' ? tender.ocrPages : 0,
+          requirements,
+        })
       }
+    }
+    workspaces.push({
+      ...(candidate as unknown as CompanyWorkspace),
+      id: candidate.id,
+      name:
+        typeof candidate.name === 'string' && candidate.name
+          ? candidate.name
+          : String(company.name ?? ''),
+      company: company as unknown as CompanyWorkspace['company'],
+      customers: Array.isArray(candidate.customers)
+        ? (candidate.customers as CompanyWorkspace['customers'])
+        : [],
+      vault: Array.isArray(candidate.vault) ? (candidate.vault as CompanyWorkspace['vault']) : [],
+      tenders,
     })
   }
+  return workspaces
+}
+
+/**
+ * The legacy v1 envelope, read back field by field. An unreadable payload throws
+ * `LegacyTendersReadError` rather than being answered with a synthesized or empty
+ * document: an `{workspaces: []}` the user never chose is silent apparent data
+ * loss on a path that runs before they open a view.
+ *
+ * `version` is accepted as found and normalized to the current schema version, so
+ * a `version: 0` file written by an older build still reads. It is only rejected
+ * when present and not a number, which is a payload this reader cannot interpret.
+ */
+export function migrateAndValidateTenders(raw: unknown): TendersData {
+  const now = new Date().toISOString()
+  if (!isRecord(raw)) throw new LegacyTendersReadError('The Tenders file is not a JSON document.')
+  const rawVersion = raw.version
+  if (
+    rawVersion !== undefined &&
+    (typeof rawVersion !== 'number' || !Number.isFinite(rawVersion))
+  ) {
+    throw new LegacyTendersReadError(
+      `The Tenders file declares an unreadable version: ${JSON.stringify(rawVersion)}`,
+    )
+  }
+  const updatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim() ? raw.updatedAt : now
+  const workspaces = parseLegacyWorkspaces(raw.workspaces, now)
   const activeCompanyId =
-    typeof r.activeCompanyId === 'string' &&
-    r.activeCompanyId.trim() &&
-    r.activeCompanyId !== 'comp-zano-01'
-      ? r.activeCompanyId === 'ws-ekurhuleni-01'
-        ? SEED_COMPANY_ID
-        : r.activeCompanyId
-      : workspaces[0]?.id || SEED_COMPANY_ID
-  const issuerTemplates = Array.isArray(r.issuerTemplates) ? (r.issuerTemplates as any[]) : []
+    typeof raw.activeCompanyId === 'string' && raw.activeCompanyId.trim()
+      ? raw.activeCompanyId
+      : (workspaces[0]?.id ?? '')
+  const issuerTemplates = Array.isArray(raw.issuerTemplates)
+    ? (raw.issuerTemplates as TendersData['issuerTemplates'])
+    : []
 
   return {
-    version,
+    version: CURRENT_TENDERS_SCHEMA_VERSION,
     updatedAt,
     activeCompanyId,
     workspaces,
@@ -261,19 +391,23 @@ export function migrateAndValidateTenders(raw: unknown): TendersData {
   }
 }
 
+/** A legacy payload that could not be read honestly. Never answered with a stub. */
+export class LegacyTendersReadError extends Error {
+  readonly code = 'READ_FAILED' as const
+  constructor(message: string) {
+    super(message)
+    this.name = 'LegacyTendersReadError'
+  }
+}
+
 export function readTendersStore(baseDirOrPath: string): TendersData {
   const filePath = baseDirOrPath.endsWith('tenders-data.json')
     ? baseDirOrPath
     : join(baseDirOrPath, 'tenders-data.json')
+  // A file that is not there yet is a genuinely not-yet-existing store: the one
+  // case where "nothing" is the honest answer, because it is also what the read
+  // found. Nothing is synthesized into it.
   if (!existsSync(filePath)) {
-    return migrateAndValidateTenders(null)
-  }
-
-  let content: string
-  try {
-    content = readFileSync(filePath, 'utf8')
-  } catch (err) {
-    console.error('tenders-main: failed to read tenders-data.json:', err)
     return {
       version: CURRENT_TENDERS_SCHEMA_VERSION,
       updatedAt: new Date().toISOString(),
@@ -283,9 +417,17 @@ export function readTendersStore(baseDirOrPath: string): TendersData {
     }
   }
 
+  let content: string
   try {
-    const parsed = JSON.parse(content)
-    return migrateAndValidateTenders(parsed)
+    content = readFileSync(filePath, 'utf8')
+  } catch (err) {
+    console.error('tenders-main: failed to read tenders-data.json:', err)
+    throw new LegacyTendersReadError(errorMessage(err, 'The Tenders file could not be read.'))
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
   } catch (parseErr) {
     const backupPath = `${filePath}.corrupted.bak`
     try {
@@ -294,14 +436,137 @@ export function readTendersStore(baseDirOrPath: string): TendersData {
     } catch (bakErr) {
       console.error('tenders-main: Failed to write corrupted backup file', bakErr)
     }
-    return {
-      version: CURRENT_TENDERS_SCHEMA_VERSION,
-      updatedAt: new Date().toISOString(),
-      activeCompanyId: '',
-      workspaces: [],
-      issuerTemplates: [],
-    }
+    // Fails CLOSED. Returning `{workspaces: []}` here would present a corrupt
+    // primary as an empty workspace — apparent data loss, silently, before the
+    // user opens a view. Callers surface the failure and point at recovery.
+    throw new LegacyTendersReadError(
+      `The Tenders file is not valid JSON. A copy of the unreadable bytes was kept at ${backupPath}.`,
+    )
   }
+
+  try {
+    return migrateAndValidateTenders(parsed)
+  } catch (validationError) {
+    throw new LegacyTendersReadError(
+      errorMessage(validationError, 'The Tenders file could not be validated.'),
+    )
+  }
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+// ── diagnostics ──────────────────────────────────────────────────────────────
+//
+// One sink for the whole main process, under the same Tenders data directory the
+// store uses. Every failure this file already knows about — a corrupt store, a
+// refused read, a dropped notification — used to reach `console.warn` and
+// nothing else, which on a packaged build means it reached nowhere a support
+// engineer can look. The sink owns rotation and the content rule; this file only
+// decides what is worth recording.
+
+let diagnosticsLog: DiagnosticsLog | null = null
+let diagnosticsLogOverride: DiagnosticsLog | null = null
+
+/**
+ * The diagnostics sink for this process. `createDiagnosticsLog` takes an
+ * injected clock, and the tests inject a whole sink through
+ * `setTendersEngineOverrides({ diagnosticsLog })`, so no test writes to the real
+ * data directory or waits on a real rotation.
+ */
+export function getTendersDiagnosticsLog(): DiagnosticsLog {
+  if (engineOverrides.diagnosticsLog) return engineOverrides.diagnosticsLog
+  if (diagnosticsLogOverride) return diagnosticsLogOverride
+  if (diagnosticsLog) return diagnosticsLog
+  diagnosticsLog = createDiagnosticsLog({
+    dir: diagnosticsLogDir(app.getPath('userData')),
+    ...(engineOverrides.now ? { now: engineOverrides.now } : {}),
+  })
+  return diagnosticsLog
+}
+
+/** The absolute path of the live log, for the user-facing "where is it" answer. */
+export function tendersDiagnosticsPath(): string {
+  return getTendersDiagnosticsLog().path()
+}
+
+/**
+ * The running version, for the log's first line.
+ *
+ * `app.getVersion()` is always present in a real Electron process; this guards
+ * the read so a host that does not expose it cannot make the startup
+ * diagnostic the reason the app fails to start. A log line saying `unknown` is
+ * still a log line that says what wrote it.
+ */
+function tendersAppVersion(): string {
+  try {
+    return typeof app.getVersion === 'function' ? app.getVersion() : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** Test seam: install a sink, or `null` to rebuild the real one on next use. */
+export function setTendersDiagnosticsLogForTests(log: DiagnosticsLog | null): void {
+  diagnosticsLogOverride = log
+}
+
+function recordDiagnostic(
+  level: 'info' | 'warn' | 'error',
+  source: string,
+  message: string,
+  detail?: Record<string, unknown>,
+): void {
+  try {
+    getTendersDiagnosticsLog().record({ level, source, message, ...(detail ? { detail } : {}) })
+  } catch {
+    // The sink never throws by contract; a sink that is not there yet must not
+    // turn a diagnostic into a failure of the operation being diagnosed.
+  }
+}
+
+/** Record a legacy-read refusal, naming the file and the reason. */
+function noteLegacyReadFailure(path: string, error: unknown): void {
+  recordDiagnostic('error', 'tenders-main', 'The saved Tenders file could not be read.', {
+    path,
+    reason: errorMessage(error, 'unknown'),
+  })
+}
+
+/**
+ * The recoverable copies main can see for a legacy file it could not read: the
+ * `.corrupted.bak` it just quarantined alongside the live file. Deliberately NOT
+ * the v2 store's own candidate list — that store owns a different document, and
+ * offering its backups for a v1 file would be a recovery path that restores the
+ * wrong thing.
+ */
+async function listLegacyRecoveryCandidates(): Promise<TendersRecoveryCandidate[]> {
+  const candidates: TendersRecoveryCandidate[] = []
+  const directory = getTendersBaseDir()
+  try {
+    for (const name of readdirSync(directory)) {
+      if (!/\.corrupted\.bak$/.test(name)) continue
+      const full = join(directory, name)
+      try {
+        const information = statSync(full)
+        candidates.push({
+          id: name,
+          path: name,
+          source: 'primary',
+          reason: 'Quarantined copy of the file that could not be read.',
+          updatedAt: information.mtime.toISOString(),
+          valid: false,
+          sizeBytes: information.size,
+        })
+      } catch {
+        // the copy disappeared between listing and stat
+      }
+    }
+  } catch {
+    // the directory is unreadable; the failure above is the one to report
+  }
+  return candidates
 }
 
 const activeTendersWebContents = new Set<WebContents>()
@@ -430,9 +695,9 @@ function gateTendersCommits(store: TendersStore): TendersStore {
         new Date(),
       )
       if (repaired > 0) {
-        console.warn(
-          `tenders-main: recomputed ${repaired} submission readiness checkpoint(s) that contradicted canonical readiness.`,
-        )
+        const message = `Recomputed ${repaired} submission readiness checkpoint(s) that contradicted canonical readiness.`
+        console.warn(`tenders-main: ${message}`)
+        recordDiagnostic('warn', 'readiness-gate', message, { recomputed: repaired })
       }
     } catch {
       // A document malformed enough to break the recomputation cannot commit
@@ -467,10 +732,6 @@ function getManagedDocumentStore(overrideUserData?: string): ManagedDocumentStor
   const store = createManagedDocumentStore({ baseDir: directory })
   managedDocumentStores.set(directory, store)
   return store
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function validOptionalString(value: unknown, maxLength: number): boolean {
@@ -660,7 +921,23 @@ export function broadcastTendersData(data: TendersData): void {
 
 let watchedFilePath = ''
 
+/**
+ * Is this process a test runner? The legacy store watcher is a deliberate,
+ * fully-executed piece of machinery that must not be running in production (see
+ * the retirement note above), but the tests that pin its behaviour drive it
+ * directly through `startTendersStoreWatcher`.
+ */
+function legacyWatcherAllowed(): boolean {
+  return process.env.VITEST === 'true' || process.env.NODE_ENV === 'test'
+}
+
 export function startTendersStoreWatcher(targetPath?: string): void {
+  // Retirement guard for the production path: `registerTendersIpc` no longer
+  // starts the watcher at all (`tenders:data-changed` has had zero subscribers
+  // since the v2 store landed), and this second gate means even an accidental
+  // re-introduction cannot put a live `fs.watch` back on a shipping build.
+  // Tests set VITEST, so the watcher's own suite still exercises it for real.
+  if (!legacyWatcherAllowed()) return
   const filePath = targetPath || getStoragePath()
   const dir = filePath.replace(/[/\\][^/\\]+$/, '')
   if (!existsSync(dir)) {
@@ -739,7 +1016,10 @@ export function writeTendersStore(baseDirOrPath: string, data: unknown): void {
   const tmp = `${filePath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
   try {
     writeFileSync(tmp, serialized, 'utf8')
-    renameSync(tmp, filePath)
+    // Same bounded EBUSY/EPERM retry the managed documents get. The primary had
+    // none, so a reader holding `tenders-data.json` open — a scanner, a sync
+    // client, OneDrive — turned a perfectly good write into a hard failure.
+    renameWithBoundedRetry(tmp, filePath)
     broadcastTendersData(validated)
   } catch (e) {
     try {
@@ -822,6 +1102,84 @@ export function resolveSafeTendersPath(
   return { safe: true, fullPath: resolved }
 }
 
+/**
+ * The confinement check that actually holds, on top of the lexical one above.
+ *
+ * `resolveSafeTendersPath` validates the TEXT: no `..`, no absolute path, no
+ * drive-relative form. That is not containment. A symlink or NTFS junction
+ * planted at one managed leaf — or replacing `documents/` itself — passes every
+ * text check and still resolves outside the Tenders directory, and this product
+ * ingests untrusted third-party PDFs, so the filesystem's own answer is the one
+ * that has to be asserted.
+ *
+ * Resolves the real root and the real path and re-asserts the `documents/` or
+ * `vault/` prefix against them. A real root that is itself a link (or sits under
+ * a base directory that is one) is refused outright, because `realpath` would
+ * have followed it and every prefix check afterwards would then agree with the
+ * escape.
+ */
+export function resolveConfinedTendersPath(
+  storedPath: string,
+  overrideUserData?: string,
+): { safe: boolean; fullPath: string; error?: string } {
+  const lexical = resolveSafeTendersPath(storedPath, overrideUserData)
+  if (!lexical.safe) return lexical
+  const directory = storedPath.replace(/\\/g, '/').split('/')[0]
+  if (directory !== 'documents' && directory !== 'vault') {
+    // The two directories whose real root is checked below. A path that reaches
+    // them by another spelling has already been refused by the lexical check, so
+    // this is a belt-and-braces guard rather than the boundary.
+    return { safe: false, fullPath: '', error: 'Directory traversal detected' }
+  }
+  const baseDir = resolve(getTendersBaseDir(overrideUserData))
+  const lexicalRoot = join(baseDir, directory)
+  try {
+    if (lstatSync(baseDir).isSymbolicLink() || lstatSync(lexicalRoot).isSymbolicLink()) {
+      return {
+        safe: false,
+        fullPath: '',
+        error: 'The managed document directory is a link outside the Tenders data directory',
+      }
+    }
+  } catch {
+    return { safe: false, fullPath: '', error: 'File not found on disk' }
+  }
+  let realRoot: string
+  let realFull: string
+  try {
+    realRoot = realpathSync(lexicalRoot)
+    realFull = realpathSync(lexical.fullPath)
+  } catch {
+    return { safe: false, fullPath: '', error: 'File not found on disk' }
+  }
+  const normalizedRoot = realRoot.endsWith(sep) ? realRoot : realRoot + sep
+  const compare = (value: string): string =>
+    process.platform === 'win32' ? value.toLowerCase() : value
+  if (!compare(realFull).startsWith(compare(normalizedRoot))) {
+    return {
+      safe: false,
+      fullPath: '',
+      error: 'The stored path resolves outside the Tenders data directory',
+    }
+  }
+  let leaf: ReturnType<typeof lstatSync>
+  try {
+    leaf = lstatSync(realFull)
+  } catch {
+    return { safe: false, fullPath: '', error: 'File not found on disk' }
+  }
+  // A link is never a document this app wrote: `saveDocumentFile` writes into a
+  // name it composed, with `flag: 'wx'`.
+  if (leaf.isSymbolicLink() || !leaf.isFile()) {
+    return {
+      safe: false,
+      fullPath: '',
+      error: 'The stored path is not a regular file inside the Tenders data directory',
+    }
+  }
+  return { safe: true, fullPath: realFull }
+}
+
 export function atomicWriteDocumentFile(targetPath: string, buffer: Buffer): void {
   const dir = targetPath.replace(/[/\\][^/\\]+$/, '')
   if (!existsSync(dir)) {
@@ -830,34 +1188,53 @@ export function atomicWriteDocumentFile(targetPath: string, buffer: Buffer): voi
   const tmp = `${targetPath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
   try {
     writeFileSync(tmp, buffer)
-    let renamed = false
-    let lastErr: any = null
-    for (let i = 0; i < 3; i++) {
-      try {
-        renameSync(tmp, targetPath)
-        renamed = true
-        break
-      } catch (err: any) {
-        lastErr = err
-        if (err?.code === 'EBUSY' || err?.code === 'EPERM') {
-          const start = Date.now()
-          while (Date.now() - start < 15) {
-            /* retry delay */
-          }
-        } else {
-          throw err
-        }
-      }
-    }
-    if (!renamed && lastErr) {
-      throw lastErr
-    }
+    renameWithBoundedRetry(tmp, targetPath)
   } catch (err) {
     try {
       if (existsSync(tmp)) unlinkSync(tmp)
     } catch {}
     throw err
   }
+}
+
+/**
+ * Atomic rename with a bounded retry for the two Windows-only transient codes.
+ *
+ * A reader holding the destination open (a scanner, a sync client, the app's own
+ * `fs.watch` handler between two reads) makes `renameSync` fail with `EBUSY` or
+ * `EPERM` on Windows even though nothing is wrong with the write. Every atomic
+ * write in this file goes through here, so the primary `tenders-data.json` gets
+ * the same treatment the managed documents always had — the asymmetry between
+ * the two was the defect.
+ *
+ * The delay SLEEPS rather than spinning: the previous implementation burned a
+ * full 15 ms of CPU per attempt waiting for a lock it was not holding, on the
+ * main process's thread. Attempts are capped, so a genuinely locked destination
+ * still fails with its own error rather than hanging the app.
+ */
+const RENAME_RETRY_ATTEMPTS = 3
+const RENAME_RETRY_DELAY_MS = 15
+
+export function renameWithBoundedRetry(from: string, to: string): void {
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < RENAME_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      renameSync(from, to)
+      return
+    } catch (error: unknown) {
+      lastError = error
+      const code = (error as { code?: unknown } | null)?.code
+      if (code !== 'EBUSY' && code !== 'EPERM') throw error
+      if (attempt < RENAME_RETRY_ATTEMPTS - 1) sleepSync(RENAME_RETRY_DELAY_MS)
+    }
+  }
+  throw lastError
+}
+
+/** Block this thread for `ms`, without spinning a core for the whole duration. */
+function sleepSync(ms: number): void {
+  const shared = new Int32Array(new SharedArrayBuffer(4))
+  Atomics.wait(shared, 0, 0, ms)
 }
 
 let lastSaveTimestamp = 0
@@ -923,7 +1300,7 @@ export async function readDocumentFile(
     if (!req || typeof req !== 'object' || !req.storedPath) {
       return { ok: false, error: 'Stored path is required' }
     }
-    const check = resolveSafeTendersPath(req.storedPath, overrideUserData)
+    const check = resolveConfinedTendersPath(req.storedPath, overrideUserData)
     if (!check.safe) {
       return { ok: false, error: check.error || 'Invalid or unsafe path' }
     }
@@ -954,12 +1331,26 @@ export async function openDocumentFile(
     if (!req || typeof req !== 'object' || !req.storedPath) {
       return { ok: false, error: 'Stored path is required' }
     }
-    const check = resolveSafeTendersPath(req.storedPath, overrideUserData)
+    // Confinement is proven against the real filesystem, not the text: a link
+    // planted at a managed leaf would otherwise hand `shell.openPath` a path
+    // that resolves outside the Tenders directory.
+    const check = resolveConfinedTendersPath(req.storedPath, overrideUserData)
     if (!check.safe) {
       return { ok: false, error: check.error || 'Invalid or unsafe path' }
     }
     if (!existsSync(check.fullPath)) {
       return { ok: false, error: 'File not found on disk' }
+    }
+    // `shell.openPath` hands the file to the OS, which FOLLOWS a `.lnk` shortcut
+    // and runs a launcher. A managed document is a PDF, a DOCX or an image —
+    // never a shortcut or a launcher script — so the extension is refused here
+    // rather than trusted to the shell.
+    const extension = extname(check.fullPath).toLowerCase()
+    if (WINDOWS_LAUNCHER_EXTENSIONS.has(extension)) {
+      return {
+        ok: false,
+        error: `A ${extension} file is a launcher or shortcut and is not opened from Tenders.`,
+      }
     }
     const openErr = await shell.openPath(check.fullPath)
     if (openErr) {
@@ -971,6 +1362,27 @@ export async function openDocumentFile(
     return { ok: false, error: err?.message || 'Failed to open document' }
   }
 }
+
+/**
+ * Extensions the OS treats as a launcher rather than a document. Opening one
+ * through `shell.openPath` runs whatever it points at or contains, which for a
+ * `.lnk` means following an attacker-chosen target.
+ */
+const WINDOWS_LAUNCHER_EXTENSIONS = new Set([
+  '.lnk',
+  '.url',
+  '.pif',
+  '.scf',
+  '.bat',
+  '.cmd',
+  '.ps1',
+  '.vbs',
+  '.js',
+  '.hta',
+  '.reg',
+  '.msi',
+  '.exe',
+])
 
 /**
  * Soft-delete a managed document: the file is MOVED to the Tenders trash (never
@@ -1399,6 +1811,10 @@ export function resetTendersIpcForTests(): void {
   managedDocumentStores.clear()
   pendingCloseFlushes.clear()
   closeFlushWaiters.clear()
+  // Drop the memoised diagnostics sink: it is built from `app.getPath('userData')`,
+  // which a test changes between cases, so keeping it would point the next case's
+  // diagnostics at the previous case's directory.
+  diagnosticsLog = null
   const baseDirectory = getTendersBaseDir()
   try {
     rmSync(join(baseDirectory, 'documents'), { recursive: true, force: true })
@@ -1486,6 +1902,8 @@ export interface TendersEngineOverrides {
   discoveryCacheDir?: string
   /** The scheduler's `userDataDir` (defaults to the app's userData). */
   remindersUserDataDir?: string
+  /** Replaces the diagnostics sink (defaults to the real rotating file). */
+  diagnosticsLog?: DiagnosticsLog
 }
 
 let engineOverrides: TendersEngineOverrides = {}
@@ -1508,12 +1926,21 @@ export function setTendersEngineOverrides(overrides: TendersEngineOverrides | nu
  * The app's reminder log. The scheduler reports every dropped notification and
  * every unreadable state file through this hook, so passing it is what keeps
  * "the platform could not show this" visible instead of silent.
+ *
+ * It now goes to the diagnostics file as well as the console. A reminder that
+ * never reached the user is exactly the kind of contained failure a support
+ * engineer needs to see afterwards, and `console.warn` on a packaged build is
+ * read by nobody.
  */
 const defaultReminderLog: ReminderLog = (event) => {
   const subject = [event.tenderId, event.thresholdId].filter(Boolean).join(' ')
   const line = `tenders-main: reminders: ${event.message}${subject ? ` (${subject})` : ''}`
   if (event.level === 'warn') console.warn(line)
   else console.info(line)
+  recordDiagnostic(event.level === 'warn' ? 'warn' : 'info', 'reminders', event.message, {
+    ...(event.tenderId ? { tenderId: event.tenderId } : {}),
+    ...(event.thresholdId ? { thresholdId: event.thresholdId } : {}),
+  })
 }
 
 /** The discovery client for this app's data directory (memoised per cache dir). */
@@ -1927,8 +2354,20 @@ export function validateReminderSettingsPatch(value: unknown): ReminderSettingsP
 export function registerTendersIpc(): void {
   if (ipcRegistered) return
 
-  startTendersStoreWatcher()
+  // The first line in the log file, so a file attached to a support request says
+  // what wrote it and which build. This is the only caller of
+  // `recordDiagnosticsStart`: the sink is built here for the first time, and the
+  // `ipcRegistered` guard above keeps the line from being written twice. It is
+  // written BEFORE anything else can record — `startTendersReminders` below
+  // records its own info line on its first check, and a header that arrives
+  // second is not a header.
+  recordDiagnosticsStart(getTendersDiagnosticsLog(), tendersAppVersion())
 
+  // The legacy `tenders-data.json` watcher is NOT started here any more. It read
+  // the v1 file back on every change and broadcast it on `tenders:data-changed`,
+  // a channel with no subscribers since the authoritative v2 store landed — a
+  // background reader nobody consumed. `getStoredData` (below) still serves the
+  // legacy file on demand; nothing watches it.
   // Best-effort startup reconciliation of managed documents (Phase 5 WP-9):
   // persist missing/orphaned state now; the renderer shows the full report via
   // `tenders:reconcile-documents`. A failure never blocks startup.
@@ -1944,7 +2383,17 @@ export function registerTendersIpc(): void {
 
   ipcMain.handle(TENDERS_CHANNELS.loadStoreV2, async (_e) => {
     if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
-    return getAuthoritativeTendersStore().load()
+    const result = await getAuthoritativeTendersStore().load()
+    if (!result.ok) {
+      // A store that could not be read is the one failure a user will report as
+      // "my data is gone", and the answer has to be in the record: the code, the
+      // message and how many recovery copies main can see.
+      recordDiagnostic('error', 'store', result.error.message, {
+        code: result.error.code,
+        candidates: result.recoveryCandidates?.length ?? 0,
+      })
+    }
+    return result
   })
 
   ipcMain.handle(TENDERS_CHANNELS.saveStoreV2, async (_e, request: SaveTendersRequest) => {
@@ -1976,6 +2425,10 @@ export function registerTendersIpc(): void {
     // receipt for a blocked tender.
     const result = await getAuthoritativeTendersStore().save(request)
     if (result.ok) return result
+    // A refused save is the failure the user sees as "my edit did not stick".
+    // Recorded with its code, so an intermittent refusal can be attributed to
+    // the branch that produced it rather than to "saving sometimes fails".
+    recordDiagnostic('warn', 'store', result.error.message, { code: result.error.code })
     // Compact conflict payload: never ship the full authoritative document over
     // IPC. The renderer only needs the error and the current revision; it
     // reveals its conflict UI from `code`, and reloads via `loadStoreV2`.
@@ -2020,17 +2473,33 @@ export function registerTendersIpc(): void {
   })
 
   // Persistence in userData/tenders/
-  ipcMain.handle(TENDERS_CHANNELS.getStoredData, (_e) => {
+  //
+  // The legacy read path. It answers with the file that is actually on disk, or
+  // `null` when there is no file at all — never with a synthesized document and
+  // never with a silent empty one. A file that exists but cannot be read or
+  // parsed used to be reported as `null`, which the renderer showed as "no saved
+  // data": apparent data loss, with the real failure invisible. It now fails
+  // CLOSED with the shared `TendersIpcFailure` shape the other privileged
+  // handlers already return, names the recovery copies main can see, and asks the
+  // caller to restore one — the same posture `loadStoreV2` takes for the
+  // authoritative store.
+  ipcMain.handle(TENDERS_CHANNELS.getStoredData, async (_e) => {
     if (!isTrustedTendersEvent(_e)) return unauthorizedTendersRequest()
+    const p = getStoragePath()
+    if (!existsSync(p)) return null
     try {
-      const p = getStoragePath()
-      if (existsSync(p)) {
-        const validated = readTendersStore(p)
-        return JSON.stringify(validated)
+      return JSON.stringify(readTendersStore(p))
+    } catch (err) {
+      noteLegacyReadFailure(p, err)
+      const candidates = await listLegacyRecoveryCandidates()
+      return {
+        ok: false,
+        error: {
+          code: 'RECOVERY_REQUIRED',
+          message: LEGACY_TENDERS_READ_FAILED,
+        },
+        ...(candidates.length ? { recoveryCandidates: candidates } : {}),
       }
-      return null
-    } catch {
-      return null
     }
   })
 
@@ -2061,6 +2530,7 @@ export function registerTendersIpc(): void {
         document: validated.data,
       })
       if (result.ok) return { ok: true }
+      recordDiagnostic('warn', 'store', result.error.message, { code: result.error.code })
       return { ok: false, error: result.error.message }
     } catch (err: any) {
       return { ok: false, error: err?.message || 'Failed to save stored data' }
@@ -2333,6 +2803,78 @@ export function registerTendersIpc(): void {
             error instanceof Error ? error.message : 'The reminder check could not be completed.',
         },
       }
+    }
+  })
+
+  // ── Diagnostics ────────────────────────────────────────────────────────────
+  // The renderer reports a failure main cannot see (a refusal it detected, an
+  // extraction that came back empty) and reads back where the log lives. Main
+  // owns the bounds and the sink; the renderer can append entries but can never
+  // read the log back, so the diagnostics surface is write-only from the UI.
+  ipcMain.handle(
+    TENDERS_CHANNELS.diagnosticsRecord,
+    (_e, request: unknown): RecordDiagnosticsResponse => {
+      if (!isTrustedTendersEvent(_e)) {
+        return { ok: false, error: 'Sender is not a registered Tenders WebContents.' }
+      }
+      if (!isRecord(request)) return { ok: false, error: 'A diagnostics entry is required.' }
+      const { level, source, message } = request
+      if (level !== 'info' && level !== 'warn' && level !== 'error') {
+        return { ok: false, error: 'A diagnostics level must be info, warn or error.' }
+      }
+      if (
+        typeof source !== 'string' ||
+        source.trim().length === 0 ||
+        source.length > MAX_TENDERS_DIAGNOSTIC_SOURCE_CHARS
+      ) {
+        return {
+          ok: false,
+          error: `A diagnostics source is required and may be at most ${MAX_TENDERS_DIAGNOSTIC_SOURCE_CHARS} characters.`,
+        }
+      }
+      if (
+        typeof message !== 'string' ||
+        message.trim().length === 0 ||
+        message.length > MAX_TENDERS_DIAGNOSTIC_MESSAGE_CHARS
+      ) {
+        return {
+          ok: false,
+          error: `A diagnostics message is required and may be at most ${MAX_TENDERS_DIAGNOSTIC_MESSAGE_CHARS} characters.`,
+        }
+      }
+      if (request.detail !== undefined && !isRecord(request.detail)) {
+        return { ok: false, error: 'Diagnostics detail must be an object when supplied.' }
+      }
+      const detail = isRecord(request.detail) ? request.detail : null
+      if (detail && Object.keys(detail).length > MAX_TENDERS_DIAGNOSTIC_DETAIL_KEYS) {
+        return {
+          ok: false,
+          error: `Diagnostics detail may carry at most ${MAX_TENDERS_DIAGNOSTIC_DETAIL_KEYS} keys.`,
+        }
+      }
+      try {
+        getTendersDiagnosticsLog().record({
+          level,
+          source,
+          message,
+          ...(detail ? { detail } : {}),
+        })
+      } catch {
+        // The sink never throws by contract; a renderer must not see an exception
+        // for a diagnostic that could not be written.
+      }
+      return { ok: true }
+    },
+  )
+
+  ipcMain.handle(TENDERS_CHANNELS.diagnosticsPath, (_e): DiagnosticsPathResponse => {
+    if (!isTrustedTendersEvent(_e)) {
+      return { ok: false, error: 'Sender is not a registered Tenders WebContents.' }
+    }
+    try {
+      return { ok: true, path: tendersDiagnosticsPath() }
+    } catch (error: unknown) {
+      return { ok: false, error: errorMessage(error, 'The diagnostics log path is unavailable.') }
     }
   })
 
@@ -2959,10 +3501,40 @@ export function registerTendersIpc(): void {
  */
 function allowedTendersNavigation(url: string): boolean {
   if (typeof url !== 'string' || url.length === 0) return false
-  // `blob:` URLs are created by the trusted renderer from a file the user picked
-  // in this session; their origin is the renderer itself.
-  if (url.startsWith('blob:')) return true
+  if (isTrustedRendererBlobUrl(url)) return true
   return trustedRendererUrl(url)
+}
+
+/**
+ * Is this a `blob:` object URL owned by the trusted renderer?
+ *
+ * `blob:` is NOT an origin of its own: a blob URL inherits the origin of the
+ * context that created it, and its serialization is
+ * `blob:<creator-origin>/<uuid>`. That means `blob:https://attacker.example/x`
+ * is a URL a foreign document can construct, and an unqualified
+ * `url.startsWith('blob:')` would have allowed it to navigate the privileged
+ * view. Only the renderer ever creates these in practice — the four call sites
+ * are `URL.createObjectURL` in `renderer/src/calendar.ts`,
+ * `renderer/src/components/TenderList.tsx`,
+ * `renderer/src/components/Workspace.tsx` and `renderer/src/mock/vault.ts`, all
+ * of which are the trusted view — so qualifying by that origin costs nothing and
+ * closes the foreign-blob hole.
+ *
+ * The no-`//` prefix rule matches the HTML "blob URL" definition: the creator's
+ * origin is serialized with a single leading slash, so anything of the form
+ * `blob://host/...` is not a blob URL this renderer could have made.
+ */
+function isTrustedRendererBlobUrl(url: string): boolean {
+  if (!url.startsWith('blob:')) return false
+  if (!runtime.rendererUrl && !runtime.rendererFile) return false
+  if (url.startsWith('blob://')) return false
+  try {
+    const creator = new URL(url.slice('blob:'.length))
+    if (creator.origin === 'null' || creator.origin === '') return false
+    return trustedRendererUrl(creator.href)
+  } catch {
+    return false
+  }
 }
 
 /**

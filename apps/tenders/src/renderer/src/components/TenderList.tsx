@@ -36,8 +36,10 @@ import {
   DocxImportCancelledError,
   DocxPreflightError,
   extractDocxIntake,
+  groupThousands,
 } from '../intake/docx'
 import { extractIssuerInfo, extractTenderMeta, shredExtraction } from '../pdf/shred'
+import { MAX_TENDERS_DOCUMENT_UPLOAD_BYTES } from '../../../shared/ipc'
 import {
   applyGapToRequirementsIndexed,
   buildTenderRecord,
@@ -66,7 +68,9 @@ import { Dialog } from './Dialog'
 import type { ExtractionRejection } from '../../../shared/ai-extraction'
 import { MAX_TENDERS_REVIEW_CONFLICTS } from '../../../shared/tenders-persistence'
 import {
+  AI_EXTRACTION_CHUNK_BUDGET_MS,
   AI_EXTRACTION_RULES,
+  AI_EXTRACTION_RUN_BUDGET_MS,
   adaptAiExtraction,
   checkDuplicateReference,
   createVisionCompletion,
@@ -76,6 +80,7 @@ import {
   settingsSupportVision,
   type AiPageImage,
   type AiPassProgress,
+  type AiRunBudget,
   type AiVisionCompletion,
   type DuplicateReferenceCheck,
   type TenderAiPassVision,
@@ -97,6 +102,35 @@ const DEMO_RFP_URLS = ['./demo/sample-rfp.pdf', '/demo/sample-rfp.pdf'] as const
 
 /** File name the bundled sample RFP is imported under. */
 const DEMO_RFP_FILE_NAME = 'sample-rfp.pdf'
+
+/**
+ * What the dropzone tells the user it will accept — and what it tells them about
+ * the SMALLER limit that decides whether the document can be kept.
+ *
+ * Two different bounds run here, and publishing only the first one was a promise
+ * the app could not keep: a PDF up to `PDF_PREFLIGHT_LIMITS.maxBytes` (100 MiB) is
+ * read, shredded and committed in full, but the managed-document store refuses to
+ * SAVE anything above `MAX_TENDERS_DOCUMENT_UPLOAD_BYTES` (25 MiB) — so a document
+ * between the two numbers imported fine and then existed only as a session blob,
+ * which the user had not been warned to expect when they chose the file. The
+ * import itself is unaffected either way, which is why the sentence says what
+ * actually happens rather than pretending the file is refused.
+ *
+ * Every number is read from the constant that ENFORCES it, and
+ * `tests/docx-intake.test.ts` asserts each one appears here, so the copy cannot
+ * drift away from the guard again.
+ */
+export function intakeLimitDisclosure(): string {
+  return (
+    `Import limits: up to ${groupThousands(PDF_PREFLIGHT_LIMITS.maxPages)} pages and ` +
+    `${formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes)} per PDF, or up to ` +
+    `${groupThousands(DOCX_PREFLIGHT_LIMITS.maxLines)} text lines and ` +
+    `${formatBytes(DOCX_PREFLIGHT_LIMITS.maxBytes)} per Word .docx. A document above ` +
+    `${formatBytes(MAX_TENDERS_DOCUMENT_UPLOAD_BYTES)} still imports and is shredded, but is too ` +
+    `large to save into the workspace: it stays open for this session only and has to be re-attached ` +
+    `after a restart.`
+  )
+}
 
 /** Label shown on a tender that came from the bundled sample RFP. */
 export const DEMO_TENDER_LABEL = 'Demo import'
@@ -306,6 +340,12 @@ export interface ImportVisionArgs {
   /** Built only when a page image can actually be read, so it is never wasted. */
   createCompletion: () => AiVisionCompletion
   renderPageImage: (doc: PDFDocumentProxy, pageNumber: number) => Promise<AiPageImage>
+  /**
+   * Ceilings for a vision pass that is given no run budget of its own. The pass
+   * hands the reader its own remaining budget whenever it has one; this is the
+   * fallback for the callers that do not (see `TenderAiPassVision.budget`).
+   */
+  budget?: AiRunBudget
 }
 
 /**
@@ -326,6 +366,7 @@ export function importVision(args: ImportVisionArgs): TenderAiPassVision {
     available: true,
     completion: args.createCompletion(),
     renderPageImage: (pageNumber) => args.renderPageImage(doc, pageNumber),
+    ...(args.budget ? { budget: args.budget } : {}),
   }
 }
 
@@ -761,6 +802,18 @@ export async function shredTenderFile(
     throw wordDocument ? new DocxImportCancelledError() : new PdfImportCancelledError()
   }
   let openedDoc: PDFDocumentProxy | null = null
+  // ONE read of the file for the whole import: the same buffer feeds the reader
+  // (the PDF parse, or the .docx parse) and the persistence write.
+  //
+  // Reading it twice — once here and once in the save below — put two full copies
+  // of the document's bytes on the heap at the same time for as long as the
+  // import ran: `File.arrayBuffer()` returns a fresh ArrayBuffer each call, so a
+  // 100 MB PDF held ~200 MB of buffers, on top of whatever the reader allocates.
+  // `loadPdfDocument` slices its argument before handing it to pdfjs (which MAY
+  // detach what it is given), so the reader never takes ownership of this buffer
+  // and reusing it for the write is safe; `extractDocxIntake` reads an
+  // `ArrayBuffer` in place, with no copy of its own.
+  let fileBytes: ArrayBuffer | null = null
   try {
     let ex: PageExtraction
     if (wordDocument) {
@@ -771,15 +824,17 @@ export async function shredTenderFile(
       assertDocxBytesWithinLimit(file.size)
       setShredding({ stage: 'loading', message: 'Reading Word document…', page: 0, total: 0 })
       throwIfAborted()
-      ex = await extractDocxIntake(file, { signal })
+      fileBytes = await file.arrayBuffer()
+      throwIfAborted()
+      ex = await extractDocxIntake(fileBytes, { signal })
       throwIfAborted()
     } else {
       // Preflight BEFORE reading the file buffer.
       assertPdfBytesWithinLimit(file.size)
       setShredding({ stage: 'loading', message: 'Reading PDF…', page: 0, total: 0 })
       throwIfAborted()
-      const buf = await file.arrayBuffer()
-      const doc = await loadPdfDocument(buf)
+      fileBytes = await file.arrayBuffer()
+      const doc = await loadPdfDocument(fileBytes)
       openedDoc = doc
 
       // Page-count preflight BEFORE any page is read or rendered.
@@ -871,7 +926,10 @@ export async function shredTenderFile(
     } else if (typeof window !== 'undefined' && window.tendersApi?.saveDocument) {
       let storedPath: string | null = null
       try {
-        const buffer = await file.arrayBuffer()
+        // The buffer this import already read — NOT a second `file.arrayBuffer()`.
+        // The reader above never takes ownership of it, so the write sends the
+        // same bytes the parser read and one document holds one buffer.
+        const buffer = fileBytes ?? (await file.arrayBuffer())
         const saveRes = await window.tendersApi.saveDocument({
           fileName: file.name,
           buffer,
@@ -1052,6 +1110,12 @@ export async function runAiPass(args: ImportAiPassArgs): Promise<void> {
     // A model that cannot take an image is not asked to, and neither is a
     // model reading a Word .docx: that file has no rendered page to hand it.
     // Either way the pages without text keep blocking and the pass says why.
+    //
+    // The run gets one wall clock for all its phases (`AiRunBudget`), and both
+    // model calls carry their own ceiling on that same clock: the vision read via
+    // `callTimeoutMs` with the per-call budget, and every text chunk via the
+    // budget `runTenderAiPass` hands down. Without them `chunkCount × latency`
+    // was unbounded — only a manual Cancel ended a run against a slow provider.
     const vision = importVision({
       doc: args.doc,
       supportsVision: settingsSupportVision(readiness.settings),
@@ -1060,15 +1124,24 @@ export async function runAiPass(args: ImportAiPassArgs): Promise<void> {
           bridge,
           settings: readiness.settings,
           onProgress: (progress) => reportAiPassChars(runId, progress.chars),
+          callTimeoutMs: AI_EXTRACTION_CHUNK_BUDGET_MS,
         }),
       renderPageImage: (doc, pageNumber) =>
         renderPdfPageImage(doc, pageNumber, { signal: controller.signal }),
+      budget: {
+        chunkBudgetMs: AI_EXTRACTION_CHUNK_BUDGET_MS,
+        runBudgetMs: AI_EXTRACTION_CHUNK_BUDGET_MS,
+      },
     })
     try {
       const completion = createTendersCompletion({
         bridge,
         settings: readiness.settings,
         onProgress: (progress) => reportAiPassChars(runId, progress.chars),
+        // The per-call ceiling: the run's own driver stops waiting at this figure
+        // and names the reason, and this is what cancels the request in main so a
+        // provider cannot go on streaming into a chunk the run has given up on.
+        callTimeoutMs: AI_EXTRACTION_CHUNK_BUDGET_MS,
       })
       const pass = await runTenderAiPass({
         completion,
@@ -1083,6 +1156,10 @@ export async function runAiPass(args: ImportAiPassArgs): Promise<void> {
         tenderTitle: args.tenderTitle,
         signal: controller.signal,
         vision,
+        budget: {
+          chunkBudgetMs: AI_EXTRACTION_CHUNK_BUDGET_MS,
+          runBudgetMs: AI_EXTRACTION_RUN_BUDGET_MS,
+        },
         onProgress: (progress) => reportAiPassProgress(runId, progress),
       })
       if (controller.signal.aborted) {
@@ -1670,12 +1747,7 @@ export function TenderList() {
                 Nothing is uploaded unless you turn on AI extraction, which sends the document to
                 the model provider you configured.
               </p>
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                Import limits: up to {PDF_PREFLIGHT_LIMITS.maxPages} pages ·{' '}
-                {formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes)} per PDF, and up to{' '}
-                {DOCX_PREFLIGHT_LIMITS.maxLines} text lines ·{' '}
-                {formatBytes(DOCX_PREFLIGHT_LIMITS.maxBytes)} per Word .docx.
-              </p>
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">{intakeLimitDisclosure()}</p>
               {/* Optional AI extraction: off unless the user turns it on, and
                   remembered between imports. Offered only when a model is
                   actually configured — otherwise the reason is stated plainly

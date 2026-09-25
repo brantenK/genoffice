@@ -24,7 +24,8 @@ Read `contracts-and-invariants.md` first.
 
 ## Task 2A — Live regression smoke (was cancelled)
 
-Why: F1–F4 made **all 23 privileged handlers** require a registered Tenders WebContents
+Why: F1–F4 made **every privileged handler** — 23 of them at the time this task ran; 33 today,
+`contracts-and-invariants.md` §3 — require a registered Tenders WebContents
 with a trusted top-frame origin. If origin matching is wrong, the live renderer breaks
 before the cutover even starts.
 
@@ -68,7 +69,9 @@ Required behaviour:
    local state only from the returned committed snapshot.
 3. **Save state UI**: Loading / Saving / Saved / Save failed (Retry) / Conflict. On
    `REVISION_CONFLICT`, surface the conflict (reload the committed document or prompt),
-   never blind-overwrite.
+   never blind-overwrite. **As built, there is a sixth kind:** `SaveStatus` also carries
+   `'no-bridge'`, rendered "Cannot save", for a build whose preload bridge is missing or
+   stale — the save-state names as they exist today are in `contracts-and-invariants.md` §2a.
 4. **Subscribe** to `onStoreChangedV2` to stay in sync if another window writes.
 5. **Remove localStorage domain authority**: keep only UI preferences (current page, pane
    width/mode, zoom, onboarding-seen) under a UI-only key. Do not store workspaces,
@@ -78,6 +81,10 @@ Required behaviour:
    schema-v2 document and commits it through the authoritative store at its own revision
    (v1, `schemaVersion: 3` and non-integer versions are all rejected), so it can never
    re-seed demo company/vault/tender data into, or overwrite, the user's store.
+   **As built:** no renderer module calls either channel any more; the legacy file watcher is
+   never started; `writeTendersStore` is called from no Tenders handler; and `getStoredData`
+   fails closed on an unreadable file (`RECOVERY_REQUIRED`, after quarantining) while a missing
+   file is still `null` — `contracts-and-invariants.md` §2b and §3.
 7. Debounce/queue saves sensibly; never fire concurrent saves with the same
    `expectedRevision` (the store serialises, but the UI should still avoid churn).
 
@@ -114,6 +121,13 @@ data?
 
 These were originally in the Phase 2 durability scope. They are separable and were
 deferred to prioritise speed.
+
+> **All four have since been closed** — items 1 and 2 in Phase 5 (rotating backups + explicit
+> recovery, and the managed-file lifecycle; see "Phase 5 also closed the deferred durability
+> items" in `contracts-and-invariants.md` §6), item 3 in Phase 4 (main-owned readiness
+> binding, §5 of the same file), and item 4 at the Phase 2 gate and Phase 5 WP-14 (items 1–13
+> of §6, of which 11 and 13 were closed later still). The list below is kept as the record of
+> what was deferred and why, not as open work.
 
 1. **Rotating backups + explicit recovery UI** (planner WP-2 remainder)
    - Rotating last-known-good copies of `tenders-data.json`; a recovery screen listing

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   assessDocHealth,
   assessReadiness,
+  checkCompanyDetails,
+  daysBetween,
   docsAtClosing,
   isRequirementResolved,
   parseClosingDate,
@@ -656,6 +658,53 @@ describe('company-profile readiness semantics', () => {
       expect(report.ready).toBe(true)
     },
   )
+
+  it.each(COMPANY_RULE_FIELDS)(
+    'reads the catalogue rule key, not a quoted clause, for %s',
+    (ruleKey, companyField) => {
+      // Tender text quotes returnables it then withdraws ("the following is not
+      // applicable to this bid: registration number …"). The quoted clause carries
+      // the keyword while demanding nothing of an optional requirement, so the
+      // mandatory-ness of the requirement decides — never the words inside it.
+      const rule = TENDER_RULES.find((candidate) => candidate.key === ruleKey)!
+      const keyword = rule.vaultHints.keywords[0]
+      const report = assessReadiness(
+        tender({
+          requirements: [
+            catalogueRequirement(rule, {
+              isMandatory: false,
+              verbatimClause: `The following is not applicable to this bid: ${keyword}.`,
+              linkedVaultDocId: null,
+            }),
+          ],
+        }),
+        [],
+        companyWithout(companyField),
+      )
+
+      expect(blockingCheck(report, 'company-details')?.passed).toBe(true)
+      expect(report.ready).toBe(true)
+    },
+  )
+
+  it('does not demand company details for a requirement quoted with a company keyword', () => {
+    const registrationRule = TENDER_RULES.find((rule) => rule.key === 'cipc')!
+    const mismatches = checkCompanyDetails(
+      tender({
+        requirements: [
+          catalogueRequirement(registrationRule, {
+            isMandatory: false,
+            title: 'Registration of subcontractors',
+            verbatimClause: 'Subcontractors must provide their own CIPC registration.',
+            linkedVaultDocId: null,
+          }),
+        ],
+      }),
+      companyWithout('registrationNumber'),
+    )
+
+    expect(mismatches).toEqual([])
+  })
 })
 
 describe('NOT_APPLICABLE audit justification', () => {
@@ -690,6 +739,20 @@ describe('NOT_APPLICABLE audit justification', () => {
     }
 
     expect(isRequirementResolved(candidate)).toBe(true)
+  })
+
+  it('never treats the machine-written reason as an N/A justification', () => {
+    // `reason` is in the signature because every caller holds it, not because it
+    // resolves anything: `applyGapToRequirement` writes it on every automated
+    // pass, so accepting it would let the gap analyser mark a requirement N/A
+    // without a person deciding anything. Only `notApplicableReason` counts.
+    const candidate: FutureRequirementResolution = {
+      status: 'NOT_APPLICABLE',
+      reason: 'The issuing authority confirmed this requirement is inapplicable.',
+      notApplicableReason: null,
+    }
+
+    expect(isRequirementResolved(candidate)).toBe(false)
   })
 })
 
@@ -825,6 +888,161 @@ describe('strict civil-date handling', () => {
       if (originalTimezone === undefined) delete process.env.TZ
       else process.env.TZ = originalTimezone
     }
+  })
+})
+
+// ── the closing instant is never invented ─────────────────────────────────────
+// `docsAtClosing` used to fall back to `Date.now() + 90 days` when the tender had
+// no parseable closing date, so every linked document's VALID/EXPIRED verdict —
+// and the `docs-at-closing` gate built on it — was decided on a deadline nobody
+// stated. These tests pin the honest behaviour: no closing instant on file means
+// the assessment does not happen, and the gate says so in words.
+
+describe('an unknown closing instant is never fabricated', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // A deadline that nothing will ever make expire on the synthetic timeline: the
+  // fabricated fallback was `now + 90d`, so on 2026-09-01 the invented closing
+  // instant was 2026-11-30 and this document "remained valid through closing".
+  const LONG_LIVED_EVIDENCE = vaultDoc({ expiryDate: '2027-12-31' })
+
+  it.each<[string, string | null]>([
+    ['no closing date at all', null],
+    ['a blank closing date', '   '],
+  ])('reports an unevaluable assessment for %s', (_label, closingDate) => {
+    const tenderRecord = tender({
+      closingDate: closingDate as TenderRecord['closingDate'],
+      requirements: [requirement()],
+    })
+    const [entry] = docsAtClosing(tenderRecord, [LONG_LIVED_EVIDENCE])
+
+    expect(entry.closingDate).toEqual({ status: 'UNKNOWN', raw: null })
+    // Not assessed: no health verdict and no day count on a made-up timeline.
+    expect(entry.healthAtClosing).toEqual({
+      health: 'UNKNOWN',
+      daysUntilExpiry: null,
+      daysSinceCertified: null,
+      stampDaysLeft: null,
+    })
+    expect(entry.willFail).toBe(true)
+
+    const report = assessReadiness(tenderRecord, [LONG_LIVED_EVIDENCE], MOCK_COMPANY)
+    const check = blockingCheck(report, 'docs-at-closing')
+    expect(check?.passed).toBe(false)
+    expect(report.ready).toBe(false)
+    expect(check?.detail).toBe(
+      'Cannot be evaluated: this tender has no closing date on file, so there is no deadline to check 1 linked document(s) against. Confirm the closing date first.',
+    )
+    // An unevaluable dimension earns no score, and the check is still the single
+    // biggest loss, so the app points at the thing to fix.
+    expect(report.score).toBeLessThan(100)
+    expect(report.nextBestAction?.detail).toBe(check?.detail)
+  })
+
+  it('reports an unparseable closing date with the text it refused', () => {
+    const raw = 'Friday, 30 November 2026 (11:00)'
+    const tenderRecord = tender({
+      closingDate: raw,
+      requirements: [requirement()],
+    })
+    const [entry] = docsAtClosing(tenderRecord, [LONG_LIVED_EVIDENCE])
+
+    expect(entry.closingDate).toEqual({ status: 'UNPARSEABLE', raw })
+    expect(entry.healthAtClosing.health).toBe('UNKNOWN')
+    expect(entry.willFail).toBe(true)
+
+    const check = blockingCheck(
+      assessReadiness(tenderRecord, [LONG_LIVED_EVIDENCE], MOCK_COMPANY),
+      'docs-at-closing',
+    )
+    expect(check?.passed).toBe(false)
+    expect(check?.detail).toContain(`the closing date "${raw}" could not be read`)
+    expect(check?.detail).toContain('Confirm the closing date first')
+  })
+
+  it('never reports a permanent document as valid through an unknown closing date', () => {
+    // The permanent branch of `assessDocHealth` returns VALID without reading the
+    // instant at all, so it is the one path that would otherwise slip a "valid
+    // through closing" verdict out of a deadline the app does not have.
+    const cipcRule = TENDER_RULES.find((rule) => rule.key === 'cipc')!
+    const tenderRecord = tender({
+      closingDate: null as unknown as TenderRecord['closingDate'],
+      requirements: [catalogueRequirement(cipcRule, { linkedVaultDocId: 'vault-cipc' })],
+    })
+    const [entry] = docsAtClosing(tenderRecord, [vaultDoc({ id: 'vault-cipc', expiryDate: null })])
+
+    expect(entry.healthAtClosing.health).toBe('UNKNOWN')
+    expect(entry.willFail).toBe(true)
+    expect(
+      blockingCheck(assessReadiness(tenderRecord, [], MOCK_COMPANY), 'docs-at-closing')?.passed,
+    ).toBe(false)
+  })
+
+  it('still reports a fully-known closing date as an assessed instant', () => {
+    const [entry] = docsAtClosing(
+      tender({ closingDate: '2026-12-18', requirements: [requirement()] }),
+      [LONG_LIVED_EVIDENCE],
+    )
+
+    expect(entry.closingDate).toEqual({
+      status: 'KNOWN',
+      raw: '2026-12-18',
+      instant: new Date(Date.parse('2026-12-18T21:59:00.000Z')),
+    })
+    expect(entry.healthAtClosing.health).toBe('VALID')
+    expect(entry.willFail).toBe(false)
+  })
+
+  it('leaves the gate untouched when no document is linked to the tender', () => {
+    // Nothing was ever assessed against the missing instant, so there is nothing
+    // for it to invalidate: the check keeps its historical copy exactly.
+    const signatureOnly = tender({
+      closingDate: null as unknown as TenderRecord['closingDate'],
+      signatureChecks: { sbd_forms: true },
+      requirements: [
+        requirement({
+          id: 'req-sbd',
+          ruleKey: 'sbd_forms',
+          title: 'Signed SBD returnable forms',
+          linkedVaultDocId: null,
+        }),
+      ],
+    })
+    const report = assessReadiness(signatureOnly, [], MOCK_COMPANY)
+    const check = blockingCheck(report, 'docs-at-closing')
+
+    expect(check?.passed).toBe(true)
+    expect(check?.detail).toBe('No documents linked yet.')
+  })
+})
+
+describe('daysBetween is a civil-day reading, never a decision', () => {
+  it('counts South African civil days, not a rounded 24-hour quotient', () => {
+    // The pair that matters is the one the SA civil calendar flips and the raw
+    // hour count does not. 15:00Z is 17:00 SAST on 30 Nov; 22:01Z is 00:01 SAST on
+    // 1 Dec. Seven hours apart — `Math.round` over the instants would say 0 — but
+    // one civil day apart, which is what a "days away" label must say.
+    expect(daysBetween(new Date('2026-11-30T22:01:00Z'), new Date('2026-11-30T15:00:00Z'))).toBe(1)
+    // …and the same civil day reads 0 however far into it the clock has run: 14:00Z
+    // is 16:00 SAST on 30 Nov, nine hours before the value above, and 0 SA civil
+    // days from it.
+    expect(daysBetween(new Date('2026-11-30T14:00:00Z'), new Date('2026-11-30T15:00:00Z'))).toBe(0)
+    // A whole number of days is unaffected.
+    expect(daysBetween(new Date('2026-12-31T00:00:00Z'), new Date('2026-12-01T00:00:00Z'))).toBe(30)
+    expect(daysBetween(new Date('2026-12-01T00:00:00Z'), new Date('2026-12-31T00:00:00Z'))).toBe(
+      -30,
+    )
+  })
+
+  it('returns 0 rather than NaN for an instant that is not a real date', () => {
+    expect(daysBetween(new Date('nope'), new Date('2026-11-30T00:00:00Z'))).toBe(0)
   })
 })
 

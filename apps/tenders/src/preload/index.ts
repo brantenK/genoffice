@@ -197,6 +197,12 @@ const tendersApi: TendersApi = {
   getReminders: () => ipcRenderer.invoke(TENDERS_CHANNELS.remindersGet),
   setReminders: (settings) => ipcRenderer.invoke(TENDERS_CHANNELS.remindersSet, settings),
   checkReminders: () => ipcRenderer.invoke(TENDERS_CHANNELS.remindersCheck),
+  // ── Diagnostics ───────────────────────────────────────────────────────────
+  // Write-only from the UI: the renderer reports what it saw and asks where the
+  // log lives. There is no reader here, so a renderer can add to the record and
+  // never browse it; the bounds and the sink both stay in main.
+  recordDiagnostics: (request) => ipcRenderer.invoke(TENDERS_CHANNELS.diagnosticsRecord, request),
+  diagnosticsPath: () => ipcRenderer.invoke(TENDERS_CHANNELS.diagnosticsPath),
 }
 
 contextBridge.exposeInMainWorld('tendersApi', tendersApi)

@@ -58,12 +58,12 @@ import {
   atomicWriteDocumentFile,
   CURRENT_TENDERS_SCHEMA_VERSION,
   getUniqueTimestamp,
+  LegacyTendersReadError,
   migrateAndValidateTenders,
   readDocumentFile,
   readTendersStore,
   resolveSafeTendersPath,
   saveDocumentFile,
-  SEED_COMPANY_ID,
   writeTendersStore,
 } from '../src/main/tenders-main'
 import { RULE_BY_KEY, TENDER_RULES } from '../src/shared/rules'
@@ -483,11 +483,12 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
   // =========================================================================
   describe('3. Store Migration & Concurrency Stress', () => {
     it('preserves data integrity under high-volume store migration variations', () => {
-      expect(migrateAndValidateTenders(null).version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
-      expect(migrateAndValidateTenders(undefined).version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
-      expect(migrateAndValidateTenders(12345).workspaces).toHaveLength(1)
-      expect(migrateAndValidateTenders('corrupted-string').workspaces).toHaveLength(1)
-      expect(migrateAndValidateTenders([]).workspaces).toHaveLength(1)
+      // Every payload the reader cannot interpret is refused, never answered with
+      // the demo seed envelope: an invented workspace on this path would be a
+      // customer register, a compliance vault and a tender the file never held.
+      for (const junk of [null, undefined, 12345, 'corrupted-string', []]) {
+        expect(() => migrateAndValidateTenders(junk)).toThrow(LegacyTendersReadError)
+      }
 
       const legacy = {
         version: 0,
@@ -504,9 +505,17 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
       }
       const migrated = migrateAndValidateTenders(legacy)
       expect(migrated.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
-      expect(migrated.activeCompanyId).toBe(SEED_COMPANY_ID)
-      expect(migrated.workspaces[0].id).toBe(SEED_COMPANY_ID)
-      expect(migrated.workspaces[0].vault).toHaveLength(7)
+      // Read as written: no rewrite of either id to the seed company, and no
+      // seeded vault of 7 compliance documents behind the empty lists.
+      expect(migrated.activeCompanyId).toBe('ws-ekurhuleni-01')
+      expect(migrated.workspaces).toHaveLength(1)
+      expect(migrated.workspaces[0].id).toBe('ws-ekurhuleni-01')
+      expect(migrated.workspaces[0].company.name).toBe('Ekurhuleni Works')
+      expect(migrated.workspaces[0].customers).toEqual([])
+      expect(migrated.workspaces[0].vault).toEqual([])
+      expect(migrated.workspaces[0].tenders).toEqual([])
+      expect(JSON.stringify(migrated)).not.toContain('vd-tax')
+      expect(JSON.stringify(migrated)).not.toContain('RFP-WTR-2026-04')
 
       const custom = {
         version: 1,
@@ -628,37 +637,47 @@ describe('Adversarial Stress Testing & Heuristic Verification', () => {
       expect(finalStore.activeCompanyId).toBe('co-atomic-39')
     })
 
-    it('executes 50 concurrent saveDocumentFile calls with zero timestamp collisions', async () => {
-      const promises: Promise<any>[] = []
-      const fileCount = 50
+    // Budget, not an assertion: this test writes and reads back 50 documents
+    // concurrently (100 real file operations), measured at 7 150 ms standalone —
+    // under a third of the 20 s default alone, but 2.8× that cost under the full
+    // parallel suite, where it timed out at 20 000 ms. The collision assertions
+    // below are unchanged; the fail-safe is lengthened so a correct but
+    // load-slowed run is not reported as a timestamp collision failure.
+    it(
+      'executes 50 concurrent saveDocumentFile calls with zero timestamp collisions',
+      { timeout: 120_000 },
+      async () => {
+        const promises: Promise<any>[] = []
+        const fileCount = 50
 
-      for (let i = 0; i < fileCount; i++) {
-        const req = {
-          fileName: `contract-spec-${i}.pdf`,
-          buffer: Buffer.from(`Adversarial PDF content for document #${i} — timestamp test`),
-          category: 'rfp' as const,
+        for (let i = 0; i < fileCount; i++) {
+          const req = {
+            fileName: `contract-spec-${i}.pdf`,
+            buffer: Buffer.from(`Adversarial PDF content for document #${i} — timestamp test`),
+            category: 'rfp' as const,
+          }
+          promises.push(saveDocumentFile(req, testDir))
         }
-        promises.push(saveDocumentFile(req, testDir))
-      }
 
-      const results = await Promise.all(promises)
+        const results = await Promise.all(promises)
 
-      for (const res of results) {
-        expect(res.ok).toBe(true)
-        expect(res.storedPath).toMatch(/^documents\/\d+_contract-spec-\d+\.pdf$/)
-      }
+        for (const res of results) {
+          expect(res.ok).toBe(true)
+          expect(res.storedPath).toMatch(/^documents\/\d+_contract-spec-\d+\.pdf$/)
+        }
 
-      const storedPaths = results.map((r) => r.storedPath)
-      const uniquePaths = new Set(storedPaths)
-      expect(uniquePaths.size).toBe(fileCount)
+        const storedPaths = results.map((r) => r.storedPath)
+        const uniquePaths = new Set(storedPaths)
+        expect(uniquePaths.size).toBe(fileCount)
 
-      for (let i = 0; i < fileCount; i++) {
-        const readRes = await readDocumentFile({ storedPath: storedPaths[i] }, testDir)
-        expect(readRes.ok).toBe(true)
-        const text = Buffer.from(readRes.buffer!).toString('utf8')
-        expect(text).toContain(`Adversarial PDF content for document #${i}`)
-      }
-    })
+        for (let i = 0; i < fileCount; i++) {
+          const readRes = await readDocumentFile({ storedPath: storedPaths[i] }, testDir)
+          expect(readRes.ok).toBe(true)
+          const text = Buffer.from(readRes.buffer!).toString('utf8')
+          expect(text).toContain(`Adversarial PDF content for document #${i}`)
+        }
+      },
+    )
 
     it('blocks directory traversal attacks in saveDocumentFile, readDocumentFile, and resolveSafeTendersPath', async () => {
       // 1. Directory traversal in fileName during save (stripped by basename)

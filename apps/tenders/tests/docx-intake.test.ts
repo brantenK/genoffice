@@ -6,11 +6,14 @@ import {
   DocxPreflightError,
   docxPaginationNote,
   extractDocxIntake,
+  groupThousands,
   type DocxPreflightCode,
 } from '../src/renderer/src/intake/docx'
 import { buildClauses } from '../src/renderer/src/pdf/clauses'
-import { PDF_PREFLIGHT_LIMITS } from '../src/renderer/src/pdf/extract'
+import { formatBytes, PDF_PREFLIGHT_LIMITS } from '../src/renderer/src/pdf/extract'
 import { extractTenderMeta, shredExtraction } from '../src/renderer/src/pdf/shred'
+import { intakeLimitDisclosure } from '../src/renderer/src/components/TenderList'
+import { MAX_TENDERS_DOCUMENT_UPLOAD_BYTES } from '../src/shared/ipc'
 import type { BoundingBox } from '../src/shared/types'
 
 /**
@@ -292,7 +295,10 @@ describe('DOCX intake', () => {
 
     it('accepts a File and reads the bytes only once the byte cap allows it', async () => {
       const bytes = await buildDocx({ bodyXml: RFP_HEAD + P(TAX_CLAUSE) })
-      const file = new File([bytes], 'tender.docx', {
+      // A `File` part takes an `ArrayBuffer`-backed view; the generator hands back
+      // a `Uint8Array` whose buffer is only known to be `ArrayBufferLike`, so the
+      // copy gives it the concrete backing buffer the DOM type asks for.
+      const file = new File([new Uint8Array(bytes)], 'tender.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       })
       const intake = await extractDocxIntake(file)
@@ -475,6 +481,46 @@ describe('DOCX intake', () => {
       expect(DOCX_PREFLIGHT_LIMITS.maxBytes).toBe(PDF_PREFLIGHT_LIMITS.maxBytes)
       expect(DOCX_PREFLIGHT_LIMITS.maxBytes).toBe(100 * 1024 * 1024)
       expect(DOCX_PREFLIGHT_LIMITS.maxLines).toBe(24_600)
+      expect(DOCX_PREFLIGHT_LIMITS.maxTextChars).toBe(12_000_000)
+    })
+
+    /**
+     * The character budget exists because a LINE count cannot bound a DOCX: a
+     * paragraph with no break is one line of unbounded length, and the engine's
+     * own zip limit admits 512 MiB in a single part. This is the shape the line
+     * guard passes and the text guard must catch. The budget is injected small so
+     * the fixture is cheap; the value the app ships is asserted against the
+     * published constant further down.
+     */
+    it('refuses too much text on too few lines, where a line count sees nothing', async () => {
+      const limits = { ...DOCX_PREFLIGHT_LIMITS, maxTextChars: 10_000 }
+      const bytes = await buildDocx({ bodyXml: P('x'.repeat(limits.maxTextChars + 1)) })
+      const error = await expectCode(extractDocxIntake(bytes, { limits }), 'TOO_MUCH_TEXT')
+      expect(error.actual).toBe(limits.maxTextChars + 1)
+      expect(error.limit).toBe(limits.maxTextChars)
+      expect(error.message).toMatch(/10 000 characters per document/)
+      // One line: the line budget is nowhere near binding for this document.
+      const atLimit = await buildDocx({ bodyXml: P('x'.repeat(limits.maxTextChars)) })
+      await expect(extractDocxIntake(atLimit, { limits })).resolves.toMatchObject({
+        numLines: 1,
+        numChars: limits.maxTextChars,
+      })
+    })
+
+    it('reports the extracted character count on the result', async () => {
+      const bytes = await buildDocx({ bodyXml: RFP_HEAD + P(TAX_CLAUSE) })
+      const intake = await extractDocxIntake(bytes)
+      const lineChars = intake.pages.reduce(
+        (total, page) => total + page.lines.reduce((sum, line) => sum + line.text.length, 0),
+        0,
+      )
+      expect(intake.numChars).toBeGreaterThan(0)
+      expect(intake.numChars).toBe(lineChars)
+      // `page.text` joins the lines with '\n', so it carries one more character
+      // per line than the text lifted — the count is of the text, not the join.
+      const joined = intake.pages.reduce((total, page) => total + page.text.length, 0)
+      const lines = intake.pages.reduce((total, page) => total + page.lines.length, 0)
+      expect(joined).toBe(lineChars + lines - intake.pages.length)
     })
 
     it('returns no partial result when the import is cancelled', async () => {
@@ -488,5 +534,54 @@ describe('DOCX intake', () => {
       expect(error).toBeInstanceOf(DocxImportCancelledError)
       expect((error as DocxImportCancelledError).code).toBe('CANCELLED')
     })
+  })
+})
+
+// ── what the dropzone advertises is what the preflights enforce ───────────────
+//
+// The trust bug this closes: the dropzone said "up to 100.0 MB per PDF" while the
+// managed-document store refused to SAVE above 25 MiB, so a document the copy
+// called fine imported and then existed only as a session blob. The disclosure now
+// states both bounds, and every number in it is read from the constant that
+// ENFORCES it — asserted here against those same constants, so the two cannot
+// drift apart again. Reading the constant (rather than restating its value) is
+// what gives this teeth: change a limit and this fails until the copy is changed
+// with it.
+
+describe('the advertised import limits are the enforced ones', () => {
+  const disclosure = intakeLimitDisclosure()
+
+  it('quotes the PDF preflight figure that refuses an oversize PDF', () => {
+    expect(disclosure).toContain(groupThousands(PDF_PREFLIGHT_LIMITS.maxPages))
+    expect(disclosure).toContain(formatBytes(PDF_PREFLIGHT_LIMITS.maxBytes))
+  })
+
+  it('quotes the DOCX preflight figures that refuse an oversize .docx', () => {
+    expect(disclosure).toContain(groupThousands(DOCX_PREFLIGHT_LIMITS.maxLines))
+    expect(disclosure).toContain(formatBytes(DOCX_PREFLIGHT_LIMITS.maxBytes))
+  })
+
+  it('names the smaller bound that decides whether the document can be kept', () => {
+    // The whole point of the disclosure: the save ceiling is not the import
+    // ceiling, and a document between them is kept for the session only.
+    expect(MAX_TENDERS_DOCUMENT_UPLOAD_BYTES).toBeLessThan(PDF_PREFLIGHT_LIMITS.maxBytes)
+    expect(disclosure).toContain(formatBytes(MAX_TENDERS_DOCUMENT_UPLOAD_BYTES))
+    expect(disclosure).toMatch(/session only/)
+    // ...and it names both readers, so neither path is described by the other's
+    // numbers.
+    expect(disclosure).toMatch(/per PDF/)
+    expect(disclosure).toMatch(/per Word \.docx/)
+  })
+
+  it('fails if either preflight constant is raised past what it advertises', () => {
+    // A RED case for the assertions above: the disclosure is built from these
+    // constants, so a value it does not quote is a value it would not have.
+    const raised = { ...PDF_PREFLIGHT_LIMITS, maxBytes: PDF_PREFLIGHT_LIMITS.maxBytes * 2 }
+    expect(disclosure).not.toContain(formatBytes(raised.maxBytes))
+    const raisedLines = { ...DOCX_PREFLIGHT_LIMITS, maxLines: 99_999 }
+    expect(disclosure).not.toContain(groupThousands(raisedLines.maxLines))
+    // The grouped form is the published one, so the raw digits are NOT what the
+    // assertion above would accept by accident.
+    expect(groupThousands(raisedLines.maxLines)).not.toBe(String(raisedLines.maxLines))
   })
 })

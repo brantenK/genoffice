@@ -727,19 +727,21 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 /**
- * The reminder switch's own sizing, rather than the shared `FORM_CHECKBOX_CLASS`.
+ * The reminder switch's own sizing.
  *
- * That class is `size-4 box-content p-1` — a 16px box whose 4px padding is
- * documented as bringing the pointer target to 24px. On a checkbox it does not:
- * `padding` computes to `0px` on `<input type="checkbox">` (the user-agent
- * stylesheet for the native control drops the author's padding), so the padding
- * utility adds nothing and the box stays at the 16px `size-4`. That is a measured
- * fact, not a guess — the e2e a11y journey (`e2e/tenders-a11y-theme.spec.ts`,
- * "interactive targets below 24x24px") reads the rendered border box and reported
- * this control at 16x16. The class is shared with the overlay forms, so it is not
- * this page's to change; the switch carries its own sizing.
+ * It carried this class while the shared `FORM_CHECKBOX_CLASS` measured 16x16:
+ * that class was `size-4 box-content p-1`, and on a native checkbox `padding`
+ * computes to `0px` (the user-agent stylesheet for the control owns it), so the
+ * box stayed at 16px — a measured fact, not a guess: the e2e a11y journey
+ * ("interactive targets below 24x24px") read the rendered border box and reported
+ * this control at 16x16.
  *
- * `size-6` is the fix: `calc(var(--spacing) * 6)` with `--spacing: .25rem` is
+ * The shared class has since been fixed to `size-6` and now measures
+ * 23.93x23.93 (the same 24px box this one gives), so the two are equivalent
+ * today. The switch keeps its own: its size is this surface's decision, and
+ * `tests/reminders-settings-copy.test.ts` pins that it carries it.
+ *
+ * `size-6` is `calc(var(--spacing) * 6)` with the app's `--spacing: .25rem`:
  * exactly 24px on both axes, and since padding is ignored on a checkbox there is
  * nothing left for a box-sizing rule to reinterpret. The sidebar collapse control
  * in `App.tsx` is already a `size-6` button that passes this same measurement.

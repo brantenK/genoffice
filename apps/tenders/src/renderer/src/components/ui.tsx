@@ -230,13 +230,35 @@ export const FORM_CONTROL_CLASS =
 export const FORM_LABEL_CLASS = 'mb-1 block text-[11px] font-medium text-[var(--text-secondary)]'
 
 /**
- * 16px visual box + a 4px transparent border = a 24x24 pointer target, the
- * minimum the a11y lane enforces. The border is used rather than padding
- * because the UA stylesheet computes `padding: 0` on a checkbox, so a `p-*`
- * utility there silently leaves a 16x16 target.
+ * A 24x24 checkbox: `size-6` is `calc(var(--spacing) * 6)` = 24px on both axes,
+ * the minimum pointer target the a11y lane enforces.
+ *
+ * It is a SIZE class rather than a smaller box grown by padding or a transparent
+ * border, because on a native checkbox neither of those grows anything. Measured
+ * in the built app (the certified-document checkbox in `DocumentsPage`, read with
+ * `getBoundingClientRect()` and `getComputedStyle()`):
+ *
+ *   * `size-4 p-1` — computed `padding` is `0px`, so the box measures 16x16;
+ *   * `size-4 box-content border-4 border-transparent` — `box-sizing:
+ *     content-box` does apply, but computed `border-width` is `0px` and
+ *     `border-style` is `none`, so the box still measures 15.98x15.98. This was
+ *     the class's own claim of "a 24x24 pointer target", and the a11y lane
+ *     reported the control at 16x16 — the defect this replaces;
+ *   * `size-6` — measures 23.93x23.93, i.e. the same 24px box this app renders as
+ *     16px for a 16px target (the device-pixel scale reports 15.98 for 16).
+ *
+ * The drop is specific to the native control, not to the author's styles: the
+ * same inline `padding: 4px; border: 4px solid` on a text input is honoured
+ * (`4px 4px` computed, `border-style: solid`), and on a checkbox comes back as
+ * `0px` / `none`. So the size class has to be the whole fix: it sets the rendered
+ * box directly, with nothing left for `box-sizing` to reinterpret.
+ *
+ * Shared by the overlay forms that tick a row: the certified-document checkbox in
+ * `DocumentsPage`, the signature checklist in `ReadinessDrawer` and the "Ready"
+ * flag on a required document in `CustomerFormDialog`.
  */
 export const FORM_CHECKBOX_CLASS =
-  'size-4 box-content border-4 border-transparent cursor-pointer rounded accent-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none'
+  'size-6 cursor-pointer rounded accent-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none'
 
 export interface FormFieldProps {
   label: string

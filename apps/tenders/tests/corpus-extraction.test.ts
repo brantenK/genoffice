@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { buildFixturePdf } from '../../../tools/tenders-corpus/generate.mjs'
-import { CORPUS } from '../../../tools/tenders-corpus/corpus.mjs'
-import { CRITICAL_FIELDS, computeMetrics } from '../../../tools/tenders-corpus/metrics.mjs'
 import { extractAllPages, loadPdfDocument } from '../src/renderer/src/pdf/extract'
 import {
   extractSubmissionLogistics,
@@ -69,8 +67,89 @@ interface Gold {
   closingDateTime: string | null
   unconfirmedFields: string[]
   conflicts: Record<string, boolean>
+  sector: string
+  issuerType: string
+  tags: string[]
+  /** The committed PDF hash the fixture is proved reproducible against. */
+  pdfSha256: string
   [key: string]: unknown
 }
+
+// ── the fixture tooling, typed at the module boundary ─────────────────────────
+//
+// `tools/tenders-corpus/*.mjs` is plain ESM tooling with no declaration files, so
+// a static import of it is an implicit `any` (TS7016) and every callback over its
+// values an implicit-any parameter. These interfaces describe exactly what this
+// harness reads, and the modules are loaded through `createRequire` — a call whose
+// argument is a path string, so the modules are TYPED at the boundary rather than
+// suppressed. A rename or a shape change in the tooling now fails this file's
+// typecheck instead of silently becoming `any`.
+//
+// (The alternative — a `.d.mts` beside each tool — is the better home for these
+// types, but those files are outside this test's ownership.)
+
+/** One synthetic fixture from `tools/tenders-corpus/corpus.mjs`. */
+interface CorpusFixture {
+  gold: Gold
+  pages: unknown[]
+}
+
+/** The metric report `tools/tenders-corpus/metrics.mjs#computeMetrics` returns. */
+interface MetricsReport {
+  corpusKind: string
+  fixtureCount: number
+  metrics: {
+    criticalMetadataAccuracy: {
+      overall: number | null
+      perField: Record<string, { correct: number; total: number }>
+    }
+    criticalRequirementRecall: {
+      overall: number | null
+      mandatory: number | null
+      disqualifiers: number | null
+      expected: number
+      found: number
+      missed: string[]
+    }
+    falsePositiveRate: {
+      overall: number | null
+      falsePositives: number
+      extracted: number
+      detail: string[]
+    }
+    conflictDetectionAccuracy: { overall: number | null; correct: number; total: number }
+    unconfirmedClassificationAccuracy: { overall: number | null; correct: number; total: number }
+    nativeVsScannedPageAccuracy: { overall: number | null; correct: number; total: number }
+    pricingRequirementRecall: {
+      overall: number | null
+      expected: number
+      detected: number
+      note: string
+    }
+    falseReadinessCount: { count: number; target: number; fixtures: string[] }
+  }
+  fixtures: Array<{ id: string }>
+}
+
+const requireTool = createRequire(import.meta.url)
+
+const generateTools = requireTool('../../../tools/tenders-corpus/generate.mjs') as {
+  buildFixturePdf(fixture: CorpusFixture): Promise<Uint8Array>
+}
+
+const corpusTools = requireTool('../../../tools/tenders-corpus/corpus.mjs') as {
+  CORPUS: CorpusFixture[]
+}
+
+const metricsTools = requireTool('../../../tools/tenders-corpus/metrics.mjs') as {
+  CRITICAL_FIELDS: string[]
+  /** `records` is the array this harness builds below (`Record_`). */
+  computeMetrics(records: readonly Record_[]): MetricsReport
+}
+
+const { buildFixturePdf } = generateTools
+const { CORPUS } = corpusTools
+const { CRITICAL_FIELDS, computeMetrics } = metricsTools
 
 interface Record_ {
   gold: Gold
@@ -103,16 +182,16 @@ describe('Tenders synthetic intake corpus harness', () => {
     expect(CORPUS.length).toBeGreaterThanOrEqual(25)
     expect(CORPUS.length).toBeLessThanOrEqual(40)
 
-    const sectors = new Set(CORPUS.map((fixture: any) => fixture.gold.sector))
+    const sectors = new Set(CORPUS.map((fixture) => fixture.gold.sector))
     expect(sectors).toEqual(
       new Set(['office-equipment', 'construction-civil', 'professional-services']),
     )
 
-    const issuerTypes = new Set(CORPUS.map((fixture: any) => fixture.gold.issuerType))
+    const issuerTypes = new Set(CORPUS.map((fixture) => fixture.gold.issuerType))
     expect(issuerTypes.has('municipal')).toBe(true)
     expect(issuerTypes.has('government')).toBe(true)
 
-    const tags = CORPUS.flatMap((fixture: any) => fixture.gold.tags as string[])
+    const tags = CORPUS.flatMap((fixture) => fixture.gold.tags)
     const count = (tag: string) => tags.filter((entry) => entry === tag).length
     expect(count('scanned-only')).toBeGreaterThanOrEqual(3)
     expect(count('mixed')).toBeGreaterThanOrEqual(3)
@@ -130,8 +209,8 @@ describe('Tenders synthetic intake corpus harness', () => {
     expect(tags).toContain('forms')
 
     const ids = new Set<string>()
-    for (const fixture of CORPUS as any[]) {
-      const id = fixture.gold.id as string
+    for (const fixture of CORPUS) {
+      const id = fixture.gold.id
       expect(ids.has(id), `duplicate fixture id ${id}`).toBe(false)
       ids.add(id)
 
@@ -142,8 +221,7 @@ describe('Tenders synthetic intake corpus harness', () => {
 
       // Determinism: the generated bytes hash must match the committed gold
       // annotation produced by `tools/tenders-corpus/generate-fixtures.mjs`.
-      const committedHash = (gold as any).pdfSha256 as string
-      expect(hash, `fixture ${id} is not reproducible from the generator`).toBe(committedHash)
+      expect(hash, `fixture ${id} is not reproducible from the generator`).toBe(gold.pdfSha256)
       expect(fixture.pages.length).toBe(gold.pageCount)
 
       // Build twice — byte-for-byte reproducible within a run.
@@ -152,13 +230,19 @@ describe('Tenders synthetic intake corpus harness', () => {
     }
   })
 
-  let report: ReturnType<typeof computeMetrics>
+  let report: MetricsReport
 
+  // Budget, not an assertion: this hook builds every corpus fixture and runs the
+  // real parser over all of them, measured at ~7.8 s standalone (the whole file
+  // is 9 707 ms) against vitest's 10 s default `hookTimeout` — 1.3× headroom,
+  // which the full parallel suite consumes (observed in-suite: "Hook timed out in
+  // 10000ms" while the file is green alone). 120 000 ms is ~15× the measured
+  // cost, so a genuinely hung parser still fails. No assertion is changed.
   beforeAll(async () => {
     const records: Record_[] = []
 
-    for (const fixture of CORPUS as any[]) {
-      const id = fixture.gold.id as string
+    for (const fixture of CORPUS) {
+      const id = fixture.gold.id
       const gold = JSON.parse(readFileSync(goldPath(id), 'utf8')) as Gold
       const bytes = await buildFixturePdf(fixture)
 
@@ -249,7 +333,7 @@ describe('Tenders synthetic intake corpus harness', () => {
     ]
     // eslint-disable-next-line no-console
     console.log(lines.join('\n'))
-  })
+  }, 120_000)
 
   it('metrics: computes a well-formed, machine-readable report from the real parser', () => {
     const { metrics } = report

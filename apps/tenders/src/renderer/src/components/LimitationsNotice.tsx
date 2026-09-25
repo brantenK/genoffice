@@ -14,6 +14,10 @@
 // through the shared Dialog primitive, so it is a labelled modal with Escape,
 // a Tab trap and focus restored to whatever opened it.
 //
+// It also names the diagnostics log file, which was previously written and
+// reachable over IPC (`tenders:diagnostics-path`) but named nowhere a user could
+// find it — a support request with no file to attach.
+//
 // Chrome colours are semantic tokens only; document data never appears here.
 import { useState } from 'react'
 import { ClipboardCheck, FileSearch, Scale, Send, ShieldAlert, Sparkles } from 'lucide-react'
@@ -156,6 +160,12 @@ export function LimitationsNotice({ onClose }: LimitationsNoticeProps) {
           application store, no account is needed, and nothing is uploaded unless you turn on AI
           extraction — which sends the document's text, or a scanned page's image, to the model
           provider you configured.
+        </p>
+        <p className="mt-3 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+          Tenders also keeps a diagnostics log — tenders-diagnostics.log, in the same local
+          application data folder as its data file. It records what the app did: failures, codes and
+          counts. It drops the text of your documents rather than writing it. Attach that file when
+          you report a problem.
         </p>
       </div>
     </Dialog>

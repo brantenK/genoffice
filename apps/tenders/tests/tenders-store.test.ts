@@ -33,7 +33,18 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 
-async function settleWithin<T>(promise: Promise<T>, timeoutMs = 750): Promise<T> {
+/**
+ * Fail-safe, not a timing assertion: every call site waits for an operation that
+ * must complete, so exhausting the budget means the store hung — the deadlock this
+ * helper exists to turn into a failure rather than a silent stall.
+ *
+ * 750 ms was too small for a correct operation under the full suite's parallel
+ * load: measured, two tests in this file timed out at 750 ms in-suite while the
+ * whole file passes standalone (34/34 in 3 495 ms). 15 000 ms is load-tolerant and
+ * still fails a genuine hang, so the assertions this file makes about not blocking
+ * are exactly as strict — they are on the values returned, never on latency.
+ */
+async function settleWithin<T>(promise: Promise<T>, timeoutMs = 15_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -49,6 +60,16 @@ async function settleWithin<T>(promise: Promise<T>, timeoutMs = 750): Promise<T>
     if (timer) clearTimeout(timer)
   }
 }
+
+/**
+ * Budget for the re-entrancy guards: a call made *inside* a held commit lock must
+ * resolve (the deadlock these tests exist to catch), not resolve fast. Measured,
+ * the old 350 ms / 900 ms pair was exceeded in-suite — `Error: Operation did not
+ * settle within 900ms` on the async-mutator test — while the file is green alone
+ * (34/34 in 3 495 ms). 10 000 ms is deliberately tighter than `settleWithin`'s
+ * default so a deadlock is still reported by the inner guard.
+ */
+const REENTRANT_GUARD_MS = 10_000
 
 async function uniqueDirectory(label: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), `tenders-store-${label}-${randomUUID()}-`))
@@ -553,13 +574,12 @@ describe('Phase 2 authoritative Tenders store', () => {
       let store: ReturnType<typeof createTendersStore>
       let observed: TendersLoadResult | undefined
       const onCommitted = vi.fn(async () => {
-        observed = await settleWithin(store.load(), 350)
+        observed = await settleWithin(store.load(), REENTRANT_GUARD_MS)
       })
       store = createTendersStore({ directory, now: () => FIXED_NOW, onCommitted })
 
       const result = await settleWithin(
         store.save({ expectedRevision: 0, document: validV2(0, ['callback-load']) }),
-        900,
       )
 
       expectSaveSuccess(result)
@@ -750,11 +770,10 @@ describe('Phase 2 authoritative Tenders store', () => {
 
       const result = await settleWithin(
         store.mutate(1, async (document) => {
-          observed = await settleWithin(store.load(), 350)
+          observed = await settleWithin(store.load(), REENTRANT_GUARD_MS)
           document.issuerTemplates.push(issuer('async-mutator'))
           return document
         }),
-        900,
       )
 
       expect(result.ok || (!result.ok && result.error.code === 'REVISION_CONFLICT')).toBe(true)

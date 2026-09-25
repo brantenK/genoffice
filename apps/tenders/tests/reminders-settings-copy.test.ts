@@ -397,20 +397,21 @@ describe('the reminder switch clears the minimum pointer target', () => {
    * below 24x24px") measures the rendered border box of every interactive control
    * and fails below 24px. It measured this switch at 16x16 while it carried the
    * app's shared `FORM_CHECKBOX_CLASS` (`size-4 box-content p-1`): on a checkbox
-   * the user-agent stylesheet drops the author's padding, so the `p-1` adds
-   * nothing and the box stays at the 16px `size-4` the class's own comment reads
-   * as a 24px target. The shared class is used by the overlay forms too, so the
-   * fix belongs to this surface: the switch sizes itself with `size-6`, which is
-   * `calc(var(--spacing) * 6)` and therefore 24px with the app's `--spacing: .25rem`.
+   * the user-agent stylesheet owns `padding`, which computes to `0px`, so the
+   * `p-1` added nothing and the box stayed at the 16px `size-4`.
+   *
+   * The shared class has since been fixed to `size-6` and now measures 24px, so
+   * the two classes are equivalent today; what this guard pins is that the switch
+   * still sizes ITSELF with `size-6` — `calc(var(--spacing) * 6)`, i.e. 24px with
+   * the app's `--spacing: .25rem` — rather than depending on the shared class.
    */
-  it('sizes itself at 24px instead of reusing the 16px shared checkbox', () => {
+  it('sizes itself at 24px instead of reusing the shared checkbox', () => {
     const at = CODE.indexOf('data-testid="reminders-enabled-toggle"')
     expect(at, 'the switch exists').toBeGreaterThan(-1)
     const field = CODE.slice(at, at + 320)
-    expect(
-      field,
-      'the switch must not carry the shared checkbox box, which measures 16x16',
-    ).not.toContain('FORM_CHECKBOX_CLASS')
+    expect(field, 'the switch must size itself, not inherit the shared checkbox box').not.toContain(
+      'FORM_CHECKBOX_CLASS',
+    )
     expect(field, 'the switch carries its own sizing').toContain(
       'className={REMINDER_SWITCH_CLASS}',
     )
@@ -422,6 +423,9 @@ describe('the reminder switch clears the minimum pointer target', () => {
 
   it('the guard is not vacuous: the pre-fix shape is caught', () => {
     const at = CODE.indexOf('data-testid="reminders-enabled-toggle"')
+    // The shape this guard was written for: the switch carrying the shared class
+    // back when that class measured 16x16. The assertion above rejects exactly
+    // this, whatever the shared class measures today.
     const before = CODE.slice(at, at + 320).replace(
       'className={REMINDER_SWITCH_CLASS}',
       'className={FORM_CHECKBOX_CLASS}',

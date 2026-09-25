@@ -45,6 +45,7 @@ import {
 } from '../../shared/lifecycle'
 import { RULE_BY_KEY } from '../../shared/rules'
 import { applyGapToRequirement } from './gap'
+import { rendererDiagnostics } from './diagnostics'
 import { findIssuerTemplate } from './issuer'
 
 export type View = 'list' | 'workspace' // within the Tenders page
@@ -59,7 +60,26 @@ export interface ShredProgress {
 }
 
 export type HydrationStatus = 'loading' | 'ready' | 'error'
-export type SaveStatus = 'loading' | 'saving' | 'saved' | 'error' | 'conflict'
+/**
+ * What the workspace can say about saving.
+ *
+ * `'no-bridge'` is the honest answer to a condition the app used to hide: this
+ * build has no preload bridge, so NOTHING can ever be written — not a retry, not
+ * a later moment, not after a reload. It is not a failure that might clear; it is
+ * the absence of a persistence path, and it must never read as `'saved'`. The
+ * user gets a real workspace to look at and one plain sentence saying their work
+ * cannot be kept, which is the only way the situation is survivable.
+ */
+export type SaveStatus = 'loading' | 'saving' | 'saved' | 'error' | 'conflict' | 'no-bridge'
+
+/**
+ * How the workspace was hydrated. `'unavailable'` is the no-bridge case again,
+ * from the hydration side: the main process was never asked, because there is no
+ * bridge to ask through. `HydrationStatus` alone could not say this, which is why
+ * the app rendered a fully interactive workspace (`'ready'`) that silently refused
+ * every save.
+ */
+export type HydrationMode = 'normal' | 'unavailable'
 
 /** Backwards-compatible workspace alias. */
 export type CompanyWorkspace = TendersWorkspaceV2
@@ -613,6 +633,12 @@ export function formatTendersSaveRefusal(details: TendersSaveRefusalDetails): st
  * convention (`DocumentsPage`): a grep-able line for captured CI console plus an
  * expandable object for a live devtools session. Counts only — the document is
  * never included.
+ *
+ * It also forwards to main's log file (`renderer/src/diagnostics.ts` →
+ * `tenders:diagnostics-record`), which is the only way a PACKAGED user's refused
+ * save is ever diagnosable: a shipped Electron app gives them no console. The
+ * forwarded `detail` is the same flat set of counts and codes, because the
+ * never-log-content rule is the sink's as well as this function's.
  */
 export function warnTendersSaveRefused(details: TendersSaveRefusalDetails): void {
   console.warn(formatTendersSaveRefusal(details), {
@@ -622,6 +648,22 @@ export function warnTendersSaveRefused(details: TendersSaveRefusalDetails): void
     fieldPath: details.fieldPath ?? null,
     size: details.size ?? null,
     target: details.target,
+  })
+  rendererDiagnostics.warn('store', formatTendersSaveRefusal(details), {
+    code: details.code,
+    path: details.path,
+    storeErrorCode: details.storeErrorCode ?? null,
+    fieldPath: details.fieldPath ?? null,
+    documentBytes: details.size?.documentBytes ?? null,
+    documentLimitBytes: details.size?.documentLimitBytes ?? null,
+    revision: details.target.expectedRevision,
+    // Counts, named as counts. The bare collection names (`workspaces`,
+    // `customers`) are refused by the sink's never-log-content rule, and rightly
+    // so — these are the counts that rule leaves room for.
+    workspaceCount: details.target.workspaces,
+    tenderCount: details.target.tenders,
+    customerCount: details.target.customers,
+    vaultDocCount: details.target.vaultDocs,
   })
 }
 
@@ -640,9 +682,24 @@ let warnedMissingBridge = false
 let conflictWarnedFor: string | null = null
 
 function warnSaveRefusedForMissingBridge(path: TendersSaveRefusalPath): void {
+  const s = useTendersStore.getState()
+  // The state is set on EVERY refused edit, not only the first: a bridge that
+  // disappears mid-session must flip the pill to `Cannot save` at the moment the
+  // first edit is refused, and a later edit must be able to restore it if the
+  // bridge came back (the guard below is only about the LOG line).
+  if (s.saveStatus !== 'no-bridge') {
+    const reason =
+      'This build has no connection to the app’s main process, so nothing can be saved. Your work in this window will not be kept when it closes.'
+    useTendersStore.setState({
+      hydrationMode: 'unavailable',
+      hydrationError: reason,
+      saveStatus: 'no-bridge',
+      saveError: reason,
+      saveSizeWarning: null,
+    })
+  }
   if (warnedMissingBridge) return
   warnedMissingBridge = true
-  const s = useTendersStore.getState()
   warnTendersSaveRefused({
     code: 'NO_IPC_BRIDGE',
     path,
@@ -1079,6 +1136,13 @@ export interface TendersState {
   // ── authoritative v2 persistence state & actions ───────────────────────────
   hydrationStatus: HydrationStatus
   hydrationError: string | null
+  /**
+   * WHICH kind of hydration happened. `'unavailable'` means there is no preload
+   * bridge, so main was never asked, no document was read and NO save can ever
+   * succeed. It is the field that stops the app rendering a healthy `'ready'`
+   * workspace over a persistence path that does not exist.
+   */
+  hydrationMode: HydrationMode
   saveStatus: SaveStatus
   saveError: string | null
   /**
@@ -1653,6 +1717,7 @@ export const useTendersStore = create<TendersState>()(
         // ── authoritative v2 persistence state & actions ───────────────────────
         hydrationStatus: 'loading',
         hydrationError: null,
+        hydrationMode: 'normal',
         saveStatus: 'saved',
         saveError: null,
         saveSizeWarning: null,
@@ -1665,7 +1730,30 @@ export const useTendersStore = create<TendersState>()(
 
         hydrateFromMain: async () => {
           if (typeof window === 'undefined' || !window.tendersApi?.loadStoreV2) {
-            set({ hydrationStatus: 'ready' })
+            // No bridge: main was never asked and NOTHING can ever be written.
+            // Rendering this as `'ready'`/`'saved'` (what this branch used to do)
+            // showed an interactive workspace with a "Saved" pill over a
+            // persistence path that does not exist — a user could build a
+            // company, tenders and requirements that could never persist, and was
+            // told the opposite the whole time. The state below is the honest
+            // answer: usable, and explicitly unable to save.
+            const reason =
+              'This build has no connection to the app’s main process, so nothing can be saved. Your work in this window will not be kept when it closes.'
+            set({
+              hydrationStatus: 'ready',
+              hydrationMode: 'unavailable',
+              hydrationError: reason,
+              saveStatus: 'no-bridge',
+              saveError: reason,
+              saveSizeWarning: null,
+            })
+            rendererDiagnostics.error('store', reason, {
+              channel: 'loadStoreV2',
+              hasWindow: typeof window !== 'undefined',
+              hasBridge: Boolean(
+                typeof window !== 'undefined' && (window as { tendersApi?: unknown }).tendersApi,
+              ),
+            })
             return
           }
 
@@ -1823,6 +1911,15 @@ export const useTendersStore = create<TendersState>()(
 
               if (res.needsSave && !isMigrating && !migrationCommitted) {
                 isMigrating = true
+                // The migration commit is what makes the document this renderer
+                // just adopted durable. If it fails, the workspace on screen is
+                // built on a document that was NEVER committed — which is not a
+                // healthy `'ready'` hydration, and the UI must say so rather than
+                // presenting a fully interactive workspace over it. The flag is
+                // set by each refusal branch below and applied once, here, so all
+                // three failure shapes (over-size, refused, threw) get the same
+                // honest hydration state.
+                let migrationFailed = false
                 try {
                   // The same size pre-check every other save path runs: a v1 store
                   // that migrates into a document over a ceiling would otherwise
@@ -1833,6 +1930,7 @@ export const useTendersStore = create<TendersState>()(
                     // The migrated document is not durable, so the shell's close
                     // guard must still see uncommitted work.
                     hasUncommittedEdits = true
+                    migrationFailed = true
                     set({
                       saveStatus: 'error',
                       saveError: migratedSize.error,
@@ -1864,6 +1962,7 @@ export const useTendersStore = create<TendersState>()(
                         saveSizeWarning: migratedSize?.warning ?? null,
                       })
                     } else {
+                      migrationFailed = true
                       set({
                         saveStatus:
                           saveRes.error.code === 'REVISION_CONFLICT' ? 'conflict' : 'error',
@@ -1883,6 +1982,7 @@ export const useTendersStore = create<TendersState>()(
                   }
                 } catch (saveErr) {
                   const message = saveErr instanceof Error ? saveErr.message : String(saveErr)
+                  migrationFailed = true
                   set({ saveStatus: 'error', saveError: message })
                   warnTendersSaveRefused({
                     code: 'SAVE_THREW',
@@ -1894,6 +1994,19 @@ export const useTendersStore = create<TendersState>()(
                   // Always release the latch so a failed migration can be
                   // retried; success is separately latched by migrationCommitted.
                   isMigrating = false
+                }
+                if (migrationFailed) {
+                  // The document on screen was read, so the workspace stays
+                  // usable — but it is not durable, and the hydration state has
+                  // to stop claiming otherwise. `'error'` is what routes the
+                  // shell to the load-failure screen unless the user is already
+                  // working, and `hydrationError` is the sentence that explains
+                  // it. `retrySave`/`reloadCommittedFromMain` are the ways out.
+                  set({
+                    hydrationStatus: 'error',
+                    hydrationError:
+                      'Your saved data was read and upgraded, but the upgraded copy could not be written back to disk. Nothing on screen has been changed on disk, and this window’s edits cannot be saved until the write succeeds.',
+                  })
                 }
                 // A save requested while migration held the latch can now run
                 // against the freshly committed revision.
@@ -1917,7 +2030,22 @@ export const useTendersStore = create<TendersState>()(
         },
 
         reloadCommittedFromMain: async () => {
-          if (typeof window === 'undefined' || !window.tendersApi?.loadStoreV2) return
+          if (typeof window === 'undefined' || !window.tendersApi?.loadStoreV2) {
+            // The same no-bridge condition `hydrateFromMain` answers, on the
+            // recovery control: there is nothing to reload FROM. Saying so — and
+            // leaving the workspace in its honest unable-to-save state — is the
+            // only answer that does not imply a document was fetched.
+            const reason =
+              'This build has no connection to the app’s main process, so there is no saved copy to reload. Your work in this window will not be kept when it closes.'
+            set({
+              hydrationStatus: 'ready',
+              hydrationMode: 'unavailable',
+              hydrationError: reason,
+              saveStatus: 'no-bridge',
+              saveError: reason,
+            })
+            return
+          }
           // The user explicitly chose the committed document over the local one.
           cancelPendingSave()
           hasUncommittedEdits = false
@@ -1935,6 +2063,12 @@ export const useTendersStore = create<TendersState>()(
                   issuerTemplates: res.data.issuerTemplates || [],
                   tenderReviews: reviewsFromWorkspaces(res.data.workspaces),
                   hasWorkspaces: res.data.workspaces.length > 0,
+                  // A reload that SUCCEEDS heals the hydration state too: this is
+                  // the control offered after a failed migration or a refused
+                  // save, and leaving `'error'` here would keep the workspace
+                  // behind the failure screen after it had been repaired.
+                  hydrationStatus: 'ready',
+                  hydrationError: null,
                   saveStatus: 'saved',
                   saveError: null,
                 })
@@ -1942,12 +2076,28 @@ export const useTendersStore = create<TendersState>()(
                 isSyncingFromMain = false
               }
             } else {
-              set({ saveStatus: 'error', saveError: res.error.message })
+              // The reload FAILED. It used to set only `saveStatus`, so the
+              // workspace stayed `hydrationStatus: 'ready'` — a healthy, fully
+              // interactive screen whose document was never obtained, with the
+              // user free to keep working on a copy that cannot be trusted. The
+              // hydration state is what routes the shell to the load-failure
+              // screen, so it is set here as well.
+              set({
+                hydrationStatus: 'error',
+                hydrationError: res.error.message,
+                recoveryRequired: res.error.code === 'RECOVERY_REQUIRED',
+                recoveryCandidates: res.recoveryCandidates ?? [],
+                saveStatus: 'error',
+                saveError: res.error.message,
+              })
             }
           } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
             set({
+              hydrationStatus: 'error',
+              hydrationError: message,
               saveStatus: 'error',
-              saveError: err instanceof Error ? err.message : String(err),
+              saveError: message,
             })
           }
         },

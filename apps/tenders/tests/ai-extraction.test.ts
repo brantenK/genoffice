@@ -46,6 +46,7 @@ import {
   type ExtractionChunk,
   type ExtractionRuleCatalogue,
   type ParsedExtractionReply,
+  type SuggestionProvenance,
 } from '../src/shared/ai-extraction'
 
 /** Locate the module on disk whether Vitest runs from the workspace or the repo root. */
@@ -177,7 +178,10 @@ describe('module shape', () => {
   })
 
   it('marks provenance additively without mutating the input', () => {
-    const suggestion = { value: 'x' }
+    // The carrier shape the app's own suggestions have: provenance is an OPTIONAL
+    // member, which is what makes `isAiSuggested` answer false for an unmarked
+    // value rather than being handed something it cannot describe.
+    const suggestion: { value: string; provenance?: SuggestionProvenance } = { value: 'x' }
     const marked = markProvenance(suggestion)
     expect(marked).toEqual({ value: 'x', provenance: AI_SUGGESTION_PROVENANCE })
     expect(suggestion).toEqual({ value: 'x' })

@@ -40,10 +40,14 @@ import {
   createVisionCompletion,
   markModelReadPages,
   mergeAiIntoReview,
+  RUN_DEADLINE_REASON,
+  runDeadlineWarning,
   runTenderAiPass,
   settingsSupportVision,
   VISION_CANCELLED_REASON,
+  VISION_DEADLINE_REASON,
   type AiPageImage,
+  type AiRunBudget,
   type AiVisionCompletion,
   type TenderAiPassVision,
 } from '../src/renderer/src/ai/extract-with-ai'
@@ -289,13 +293,9 @@ describe('the vision capability gate', () => {
   it('mirrors the provider catalogue, so the gate cannot drift from the suite’s own', () => {
     for (const provider of AI_PROVIDERS) {
       const expected = getProviderAdapter(provider.id).capabilities.vision
-      expect(
-        settingsSupportVision({
-          provider: provider.id,
-          providers: { [provider.id]: { model: '' } },
-        }),
-        provider.id,
-      ).toBe(expected)
+      expect(settingsSupportVision(settingsWith(provider.id, { model: '' })), provider.id).toBe(
+        expected,
+      )
     }
   })
 
@@ -626,5 +626,223 @@ describe('the vision pass', () => {
     expect(pass.merged.requirements.map((requirement) => requirement.ruleKey)).toEqual(['coida'])
     expect(pass.merged.requirements[0]!.provenance).toBe('ai-suggested')
     expect(pass.merged.reviewState).toBe('unconfirmed')
+  })
+})
+
+// ── the run's wall-clock budget ───────────────────────────────────────────────
+//
+// The Blocker this closes: nothing bounded `chunkCount × per-request latency`, so
+// a long tender against a slow provider could run far past what a user will wait,
+// with only a manual Cancel. These tests drive the budget with an injected clock,
+// an injected timer and injected model calls, so nothing sleeps and nothing
+// touches the network.
+//
+// What is asserted is the rule every other failure follows: a chunk that was
+// stopped keeps its pages UNREAD (so they still block readiness), every other
+// chunk's result is kept, and the run says in plain language that it stopped for
+// time. A run the user cancelled is still reported as a cancellation.
+
+interface ManualBudget {
+  budget: AiRunBudget
+  /** Move the clock forward, as a slow call would. */
+  advance(milliseconds: number): void
+  /** Every delay a timer was armed with, in the order they were armed. */
+  armed(): number[]
+  /** Timers still waiting, so a run can be shown to leave none behind. */
+  pending(): number
+}
+
+/**
+ * A scheduler a test drives.
+ *
+ * `fireOnArm` names the 1-based arming order of the timers that should fire as
+ * soon as they are armed — which is exactly what a call that outlives its share
+ * of the run looks like — and it is a NUMBER rather than a wait, so the deadline
+ * is deterministic: no `setTimeout`, no sleeping, no flakiness.
+ */
+function manualBudget(options: {
+  chunkBudgetMs: number
+  runBudgetMs: number
+  fireOnArm?: number[]
+}): ManualBudget {
+  const fireOnArm = new Set(options.fireOnArm ?? [])
+  let current = 0
+  let nextId = 1
+  let armCount = 0
+  let armed: number[] = []
+  const delays: number[] = []
+  return {
+    budget: {
+      chunkBudgetMs: options.chunkBudgetMs,
+      runBudgetMs: options.runBudgetMs,
+      now: () => current,
+      setTimer: (callback, milliseconds) => {
+        const id = nextId++
+        armCount += 1
+        delays.push(milliseconds)
+        armed.push(id)
+        if (fireOnArm.has(armCount)) queueMicrotask(callback)
+        return id
+      },
+      clearTimer: (handle) => {
+        armed = armed.filter((id) => id !== handle)
+      },
+    },
+    advance(milliseconds) {
+      current += milliseconds
+    },
+    armed: () => [...delays],
+    pending: () => armed.length,
+  }
+}
+
+/** A page carrying enough text that two of them become two chunks of their own. */
+function longPage(pageNumber: number): { pageNumber: number; text: string; needsOcr: boolean } {
+  return {
+    pageNumber,
+    text: `Requirement ${pageNumber} ${'the bidder must submit a valid tax clearance. '.repeat(280)}`,
+    needsOcr: false,
+  }
+}
+
+/** The page a text chunk carries, read off the prompt the chunker built. */
+function chunkedPage(user: string): number {
+  return Number(PAGE_MARKER.exec(user)?.[1] ?? 1)
+}
+
+describe('the run’s wall-clock budget', () => {
+  it('bounds one call to its share of the run, and keeps every other chunk’s result', async () => {
+    // Two chunks, and the FIRST call never answers. Without a per-call ceiling the
+    // run would wait on it for as long as the provider kept the socket open.
+    const clock = manualBudget({ chunkBudgetMs: 1_000, runBudgetMs: 60_000, fireOnArm: [1] })
+    let calls = 0
+    const completion: AiCompletion = async ({ user }) => {
+      calls += 1
+      if (calls === 1) return await new Promise<string>(() => {})
+      return requirementReply(chunkedPage(user))
+    }
+    const pass = await runTenderAiPass({
+      completion,
+      pages: [longPage(1), longPage(2)],
+      numPages: 2,
+      rules: AI_EXTRACTION_RULES,
+      budget: clock.budget,
+    })
+
+    expect(calls).toBe(2)
+    // The first call was cut at exactly its own ceiling...
+    expect(clock.armed()[0]).toBe(1_000)
+    expect(pass.outcomes[0]!.error).toMatch(/outlived its share of the run’s time budget/)
+    expect(pass.merged.unreadPages).toContain(1)
+    // ...and the second chunk answered, so one slow call does not discard the run.
+    expect(pass.merged.pagesRead.some((read) => read.pageNumber === 2)).toBe(true)
+    expect(pass.merged.requirements.length).toBeGreaterThan(0)
+    // No timer is left armed once the call has settled.
+    expect(clock.pending()).toBe(0)
+  })
+
+  it('stops the whole run at its deadline and says so, with the pages it never reached', async () => {
+    const clock = manualBudget({ chunkBudgetMs: 5_000, runBudgetMs: 2_500 })
+    const completion: AiCompletion = async ({ user }) => {
+      // The first chunk's reply alone overruns the whole run's budget.
+      clock.advance(3_000)
+      return requirementReply(chunkedPage(user))
+    }
+    const pass = await runTenderAiPass({
+      completion,
+      pages: [longPage(1), longPage(2)],
+      numPages: 2,
+      rules: AI_EXTRACTION_RULES,
+      budget: clock.budget,
+    })
+
+    // Chunk 1 answered inside the budget; chunk 2's start is past the deadline, so
+    // it is never sent at all.
+    expect(pass.outcomes).toHaveLength(2)
+    expect(pass.outcomes[0]!.error).toBeUndefined()
+    expect(pass.outcomes[1]!.error).toBe(RUN_DEADLINE_REASON)
+    expect(pass.merged.unreadPages).toEqual([2])
+    // The page the run never reached still blocks readiness...
+    expect(pass.merged.pagesRead).toEqual([{ pageNumber: 1, method: 'native-text', chunkIndex: 0 }])
+    // ...and the run says why, in the copy a user reads.
+    expect(pass.merged.warnings[0]).toBe(runDeadlineWarning(2_500))
+    expect(pass.merged.warnings[0]).toMatch(/reached its 3 seconds time budget/)
+    expect(pass.merged.warnings[0]).toMatch(/Everything it had read up to that point is kept/)
+  })
+
+  it('bounds the vision reads on the same clock, and leaves those pages blocking', async () => {
+    const clock = manualBudget({ chunkBudgetMs: 5_000, runBudgetMs: 1_000 })
+    const vision = visionCompletion((pageNumber) => requirementReply(pageNumber))
+    const pass = await runTenderAiPass({
+      completion: async () => {
+        // The text chunk alone uses the entire run budget.
+        clock.advance(1_000)
+        return requirementReply(1)
+      },
+      pages: [
+        { pageNumber: 1, text: 'A valid SARS Tax Clearance must be submitted.', needsOcr: false },
+        { pageNumber: 2, text: '', needsOcr: true },
+        { pageNumber: 3, text: '', needsOcr: true },
+      ],
+      numPages: 3,
+      rules: AI_EXTRACTION_RULES,
+      vision: {
+        available: true,
+        completion: vision.completion,
+        renderPageImage: async (pageNumber) => imageFor(pageNumber),
+      },
+      budget: clock.budget,
+    })
+
+    expect(vision.calls, 'no page image is sent once the budget is spent').toHaveLength(0)
+    expect(pass.vision.readPages).toEqual([])
+    expect(pass.vision.unread.map((page) => page.reason)).toEqual([
+      VISION_DEADLINE_REASON,
+      VISION_DEADLINE_REASON,
+    ])
+    // The pages were never read, so they still block readiness.
+    expect(pass.merged.unreadPages).toEqual([2, 3])
+    expect(pass.merged.pagesRead).toEqual([{ pageNumber: 1, method: 'native-text', chunkIndex: 0 }])
+  })
+
+  it('reports a user’s cancellation as a cancellation, never as the budget', async () => {
+    // The budget must not relabel a Cancel click. The signal is aborted before the
+    // chunk is sent, which is the transport's own cancelled path.
+    const clock = manualBudget({ chunkBudgetMs: 1_000, runBudgetMs: 60_000, fireOnArm: [1] })
+    const controller = new AbortController()
+    controller.abort()
+    const pass = await runTenderAiPass({
+      completion: async () => requirementReply(1),
+      pages: [longPage(1), longPage(2)],
+      numPages: 2,
+      rules: AI_EXTRACTION_RULES,
+      signal: controller.signal,
+      budget: clock.budget,
+    })
+
+    expect(pass.outcomes.every((outcome) => /cancelled/.test(outcome.error ?? ''))).toBe(true)
+    expect(pass.merged.warnings.join(' ')).not.toMatch(/time budget/)
+    expect(pass.merged.unreadPages).toEqual([1, 2])
+    expect(clock.armed(), 'nothing is armed for a run that never sends').toEqual([])
+  })
+
+  it('leaves a run that stays inside the budget exactly as it was', async () => {
+    // The budget only ever changes what a SLOW run does: a run that comes nowhere
+    // near either ceiling produces precisely what it produced before.
+    const clock = manualBudget({ chunkBudgetMs: 300_000, runBudgetMs: 900_000 })
+    const completion = textCompletion()
+    const pass = await runTenderAiPass({
+      completion,
+      pages: passPages(),
+      numPages: 3,
+      rules: AI_EXTRACTION_RULES,
+      budget: clock.budget,
+    })
+    // Pages 2 and 3 have no text layer and this run has no vision pass, so they
+    // were never obtained — exactly as before the budget existed.
+    expect(pass.outcomes).toHaveLength(1)
+    expect(pass.merged.unreadPages).toEqual([2, 3])
+    expect(pass.merged.warnings.join(' ')).not.toMatch(/time budget/)
+    expect(clock.pending()).toBe(0)
   })
 })

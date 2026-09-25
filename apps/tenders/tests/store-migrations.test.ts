@@ -42,7 +42,9 @@ vi.mock('electron', () => {
 
 import {
   atomicWriteDocumentFile,
+  createDefaultSeedWorkspaces,
   CURRENT_TENDERS_SCHEMA_VERSION,
+  LegacyTendersReadError,
   migrateAndValidateTenders,
   readTendersStore,
   SEED_COMPANY_ID,
@@ -412,13 +414,20 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
   })
 
   describe('1. migrateAndValidateTenders Schema Validation & Seeding', () => {
-    it('initializes clean default seed envelope when input is null or undefined', () => {
-      const data = migrateAndValidateTenders(null)
-      expect(data.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
-      expect(data.activeCompanyId).toBe(SEED_COMPANY_ID)
-      expect(data.workspaces).toHaveLength(1)
+    it('refuses a null payload and never invents the demo seed envelope', () => {
+      // The reader no longer answers a non-object payload with the demo envelope:
+      // a file it cannot read is refused, not replaced with demo company,
+      // customers, vault or the seeded RFP that the file does not contain.
+      expect(() => migrateAndValidateTenders(null)).toThrow(LegacyTendersReadError)
+      expect(() => migrateAndValidateTenders(undefined)).toThrow(LegacyTendersReadError)
+      expect(() => migrateAndValidateTenders({})).not.toThrow(LegacyTendersReadError)
 
-      const seedWs = data.workspaces[0]
+      // The demo envelope itself is unchanged — it is simply built explicitly now,
+      // never synthesized by a read.
+      const seed = createDefaultSeedWorkspaces()
+      expect(seed).toHaveLength(1)
+
+      const seedWs = seed[0]
       expect(seedWs.id).toBe(SEED_COMPANY_ID)
       expect(seedWs.company.name).toBe(MOCK_COMPANY.name)
       expect(seedWs.customers).toHaveLength(MOCK_CUSTOMERS.length)
@@ -427,12 +436,24 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
       expect(seedWs.tenders[0].id).toBe(SEED_TENDER_WTR_04.id)
       expect(seedWs.tenders[0].referenceNumber).toBe('RFP-WTR-2026-04')
       expect(seedWs.tenders[0].milestones).toHaveLength(2)
+
+      // Reading the envelope back only stamps it with the current schema version
+      // and derives the active company from the workspaces the file really holds.
+      const data = migrateAndValidateTenders({ version: 0, workspaces: seed })
+      expect(data.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
+      expect(data.activeCompanyId).toBe(SEED_COMPANY_ID)
+      expect(data.workspaces).toEqual(seed)
     })
 
-    it('preserves all 7 compliance documents in MOCK_VAULT during migration', () => {
-      const data = migrateAndValidateTenders({})
+    it('preserves all 7 compliance documents in MOCK_VAULT as written during migration', () => {
+      const data = migrateAndValidateTenders({
+        version: 1,
+        workspaces: [{ id: SEED_COMPANY_ID, vault: [...MOCK_VAULT] }],
+      })
       const vault = data.workspaces[0].vault
       expect(vault).toHaveLength(7)
+      // Pass-through, in order: the reader invents no document and drops none.
+      expect(vault.map((d) => d.id)).toEqual(MOCK_VAULT.map((d) => d.id))
 
       const expectedDocIds = [
         'vd-tax',
@@ -449,9 +470,16 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
         expect(found?.title).toBeTruthy()
         expect(found?.category).toBeTruthy()
       }
+
+      // And an empty vault stays empty: the reader adds no document to reach a
+      // seven-document floor of its own.
+      expect(
+        migrateAndValidateTenders({ workspaces: [{ id: SEED_COMPANY_ID, vault: [] }] })
+          .workspaces[0].vault,
+      ).toEqual([])
     })
 
-    it('migrates legacy workspace id ws-ekurhuleni-01 and comp-zano-01 to co-thabo', () => {
+    it('reads legacy workspace and active-company ids as written instead of rewriting or seeding them', () => {
       const legacyRaw = {
         version: 1,
         activeCompanyId: 'comp-zano-01',
@@ -467,12 +495,18 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
       }
 
       const migrated = migrateAndValidateTenders(legacyRaw)
-      expect(migrated.activeCompanyId).toBe(SEED_COMPANY_ID)
-      expect(migrated.workspaces[0].id).toBe(SEED_COMPANY_ID)
-      // Empty legacy lists should be seeded with defaults
-      expect(migrated.workspaces[0].customers.length).toBeGreaterThan(0)
-      expect(migrated.workspaces[0].vault).toHaveLength(7)
-      expect(migrated.workspaces[0].tenders).toHaveLength(1)
+      expect(migrated.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
+      // Ids are read as written: no rewrite to `co-thabo`, no seed-company
+      // normalization of `comp-zano-01`.
+      expect(migrated.activeCompanyId).toBe('comp-zano-01')
+      expect(migrated.workspaces[0].id).toBe('ws-ekurhuleni-01')
+      // Empty legacy lists are the user's own emptiness, not a seeding signal:
+      // the seeded vault of 7 documents and the seeded RFP must not reappear.
+      expect(migrated.workspaces[0].customers).toEqual([])
+      expect(migrated.workspaces[0].vault).toEqual([])
+      expect(migrated.workspaces[0].tenders).toEqual([])
+      expect(JSON.stringify(migrated)).not.toContain('RFP-WTR-2026-04')
+      expect(JSON.stringify(migrated)).not.toContain('vd-tax')
     })
 
     it('preserves custom workspace data without overwriting with seed defaults', () => {
@@ -535,7 +569,8 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
       const targetDir = join(testDir, 'subfolder', 'deep')
       const targetFile = join(targetDir, 'tenders-data.json')
 
-      const initialData = migrateAndValidateTenders(null)
+      const initialData = migrateAndValidateTenders(validV1())
+      expect(initialData.workspaces[0].tenders).toHaveLength(1)
       initialData.workspaces[0].tenders[0].estimatedValue = 550000
 
       writeTendersStore(targetFile, initialData)
@@ -558,26 +593,40 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
   })
 
   describe('3. Corrupted JSON Recovery and .corrupted.bak', () => {
-    it('creates .corrupted.bak and returns safe fallback envelope on invalid JSON', () => {
+    it('creates .corrupted.bak and fails closed on invalid JSON', () => {
       const storePath = join(testDir, 'tenders-data.json')
       const corruptContent = '{ "version": 1, "unclosed_json_syntax: true, [BAD DATA]'
       writeFileSync(storePath, corruptContent, 'utf8')
 
-      const loaded = readTendersStore(storePath)
-      expect(loaded).toBeDefined()
-      expect(loaded.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
+      // Fails CLOSED: returning an empty envelope here would present a corrupt
+      // primary as an empty workspace — silent, apparent data loss on a path that
+      // runs before the user opens a view. Callers surface the failure instead.
+      let thrown: unknown
+      try {
+        readTendersStore(storePath)
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBeInstanceOf(LegacyTendersReadError)
+      const message = (thrown as Error).message
+      expect(message).toMatch(/not valid JSON/i)
+      expect(message).toContain('corrupted.bak')
 
       const bakPath = `${storePath}.corrupted.bak`
       expect(existsSync(bakPath)).toBe(true)
       const bakContent = readFileSync(bakPath, 'utf8')
       expect(bakContent).toBe(corruptContent)
+      // The unreadable primary itself is left exactly as it was found.
+      expect(readFileSync(storePath, 'utf8')).toBe(corruptContent)
     })
 
-    it('returns default seed data when file does not exist', () => {
+    it('returns a genuinely empty envelope when the store file does not exist and never seeds it', () => {
       const nonExistentPath = join(testDir, 'does-not-exist.json')
       const data = readTendersStore(nonExistentPath)
-      expect(data.workspaces).toHaveLength(1)
-      expect(data.workspaces[0].vault).toHaveLength(7)
+      expect(data.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
+      expect(data.activeCompanyId).toBe('')
+      expect(data.workspaces).toEqual([])
+      expect(data.issuerTemplates).toEqual([])
     })
   })
 
@@ -821,7 +870,10 @@ describe('Phase 2 pure persisted-schema v2 contract', () => {
       ['not a date', 'not-a-date'],
       ['calendar-invalid', '2026-02-30T10:00:00.000Z'],
     ])('uses injected migratedAt only when legacy updatedAt is %s', (_label, updatedAt) => {
-      const input = validV1() as TendersDataV1 & { updatedAt?: string }
+      // `Omit` + optional rather than an intersection: `TendersDataV1.updatedAt`
+      // is required, and an intersection keeps it required, so `delete` would be
+      // deleting a member the type says is always there.
+      const input: Omit<TendersDataV1, 'updatedAt'> & { updatedAt?: string } = validV1()
       if (updatedAt === undefined) delete input.updatedAt
       else input.updatedAt = updatedAt
 
@@ -1574,7 +1626,11 @@ describe('Phase 2 pure persisted-schema v2 contract', () => {
     })
 
     it.each(SCHEMA_LANES)('$label preserves non-empty IDs containing internal spaces', (lane) => {
-      const input = lane.make()
+      // The lane factories are `any`: one fixture is a v1 document and one is a
+      // v2 one, and this table-driven test touches only the workspace shape both
+      // versions carry. Typing the fixture as the v2 document it is shaped like is
+      // what gives the requirement loop below a real `suggestedVaultDocIds`.
+      const input = lane.make() as TendersDataV2
       const workspace = input.workspaces[0]
       const expected = {
         workspace: 'workspace example 1',
@@ -1611,7 +1667,10 @@ describe('Phase 2 pure persisted-schema v2 contract', () => {
           )
         }
       }
-      workspace.tenders[0].milestones[0].id = expected.milestone
+      // `milestones` is optional on the v2 tender shape (see the `milestones!`
+      // uses elsewhere in this file): this fixture carries one on both lanes, and
+      // writing through a missing one must fail loudly rather than pass quietly.
+      workspace.tenders[0].milestones![0].id = expected.milestone
       workspace.company.projects[0].id = expected.project
       input.issuerTemplates[0].id = expected.issuer
 

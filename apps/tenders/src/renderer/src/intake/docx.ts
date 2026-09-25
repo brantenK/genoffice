@@ -60,17 +60,48 @@ export interface DocxPreflightLimits {
   /** Same published per-file ceiling as the PDF path — see `PDF_PREFLIGHT_LIMITS`. */
   maxBytes: number
   /**
-   * Extracted text lines (one paragraph or table row each). This is the PDF
-   * envelope's own line budget: ~0.042 MB heap per extracted line at a 1 GB
-   * budget ≈ 24 600 lines (see the measurement note on `PDF_PREFLIGHT_LIMITS`),
-   * and clause reconstruction plus rule matching are the cost it bounds.
+   * Extracted text lines (one paragraph or table row each).
+   *
+   * A .docx "line" is a whole paragraph or table row, so the reason the PDF path
+   * needs a line budget applies here too — but NOT the PDF's own figure: its
+   * ~0.042 MB heap per line was measured on VISUAL lines of ~40 characters, and a
+   * DOCX paragraph is 5–25 times longer. What was measured for this path is a
+   * cost per LINE rather than per character, because the parsed block model (not
+   * the text) dominates it: 24 500 lines / 4.77 M characters retained ~112 MB
+   * through parse → `buildClauses` → `shredExtraction` in ~4.8 s on the reference
+   * machine, i.e. ~4.6 KB per line whether the line is 195 or 1 087 characters.
+   * 24 600 lines is therefore ~115 MB and ~5 s — well inside the same 1 GB heap
+   * budget the PDF envelope is written against, and the reason it is safe to hold
+   * at the PDF's figure.
+   *
+   * It bounds the WORK of clause reconstruction plus rule matching, which are
+   * per-line, and it is NOT a bound on characters — see `maxTextChars`.
    */
   maxLines: number
+  /**
+   * Extracted text characters across the whole document.
+   *
+   * `maxLines` alone does not bound what it looks like it bounds: `blockUnits`
+   * splits at the engine's soft/column/page breaks, and a paragraph with no break
+   * is ONE line of unbounded length. A small, highly compressible .docx can
+   * declare up to `DOCX_ZIP_LIMITS.maxPartBytes` of `document.xml` (512 MiB) in a
+   * single paragraph, so a two-line document could carry hundreds of MB of text
+   * past a line-count guard.
+   *
+   * Measured on this path: ~4.5 bytes of resident heap per extracted character
+   * and ~1 M characters per second through parse → clause reconstruction → rule
+   * matching, so 12 000 000 characters is ~54 MB of heap and ~12 s of local work
+   * on the reference machine. That is 2.5× the 4 766 389 characters of the
+   * 24 500-line realistic fixture, so `maxLines` still binds first for a normal
+   * document and this budget exists for the shape a line count cannot see.
+   */
+  maxTextChars: number
 }
 
 export const DOCX_PREFLIGHT_LIMITS: DocxPreflightLimits = {
   maxBytes: PDF_PREFLIGHT_LIMITS.maxBytes,
   maxLines: 24_600,
+  maxTextChars: 12_000_000,
 }
 
 /** Twips per point: the engine reports page sizes in twips, the PDF path in points. */
@@ -83,6 +114,8 @@ export type DocxPreflightCode =
   | 'TOO_MANY_LINES'
   /** Declared uncompressed size beyond `DOCX_ZIP_LIMITS` (zip bomb). */
   | 'ZIP_BOMB'
+  /** More extracted text than `maxTextChars`, which a line count cannot see. */
+  | 'TOO_MUCH_TEXT'
   /** A CFB/OLE container: password-protected, or a legacy .doc wearing a .docx name. */
   | 'PROTECTED'
   /** Not a Word package at all (another format renamed to .docx, or no document part). */
@@ -156,6 +189,34 @@ export function assertDocxLinesWithinLimit(
   }
 }
 
+/**
+ * Reject a document holding more text than the budget, once its text is known and
+ * before the shredder runs.
+ *
+ * Checked alongside the line budget, not instead of it: a paragraph with no break
+ * is one line of unbounded length, so a document can hold too much text while
+ * holding very few lines. Both are refusals before the shredder, never a silent
+ * truncation — a cut document would present a partial reading as a complete one.
+ */
+export function assertDocxTextWithinLimit(
+  chars: number,
+  limits: DocxPreflightLimits = DOCX_PREFLIGHT_LIMITS,
+): void {
+  if (Number.isFinite(chars) && chars > limits.maxTextChars) {
+    throw new DocxPreflightError(
+      'TOO_MUCH_TEXT',
+      chars,
+      limits.maxTextChars,
+      `This .docx contains ${groupThousands(chars)} characters of text — the import limit is ${groupThousands(limits.maxTextChars)} characters per document.`,
+    )
+  }
+}
+
+/** `12000000` as `12 000 000`, so a large count stays readable in a message. */
+export function groupThousands(value: number): string {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+}
+
 const ZIP_BOMB_MESSAGE =
   `This .docx was refused before it was read: the package declares more than ` +
   `${formatBytes(DOCX_ZIP_LIMITS.maxTotalBytes)} of uncompressed content, or more than ` +
@@ -222,6 +283,8 @@ export interface DocxIntake extends PageExtraction {
   nonTextBlocks: number
   /** Text lines lifted, in reading order (equals the sum of the pages' line counts). */
   numLines: number
+  /** Characters of text lifted, after normalization (equals the sum of the lines'). */
+  numChars: number
 }
 
 /** Anything with a byte length and an async byte reader: a `File`/`Blob`, or a plain buffer. */
@@ -487,7 +550,12 @@ export async function extractDocxIntake(
 
   const segments = buildSegments(parsed.blocks, sectionPageStarts)
   const numLines = segments.reduce((total, segment) => total + segment.units.length, 0)
+  const numChars = segments.reduce(
+    (total, segment) => total + segment.units.reduce((sum, unit) => sum + unit.text.length, 0),
+    0,
+  )
   assertDocxLinesWithinLimit(numLines, limits)
+  assertDocxTextWithinLimit(numChars, limits)
 
   const contentBlocks = parsed.blocks.filter(isContentBlock)
   const nonTextBlocks = contentBlocks.filter(carriesNonText).length
@@ -516,6 +584,7 @@ export async function extractDocxIntake(
     numBlocks: contentBlocks.length,
     nonTextBlocks,
     numLines,
+    numChars,
     numPages: pages.length,
     pages,
     textPages: pages.length - ocrPages,

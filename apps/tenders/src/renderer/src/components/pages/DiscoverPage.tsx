@@ -75,14 +75,25 @@ import { useTendersStore } from '../../store'
 import { DocxImportCancelledError, DocxPreflightError } from '../../intake/docx'
 import { PdfImportCancelledError, PdfPreflightError } from '../../pdf/extract'
 import { intakeTenderFile, readAiExtractionPreference, tenderSourceKind } from '../TenderList'
-import {
-  Badge,
-  Button,
-  FORM_CHECKBOX_CLASS,
-  FORM_CONTROL_CLASS,
-  FORM_LABEL_CLASS,
-  Spinner,
-} from '../ui'
+import { Badge, Button, FORM_CONTROL_CLASS, FORM_LABEL_CLASS, Spinner } from '../ui'
+
+/**
+ * The two filter checkboxes' own sizing.
+ *
+ * These controls carried this class while the shared `FORM_CHECKBOX_CLASS`
+ * measured 16x16: it was `size-4 box-content border-4 border-transparent`, and
+ * neither the padding nor the transparent border grows a native checkbox (the
+ * e2e a11y journey reads the rendered border box). The shared class has since
+ * been fixed to `size-6` — measured at 23.93x23.93, i.e. the same 24px box this
+ * class gives — so the two are equivalent today and this is a deliberate
+ * page-local class rather than a different size.
+ *
+ * `size-6` is `calc(var(--spacing) * 6)`: exactly 24px on both axes, with no
+ * padding or border left for a box-sizing rule to reinterpret — the sizing the
+ * sidebar's collapse control and the reminders switch use too.
+ */
+const DISCOVERY_CHECKBOX_CLASS =
+  'size-6 cursor-pointer rounded accent-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none'
 
 // ── the injectable transport ─────────────────────────────────────────────────
 
@@ -572,7 +583,10 @@ export function DiscoverPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-thin">
       <div className="border-b border-[var(--border)] bg-[var(--surface)] px-8 py-5">
-        <h1 className="inline-flex items-center gap-2 text-xl font-bold text-[var(--text)]">
+        <h1
+          id="discover-page-heading"
+          className="inline-flex items-center gap-2 text-xl font-bold text-[var(--text)]"
+        >
           <Search size={20} className="text-[var(--accent)]" aria-hidden="true" /> Find tenders
         </h1>
         <p className="mt-0.5 text-sm text-[var(--text-secondary)]">
@@ -582,7 +596,14 @@ export function DiscoverPage() {
         </p>
       </div>
 
-      <section aria-label="Find tenders" className="mx-auto w-full max-w-5xl flex-1 px-8 py-8">
+      {/* The page's own landmark, named by the page heading beside it (the
+          `aria-labelledby` pattern `OverviewPage`/`ProfilePage` use), so a
+          screen-reader user can jump to "Find tenders" and land on the pane
+          rather than on a region that only repeats the heading's words. */}
+      <section
+        aria-labelledby="discover-page-heading"
+        className="mx-auto w-full max-w-5xl flex-1 px-8 py-8"
+      >
         {/* What the feed is, and is not — rendered verbatim from
             `describeCoverage()` and always on screen, in every state. */}
         <section
@@ -840,7 +861,7 @@ export function DiscoverPage() {
               <input
                 type="checkbox"
                 data-testid="discovery-include-closed"
-                className={FORM_CHECKBOX_CLASS}
+                className={DISCOVERY_CHECKBOX_CLASS}
                 checked={filter.includeClosed}
                 onChange={(event) =>
                   setFilter((current) => ({ ...current, includeClosed: event.target.checked }))
@@ -852,7 +873,7 @@ export function DiscoverPage() {
               <input
                 type="checkbox"
                 data-testid="discovery-include-unknown-closing"
-                className={FORM_CHECKBOX_CLASS}
+                className={DISCOVERY_CHECKBOX_CLASS}
                 checked={filter.includeUnknownClosing}
                 onChange={(event) =>
                   setFilter((current) => ({
@@ -884,9 +905,14 @@ export function DiscoverPage() {
           )}
         </section>
 
-        {/* The list itself. */}
-        <section aria-label="Opportunities" className="mt-6">
-          <h2 className="mb-3 text-sm font-semibold text-[var(--text)]">
+        {/* The list itself, named by its own visible heading so the region a
+            screen reader announces and the heading on screen say the same
+            thing — including how many listings the filters are showing. */}
+        <section aria-labelledby="discover-listings-heading" className="mt-6">
+          <h2
+            id="discover-listings-heading"
+            className="mb-3 text-sm font-semibold text-[var(--text)]"
+          >
             Listings{' '}
             {listings.length > 0 && (
               <span className="text-[var(--text-tertiary)]">

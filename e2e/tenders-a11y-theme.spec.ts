@@ -31,6 +31,16 @@
  *    "Trashed documents"), SubmissionDialog, OutcomeDialog, GuidedTour.
  *  - Icon-only controls carry an accessible name; interactive targets are at
  *    least 24x24 CSS px.
+ *  - Every page in the sidebar is axe-scanned, Find tenders and Tutorials
+ *    included: the two newest pages were reachable but unscanned, so a
+ *    regression on either had nothing to fail against (test 3).
+ *  - Find tenders is a landmark named BY its level-1 heading, and the model's
+ *    provenance marker is part of the accessible name (plus the field's
+ *    accessible description) rather than a tooltip only (test 9).
+ *  - The compact overflow menu keeps the keyboard contract `role="menu"`
+ *    promises: one tabbable item at a time, Arrow keys that wrap and skip
+ *    disabled actions, Home/End, Escape back to the trigger, Tab closes it
+ *    (test 10).
  *  - A Drawer-based aside (ReadinessDrawer, VaultDrawer, MilestonesDrawer) is
  *    placed against the workspace root (`<section data-workspace-root>`, the
  *    drawer's containing block), which also hosts the sticky workspace toolbar
@@ -123,6 +133,7 @@ function requirementFixture(
   id: string,
   title: string,
   pageNumber: number,
+  extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     id,
@@ -140,6 +151,7 @@ function requirementFixture(
     linkedVaultDocId: null,
     reason: null,
     suggestedVaultDocIds: [],
+    ...extra,
   }
 }
 
@@ -212,7 +224,41 @@ function seededDocument(): Record<string, unknown> {
           },
         ],
         tenders: [
-          tenderFixture('t-a11y-active', TENDER_REF, 'IN_PROGRESS'),
+          // The active tender carries one MODEL-SUGGESTED requirement and one
+          // MODEL-SUGGESTED review field. Those are the two shapes for which
+          // `ExtractionReview` renders its provenance marker: the requirement
+          // list (low confidence, unverified) and the field editor (an
+          // AI-suggested value still awaiting a human). Test 9 asserts what a
+          // screen reader is told about both.
+          tenderFixture('t-a11y-active', TENDER_REF, 'IN_PROGRESS', {
+            requirements: [
+              requirementFixture('req-t-a11y-active-1', `E2E requirement one (${TENDER_REF})`, 1, {
+                suggestedBy: 'ai',
+                confidence: 0.4,
+              }),
+              requirementFixture('req-t-a11y-active-2', `E2E requirement two (${TENDER_REF})`, 2),
+            ],
+            intakeVerification: {
+              fields: {
+                title: {
+                  extractedValue: `E2E A11y Tender ${TENDER_REF}`,
+                  sourcePage: 1,
+                  sourceClause: 'The title as printed on the cover page.',
+                  confidence: 0.4,
+                  candidates: [],
+                  state: 'unconfirmed',
+                  reviewedAt: null,
+                  suggestedBy: 'ai',
+                },
+              },
+              requirements: {},
+              pages: [],
+              contactEmail: null,
+              conflicts: [],
+              createdAt: LOADED_AT,
+              updatedAt: LOADED_AT,
+            },
+          }),
           tenderFixture('t-a11y-won', TENDER_WON_REF, 'WON', {
             milestones: [
               {
@@ -312,6 +358,53 @@ async function createCompany(tenders: Page, name: string): Promise<void> {
 
 async function gotoPage(tenders: Page, label: string): Promise<void> {
   await tenders.locator('nav').getByRole('button', { name: label }).click()
+}
+
+/**
+ * Put the shell in the workspace's COMPACT layout, where the secondary actions
+ * (Sheets, Docs, CRM, milestones) move into the overflow menu.
+ *
+ * The workspace decides compact from its own container width, so the window must
+ * be narrow — and the shell enforces a 980px minimum, which is why the minimum is
+ * relaxed for the resize and put back once the layout has settled. The
+ * assertions themselves are then made against the real built app at that size.
+ */
+async function resizeToCompact(app: ElectronApplication, tenders: Page): Promise<void> {
+  const relaxed = await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (!win) throw new Error('no shell window')
+    const [minWidth, minHeight] = win.getMinimumSize()
+    if (800 < minWidth || 600 < minHeight) {
+      win.setMinimumSize(Math.min(800, minWidth), Math.min(600, minHeight))
+    }
+    win.setContentSize(800, 600)
+    return [minWidth, minHeight] as [number, number]
+  })
+  await expect
+    .poll(() => tenders.evaluate(() => Math.abs(window.innerWidth - 800) <= 8), {
+      timeout: 20_000,
+      message: 'the window must take the compact width',
+    })
+    .toBe(true)
+  // The mode derives from a ResizeObserver on the split container, so wait for
+  // that width to hold still (two equal samples) before reading the layout.
+  await expect
+    .poll(
+      async () => {
+        const sample = (): Promise<number> =>
+          tenders.evaluate(
+            () => document.querySelector('[data-testid="workspace-split"]')?.clientWidth ?? 0,
+          )
+        const first = await sample()
+        await new Promise((resolve) => setTimeout(resolve, 350))
+        return first > 0 && first === (await sample())
+      },
+      { timeout: 20_000, message: 'the workspace layout must settle after the resize' },
+    )
+    .toBe(true)
+  await app.evaluate(({ BrowserWindow }, minimum) => {
+    BrowserWindow.getAllWindows()[0]?.setMinimumSize(minimum[0], minimum[1])
+  }, relaxed)
 }
 
 /**
@@ -1062,7 +1155,18 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         if (close) await close()
       }
 
-      for (const page of ['Overview', 'Customers', 'Documents', 'Tenders', 'Company Profile']) {
+      // Every page the module offers, including the two added most recently
+      // (Find tenders and Tutorials). A page that is not scanned here is a page
+      // whose a11y regressions nothing in this suite would catch.
+      for (const page of [
+        'Overview',
+        'Customers',
+        'Documents',
+        'Tenders',
+        'Discover',
+        'Company Profile',
+        'Tutorials',
+      ]) {
         await scan(`page:${page}`, async () => {
           await gotoPage(tenders, page)
         })
@@ -1461,7 +1565,17 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       const tenders = await openTendersFromNav(run.app, run.page)
       await dismissTendersOnboarding(tenders)
 
-      const surfaces = ['Overview', 'Customers', 'Documents', 'Tenders', 'Company Profile']
+      // The same seven pages the axe scan covers: a page whose controls are
+      // never inspected for a name or a 24px target is not audited at all.
+      const surfaces = [
+        'Overview',
+        'Customers',
+        'Documents',
+        'Tenders',
+        'Discover',
+        'Company Profile',
+        'Tutorials',
+      ]
       const unnamed: Array<{ surface: string; html: string }> = []
       const undersized: Array<{ surface: string; html: string; w: number; h: number }> = []
       for (const surface of surfaces) {
@@ -2101,6 +2215,236 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       await writeResult('tenders-a11y-theme-journey-8', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j8').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test('9: Find tenders is a named page region, and machine provenance is in the accessible name', async () => {
+    const screenshots: string[] = []
+    let run: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      await writeSeededStore(userDataDir)
+      run = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-a11y-theme-j9',
+      })
+      const tenders = await openTendersFromNav(run.app, run.page)
+      await dismissTendersOnboarding(tenders)
+
+      // ── the page-level landmark ────────────────────────────────────────────
+      // Find tenders was the one page whose content sat in a section repeating
+      // the heading's words with no relationship to the heading itself, so a
+      // screen-reader user navigating region by region could not tell which page
+      // they had landed on. The region is now named BY the page heading.
+      await gotoPage(tenders, 'Discover')
+      const pageRegion = tenders.getByRole('region', { name: 'Find tenders' })
+      await expect(pageRegion).toBeVisible({ timeout: 20_000 })
+      await expect(
+        tenders.getByRole('heading', { name: 'Find tenders', level: 1 }),
+        'the region must be named by the page heading of the same page',
+      ).toBeVisible()
+      const pageRegionLabelledBy = (await pageRegion.getAttribute('aria-labelledby')) ?? ''
+      expect(
+        pageRegionLabelledBy,
+        'the landmark must point at the page heading, not repeat its words',
+      ).toBe('discover-page-heading')
+      // …and the list inside it is named by its own visible heading, not by a
+      // second name for the same thing.
+      const listings = tenders.getByRole('region', { name: /^Listings/ })
+      await expect(listings).toBeVisible()
+      const listingsRegionName = (await listings.getAttribute('aria-labelledby')) ?? ''
+      expect(listingsRegionName, 'the listings region must be named by its own heading too').toBe(
+        'discover-listings-heading',
+      )
+      screenshots.push(await shot(tenders, 'a11y-theme-j9-discover-region'))
+
+      // ── machine provenance, as an accessible name ──────────────────────────
+      await openTender(tenders, TENDER_REF)
+      await tenders
+        .getByRole('button', { name: /Review extraction/ })
+        .first()
+        .click()
+      const panel = tenders.getByRole('region', { name: 'Extraction review' })
+      await expect(panel).toBeVisible({ timeout: 20_000 })
+
+      // The field the model suggested: the marker is NAMED (not hover-only), and
+      // the control carries it in its accessible description, so a screen-reader
+      // user confirming the value is told who produced it.
+      const titleInput = panel.getByLabel('Tender title')
+      await expect(titleInput).toBeVisible()
+      await expect(
+        titleInput,
+        'the field control must describe who suggested the value it holds',
+      ).toHaveAccessibleDescription(/suggested by a model you configured/i)
+
+      const fieldMarker = panel.getByRole('note', { name: /AI-suggested/ }).first()
+      await expect(fieldMarker, 'the marker must be exposed with a name').toBeVisible()
+      await expect(fieldMarker, 'the name must say who produced the value').toHaveAccessibleName(
+        /^AI-suggested\./,
+      )
+      await expect(
+        fieldMarker,
+        'the name must carry the caveat the tooltip used to hold alone',
+      ).toHaveAccessibleName(/not a verified fact/)
+      // Every marker on the active tender's review is named — the requirement
+      // list renders the same marker for the model-suggested requirement.
+      const namedMarkers = await panel
+        .getByRole('note', { name: /AI-suggested/ })
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute('aria-label') ?? '').filter((v) => v.length > 0),
+        )
+      expect(
+        namedMarkers.length,
+        `every AI-suggested marker must carry a name (got ${JSON.stringify(namedMarkers)})`,
+      ).toBeGreaterThanOrEqual(2)
+      screenshots.push(await shot(tenders, 'a11y-theme-j9-ai-provenance'))
+
+      // The negative case is the point: a tender with only the parser's own read
+      // renders no marker at all, so the marker still means what it says.
+      await openTender(tenders, TENDER_READY_REF)
+      await tenders
+        .getByRole('button', { name: /Review extraction/ })
+        .first()
+        .click()
+      const parserPanel = tenders.getByRole('region', { name: 'Extraction review' })
+      await expect(parserPanel).toBeVisible({ timeout: 20_000 })
+      await expect(
+        parserPanel.getByRole('note', { name: /AI-suggested/ }),
+        'a parser-only tender must render no machine-provenance marker',
+      ).toHaveCount(0)
+
+      const result: JourneyResult = {
+        journey: '9: page landmark + machine provenance are in the accessibility tree',
+        status: 'PASS',
+        detail:
+          'Find tenders is a region named by its level-1 heading; the AI-suggested marker is a named note carrying the caveat, its field control describes the provenance, and a parser-only tender renders no marker',
+        evidence: {
+          userDataDir,
+          namedMarkers,
+          pageRegionLabelledBy,
+          listingsRegionName,
+        },
+        screenshots,
+      }
+      await writeResult('tenders-a11y-theme-journey-9', result)
+    } finally {
+      if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j9').catch(() => undefined)
+      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test('10: the compact overflow menu keeps the keyboard contract its role promises', async () => {
+    const screenshots: string[] = []
+    let run: LaunchedApp | undefined
+    let userDataDir = ''
+    try {
+      userDataDir = await scratchUserData()
+      await writeSeededStore(userDataDir)
+      run = await launchShell({
+        userDataDir,
+        onboardingSeen: true,
+        videoDir: 'tenders-a11y-theme-j10',
+      })
+      const tenders = await openTendersFromNav(run.app, run.page)
+      await dismissTendersOnboarding(tenders)
+
+      // The workspace must be on screen before the resize: the compact layout is
+      // measured on the workspace's own container, which only exists once a
+      // tender is open.
+      await openTender(tenders, TENDER_REF)
+      await resizeToCompact(run.app, tenders)
+
+      const trigger = tenders.locator('[data-testid="workspace-overflow-trigger"]')
+      await expect(trigger).toBeVisible({ timeout: 20_000 })
+      await expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+      await expect(
+        tenders.locator('[data-testid="workspace-pane-switch"]'),
+        'the compact layout must actually be in effect',
+      ).toBeVisible()
+
+      const menu = tenders.locator('[data-testid="workspace-overflow-menu"]')
+      const enabled = menu.locator('[role="menuitem"]:not([disabled])')
+      const roving = menu.locator('[role="menuitem"][tabindex="0"]')
+
+      await trigger.click()
+      await expect(menu).toBeVisible()
+      const enabledCount = await enabled.count()
+      expect(enabledCount, 'compact mode must offer the secondary actions').toBeGreaterThan(1)
+
+      // Roving tabindex: exactly one item is tabbable, and it is where focus is.
+      await expect(roving, 'exactly one item may be tabbable').toHaveCount(1)
+      await expect(enabled.first(), 'opening lands on the first enabled action').toBeFocused()
+
+      // Down/Up move and wrap; disabled items are never landed on.
+      await tenders.keyboard.press('ArrowDown')
+      await expect(enabled.nth(1)).toBeFocused()
+      await expect(roving).toHaveCount(1)
+      await tenders.keyboard.press('ArrowUp')
+      await expect(enabled.first()).toBeFocused()
+      await tenders.keyboard.press('ArrowUp')
+      await expect(enabled.last(), 'ArrowUp from the first item wraps to the last').toBeFocused()
+
+      // Home/End jump to the ends.
+      await tenders.keyboard.press('Home')
+      await expect(enabled.first()).toBeFocused()
+      await tenders.keyboard.press('End')
+      await expect(enabled.last()).toBeFocused()
+      await tenders.keyboard.press('ArrowDown')
+      await expect(enabled.first(), 'ArrowDown from the last item wraps to the first').toBeFocused()
+
+      // Walking the whole list never lands on a disabled action.
+      const focusedDisabled: Array<{ index: number; label: string }> = []
+      for (let index = 0; index < enabledCount; index += 1) {
+        const landed = await tenders.evaluate(() => {
+          const active = document.activeElement as HTMLButtonElement | null
+          return { disabled: active?.disabled === true, label: (active?.textContent ?? '').trim() }
+        })
+        if (landed.disabled) focusedDisabled.push({ index, label: landed.label })
+        await tenders.keyboard.press('ArrowDown')
+      }
+      expect(
+        focusedDisabled,
+        `the keyboard must never land on a disabled action: ${JSON.stringify(focusedDisabled)}`,
+      ).toEqual([])
+      screenshots.push(await shot(tenders, 'a11y-theme-j10-menu-focus'))
+
+      // Escape closes and restores focus to the trigger; Tab closes and leaves.
+      await tenders.keyboard.press('Escape')
+      await expect(menu).toBeHidden()
+      await expect(trigger).toBeFocused()
+
+      await trigger.click()
+      await expect(menu).toBeVisible()
+      await tenders.keyboard.press('Tab')
+      await expect(menu, 'Tab must close the menu and move focus out of it').toBeHidden()
+      // …and focus must leave the menu for another control, never for nowhere.
+      const afterTab = await tenders.evaluate(() => {
+        const active = document.activeElement
+        return {
+          tag: active?.tagName ?? null,
+          label: (active?.textContent ?? '').trim().slice(0, 40),
+          isBody: active === document.body || active === null,
+        }
+      })
+      expect(
+        afterTab.isBody,
+        `Tab must not drop focus out of the page: ${JSON.stringify(afterTab)}`,
+      ).toBe(false)
+
+      const result: JourneyResult = {
+        journey:
+          '10: overflow menu keyboard contract (roving tabindex, arrows, Home/End, Escape, Tab)',
+        status: 'PASS',
+        detail: `${enabledCount} enabled actions; one tabbable item at a time; arrows wrap; Home/End jump; Escape restores the trigger; Tab closes the menu and leaves focus on a control`,
+        evidence: { userDataDir, enabledCount, focusedDisabled, afterTab },
+        screenshots,
+      }
+      await writeResult('tenders-a11y-theme-journey-10', result)
+    } finally {
+      if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j10').catch(() => undefined)
       await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
     }
   })

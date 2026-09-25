@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,15 +93,22 @@ import {
   unregisterTendersWebContents,
 } from '../src/main/tenders-main'
 import { createTendersStore } from '../src/main/tenders-store'
+import { createManagedDocumentStore } from '../src/main/document-store'
 import { TENDERS_CHANNELS } from '../src/shared/ipc'
 import {
   TENDERS_PERSISTENCE_FILE_NAME,
   type SaveTendersResult,
 } from '../src/shared/tenders-persistence'
 import {
+  MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT,
   MAX_TENDERS_AGGREGATE_STRING_CHARS,
   MAX_TENDERS_DOCUMENT_BYTES,
   MAX_TENDERS_IPC_PAYLOAD_BYTES,
+  MAX_TENDERS_MANAGED_FILES,
+  MAX_TENDERS_MANAGED_INDEX_BYTES,
+  MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD,
+  MAX_TENDERS_REQUIREMENTS_PER_TENDER,
+  MAX_TENDERS_REVIEW_CANDIDATES_PER_FIELD,
   MAX_TENDERS_STORE_FILE_BYTES,
 } from '../src/shared/tenders-persistence'
 import {
@@ -971,7 +979,11 @@ describe('sec-2 Tenders persistence resource bounds', () => {
       const tender = loaded.data.workspaces[0].tenders[0]
       expect(tender.requirements).toHaveLength(ASSUMED_MAX_REQUIREMENTS_PER_TENDER)
       expect(tender.intakeVerification?.pages).toHaveLength(ASSUMED_MAX_PAGE_STATES)
-      expect(tender.intakeVerification?.fields.title.candidates).toHaveLength(
+      // `fields` is a partial map, so the title field is optional here: a fixture
+      // that failed to decide it must fail this assertion, which is why the
+      // optional read is what keeps the assertion honest rather than a claim that
+      // the member is always there.
+      expect(tender.intakeVerification?.fields.title?.candidates).toHaveLength(
         ASSUMED_MAX_REVIEW_CANDIDATES_PER_FIELD,
       )
     })
@@ -1184,5 +1196,229 @@ describe('sec-2 Tenders persistence resource bounds', () => {
       if (!loaded.ok) throw new Error(`Expected round-trip load: ${loaded.error.code}`)
       expect(loaded.data.revision).toBe(1)
     })
+  })
+})
+
+// ── what the managed-index ceiling does and does not bound ────────────────────
+//
+// The claim this replaces: `MAX_TENDERS_MANAGED_INDEX_BYTES` was documented as
+// *the memory/IO bound*, which it is not. It measures the COMPACT SERIALIZED bytes
+// of `<baseDir>/managed-documents.json`; the live objects `JSON.parse` produces are
+// several times larger, and an index at or over the ceiling is still read and still
+// written by the non-growing lifecycle paths. The claim it does support — an index
+// this large can no longer GROW through the app — is what `writeIndex` enforces,
+// and both halves are measured here on a real index read by the real store.
+
+describe('the managed-index ceiling is a serialized-bytes growth cap, not a memory cost', () => {
+  /** One index record at the store's own 80-character name clamp. */
+  function seedRecord(index: number): Record<string, unknown> {
+    const name = `${String(index).padStart(5, '0')}-${'n'.repeat(70)}.pdf`
+    return {
+      id: `mf-bounds-${index}`,
+      category: 'rfp',
+      relativePath: `documents/${name}`,
+      fileName: name,
+      mimeType: 'application/pdf',
+      size: 1_000_000,
+      hash: 'a'.repeat(64),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      state: 'active',
+    }
+  }
+
+  /**
+   * A record adopted from a file the app did not write, so its name is far past
+   * the clamp `writeIndex` applies — the residual the constant's own comment
+   * discloses. These are what make the BYTE ceiling reachable below the record
+   * count cap, which is the case that matters for the over-ceiling disclosure.
+   */
+  function longNamedRecord(index: number): Record<string, unknown> {
+    const name = `${String(index).padStart(5, '0')}-${'x'.repeat(4_000)}.pdf`
+    return {
+      id: `mf-long-${index}`,
+      category: 'rfp',
+      relativePath: `documents/${name}`,
+      fileName: name,
+      mimeType: 'application/pdf',
+      size: 1_000_000,
+      hash: 'b'.repeat(64),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      state: 'active',
+    }
+  }
+
+  function serialize(records: Array<Record<string, unknown>>): string {
+    return JSON.stringify({ version: 1, updatedAt: '2026-01-01T00:00:00.000Z', records })
+  }
+
+  /** Write an index file directly — the same compact shape `writeIndex` writes. */
+  async function storeWithIndex(
+    records: Array<Record<string, unknown>>,
+  ): Promise<{ baseDir: string; bytes: number }> {
+    const baseDir = await mkdtemp(join(tmpdir(), 'tenders-index-bound-'))
+    await mkdir(join(baseDir, 'documents'), { recursive: true })
+    await writeFile(join(baseDir, 'managed-documents.json'), serialize(records), 'utf8')
+    return { baseDir, bytes: Buffer.byteLength(serialize(records), 'utf8') }
+  }
+
+  /** Enough long-named records to put the file past the byte ceiling, under the count cap. */
+  async function overCeilingRecords(): Promise<Array<Record<string, unknown>>> {
+    const records = Array.from({ length: 600 }, (_, index) => longNamedRecord(index))
+    const { baseDir } = await storeWithIndex(records)
+    await rm(baseDir, { recursive: true, force: true })
+    expect(Buffer.byteLength(serialize(records), 'utf8')).toBeGreaterThan(
+      MAX_TENDERS_MANAGED_INDEX_BYTES,
+    )
+    expect(records.length).toBeLessThan(MAX_TENDERS_MANAGED_FILES)
+    return records
+  }
+
+  it('measures live objects several times the serialized bytes, so it is not a memory bound', async () => {
+    const { baseDir } = await storeWithIndex(
+      Array.from({ length: 5_000 }, (_, index) => seedRecord(index)),
+    )
+    try {
+      const serialized = await readFile(join(baseDir, 'managed-documents.json'), 'utf8')
+      const before = process.memoryUsage()
+      const listed = await createManagedDocumentStore({ baseDir }).listRecords()
+      const after = process.memoryUsage()
+      expect(listed).toHaveLength(5_000)
+
+      const multiple = (after.heapUsed - before.heapUsed) / Buffer.byteLength(serialized, 'utf8')
+      // Measured 5.05x. Asserted with slack for a different V8 heap layout, but far
+      // enough above 1x that "the serialized size IS the memory cost" is refuted by
+      // this test rather than merely unproven.
+      expect(
+        multiple,
+        'a parsed index costs several times its serialized size in live objects',
+      ).toBeGreaterThan(2)
+      // ...and the shape a store-written index has sits well inside the ceiling, so
+      // the count cap is what a full store reports.
+      expect(Buffer.byteLength(serialized, 'utf8')).toBeLessThan(MAX_TENDERS_MANAGED_INDEX_BYTES)
+      expect(5_000 * MAX_TENDERS_MANAGED_INDEX_BYTES_PER_RECORD).toBeLessThanOrEqual(
+        MAX_TENDERS_MANAGED_INDEX_BYTES,
+      )
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
+  })
+
+  it('still reads and writes an index that is already over the ceiling', async () => {
+    // The residual the comment discloses, pinned rather than assumed: an index over
+    // the ceiling is READ in full, and a write that adds no record is allowed past
+    // it, so a full index can never wedge the user out of deleting a document.
+    const records = await overCeilingRecords()
+    const { baseDir } = await storeWithIndex(records)
+    try {
+      const store = createManagedDocumentStore({ baseDir })
+      const listed = await store.listRecords()
+      expect(listed, 'an over-ceiling index is read, never refused').toHaveLength(records.length)
+
+      // A non-growing write on that index: the record's file is not on disk, so
+      // the store marks it `missing` and WRITES the index back. The refusal it
+      // reports is about the file, never about the index size.
+      const trashed = await store.trash(listed[0]!.relativePath)
+      expect(trashed.ok).toBe(false)
+      if (trashed.ok) throw new Error('a missing file is reported, not moved')
+      expect(trashed.error).toMatch(/not found on disk/i)
+      expect(trashed.error).not.toMatch(/index is full/i)
+      const after = await store.listRecords()
+      expect(after.find((record) => record.id === listed[0]!.id)?.state).toBe('missing')
+
+      // Emptying the trash is the other non-growing write, and the way back under
+      // the ceiling.
+      const emptied = await store.cleanupTrash({ all: true })
+      expect(emptied.ok, 'an over-ceiling index must not block emptying the trash').toBe(true)
+      expect(
+        (await store.listRecords()).filter((record) => record.state === 'trashed'),
+      ).toHaveLength(0)
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a GROWING write past the ceiling, which is the claim it does support', async () => {
+    // The same over-ceiling index with a record added: this is the check the
+    // ceiling exists for, and the refusal names the index rather than a count —
+    // reachable below the record cap only with a name the app did not write, which
+    // is exactly the residual documented on the constant.
+    const records = await overCeilingRecords()
+    const { baseDir } = await storeWithIndex(records)
+    try {
+      const refused = await createManagedDocumentStore({ baseDir }).save({
+        fileName: 'new-rfp.pdf',
+        buffer: Buffer.from('x'),
+        category: 'rfp',
+      })
+      expect(refused.ok).toBe(false)
+      if (refused.ok) throw new Error('an over-ceiling index must refuse a growing write')
+      expect(refused.error).toMatch(/index is full/i)
+      expect(refused.error).toMatch(new RegExp(String(MAX_TENDERS_MANAGED_INDEX_BYTES)))
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
+  })
+})
+
+// ── the AI core's numeric mirrors, pinned to what they mirror ─────────────────
+//
+// `shared/ai-extraction.ts` is a plain local module that may not import
+// `tenders-persistence.ts`, so it RESTATES three of its bounds instead of reading
+// them (the docs record this as an open gap: "the three numeric mirrors are not
+// pinned by any test yet"). This closes it from the persistence side, by reading
+// the constants out of the core's own source — the technique the suite already uses
+// for values a module cannot import.
+//
+// It matters because a mirror that drifts is a mirror that promises something the
+// document will refuse: a result set larger than the tender cap fails the whole
+// save, and a candidate list longer than the per-field cap rejects the document on
+// its next autosave.
+
+describe('the AI core’s numeric mirrors of the persistence bounds', () => {
+  /** Locate the core from either cwd (`-w` or repo root). */
+  function coreSource(): string {
+    let dir = process.cwd()
+    for (let depth = 0; depth < 6; depth += 1) {
+      for (const candidate of [
+        join(dir, 'src', 'shared', 'ai-extraction.ts'),
+        join(dir, 'apps', 'tenders', 'src', 'shared', 'ai-extraction.ts'),
+      ]) {
+        try {
+          return readFileSync(candidate, 'utf8')
+        } catch {
+          // try the next location
+        }
+      }
+      dir = dirname(dir)
+    }
+    throw new Error(`Could not locate src/shared/ai-extraction.ts from ${process.cwd()}`)
+  }
+
+  const AI_CORE_SOURCE = coreSource()
+
+  function coreConstant(name: string): number {
+    const match = new RegExp(`export const ${name} = ([0-9_]+)`).exec(AI_CORE_SOURCE)
+    if (!match) throw new Error(`shared/ai-extraction.ts no longer exports ${name}`)
+    return Number(match[1]!.replace(/_/g, ''))
+  }
+
+  it('mirrors the tender requirement cap exactly', () => {
+    expect(coreConstant('MAX_REQUIREMENTS_PER_RESULT')).toBe(MAX_TENDERS_REQUIREMENTS_PER_TENDER)
+  })
+
+  it('mirrors the per-field candidate cap exactly', () => {
+    expect(coreConstant('MAX_METADATA_CANDIDATES_PER_FIELD')).toBe(
+      MAX_TENDERS_REVIEW_CANDIDATES_PER_FIELD,
+    )
+  })
+
+  it('holds the additional-clause cap far below the document’s own', () => {
+    // Not a mirror: deliberately far below, because one requirement may carry many
+    // quoted clauses and the document cap is per requirement, not per reply.
+    const core = coreConstant('MAX_ADDITIONAL_CLAUSES_PER_REQUIREMENT')
+    expect(core).toBeLessThanOrEqual(MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT)
+    expect(core).toBeLessThan(MAX_TENDERS_ADDITIONAL_CLAUSES_PER_REQUIREMENT / 10)
   })
 })

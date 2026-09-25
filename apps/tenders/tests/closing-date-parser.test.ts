@@ -390,7 +390,10 @@ describe('the runway uses the same closing instant', () => {
       expect(closing?.date).toBe('2026-11-30T21:59:00.000Z')
       expect(submitBy?.date).toBe('2026-11-29T21:59:00.000Z')
       expect(closing?.date).toBe(deadlineStatus('2026-11-30', now).date?.toISOString())
-      expect(closing?.daysAway).toBe(30)
+      // `daysAway` is a whole-day reading of the SA civil calendar: 1 Nov → 30 Nov
+      // is 29 days. It used to be `Math.round` over raw instants, which added the
+      // 21:59Z wall clock of the end-of-day closing back onto the count.
+      expect(closing?.daysAway).toBe(29)
     } finally {
       if (originalTimezone === undefined) delete process.env.TZ
       else process.env.TZ = originalTimezone
@@ -508,11 +511,27 @@ describe('the load-bearing readiness invariant survives the instant comparison',
       preparedTender({
         intakeVerification: {
           fields: {
-            closingDate: { state: 'unconfirmed', value: PARENTHETICAL_CLOSING, candidates: [] },
+            // The real member, not the `value` this fixture used to carry: a
+            // field can hold a parsed value and still be undecided, which is
+            // exactly the case readiness must not clear.
+            closingDate: {
+              extractedValue: PARENTHETICAL_CLOSING,
+              sourcePage: 1,
+              sourceClause: PARENTHETICAL_CLOSING,
+              confidence: 0.9,
+              candidates: [],
+              state: 'unconfirmed',
+              reviewedAt: null,
+            },
           },
+          requirements: {},
           pages: [],
+          contactEmail: null,
+          conflicts: [],
+          createdAt: '2026-08-01T00:00:00.000Z',
+          updatedAt: '2026-08-01T00:00:00.000Z',
         },
-      } as Partial<TenderRecord>),
+      }),
       [],
       MOCK_COMPANY,
       new Date('2026-11-30T08:00:00.000Z'),
