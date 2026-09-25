@@ -1018,17 +1018,30 @@ export function createManagedDocumentStore(
           diagnoseManagedRoot(baseDir, directory).reason ??
           'The managed document directory could not be resolved.',
       })
-      let targetRoot = await realManagedRoot(baseDir, targetRelative.split('/')[0])
-      if (!diagnoseManagedRoot(baseDir, targetRelative.split('/')[0]).ok) {
-        return unresolvable(targetRelative.split('/')[0])
+      const directory = targetRelative.split('/')[0]
+      const leaf = targetRelative.split('/')[1] ?? ''
+      let targetRoot = await realManagedRoot(baseDir, directory)
+      if (!diagnoseManagedRoot(baseDir, directory).ok) {
+        return unresolvable(directory)
       }
-      if (
-        isRealPathInside(
-          targetRoot,
-          resolve(targetRoot as string, targetRelative.split('/')[1] ?? ''),
-        )
-      ) {
-        const directory = targetRelative.split('/')[0]
+      // Return the document to its recorded path — the one place a surviving
+      // `fileUrl` reference can reconnect to — whenever that spot is safe.
+      // Anything already at the leaf (a document that came back, a save that
+      // collided, a planted link, a directory) is never overwritten: a fresh
+      // name is minted instead. The leaf is confined to a plain name by
+      // `toManagedRelativePath`, so the resolved path cannot leave the root;
+      // containment is still re-asserted below after the rename decision.
+      const recordedSpotTaken = (() => {
+        try {
+          lstatSync(resolve(targetRoot as string, leaf))
+          return true
+        } catch (error: unknown) {
+          // Only a missing leaf means the spot is free; an unreadable one is
+          // treated as taken rather than guessed at.
+          return !isMissingError(error)
+        }
+      })()
+      if (recordedSpotTaken) {
         targetRelative = `${directory}/${clock().getTime()}_${randomUUID().slice(0, 8)}_${record.fileName}`
         targetRoot = await realManagedRoot(baseDir, directory)
         if (!diagnoseManagedRoot(baseDir, directory).ok) return unresolvable(directory)

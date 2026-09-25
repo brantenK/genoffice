@@ -6,7 +6,7 @@
  */
 import { basename, join } from 'node:path'
 import { mkdtemp, readFile, readdir, rm, writeFile, unlink } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -127,9 +127,90 @@ describe('soft-delete trash + undo across restart', () => {
     expect(restored.ok).toBe(true)
     if (!restored.ok) return
     expect(restored.record.state).toBe('active')
+    // The recorded relative path is the one place a surviving `fileUrl`
+    // reference can reconnect to, so an undo returns the file there when the
+    // spot is safe.
+    expect(restored.restoredPath).toBe(saved.record.relativePath)
     expect(existsSync(join(baseDir, restored.restoredPath))).toBe(true)
     expect(await readFile(join(baseDir, restored.restoredPath), 'utf8')).toBe('tax bytes')
     expect(await restarted.listTrash()).toHaveLength(0)
+  })
+
+  it('returns a document to its recorded path when the spot is free', async () => {
+    const baseDir = await tempBaseDir()
+    const managed = store(baseDir)
+    const saved = await managed.save({
+      fileName: 'certificate.pdf',
+      buffer: Buffer.from('cert bytes'),
+      category: 'vault',
+    })
+    if (!saved.ok) throw new Error(saved.error)
+    const trashed = await managed.trash(saved.record.relativePath)
+    if (!trashed.ok || !trashed.entry) throw new Error('trash failed')
+
+    const restored = await managed.restore(trashed.entry.id)
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) return
+    expect(restored.restoredPath).toBe(saved.record.relativePath)
+    expect(restored.record.relativePath).toBe(saved.record.relativePath)
+    expect(existsSync(join(baseDir, saved.record.relativePath))).toBe(true)
+    expect(await readFile(join(baseDir, saved.record.relativePath), 'utf8')).toBe('cert bytes')
+    expect(await managed.listTrash()).toHaveLength(0)
+  })
+
+  it('mints a fresh name when the recorded spot is occupied', async () => {
+    const baseDir = await tempBaseDir()
+    const managed = store(baseDir)
+    const saved = await managed.save({
+      fileName: 'certificate.pdf',
+      buffer: Buffer.from('original bytes'),
+      category: 'vault',
+    })
+    if (!saved.ok) throw new Error(saved.error)
+    const trashed = await managed.trash(saved.record.relativePath)
+    if (!trashed.ok || !trashed.entry) throw new Error('trash failed')
+
+    // Another document takes the recorded spot while the original sits in the
+    // trash (a save that collided, a file copied back in): the restore must not
+    // overwrite it.
+    await writeFile(join(baseDir, saved.record.relativePath), 'occupier bytes', 'utf8')
+
+    const restored = await managed.restore(trashed.entry.id)
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) return
+    expect(restored.restoredPath).not.toBe(saved.record.relativePath)
+    expect(restored.restoredPath).toMatch(/^vault\/\d+_[0-9a-f]{8}_certificate\.pdf$/)
+    // The occupier survives untouched; the trashed bytes land under the fresh
+    // name.
+    expect(await readFile(join(baseDir, saved.record.relativePath), 'utf8')).toBe('occupier bytes')
+    expect(await readFile(join(baseDir, restored.restoredPath), 'utf8')).toBe('original bytes')
+    expect(restored.record.relativePath).toBe(restored.restoredPath)
+  })
+
+  it('mints a fresh name when the recorded spot is a planted link', async () => {
+    const baseDir = await tempBaseDir()
+    const managed = store(baseDir)
+    const saved = await managed.save({
+      fileName: 'certificate.pdf',
+      buffer: Buffer.from('original bytes'),
+      category: 'vault',
+    })
+    if (!saved.ok) throw new Error(saved.error)
+    const trashed = await managed.trash(saved.record.relativePath)
+    if (!trashed.ok || !trashed.entry) throw new Error('trash failed')
+
+    // A link planted at the recorded spot is never a document this app wrote,
+    // so the restore must not clobber it: a fresh name is minted instead.
+    const outside = join(baseDir, 'planted-target.txt')
+    await writeFile(outside, 'link target', 'utf8')
+    symlinkSync(outside, join(baseDir, saved.record.relativePath), 'file')
+
+    const restored = await managed.restore(trashed.entry.id)
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) return
+    expect(restored.restoredPath).not.toBe(saved.record.relativePath)
+    expect(lstatSync(join(baseDir, saved.record.relativePath)).isSymbolicLink()).toBe(true)
+    expect(await readFile(join(baseDir, restored.restoredPath), 'utf8')).toBe('original bytes')
   })
 })
 
