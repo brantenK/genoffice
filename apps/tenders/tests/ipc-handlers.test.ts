@@ -1532,6 +1532,83 @@ describe('Electron IPC Handlers & Security Validation', () => {
       expect(opened.ok).toBe(true)
       expect(openedPaths).toHaveLength(1)
     })
+
+    // A stored name ending in a dot — `evil.docm.` — has `extname === '.'`, which
+    // is in neither refusal set, yet Windows strips the trailing dot when it
+    // resolves the file association and opens the file under its `.docm`
+    // handler: exactly what the refusal above exists to prevent. `sanitizeManagedFileName`
+    // preserves the trailing dot, so the name reaches the open path verbatim.
+    it.each([
+      '.docm',
+      '.dotm',
+      '.xlsm',
+      '.xltm',
+      '.xlam',
+      '.pptm',
+      '.potm',
+      '.ppsm',
+      '.sldm',
+    ])('refuses a trailing-dot %s macro container to shell.openPath', async (extension) => {
+      const saved = await saveDocumentFile(
+        {
+          fileName: `third-party-tender${extension}.`,
+          buffer: Buffer.from('a container that may carry a VBA project'),
+          category: 'rfp',
+        },
+        testDir,
+      )
+      // The file is still STORED — ingest is a separate decision from launch, and
+      // a refusal to open must not silently discard the user's document.
+      expect(saved.ok).toBe(true)
+
+      const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+
+      expect(opened.ok).toBe(false)
+      // Honest copy: a trailing-dot macro container is still a macro container,
+      // not a launcher.
+      expect(opened.error).toMatch(/macros/i)
+      expect(opened.error).not.toMatch(/launcher or shortcut/i)
+      // The OS never received the path, so nothing ran.
+      expect(openedPaths).toEqual([])
+    })
+
+    it.each(['.lnk', '.url', '.pif', '.scf'])(
+      'refuses a trailing-dot %s launcher to shell.openPath',
+      async (extension) => {
+        const saved = await saveDocumentFile(
+          {
+            fileName: `shortcut${extension}.`,
+            buffer: Buffer.from('not a document'),
+            category: 'rfp',
+          },
+          testDir,
+        )
+        expect(saved.ok).toBe(true)
+
+        const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+
+        expect(opened.ok).toBe(false)
+        expect(opened.error).toMatch(/launcher or shortcut/i)
+        // The OS never received the path, so nothing ran.
+        expect(openedPaths).toEqual([])
+      },
+    )
+
+    it('still opens a trailing-dot macro-free document, so the refusal is not blanket', async () => {
+      const saved = await saveDocumentFile(
+        {
+          fileName: 'ordinary-rfp.docx.',
+          buffer: Buffer.from('a plain document'),
+          category: 'rfp',
+        },
+        testDir,
+      )
+      expect(saved.ok).toBe(true)
+
+      const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+      expect(opened.ok).toBe(true)
+      expect(openedPaths).toHaveLength(1)
+    })
   })
 
   describe('4b. The legacy v1 stack is retired, not merely quiet', () => {

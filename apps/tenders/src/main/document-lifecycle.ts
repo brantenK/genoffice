@@ -13,7 +13,7 @@
 //   * `getAuthoritativeTendersStore()` — read only, to report which records still
 //     reference a document before it is moved to trash.
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { join, extname, basename } from 'node:path'
 import { shell } from 'electron'
 import {
   MAX_TENDERS_DOCUMENT_UPLOAD_BYTES,
@@ -144,7 +144,15 @@ export async function openDocumentFile(
     // never a shortcut, a launcher script or a macro container that would run
     // code on open — so the extension is refused here rather than trusted to the
     // shell.
-    const refusal = refusalForUnopenableExtension(extname(check.fullPath).toLowerCase())
+    // Windows strips trailing dots when it resolves a file association, so a
+    // stored name like `evil.docm.` — whose `extname` is `.`, in neither refusal
+    // set — would still open under its `.docm` handler. The trailing dot is
+    // normalized away before the extension is judged, so a macro/launcher
+    // container never reaches the shell under any name shape, while a macro-free
+    // `.docx.` still opens.
+    const leaf = basename(check.fullPath)
+    const normalizedLeaf = leaf.replace(/\.+$/, '')
+    const refusal = refusalForUnopenableExtension(extname(normalizedLeaf).toLowerCase())
     if (refusal) return { ok: false, error: refusal }
     const openErr = await shell.openPath(check.fullPath)
     if (openErr) {
