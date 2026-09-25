@@ -9,9 +9,6 @@ import type { ManagedFileTrashEntry } from '../../../shared/tenders-persistence'
 import { Badge, Button, Spinner } from './ui'
 import { Dialog, useOverlayBehaviour } from './Dialog'
 
-/** Stable no-op used while the confirm dialog owns Escape. */
-const noop = () => undefined
-
 function formatBytes(value: number): string {
   if (!Number.isFinite(value)) return 'unknown size'
   if (value < 1024) return `${value} B`
@@ -48,12 +45,12 @@ export function TrashDrawer({
   // window.confirm is not accepted by the durability E2E spec).
   const [emptyOpen, setEmptyOpen] = useState(false)
   // Escape-to-close, Tab trap, initial focus and focus restoration all come from
-  // the shared overlay behaviour (same contract as Dialog/Drawer).
+  // the shared overlay behaviour (same contract as Dialog/Drawer). While the
+  // empty-trash confirm dialog is open it is the topmost overlay and owns
+  // Escape and Tab, so this panel's trap stands down (see `useOverlayBehaviour`).
   const panelRef = useRef<HTMLElement>(null)
   const titleId = useId()
-  // Escape closes the drawer, except while the empty-trash confirm dialog is
-  // open: that dialog is a separate overlay and owns Escape itself.
-  useOverlayBehaviour(panelRef, emptyOpen ? noop : onClose)
+  useOverlayBehaviour(panelRef, onClose, undefined, true)
 
   const load = useCallback(async () => {
     if (typeof window === 'undefined' || !window.tendersApi?.listDocumentTrash) {

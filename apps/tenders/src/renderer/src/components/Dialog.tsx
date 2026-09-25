@@ -12,6 +12,15 @@ import { IconButton } from './ui'
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
+/**
+ * Dialogs currently mounted. `Dialog` increments on mount and decrements on
+ * unmount, so any overlay trap that stands down while a modal dialog is open
+ * (a drawer under a dialog) can check this at keydown time. A dialog is always
+ * a full-screen topmost overlay (`z-[75]` + scrim), so its `aria-modal`
+ * isolation claim holds: it owns Escape and Tab until it unmounts.
+ */
+let openDialogCount = 0
+
 /** Visible, enabled focus targets inside a container, in DOM order. */
 export function focusableWithin(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
@@ -42,11 +51,20 @@ function initialFocusTarget(
  *  - Escape closes (and the event does not leak to other handlers);
  *  - Tab / Shift+Tab cycle inside the panel, pulling focus back in if it escapes;
  *  - focus starts inside the panel and is restored to the opener on unmount.
+ *
+ * `deferToOpenDialog` stands this overlay's window trap down while a Dialog is
+ * mounted. Same-node window listeners all receive a keydown even after
+ * `stopPropagation()`, so when a dialog opens over a drawer both traps would
+ * otherwise fire per key: Escape would close both overlays and the drawer's
+ * Tab trap would redirect focus out of the dialog. A drawer is semi-modal
+ * (surfaces behind it stay usable), so it yields keyboard capture to the
+ * full-screen dialog on top.
  */
 export function useOverlayBehaviour(
   panelRef: RefObject<HTMLElement | null>,
   onClose: () => void,
   initialFocusRef?: RefObject<HTMLElement | null>,
+  deferToOpenDialog = false,
 ): void {
   // The opener must be captured during the FIRST RENDER, not in the mount
   // effect: React applies a control's `autoFocus` during the commit phase, so
@@ -73,6 +91,7 @@ export function useOverlayBehaviour(
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (deferToOpenDialog && openDialogCount > 0) return
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
@@ -102,7 +121,7 @@ export function useOverlayBehaviour(
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [panelRef, onClose])
+  }, [panelRef, onClose, deferToOpenDialog])
 }
 
 const DIALOG_SIZES = {
@@ -149,6 +168,14 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   useOverlayBehaviour(panelRef, onClose, initialFocusRef)
+
+  // The modal-open signal drawer traps stand down on (see `openDialogCount`).
+  useEffect(() => {
+    openDialogCount += 1
+    return () => {
+      openDialogCount -= 1
+    }
+  }, [])
 
   return (
     <div

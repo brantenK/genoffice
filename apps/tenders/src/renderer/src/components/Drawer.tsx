@@ -112,7 +112,9 @@ export function Drawer({
 }: DrawerProps) {
   const panelRef = useRef<HTMLElement>(null)
   const titleId = useId()
-  useOverlayBehaviour(panelRef, onClose, initialFocusRef)
+  // A drawer is semi-modal: a Dialog rendered on top owns Escape and Tab, so
+  // this trap stands down while one is mounted (see `useOverlayBehaviour`).
+  useOverlayBehaviour(panelRef, onClose, initialFocusRef, true)
   const toolbarOffset = useToolbarOffset(panelRef)
 
   return (
