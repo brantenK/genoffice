@@ -36,7 +36,12 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
-import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  readStore,
+  pollStore,
+  teardownScratchProfile,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -261,6 +266,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -277,6 +288,9 @@ test.describe('Tenders demo isolation (WP-8)', () => {
 
   test('1: sample workspace is labelled and carries dataOrigin demo on disk', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -339,16 +353,23 @@ test.describe('Tenders demo isolation (WP-8)', () => {
           tenders: demo.tenders.length,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-demo-isolation-journey-1', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-demo-isolation-j1').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-demo-isolation-run1`))
     }
   })
 
   test('2: a corrupt store errors and never falls back to the sample workspace', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -387,16 +408,23 @@ test.describe('Tenders demo isolation (WP-8)', () => {
         detail: 'explicit error screen with retry; corrupt file byte-identical; no demo fallback',
         evidence: { userDataDir, signatureBefore },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-demo-isolation-journey-2', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-demo-isolation-j2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-demo-isolation-run2`))
     }
   })
 
   test('3: cross-app writes are gated from the sample workspace and the copy path works', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -554,6 +582,11 @@ test.describe('Tenders demo isolation (WP-8)', () => {
             })),
           },
           screenshots,
+          // The salvaged diagnostics log(s) for this journey. Recorded as a path
+          // so a failing run names the artefact instead of deleting it with the
+          // profile — the result JSON is the run's own statement, the log is the
+          // evidence for it.
+          diagnosticsLogs: salvaged.filter(Boolean) as string[],
         })
         throw error
       }
@@ -576,11 +609,15 @@ test.describe('Tenders demo isolation (WP-8)', () => {
           copyLifecycle: copy.lifecycle,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-demo-isolation-journey-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-demo-isolation-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-demo-isolation-run3`))
     }
   })
 })

@@ -5,7 +5,7 @@
 // (`resolveSafeTendersPath`), the filesystem-proven confinement check that
 // actually holds (`resolveConfinedTendersPath`), and the atomic-write primitives
 // every writer in this app shares (`atomicWriteDocumentFile`,
-// `renameWithBoundedRetry`, `getUniqueTimestamp`).
+// `renameWithBoundedRetry`, `renameWithBoundedRetryAsync`, `getUniqueTimestamp`).
 //
 // This module owns the ONLY place a renderer-supplied path is validated before it
 // is used, which is why it is a module rather than a corner of the IPC surface:
@@ -189,10 +189,20 @@ export function atomicWriteDocumentFile(targetPath: string, buffer: Buffer): voi
  *
  * A reader holding the destination open (a scanner, a sync client, the app's own
  * `fs.watch` handler between two reads) makes `renameSync` fail with `EBUSY` or
- * `EPERM` on Windows even though nothing is wrong with the write. Every atomic
- * write in this file goes through here, so the primary `tenders-data.json` gets
- * the same treatment the managed documents always had — the asymmetry between
- * the two was the defect.
+ * `EPERM` on Windows even though nothing is wrong with the write.
+ *
+ * This file exports the retry in both forms, because the two writers that need it
+ * differ in one respect that cannot be papered over: `renameWithBoundedRetry` is
+ * SYNCHRONOUS and belongs to writers that run on a request that must finish
+ * before it returns, while `renameWithBoundedRetryAsync` is for the
+ * managed-document store, which awaits its own index writes and must not block
+ * the main process's thread for a retry delay.
+ *
+ * They share `isTransientRenameError`, `RENAME_RETRY_ATTEMPTS` and
+ * `RENAME_RETRY_DELAY_MS`, so the two paths cannot drift into different retry
+ * behaviour again. That drift was the defect: the primary store retried and the
+ * managed store did not, so a transient lock made a managed write fail where the
+ * same operation against the primary succeeded.
  *
  * The delay SLEEPS rather than spinning: the previous implementation burned a
  * full 15 ms of CPU per attempt waiting for a lock it was not holding, on the
@@ -202,6 +212,12 @@ export function atomicWriteDocumentFile(targetPath: string, buffer: Buffer): voi
 const RENAME_RETRY_ATTEMPTS = 3
 const RENAME_RETRY_DELAY_MS = 15
 
+/** The two Windows-only transient codes a retry can actually help with. */
+function isTransientRenameError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'EBUSY' || code === 'EPERM'
+}
+
 export function renameWithBoundedRetry(from: string, to: string): void {
   let lastError: unknown = null
   for (let attempt = 0; attempt < RENAME_RETRY_ATTEMPTS; attempt += 1) {
@@ -210,9 +226,43 @@ export function renameWithBoundedRetry(from: string, to: string): void {
       return
     } catch (error: unknown) {
       lastError = error
-      const code = (error as { code?: unknown } | null)?.code
-      if (code !== 'EBUSY' && code !== 'EPERM') throw error
+      if (!isTransientRenameError(error)) throw error
       if (attempt < RENAME_RETRY_ATTEMPTS - 1) sleepSync(RENAME_RETRY_DELAY_MS)
+    }
+  }
+  throw lastError
+}
+
+/**
+ * The same bounded retry, for the asynchronous writers.
+ *
+ * The managed-document store is asynchronous (it holds one queue and awaits its
+ * own index writes), so it cannot call the synchronous helper above without
+ * blocking the main process's thread. It used to call `fs/promises` `rename`
+ * directly — which meant the ONE atomic write in this app that had no retry was a
+ * managed document's, while the primary store and the document-file writer both
+ * had one. A scanner or a sync client holding the destination open therefore
+ * turned a managed write into a hard failure where the same operation against the
+ * primary store succeeded.
+ *
+ * Same attempt count and same bounded delay as the synchronous form, so the two
+ * cannot drift: this is the parity the docs claim, made true.
+ */
+export async function renameWithBoundedRetryAsync(from: string, to: string): Promise<void> {
+  const { rename } = await import('node:fs/promises')
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < RENAME_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error: unknown) {
+      lastError = error
+      if (!isTransientRenameError(error)) throw error
+      if (attempt < RENAME_RETRY_ATTEMPTS - 1) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, RENAME_RETRY_DELAY_MS)
+        })
+      }
     }
   }
   throw lastError

@@ -28,7 +28,7 @@
  */
 import { test, expect } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -41,7 +41,13 @@ import {
   SHELL_DIR,
   type LaunchedApp,
 } from './helpers'
-import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  readStore,
+  pollStore,
+  salvageTendersDiagnosticsLog,
+  teardownScratchProfile,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 const TENDERS_DEMO_DIR = resolve(SHELL_DIR, '..', 'tenders', 'public', 'demo')
 const VAULT_PDF = join(TENDERS_DEMO_DIR, 'vault', 'tax-clearance.pdf')
@@ -185,44 +191,20 @@ async function listMatrixCsvs(): Promise<string[]> {
     .map((name) => join(tmpdir(), name))
 }
 
-/** A filesystem-safe local timestamp, for artefacts a run may produce twice. */
-function stamped(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-')
-}
-
 /**
- * Salvage the app's own diagnostics log before its profile is deleted.
+ * The app's own diagnostics log, as lines.
  *
- * The log is the most valuable artefact this lane produces and it used to exist
- * only *after* a green run: `<userData>/tenders/tenders-diagnostics.log` (see
- * `src/main/diagnostics-log.ts`) had no copy made of it anywhere in `e2e/`.
- *
- * It is collected HERE, in the `finally`, for a reason: the `rm()` below deletes
- * the profile, and it has to run before the test body's final lines (which write
- * the result JSON) whenever a flow throws. Copying from the body would therefore
- * lose the log in exactly the failing run it was built to explain. A log that is
- * written and never collected is the "silent failure with no artefact" problem
- * this app spent a wave removing.
- *
- * A run that failed before the app started has no log at all; that is expected
- * and is not an error, so the absence is tolerated and reported as absent rather
- * than as a failure.
+ * Read straight from the scratch profile, which is where the app writes it — the
+ * salvaged copy in `e2e/artifacts/diagnostics/` is made at teardown, so asserting
+ * against the live file is what proves the IPC bridge actually reached the sink
+ * rather than that a later step could have written something.
  */
-async function salvageDiagnosticsLog(
-  userDataDir: string,
-  copyName: string,
-): Promise<string | null> {
-  const source = join(userDataDir, 'tenders', 'tenders-diagnostics.log')
-  // The copy carries the SALVAGE INSTANT, not just the run's start: a run that
-  // never removed its profile leaves logs from several runs in the directory, so
-  // the filename has to say which one was saved.
-  const target = join(ARTIFACTS_DIR, 'diagnostics', `${copyName}-${stamped()}.log`)
+async function readDiagnosticsLog(userDataDir: string): Promise<string[]> {
   try {
-    await mkdir(join(ARTIFACTS_DIR, 'diagnostics'), { recursive: true })
-    await copyFile(source, target)
-    return target
+    const raw = await readFile(join(userDataDir, 'tenders', 'tenders-diagnostics.log'), 'utf8')
+    return raw.split('\n').filter((line) => line.trim().length > 0)
   } catch {
-    return null
+    return []
   }
 }
 
@@ -750,7 +732,194 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         assertConservativeProposal(proposalContent)
         return `proposal ${generated!.path} still carries DRAFT — SUBMISSION BLOCKED + the canonical readiness failure and its blockers`
       })
+
+      // ── Phase E: the error boundary, in the BUILT app ───────────────────────
+      // `renderer/src/components/ErrorBoundary.tsx` exists to stop a render throw
+      // becoming a blank window, and until this flow it was proven only in jsdom
+      // (`tests/components/error-boundary.test.tsx`). jsdom proves the component's
+      // logic; it cannot prove the boundary is MOUNTED in the shipped bundle, that
+      // the fallback's own test ids survive the production build, or that the
+      // chrome around the failed region stays usable — which is the whole claim.
+      //
+      // HOW A THROW IS FORCED, AND WHAT THAT DOES AND DOES NOT PROVE. The app has
+      // no test hook and no product route that makes a page throw on demand, and
+      // shipping one to make this test easier would put a crash switch in the
+      // shipped app. Instead the throw is injected into React's OWN dispatch path,
+      // on the fiber of the REAL boundary instance the build mounted, by walking
+      // the live fiber tree from the `#root` container. What that proves: the
+      // boundary this build ships catches a render throw in a real child, renders
+      // the fallback with the real copy and test ids, keeps the shell's navigation
+      // alive, reports the failure to the diagnostics log through the real
+      // bridge, and does not claim anything was confirmed. What it does not prove:
+      // that a specific product component throws — that is the jsdom suite's job,
+      // where the real `Workspace` is mounted through the same boundary.
+      const boundary = await step('error-boundary-fallback-in-built-app', async () => {
+        expect(tenders2, 'tenders renderer must exist after restart').toBeTruthy()
+        const before = await readDiagnosticsLog(userDataDir)
+
+        const injected = await tenders2!.evaluate(() => {
+          // Walk from the React root container and collect EVERY class component
+          // holding `getDerivedStateFromError` — the real mounted boundary
+          // instances, not test doubles. The build mounts two: one in `main.tsx`
+          // around `<App />` and one in `App.tsx` around the page area. Which one
+          // is used matters, so the choice is named below rather than left to walk
+          // order.
+          const container = document.getElementById('root')
+          const rootKey = container
+            ? Object.keys(container).find((key) => key.startsWith('__reactContainer'))
+            : undefined
+          let node: any = rootKey && container ? (container as any)[rootKey] : null
+          if (node && node.stateNode && !node.type) node = node.return ?? node.child
+
+          const found: any[] = []
+          let guard = 0
+          const walk = (fiber: any): void => {
+            while (fiber && guard < 50_000) {
+              guard++
+              const type = fiber.type
+              if (
+                type &&
+                typeof type === 'function' &&
+                typeof type.getDerivedStateFromError === 'function' &&
+                fiber.stateNode
+              ) {
+                found.push(fiber)
+              }
+              if (fiber.child) walk(fiber.child)
+              fiber = fiber.sibling
+            }
+          }
+          walk(node)
+          if (found.length === 0) return { found: false as const, count: 0, regions: [] }
+
+          // The INNER boundary is the one whose claim this flow exists to check:
+          // `App.tsx` wraps only the page area, so a throw there must leave the
+          // sidebar and its navigation usable. The outer `main.tsx` boundary
+          // deliberately covers the whole window — including the nav — so
+          // asserting "the nav survives" against IT would be the wrong claim.
+          // Depth is the fiber's own distance from the root; the larger depth is
+          // the inner boundary.
+          const depthOf = (fiber: any): number => {
+            let d = 0
+            let f = fiber
+            while (f && f.return) {
+              d++
+              f = f.return
+            }
+            return d
+          }
+          const target = found.reduce((a, b) => (depthOf(a) >= depthOf(b) ? a : b))
+          const instance = target.stateNode
+          const region = instance.props?.region ?? 'this window'
+
+          // React's own path: the boundary receives the error through
+          // `getDerivedStateFromError` and then renders the fallback. Dispatching
+          // a real throw through this pair is what the boundary is built for, and
+          // it exercises the shipped component's own methods, not a copy.
+          const thrown = new TypeError('e2e: forced render failure')
+          instance.setState(instance.constructor.getDerivedStateFromError(thrown))
+          instance.componentDidCatch(thrown, { componentStack: '\n  at E2EBoundaryProbe' })
+          return {
+            found: true as const,
+            count: found.length,
+            regions: found.map((f) => f.stateNode?.props?.region ?? 'this window'),
+            region,
+          }
+        })
+        diagnostics.errorBoundaryInjection = injected
+        expect(
+          injected.found,
+          'the built renderer must mount a class error boundary reachable from the React root',
+        ).toBe(true)
+        expect(
+          injected.count,
+          'the build mounts TWO boundaries (root + page area) — finding only one means the ' +
+            'per-page boundary was removed, which is the mounting this flow exists to check',
+        ).toBeGreaterThan(1)
+        // The id is asserted, not inferred: a flow that accidentally used the root
+        // boundary would take the navigation with it and could not make this claim.
+        expect(injected.region, 'the page boundary names the page it covers').not.toBe(
+          'this window',
+        )
+
+        const fallback = tenders2!.getByTestId('error-boundary-fallback')
+        await expect(fallback).toBeVisible({ timeout: 15_000 })
+        // The copy is the app's own, and it is the honest version of it: the
+        // window is still running, nothing was confirmed, and it names the log.
+        await expect(fallback).toHaveAttribute('role', 'alert')
+        await expect(fallback).toContainText('stopped working')
+        await expect(fallback).toContainText('Nothing was confirmed on your behalf')
+        await expect(fallback).toContainText('tenders-diagnostics.log')
+        // The fallback must never be read as a readiness result.
+        await expect(fallback).not.toContainText(/READY FOR SUBMISSION/)
+        await expect(fallback).not.toContainText(/All blocking checks pass/)
+
+        // The rest of the window still works: this is the property a blank screen
+        // destroys, and the reason the boundary is mounted per-page rather than
+        // only at the root.
+        await expect(tenders2!.locator('nav').getByRole('button', { name: 'Tenders' })).toBeVisible(
+          {
+            timeout: 15_000,
+          },
+        )
+
+        // The failure reached the app's own log, through the real IPC bridge, as
+        // an error CODE — a render error's message can embed tender text.
+        const after = await readDiagnosticsLog(userDataDir)
+        const added = after.slice(before.length)
+        expect(
+          added.length,
+          `the boundary must add to the diagnostics log; added: ${JSON.stringify(added)}`,
+        ).toBeGreaterThan(0)
+        expect(
+          added.join('\n'),
+          `the log entry must carry the render-error code; added: ${JSON.stringify(added)}`,
+        ).toMatch(/render-error/)
+        expect(
+          added.join('\n'),
+          `the log entry must carry the code for this failure; added: ${JSON.stringify(added)}`,
+        ).toMatch(/tenders-react-render/)
+        expect(
+          JSON.stringify(added),
+          'the log must carry the code, never the thrown message',
+        ).not.toContain('forced render failure')
+
+        // And "Try this view again" is a real remount, not a re-render: the real
+        // page comes back and the fallback goes away. The heading asserted is
+        // whatever the page actually restores — this spec has an active tender
+        // open at this point, so the workspace's own heading is the evidence, and
+        // pinning "Tenders" here would encode this flow's incidental page state
+        // rather than the remount.
+        await tenders2!.getByTestId('error-boundary-retry').click()
+        await expect(fallback).toHaveCount(0, { timeout: 20_000 })
+        await expect(tenders2!.locator('nav').getByRole('button', { name: 'Tenders' })).toBeVisible(
+          { timeout: 20_000 },
+        )
+        await expect(tenders2!.locator('main').locator('h1').first()).toBeVisible({
+          timeout: 20_000,
+        })
+        await expect(tenders2!.getByText('stopped working')).toHaveCount(0)
+        await shot(tenders2!, 'tenders-error-boundary-fallback')
+        return `forced a child render throw; fallback shown for region "${injected.region}", navigation stayed usable, the log gained the code, and retry remounted the page`
+      })
+
+      await step('restart-after-boundary-recovery', async () => {
+        expect(boundary, 'the boundary flow must have succeeded').toBe(true)
+        return 'the boundary flow completed without leaving the window in a failed state'
+      })
     } catch (error) {
+      // ── SALVAGE AT THE THROW POINT ─────────────────────────────────────────
+      // The `finally` below salvages too, but this is the earlier of the two
+      // salvage points and the only one that survives a failure in the teardown
+      // itself (a hung `closeAndSaveVideo`, a worker killed mid-`finally`). The
+      // result JSON the run writes is a *different* statement: it says what the
+      // spec observed. This copies the evidence, so a reader can check the
+      // observation against the log rather than trusting it.
+      if (!diagnosticsLogPath)
+        diagnosticsLogPath = await salvageTendersDiagnosticsLog(
+          userDataDir,
+          'tenders-regression-smoke',
+        )
       record('aborted', 'FAIL', undefined, error instanceof Error ? error.message : String(error))
     } finally {
       if (run1) {
@@ -766,9 +935,13 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
         if (video) videos.push(video)
       }
       // BEFORE the profile goes: the log lives inside it, and a failing flow
-      // reaches this block with the result JSON still unwritten (see the helper).
-      diagnosticsLogPath = await salvageDiagnosticsLog(userDataDir, 'tenders-regression-smoke')
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      // reaches this block with the result JSON still unwritten (see the
+      // shared helper's own note). This is the second salvage point — the
+      // `catch` above is the first — and it covers the path the brief named:
+      // a failing run must still yield the log, not `null`.
+      diagnosticsLogPath =
+        (await teardownScratchProfile(userDataDir, 'tenders-regression-smoke')) ??
+        diagnosticsLogPath
     }
 
     // ── Diagnostics + result JSON ────────────────────────────────────────────
@@ -790,6 +963,11 @@ test.describe('Tenders regression smoke (post-cutover)', () => {
       if (TRUST_ERROR_RE.test(entry)) unauthorizedEvents.push(entry)
     }
     diagnostics.unauthorizedEvents = unauthorizedEvents
+    // The TOP-LEVEL field first: the previous wave set this one before the
+    // `finally` had run, so a failing run recorded `null` here while the
+    // `artifacts` entry below recorded a real path — the same statement
+    // contradicting itself in one document. Both are now written from
+    // `diagnosticsLogPath` after the last salvage point.
     diagnostics.diagnosticsLogArtifact = diagnosticsLogPath
     diagnostics.diagnosticsLogInsideProfile = join(
       userDataDir,

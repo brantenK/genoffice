@@ -55,8 +55,13 @@ findings`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
 - **The structural reference is now `module-map.md`** (wave 3): the per-module responsibility map,
   the line counts, the import-graph direction, the diagnostics log, the test infrastructure and the
   no-blank-screen invariant. It also records that **`main` no longer imports `renderer/`** — the
-  demo dataset moved to `shared/demo-seed.ts` — and that `main/tenders-main.ts` is now **347 lines**
-  (it was 3,702) and is the composition root only.
+  demo dataset moved to `shared/demo-seed.ts` — and that `main/tenders-main.ts` is now **341 lines**
+  (it was 3,702) and is the composition root only. **Two corrections to what this bullet used to
+  claim:** the figure was **347**, which was stale (a `wc -l` run in the 2026-09-25 pass reports
+  341, and the module-map table had drifted in eleven rows), and the import direction is **not**
+  "enforced" — nothing in the toolchain fails on a `main → renderer` import, and a type-only
+  `renderer → main` edge (in `renderer/src/diagnostics.ts`) exists today. `module-map.md` now says
+  both plainly.
 - **Three items this file used to record as open have closed, verified on disk:** the **error
   boundary** landed (`renderer/src/components/ErrorBoundary.tsx`, mounted in `main.tsx` around
   `<App />` and in `App.tsx` around the page area — a render throw is now a recoverable, honest
@@ -65,26 +70,49 @@ findings`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
   `registerTendersIpc` before anything else can record, and `ErrorBoundary` renders the log path to
   the user in its fallback). §6 item 15 and §3e were corrected against disk; the earlier wording in
   this folder described all three as un-landed and was wrong.
-- Full Tenders suite — **re-measured in the wave-3 pass, and the result was not a clean green:**
-  `npm test -w @genoffice/tenders` reported **Test Files 10 failed | 48 passed (58)** and
-  **Tests 8 failed | 1604 passed | 7 skipped (1619)** in **real 1m58s**. **Read that as a
-  concurrent-edit artefact, not a regression**: the tree is being edited by two other agents while
-  this is written (a `main/` split and a `shared/demo-seed.ts` extraction were landing mid-run, and
-  an in-flight `tests/components/__probe.test.tsx` exists that rewrites a fixture module on disk),
-  and **three of the reported failures — `adversarial-stress.test.ts`, `ai-e2e-contract.test.ts`
-  and `renderer-display-locale.test.ts` — pass when run alone** (61 passed / 61). The retired
-  figures (1056 passing, 36 test files; then "56 files, pass total not measured") are gone:
-  `find apps/tenders/tests -name "*.test.ts*" | wc -l` reports **57 files** on disk now, and the
-  pass total is **1604** on this machine at this moment. Both move while agents edit.
+- Full Tenders suite — **the figures below are stale and must be re-measured, not quoted.** The
+  wave-3 pass reported `npm test -w @genoffice/tenders` as **Test Files 10 failed | 48 passed (58)**
+  and **Tests 8 failed | 1604 passed | 7 skipped (1619)**, read at the time as a concurrent-edit
+  artefact rather than a regression (three of the failures — `adversarial-stress.test.ts`,
+  `ai-e2e-contract.test.ts`, `renderer-display-locale.test.ts` — passed when run alone: 61/61).
+  **Those counts are written from a tree that no longer exists.** The verified figures for the
+  current tree are **1854 passing / 7 skipped / 0 failing across 58 test files**, and
+  `find apps/tenders/tests -name "*.test.ts*" | wc -l` reports **58 files** on disk (it reported 57
+  when this bullet was written). Every pass total this folder has carried — 1056, then 1604, then
+  this one — went stale within a wave; treat a count here as a dated observation and re-run
+  `npm test -w @genoffice/tenders` for the current one.
 - `npm run check:e2e-types` and `npx tsc --noEmit -p e2e/tsconfig.json`: run in the wave-3 pass,
   both **clean (exit 0)** after the wave-3 spec edits.
-- Built-Electron E2E — **13 Tenders specs on disk** (`ls e2e/tenders-*.spec.ts | wc -l` → 13), plus
-  the shared modules `e2e/tenders-ai-fixtures.ts`, `e2e/tenders-discovery-fixtures.ts` and the new
-  `e2e/tenders-timing.ts`. The specs declare **59** `test(` cases statically
-  (`grep -h "^\s*test(" e2e/tenders-*.spec.ts | wc -l` → 59; `tenders-regression-smoke.spec.ts` is
-  one `test(` that drives 17 flows). The lane's own totals are **not** re-measured here — the
-  orchestrator runs the suite — and the last recorded run was **58 passing / 1 failing**, with the
-  one failure passing when run alone.
+- Built-Electron E2E — **14 Tenders specs on disk** (`ls e2e/tenders-*.spec.ts | wc -l` → 14), plus
+  the shared modules `e2e/tenders-ai-fixtures.ts`, `e2e/tenders-discovery-fixtures.ts` and
+  `e2e/tenders-timing.ts`. The specs declare **63** `test(` cases statically
+  (`grep -h "^\s*test(" e2e/tenders-*.spec.ts | wc -l` → 63; `tenders-regression-smoke.spec.ts` is
+  one `test(` that drives 19 flows). The lane's own totals are **not** re-measured here — the
+  orchestrator runs the suite. The two figures above move with every added test, and the previous
+  version of this bullet (**13 specs / 59 cases**) was already stale; the recorded run totals it
+  also carried have been dropped rather than left to rot, because this folder has now been wrong
+  about a test count three times.
+- **A FAILING e2e run still yields the app's diagnostics log, and that is now guarded.** The log
+  lives inside the scratch profile every spec deletes, so `e2e/tenders-timing.ts` owns
+  `salvageTendersDiagnosticsLog` / `teardownScratchProfile` and **all 14 specs** tear their profiles
+  down through them, naming the artefact in the result JSON. The first version of this collected the
+  log in the spec's `finally` but recorded the path **before** that block ran, so a failing run
+  reported `diagnosticsLogArtifact: null` with the profile already gone — the log absent exactly
+  when it was needed, and the JSON contradicting itself (top-level `null`, `artifacts.diagnosticsLog`
+  a real path). Salvage now happens at both the throw site and the `finally`, and
+  `e2e/tenders-diagnostics-artifact-guard.spec.ts` (4 cases) asserts the contract mechanically:
+  copy-before-delete with byte equality, `null` for a run whose app never started (not a second
+  failure), a failing run's artefact present and named, and **no Tenders spec deleting a scratch
+  profile outside the helper**.
+- **The error boundary now has e2e coverage in the BUILT app.** `tenders-regression-smoke.spec.ts`
+  drives a new flow (`error-boundary-fallback-in-built-app`, 19 flows in the spec now) that injects
+  a genuine render throw into the real mounted boundary instance by walking React's fiber tree from
+  `#root`, picking the **inner page boundary** (`region: "Tenders"`) rather than the root one, and
+  asserting that **both** are mounted, the fallback's real copy and test ids, that the shell's
+  navigation stays usable beside the failed region, that the failure reaches the log as an **error
+  code and not the thrown message**, and that "Try this view again" remounts the page. It does not
+  prove that a specific product component throws — that stays the
+  jsdom suite's job — and the spec says so where it asserts it.
 - **The e2e lane's load sensitivity is now a documented contract, not folklore.**
   `contracts-and-invariants.md` §7 and `e2e/tenders-timing.ts` record what was measured (a healthy
   commit is observed by a poll in **under ~600 ms**; the slowest figure any journey covers is under
@@ -362,11 +390,19 @@ Product-boundary reminder above; the contracts are in `contracts-and-invariants.
   than re-arming it (`contracts-and-invariants.md` §3c), so a silent platform degrades visibly but
   is not covered by a test here.
 - **The PDF path still has no line-count guard.** The published byte ceiling is measured (a
-  91.6 MB image-heavy PDF parses in ~0.66 s), but text density drives memory (~0.042 MB heap per
-  extracted text line, ~24 600 lines at a 1 GB budget), and the PDF preflight bounds only bytes
-  and pages. The **DOCX** path closed its half of this in the remediation wave: it now enforces
-  a line budget (24 600, the same figure) **and** a character budget (12 000 000), because a
-  single unbounded paragraph defeats a line count
+  91.6 MB image-heavy PDF parses in ~0.66 s), but text density drives memory, and the PDF preflight
+  bounds only bytes and pages. **The text-dense figure is worse than this folder used to state.**
+  It said **~0.042 MB heap per extracted text line** (≈24 600 lines at a 1 GB budget), which was
+  **extrapolated from the 2 000-page sweep** in `tests/performance/results.json` (40 000 lines,
+  ~405 MB peak heap against a ~168 MB baseline). The reviewer's measurement is against the
+  **`byteStress`** point in the same file — the fixture the byte guard actually has to survive:
+  **22 000 lines / 5.2 MB / 4 766 389 characters peaked at ~916 MB heap**, same baseline, i.e.
+  **~34 MB of heap per 1 000 lines**, on lines roughly **5× shorter** than the sweep's. That is
+  **~4× the sweep's per-line cost**, which is the correction: at the measured rate a 1 GB budget
+  buys on the order of **25 000 text-dense lines**, so a line-count guard must be sized from the
+  stress point rather than from the sweep. The **DOCX** path closed its half of this in the
+  remediation wave: it now enforces a line budget (24 600) **and** a character budget (12 000 000),
+  because a single unbounded paragraph defeats a line count
   (`contracts-and-invariants.md` §3d). A PDF line-count guard alongside the byte/page guards is
   still recommended, not required.
 - **Workspace-level `dataOrigin` trust.** The per-tender `dataOrigin` field is closed (only

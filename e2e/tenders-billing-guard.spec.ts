@@ -36,7 +36,12 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
-import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  readStore,
+  pollStore,
+  teardownScratchProfile,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -287,6 +292,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -303,6 +314,9 @@ test.describe('Tenders billing guards (Phase 4 follow-up)', () => {
 
   test('1: a non-won tender exposes no billing affordance; a won tender exposes the inline path', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -348,16 +362,23 @@ test.describe('Tenders billing guards (Phase 4 follow-up)', () => {
         detail: `${REF_NONWON} hides all billing affordances; ${REF_WON} exposes the inline bill button + toolbar`,
         evidence: { userDataDir },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-billing-journey-1', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-billing-j1').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-billing-guard-run1`))
     }
   })
 
   test('2: an inline billing attempt is never silent and the disk matches the claim', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -450,16 +471,23 @@ test.describe('Tenders billing guards (Phase 4 follow-up)', () => {
           milestoneOnDisk: milestone,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-billing-journey-2', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-billing-j2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-billing-guard-run2`))
     }
   })
 
   test('3: main rejects non-won and demo billing with typed errors and no side effect', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -535,11 +563,15 @@ test.describe('Tenders billing guards (Phase 4 follow-up)', () => {
         detail: `nonWon="${nonWon.error}"; demo="${demo.error}"; demoCrm="${demoCrm.error}"; no Books/CRM writes`,
         evidence: { userDataDir, probe },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-billing-journey-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-billing-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-billing-guard-run3`))
     }
   })
 })

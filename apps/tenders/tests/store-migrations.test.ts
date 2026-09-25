@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
@@ -561,6 +569,180 @@ describe('Tenders Store Migrations & Atomic Persistence', () => {
       expect(migrated.workspaces[0].customers[0].id).toBe('c-custom-1')
       expect(migrated.workspaces[0].vault).toHaveLength(1)
       expect(migrated.workspaces[0].vault[0].id).toBe('vd-custom-1')
+    })
+  })
+
+  describe('1b. The legacy writer never downgrades an authoritative document', () => {
+    it('refuses a v2 payload and leaves the valid v2 file byte-identical', () => {
+      const storePath = join(testDir, 'v2-primary', 'tenders-data.json')
+      mkdirSync(join(testDir, 'v2-primary'), { recursive: true })
+      const v2 = { ...validV2(), revision: 7, updatedAt: '2026-08-20T09:15:30.000Z' }
+      const originalBytes = JSON.stringify(v2, null, 2)
+      writeFileSync(storePath, originalBytes, 'utf8')
+
+      // The probe shape: a v2-shaped payload reaches the v1 writer. The writer
+      // cannot represent `schemaVersion: 2` or the revision, so it must refuse —
+      // writing here would replace an authoritative v2 document with a v1
+      // envelope (`version: 1`) and destroy the revision metadata the v2 store
+      // conflicts against.
+      let thrown: unknown
+      try {
+        writeTendersStore(storePath, { ...v2, revision: 8 })
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBeInstanceOf(Error)
+      expect((thrown as Error).message).toMatch(/schemaVersion|authoritative|downgrade/i)
+      expect(readFileSync(storePath, 'utf8'), 'the v2 primary must be untouched').toBe(
+        originalBytes,
+      )
+      // No temp file and no partial write left behind either.
+      expect(readdirSync(join(testDir, 'v2-primary'))).toEqual(['tenders-data.json'])
+    })
+
+    it.each([2, 3, 99])(
+      'refuses schemaVersion %i whether it is an integer or a legacy string version',
+      (schemaVersion) => {
+        const storePath = join(testDir, `v2-variant-${schemaVersion}.json`)
+        const originalBytes = JSON.stringify({ ...validV2(), schemaVersion }, null, 2)
+        writeFileSync(storePath, originalBytes, 'utf8')
+
+        expect(() => writeTendersStore(storePath, { ...validV2(), schemaVersion })).toThrow(
+          /schemaVersion/i,
+        )
+        expect(readFileSync(storePath, 'utf8')).toBe(originalBytes)
+      },
+    )
+
+    it('refuses a payload whose v1 "version" is not the v1 schema version', () => {
+      const storePath = join(testDir, 'unknown-version.json')
+      const originalBytes = JSON.stringify({ ...validV1(), version: 4 }, null, 2)
+      writeFileSync(storePath, originalBytes, 'utf8')
+
+      expect(() => writeTendersStore(storePath, { ...validV1(), version: 4 })).toThrow(/version/i)
+      expect(readFileSync(storePath, 'utf8')).toBe(originalBytes)
+    })
+
+    it('still writes a genuine v1 document — version 0, 1, and absent', () => {
+      // The refusal is narrow: only a payload this writer cannot represent is
+      // refused. Every v1 marker the app has ever written still round-trips.
+      for (const version of [0, 1, undefined] as const) {
+        const directory = join(testDir, `v1-ok-${String(version)}`)
+        mkdirSync(directory, { recursive: true })
+        // The store file itself, by both spellings this writer documents: the
+        // file path, and the directory that contains it.
+        const storePath = join(directory, 'tenders-data.json')
+        const payload = { ...validV1(), ...(version === undefined ? {} : { version }) }
+        if (version === undefined) delete (payload as Record<string, unknown>).version
+
+        writeTendersStore(storePath, payload)
+
+        // The write landed on the FILE named, not on a directory of that name:
+        // an early version of the path rule turned the caller's target into a
+        // directory and wrote `tenders-data.json` inside it.
+        expect(statSync(storePath).isFile(), `${storePath} must be the written file`).toBe(true)
+        const written = JSON.parse(readFileSync(storePath, 'utf8'))
+        expect(written.version).toBe(CURRENT_TENDERS_SCHEMA_VERSION)
+
+        const read = readTendersStore(storePath)
+        expect(read.workspaces[0].tenders[0].referenceNumber).toBe('ICT/EXAMPLE/001')
+        expect(read.workspaces[0].tenders[0].requirements).toHaveLength(2)
+
+        // The directory spelling reaches the same file.
+        expect(readTendersStore(directory).activeCompanyId).toBe(read.activeCompanyId)
+      }
+    })
+  })
+
+  describe('1c. A requirement the reader does not fully understand is kept, not dropped', () => {
+    /** One v1 tender carrying exactly the requirements given. */
+    function tenderWith(requirements: unknown[]) {
+      return {
+        ...validV1(),
+        workspaces: [
+          {
+            ...validV1().workspaces[0],
+            tenders: [{ ...syntheticTender(), requirements }],
+          },
+        ],
+      }
+    }
+
+    it('keeps a requirement carrying an unknown key and records why it was not fully understood', () => {
+      const data = migrateAndValidateTenders(
+        tenderWith([
+          syntheticRequirement('requirement-understood', 1),
+          {
+            ...syntheticRequirement('requirement-with-new-field', 2),
+            title: 'Submit the B-BBEE certificate',
+            verbatimClause: 'The bidder must submit a valid B-BBEE certificate.',
+            // A field a later build added. This reader cannot vouch for it, and it
+            // must not invent a value for it either — but a MANDATORY returnable
+            // that silently disappears from the tender is the one failure this
+            // product exists to prevent.
+            grantPreferencePoints: 20,
+          },
+        ]),
+      )
+
+      const tender = data.workspaces[0].tenders[0]
+      expect(tender.requirements).toHaveLength(2)
+      const kept = tender.requirements.find((item) => item.id === 'requirement-with-new-field')
+      expect(kept, 'the requirement must survive the read').toBeDefined()
+      // Honest provenance: the record is flagged, never silently accepted, and the
+      // unknown field itself is not carried into the document.
+      expect(kept?.notes).toMatch(/grantPreferencePoints/)
+      expect(kept?.notes).toMatch(/not understood|not read/i)
+      expect(kept).not.toHaveProperty('grantPreferencePoints')
+      // Nothing about the values it DID understand is invented or changed.
+      expect(kept?.title).toBe('Submit the B-BBEE certificate')
+      expect(kept?.isMandatory).toBe(syntheticRequirement('x', 2).isMandatory)
+      expect(kept?.category).toBe(syntheticRequirement('x', 2).category)
+    })
+
+    it('names every unrecognised key when a requirement carries more than one', () => {
+      const data = migrateAndValidateTenders(
+        tenderWith([
+          {
+            ...syntheticRequirement('requirement-many', 1),
+            grantPreferencePoints: 20,
+            newScoringSheet: { rows: [] },
+          },
+        ]),
+      )
+      const kept = data.workspaces[0].tenders[0].requirements[0]
+      expect(kept?.id).toBe('requirement-many')
+      expect(kept?.notes).toMatch(/grantPreferencePoints/)
+      expect(kept?.notes).toMatch(/newScoringSheet/)
+    })
+
+    it('does not touch a requirement it understands completely', () => {
+      const understood = syntheticRequirement('requirement-known', 1)
+      const data = migrateAndValidateTenders(tenderWith([understood]))
+      const kept = data.workspaces[0].tenders[0].requirements[0]
+
+      expect(kept).toEqual({
+        ...understood,
+        boundingBox: { ...understood.boundingBox },
+      })
+      expect(kept?.notes).toBe(understood.notes)
+      expect(kept?.notes).not.toMatch(/not understood|not read/i)
+    })
+
+    it('still refuses a requirement it cannot read at all, rather than inventing one', () => {
+      // The line this reader must hold: an unrecognised FIELD is kept with a note;
+      // a record with no id, no title, or a non-list `suggestedVaultDocIds` has
+      // nothing to keep and nothing to invent, so the tender is refused loudly.
+      for (const unreadable of [
+        { title: 'No id at all', suggestedVaultDocIds: [] },
+        { id: 'x', suggestedVaultDocIds: [] },
+        { id: 'x', title: 'T', suggestedVaultDocIds: 'not-a-list' },
+        'not an object',
+      ]) {
+        expect(() => migrateAndValidateTenders(tenderWith([unreadable]))).toThrow(
+          LegacyTendersReadError,
+        )
+      }
     })
   })
 

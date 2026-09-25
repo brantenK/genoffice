@@ -38,7 +38,13 @@ import {
   screenshotPath,
   type LaunchedApp,
 } from './helpers'
-import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  readStore,
+  pollStore,
+  teardownScratchProfile,
+  writeSalvagedLogs,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -231,6 +237,10 @@ test.describe('Tenders DOCX intake', () => {
 
   test('1: a Word .docx imports through the file input, populates the matrix and persists', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded so a failing
+    // run names the log rather than deleting it with the profile.
+    const salvaged: Array<string | null> = []
+    let savedArtifacts: string | undefined
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
     let userDataDir = ''
@@ -380,7 +390,8 @@ test.describe('Tenders DOCX intake', () => {
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-docx-intake-run1').catch(() => undefined)
       if (run2) await closeAndSaveVideo(run2, 'tenders-docx-intake-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-docx-intake-j1`))
+      savedArtifacts = await writeSalvagedLogs('tenders-docx-intake-journey-1', salvaged)
     }
   })
 
@@ -391,6 +402,10 @@ test.describe('Tenders DOCX intake', () => {
    * module names explicitly.
    */
   test('2: a file that is not a real .docx is refused with a reason, not shredded', async () => {
+    // Salvaged diagnostics-log artefacts for this journey, recorded so a failing
+    // run names the log rather than deleting it with the profile.
+    const salvaged: Array<string | null> = []
+    let savedArtifacts: string | undefined
     let run1: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -423,7 +438,8 @@ test.describe('Tenders DOCX intake', () => {
       await shot(tenders, 'docx-intake-refused')
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-docx-intake-run3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-docx-intake-j2`))
+      savedArtifacts = await writeSalvagedLogs('tenders-docx-intake-journey-2', salvaged)
     }
   })
 })

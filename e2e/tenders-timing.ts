@@ -49,7 +49,7 @@
  * say why, instead of inheriting one quietly.
  */
 
-import { readFile, stat } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, rm, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
@@ -76,6 +76,15 @@ export const STORE_IMPORT_POLL_MS = 30_000
  * cost, so this figure covers harness latency and nothing else.
  */
 export const FIXTURE_SETTLE_POLL_MS = 60_000
+
+/**
+ * Where the salvaged diagnostics logs are written, relative to the spec file.
+ *
+ * The specs do not import `helpers.ts` here: that module pulls in Playwright's
+ * `electron` launcher, and a spec that only wants the log path should not drag
+ * the launcher into its import graph for a directory name.
+ */
+const SALVAGE_DIR = join(__dirname, 'artifacts', 'diagnostics')
 
 /**
  * The v2 store file inside a scratch profile's user-data directory. Exported so
@@ -151,4 +160,126 @@ export async function storeSignature(userDataDir: string): Promise<string> {
   } catch {
     return 'missing'
   }
+}
+
+/**
+ * Copy the app's own diagnostics log out of a scratch profile into
+ * `e2e/artifacts/diagnostics/`, BEFORE that profile is deleted.
+ *
+ * ── WHY THIS IS SHARED AND NOT LOCAL TO ONE SPEC ─────────────────────────────
+ *
+ * The log is the most valuable artefact this lane produces — it is the only
+ * record of what a failing app did — and it lives INSIDE the scratch profile
+ * (`<userData>/tenders/tenders-diagnostics.log`, see `src/main/diagnostics-log.ts`).
+ * Every Tenders spec tears its profile down with `rm(userDataDir, …)`, so a spec
+ * that copies the log AFTER that `rm` salvages nothing, and a spec that copies it
+ * only at the end of the test body loses the log in exactly the failing run it
+ * was built to explain. Both failures were real here: the first version of this
+ * salvage ran late and reported `diagnosticsLogArtifact: null` for a FAILING run
+ * whose only evidence had already been deleted with the profile.
+ *
+ * So the caller must invoke this from a `finally` (which runs on the failing
+ * path too), and the copy's filename carries the SALVAGE INSTANT rather than the
+ * run's start, because a run that never removed its profile leaves logs from
+ * several runs in one directory.
+ *
+ * ── WHY A FAILING RUN MAY STILL SALVAGE NOTHING ──────────────────────────────
+ *
+ * A test whose very first `beforeAll` throws (or whose worker is killed before
+ * the body runs) never reaches a `finally`, so there is no salvage point at all —
+ * that is a Playwright-level failure rather than a Tenders one, and the
+ * absence is reported rather than faked. Separately, a run that failed before the
+ * app started has no log: the source file simply does not exist, which is
+ * expected and is tolerated here rather than turned into a second failure that
+ * would mask the first. The mechanical guard for this behaviour is
+ * `e2e/tenders-diagnostics-artifact-guard.spec.ts`.
+ *
+ * Returns the artefact's absolute path, or `null` when there was no log to copy.
+ */
+export async function salvageTendersDiagnosticsLog(
+  userDataDir: string,
+  copyName: string,
+): Promise<string | null> {
+  if (!userDataDir) return null
+  const source = join(userDataDir, 'tenders', 'tenders-diagnostics.log')
+  const target = join(SALVAGE_DIR, `${copyName}-${salvageStamp()}.log`)
+  try {
+    await mkdir(SALVAGE_DIR, { recursive: true })
+    await copyFile(source, target)
+    return target
+  } catch {
+    // No log (the app never started), or an unreadable profile. Either way the
+    // absence is the honest answer and must not become the run's failure.
+    return null
+  }
+}
+
+/**
+ * A filesystem-safe instant, for an artefact a run may produce more than once.
+ * Colons are illegal in a Windows filename; millisecond precision is what keeps
+ * two salvage points in the same second from overwriting each other.
+ */
+function salvageStamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+/**
+ * A `finally` body for a spec that owns a scratch profile: salvage the
+ * diagnostics log first, then delete the profile.
+ *
+ * Ordering is the whole point — after the `rm` there is nothing left to salvage —
+ * and putting it in one function is what stops the next spec author from writing
+ * the two lines the wrong way round. `label` is the artefact's filename stem, so
+ * a directory of salvaged logs says which spec produced each one.
+ */
+export async function teardownScratchProfile(
+  userDataDir: string,
+  label: string,
+): Promise<string | null> {
+  const artifact = await salvageTendersDiagnosticsLog(userDataDir, label)
+  if (userDataDir) await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+  return artifact
+}
+
+/** The salvaged artefacts on disk for one label, newest first. */
+export async function diagnosticsArtifactsFor(label: string): Promise<string[]> {
+  const entries = await readdir(SALVAGE_DIR).catch(() => [] as string[])
+  const matching = entries.filter((name) => name.startsWith(`${label}-`) && name.endsWith('.log'))
+  const withTimes = await Promise.all(
+    matching.map(async (name) => ({
+      name,
+      mtime: (await stat(join(SALVAGE_DIR, name)).catch(() => ({ mtimeMs: 0 }))).mtimeMs,
+    })),
+  )
+  withTimes.sort((a, b) => b.mtime - a.mtime)
+  return withTimes.map((entry) => join(SALVAGE_DIR, entry.name))
+}
+
+/**
+ * Write the list of salvaged log artefacts beside the test's own result file, for
+ * a spec that keeps no result JSON of its own.
+ *
+ * The point is not the file — it is that a failing run leaves a machine-readable
+ * record naming its own evidence. A `finally` that salvages and then forgets the
+ * path is one refactor away from a `finally` that only deletes; a written record
+ * is what makes the salvage observable in the run's output rather than only in a
+ * directory nobody reads. `null` entries are the runs that legitimately had no
+ * log (the app never started) and are kept, so the absence is visible too.
+ */
+export async function writeSalvagedLogs(
+  name: string,
+  salvaged: Array<string | null>,
+): Promise<string> {
+  const target = join(SALVAGE_DIR, `${name}-artifacts.json`)
+  await mkdir(SALVAGE_DIR, { recursive: true })
+  await writeFile(
+    target,
+    JSON.stringify(
+      { name, salvagedAt: new Date().toISOString(), diagnosticsLogs: salvaged },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  return target
 }

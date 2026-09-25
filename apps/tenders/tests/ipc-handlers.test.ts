@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -279,6 +280,7 @@ import {
   MAX_TENDERS_REMINDER_THRESHOLDS,
   TENDERS_CHANNELS,
 } from '../src/shared/ipc'
+import { resetTendersIntegrationsForTests } from '../src/main/integrations'
 import { createEmptyTendersDataV2, migrateTendersDataV1 } from '../src/shared/tenders-schema'
 import type { TenderRecord, TendersData, TendersDataV1, TendersDataV2 } from '../src/shared/types'
 // Importing the preload module runs `contextBridge.exposeInMainWorld`, which the
@@ -1492,6 +1494,44 @@ describe('Electron IPC Handlers & Security Validation', () => {
         expect(openedPaths).toEqual([])
       },
     )
+
+    it.each(['.docm', '.dotm', '.xlsm', '.xltm', '.xlam', '.pptm', '.potm', '.ppsm', '.sldm'])(
+      'refuses to hand a %s macro container to shell.openPath',
+      async (extension) => {
+        const saved = await saveDocumentFile(
+          {
+            fileName: `third-party-tender${extension}`,
+            buffer: Buffer.from('a container that may carry a VBA project'),
+            category: 'rfp',
+          },
+          testDir,
+        )
+        // The file is still STORED — ingest is a separate decision from launch, and
+        // a refusal to open must not silently discard the user's document.
+        expect(saved.ok).toBe(true)
+
+        const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+
+        expect(opened.ok).toBe(false)
+        // Honest copy: a macro container is not claimed to be a launcher.
+        expect(opened.error).toMatch(/macros/i)
+        expect(opened.error).not.toMatch(/launcher or shortcut/i)
+        // The OS never received the path, so nothing ran.
+        expect(openedPaths).toEqual([])
+      },
+    )
+
+    it('still opens a macro-free document, so the refusal is not blanket', async () => {
+      const saved = await saveDocumentFile(
+        { fileName: 'ordinary-rfp.docx', buffer: Buffer.from('a plain document'), category: 'rfp' },
+        testDir,
+      )
+      expect(saved.ok).toBe(true)
+
+      const opened = await openDocumentFile({ storedPath: saved.storedPath! }, testDir)
+      expect(opened.ok).toBe(true)
+      expect(openedPaths).toHaveLength(1)
+    })
   })
 
   describe('4b. The legacy v1 stack is retired, not merely quiet', () => {
@@ -1790,6 +1830,119 @@ describe('Electron IPC Handlers & Security Validation', () => {
       expect(
         recorder.deliveries.filter((d) => d.channel === STORE_CHANGED_V2_CHANNEL),
       ).toHaveLength(0)
+    })
+
+    it('syncWithCrm does not report success and does not back-link when the CRM upsert fails', async () => {
+      const syncHandler = ipcHandlers.get(TENDERS_CHANNELS.syncWithCrm)
+      expect(syncHandler).toBeDefined()
+      const recorder = deliveryRecorder()
+      const sender = registeredWebContents(recorder.send)
+      const storePath = join(testDir, 'tenders', 'tenders-data.json')
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      const starting = v2WithSeedTender(5)
+      const startingBytes = JSON.stringify(starting, null, 2)
+      writeFileSync(storePath, startingBytes, 'utf8')
+      const tender = starting.workspaces[0].tenders[0]
+
+      // The CRM port refuses the write. Telling the caller `ok: true` here is the
+      // lying success this test exists to prevent: the deal does not exist, so
+      // the authoritative document must not claim a back-link to it either.
+      configureTendersRuntime({
+        preloadPath: '',
+        rendererFile: '',
+        integrations: {
+          upsertTenderOpportunity: async () => ({ ok: false, error: 'CRM store is read-only.' }),
+        },
+      })
+
+      try {
+        const result = await syncHandler!(event(sender), { tender, tenderId: tender.id })
+
+        expect(result.ok).toBe(false)
+        expect(result.error).toMatch(/CRM store is read-only/i)
+        // The authoritative document is byte-identical: no back-link, no revision.
+        expect(readFileSync(storePath, 'utf8')).toBe(startingBytes)
+        expect(
+          recorder.deliveries.filter((d) => d.channel === STORE_CHANGED_V2_CHANNEL),
+        ).toHaveLength(0)
+      } finally {
+        // `configureTendersRuntime` only ever SETS an injection (`{}` is the
+        // explicit "integrations disabled" state), so an injected port outlives
+        // the test that installed it and every later test in this file would run
+        // with its own upsert removed. The reset hook is what actually clears it.
+        resetTendersIntegrationsForTests()
+      }
+    })
+
+    it('syncWithCrm does not report success when the CRM upsert throws', async () => {
+      const syncHandler = ipcHandlers.get(TENDERS_CHANNELS.syncWithCrm)
+      expect(syncHandler).toBeDefined()
+      const sender = registeredWebContents()
+      const storePath = join(testDir, 'tenders', 'tenders-data.json')
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      const starting = v2WithSeedTender(5)
+      const startingBytes = JSON.stringify(starting, null, 2)
+      writeFileSync(storePath, startingBytes, 'utf8')
+      const tender = starting.workspaces[0].tenders[0]
+
+      configureTendersRuntime({
+        preloadPath: '',
+        rendererFile: '',
+        integrations: {
+          upsertTenderOpportunity: async () => {
+            throw new Error('CRM app is not running')
+          },
+        },
+      })
+
+      try {
+        const result = await syncHandler!(event(sender), { tender, tenderId: tender.id })
+
+        expect(result.ok).toBe(false)
+        expect(String(result.error)).toMatch(/CRM app is not running/)
+        expect(readFileSync(storePath, 'utf8')).toBe(startingBytes)
+      } finally {
+        resetTendersIntegrationsForTests()
+      }
+    })
+
+    it('syncWithCrm reports a failed back-link honestly instead of claiming a clean sync', async () => {
+      const syncHandler = ipcHandlers.get(TENDERS_CHANNELS.syncWithCrm)
+      expect(syncHandler).toBeDefined()
+      const sender = registeredWebContents()
+      const storePath = join(testDir, 'tenders', 'tenders-data.json')
+      mkdirSync(join(testDir, 'tenders'), { recursive: true })
+      const starting = v2WithSeedTender(5)
+      // A read-only store file: the CRM port succeeds, the back-link cannot be
+      // written. The deal exists, so the sync is NOT complete and must not be
+      // reported as one.
+      writeFileSync(storePath, JSON.stringify(starting, null, 2), 'utf8')
+      chmodSync(storePath, 0o444)
+      const tender = starting.workspaces[0].tenders[0]
+      const upserts: unknown[] = []
+
+      configureTendersRuntime({
+        preloadPath: '',
+        rendererFile: '',
+        integrations: {
+          upsertTenderOpportunity: async (input: unknown) => {
+            upserts.push(input)
+            return { ok: true, dealId: `deal-tender-${tender.id}` }
+          },
+        },
+      })
+
+      try {
+        const result = await syncHandler!(event(sender), { tender, tenderId: tender.id })
+
+        expect(upserts).toHaveLength(1)
+        expect(result.ok).toBe(false)
+        expect(String(result.error)).toMatch(/could not be linked/i)
+        expect(result.dealId).toBe(`deal-tender-${tender.id}`)
+      } finally {
+        chmodSync(storePath, 0o666)
+        resetTendersIntegrationsForTests()
+      }
     })
 
     it('exportMatrixToSheets outputs strict RFC 4180 unspaced comma delimiter and UTF-8 BOM', async () => {
@@ -2206,6 +2359,7 @@ describe('Electron IPC Handlers & Security Validation', () => {
           userDataDir: hostileDir,
         })
 
+        console.log('DEBUG F2 result', JSON.stringify(result))
         expect(result.ok).toBe(true)
         expect(existsSync(hostileCrmPath)).toBe(false)
         expect(existsSync(hostileTendersPath)).toBe(false)

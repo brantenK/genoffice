@@ -75,6 +75,7 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
+import { teardownScratchProfile } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -568,6 +569,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -597,6 +604,9 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
 
   test('1: soft-delete moves the file to .trash and the trash UI restores it after a restart', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
     let userDataDir = ''
@@ -765,18 +775,25 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           trashAfterDelete,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-1', result)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-durability-j1-run1').catch(() => undefined)
       if (run2) await closeAndSaveVideo(run2, 'tenders-durability-j1-run2').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run1`))
     }
   })
 
   test('2: link-aware delete warns with referencing records and the recoverable copy', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -868,17 +885,24 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           },
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-2', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j2').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run2`))
     }
   })
 
   test('3: replacement trashes the previous file only after the new commit succeeds', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -995,17 +1019,24 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           reconcile: post,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j3').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run3`))
     }
   })
 
   test('4: recovery is never automatic — candidates are listed, restore is explicit, no substitution', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let runB: LaunchedApp | undefined
     let userDataDir = ''
@@ -1190,20 +1221,27 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           noCandidatesError: { code: loadB.error?.code, message: loadB.error?.message },
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-4', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j4').catch(() => undefined)
       if (runB) await closeAndSaveVideo(runB, 'tenders-durability-j4b').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run4`))
       if (userDataDirB)
-        await rm(userDataDirB, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDirB, `tenders-durability-run4b`))
     }
   })
 
   test('5: reconciliation reports missing and orphaned files without deleting anything', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1282,17 +1320,24 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           thirdReconcile: { missing: third.missing, activeCount: third.activeCount },
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-5', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j5').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run5`))
     }
   })
 
   test('6: a failed saveDocument surfaces an alert and never presents a session blob as durable', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1373,17 +1418,24 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           submitReenabled: true,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-6', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j6').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run6`))
     }
   })
 
   test('7: removing a tender warns about references then soft-deletes its RFP to .trash', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1479,17 +1531,24 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           noticeText,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-7', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j7').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run7`))
     }
   })
 
   test('8: tender removal is fail-closed — a failed RFP soft-delete keeps the record', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1545,17 +1604,24 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           errorText: await errorBar.textContent(),
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-8', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j8').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run8`))
     }
   })
 
   test('9: re-attaching a PDF in the vault form replaces the file and trashes the previous one', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1688,12 +1754,16 @@ test.describe('Tenders durability (Phase 5 / WP-9 + WP-2 remainder)', () => {
           reconcile: post,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-durability-journey-9', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-durability-j9').catch(() => undefined)
       if (userDataDir)
-        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+        salvaged.push(await teardownScratchProfile(userDataDir, `tenders-durability-run9`))
     }
   })
 })

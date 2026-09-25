@@ -33,7 +33,12 @@ import {
   SHELL_DIR,
   type LaunchedApp,
 } from './helpers'
-import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  readStore,
+  pollStore,
+  teardownScratchProfile,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -332,6 +337,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -348,6 +359,9 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
 
   test('1+3: fresh import opens the mandatory review gate and readiness is blocked until confirmed', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -405,16 +419,23 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
         detail: `fresh import: ${pending} pending review items; readiness blocked with intake gate failing`,
         evidence: { userDataDir, pending, before, closingDate: tender.closingDate },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-intake-review-journey-1-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-intake-review-j1').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-intake-review-run1`))
     }
   })
 
   test('2: correcting a critical field, reclassifying/adding a requirement and marking not stated completes the review', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -547,16 +568,23 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
           fieldStates: states,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-intake-review-journey-2', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-intake-review-j2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-intake-review-run2`))
     }
   })
 
   test('3: confirming the critical fields clears the intake block without a false clear', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -599,16 +627,23 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
         detail: `intake block before=${before.intakeBlocked} after=${after.intakeBlocked}; ready=${after.ready}`,
         evidence: { userDataDir, before, after },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-intake-review-journey-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-intake-review-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-intake-review-run3`))
     }
   })
 
   test('4: a textless scanned page is OCR-required, blocks readiness, and clears when reviewed', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -689,16 +724,23 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
         detail: `page 2 state=manually-reviewed method=null; ocrPages=${tender.ocrPages}; page block ${blocked.pageBlocked} -> ${after.pageBlocked}`,
         evidence: { userDataDir, page2, ocrPages: tender.ocrPages, blocked, after },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-intake-review-journey-4', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-intake-review-j4').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-intake-review-run4`))
     }
   })
 
   test('5: review/confirmation state is authoritative and survives a restart', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
     let userDataDir = ''
@@ -781,6 +823,10 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
           ),
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-intake-review-journey-5', result)
     } finally {
@@ -788,7 +834,7 @@ test.describe('Tenders intake review (Phase 3 / Wave 4)', () => {
         await closeAndSaveVideo(run1, 'tenders-intake-review-j5-run1').catch(() => undefined)
       if (run2)
         await closeAndSaveVideo(run2, 'tenders-intake-review-j5-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-intake-review-run5`))
     }
   })
 })

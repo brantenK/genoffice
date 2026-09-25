@@ -14,11 +14,16 @@
 //    nothing: a diagnostic is fire-and-forget, and the app never waits for a log
 //    write before continuing. Each entry becomes exactly one line, so `grep` and
 //    `tail` both work on a file that is being written live.
-//  * **Bounded, and provably so.** The live file never passes `maxBytes`; when it
-//    would, it is rotated to `<name>.1` (the previous `.1` becomes `.2`, … and the
-//    oldest is dropped) and a fresh file is started. With `maxFiles` generations
-//    the directory can never hold more than `maxBytes × maxFiles` bytes, no
-//    matter how long the app runs or how loud a loop gets.
+//  * **Bounded, with the bounds named rather than implied.** The live file is
+//    kept at or below `maxBytes` in the ordinary case: when an entry would pass
+//    it, the file is rotated to `<name>.1` (the previous `.1` becomes `.2`, … and
+//    the oldest is dropped) and a fresh file is started, so with `maxFiles`
+//    generations the directory holds at most `maxBytes × maxFiles` bytes. Two
+//    cases are deliberately allowed past that, and both are RECORDED rather than
+//    dropped, because a log line the console printed and the file lacks is how a
+//    real failure becomes unattributable: a rotation that cannot be performed (an
+//    unwritable directory) leaves the entry appended instead, and a `maxBytes`
+//    smaller than the truncation marker itself lets that marker stand alone.
 //  * **Never throws.** A logger that can fail the app is worse than no logger:
 //    every filesystem call here is wrapped, and a failure is swallowed (a
 //    `console.warn`, best-effort) rather than propagated. If the directory does
@@ -37,7 +42,7 @@
 // machine. Nothing here is uploaded, nothing is networked, and closing the app
 // cannot lose an entry that was already recorded (each `record()` is a completed
 // synchronous append).
-import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 // ── the contract ─────────────────────────────────────────────────────────────
@@ -246,13 +251,36 @@ function trimMessage(message: unknown): string {
  * Newlines in the message are collapsed to spaces by {@link trimMessage}, which is
  * what makes "one entry is one line" true rather than merely usual — a `tail -f`
  * on this file reads whole entries, and a multi-line message would break that.
+ *
+ * The same guarantee has to hold for the DETAIL, and `JSON.stringify` alone does
+ * not give it: U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR) are legal
+ * in a JSON string and are emitted RAW, while `grep`, `tail -f`, editors and most
+ * log readers treat them as line breaks. A detail value containing one therefore
+ * splits this entry in two and the second half reads as an entry of its own — a
+ * forged line, produced by a string the sink accepted. {@link escapeLineSeparators}
+ * is what closes that; CR and LF never reach here in the first place, because
+ * `JSON.stringify` already escapes control characters as `\r`/`\n`.
  */
 export function formatDiagnosticsLine(entry: DiagnosticsEntry, at: Date): string {
   const detail = sanitizeDiagnosticsDetail(entry.detail)
-  const suffix = Object.keys(detail).length > 0 ? ` ${JSON.stringify(detail)}` : ''
+  const suffix =
+    Object.keys(detail).length > 0 ? ` ${escapeLineSeparators(JSON.stringify(detail))}` : ''
   return `${isoTimestamp(at)} [${entry.level}] ${String(entry.source)}: ${trimMessage(
     entry.message,
   )}${suffix}\n`
+}
+
+/**
+ * Replace U+2028 and U+2029 with their JSON escapes.
+ *
+ * These two are the only line terminators JSON is willing to emit unescaped, so
+ * escaping them is the whole job; every other control character is already an
+ * escape by the time `JSON.stringify` returns. Written as an explicit code-point
+ * escape rather than the literal characters so this source file stays free of
+ * the very characters it is removing.
+ */
+function escapeLineSeparators(json: string): string {
+  return json.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
 // ── the sink ─────────────────────────────────────────────────────────────────
@@ -369,13 +397,25 @@ export function createDiagnosticsLog(options: CreateDiagnosticsLogOptions): Diag
    * entry larger than the whole ceiling is the one case a rotation cannot fix (a
    * rotation would just move the over-size file aside), so the line itself is
    * what gives: the entry still exists and still says what happened, and the file
-   * still honours its bound. `maxBytes` is at least 1, so this terminates.
+   * returns to its bound on the next entry. Only a cap smaller than the
+   * truncation marker itself can overshoot it (see below), and no shipped
+   * configuration uses one.
    */
-  function fitToCap(line: string): string | null {
+  function fitToCap(line: string): string {
     if (Buffer.byteLength(line, 'utf8') <= maxBytes) return line
     const marker = '…[truncated to fit the log ceiling]\n'
-    const budget = maxBytes - Buffer.byteLength(marker, 'utf8')
-    if (budget <= 0) return null
+    const markerBytes = Buffer.byteLength(marker, 'utf8')
+    // A cap too small to hold even the marker is the one case where the honest
+    // marker cannot fit. Dropping the entry is what this used to do, and dropping
+    // it is the wrong answer: the console has already printed the line, so a log
+    // file that is silently missing it is worse than a log file that is one line
+    // short of its ceiling — the reader cannot tell the difference between "this
+    // did not happen" and "this happened and was not kept". The cut moves to the
+    // marker instead: the file may exceed `maxBytes` by at most the marker on this
+    // single entry, and the next entry rotates it away. Reaching here needs a cap
+    // below ~35 bytes, which no shipped configuration uses.
+    if (markerBytes >= maxBytes) return marker
+    const budget = maxBytes - markerBytes
     // `slice` counts UTF-16 units, so the result is at most `budget` UTF-8 bytes.
     const head = line.slice(0, budget)
     const trimmed = head.endsWith('\n') ? head : head.slice(0, Math.max(0, budget - 1))
@@ -389,23 +429,19 @@ export function createDiagnosticsLog(options: CreateDiagnosticsLogOptions): Diag
         return
       }
       const fitted = fitToCap(formatDiagnosticsLine(entry, safeNow()))
-      if (fitted === null) return
       const bytes = Buffer.byteLength(fitted, 'utf8')
       const current = sizeOf(filePath)
       if (current > 0 && current + bytes > maxBytes) {
-        // Rotate first; if the rotation worked the fresh file has room. If it did
-        // not (an unwritable directory, a live file that is itself a directory),
-        // this entry is dropped rather than appended — losing a diagnostic line
-        // is survivable, and an unbounded file is the failure this whole module
-        // exists to prevent. The live file is emptied first so a rotation that
-        // cannot rename still cannot leave the file over its ceiling.
-        if (!rotate()) {
-          try {
-            writeFileSync(filePath, '', { encoding: 'utf8', mode: 0o600 })
-          } catch {
-            return
-          }
-        }
+        // Rotate first; that is the ordinary path and it keeps every earlier line
+        // in a generation file. When the rotation cannot be done (an unwritable
+        // directory, a live file that is itself a directory) the entry is STILL
+        // appended rather than dropped: the console has already printed this line,
+        // and a salvaged log missing a line the console showed is how a real
+        // failure becomes unattributable. The file is allowed past `maxBytes` in
+        // that case — a bounded overshoot on a path that is already reporting a
+        // broken directory is the smaller problem, and `rotationDisabled` stops
+        // the sink retrying the doomed rename on every later entry.
+        rotate()
       }
       appendFileSync(filePath, fitted, { encoding: 'utf8', mode: 0o600 })
     } catch {

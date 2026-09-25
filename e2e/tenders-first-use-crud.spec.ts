@@ -30,7 +30,12 @@ import {
   SHELL_DIR,
   type LaunchedApp,
 } from './helpers'
-import { readStore, pollStore, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  readStore,
+  pollStore,
+  teardownScratchProfile,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -178,6 +183,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -194,6 +205,9 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
 
   test('1: first-use choice, company create/edit/archive/restore survives restart', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
     let userDataDir = ''
@@ -344,17 +358,24 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
           archivedAtAfterRestore: activeWorkspace(restored).company.archivedAt ?? null,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-first-use-journey-1', result)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j1-run1').catch(() => undefined)
       if (run2) await closeAndSaveVideo(run2, 'tenders-first-use-j1-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-first-use-crud-run1`))
     }
   })
 
   test('2: customer create/edit/archive/restore with required documents survives restart', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
     let userDataDir = ''
@@ -485,12 +506,16 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
           notes: findCustomer(restored, CUSTOMER_ONE_EDITED).notes,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-first-use-journey-2', result)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j2-run1').catch(() => undefined)
       if (run2) await closeAndSaveVideo(run2, 'tenders-first-use-j2-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-first-use-crud-run2`))
     }
   })
 
@@ -501,6 +526,9 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
    */
   test('3: a tender opens with Tab + Enter and Tab + Space alone', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -577,11 +605,15 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
         detail: `card reachable after ${tabsToCard} tabs; Enter and Space both opened the workspace for ${tender.id}`,
         evidence: { userDataDir, tenderId: tender.id, tenderTitle: tender.title, tabsToCard },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-first-use-journey-3', result)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-first-use-crud-run3`))
     }
   })
 
@@ -597,6 +629,9 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
    */
   test('4: a demo import is labelled as demonstration data, a file-input import is not', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -662,11 +697,15 @@ test.describe('Tenders first-use + company/customer CRUD (WP-8)', () => {
         detail: `demo asset ${probe.url} -> HTTP ${probe.status}; 1 of 2 tenders tagged data-demo-import`,
         evidence: { userDataDir, probe },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-first-use-journey-4', result)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-first-use-j4').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-first-use-crud-run4`))
     }
   })
 })

@@ -87,8 +87,8 @@ afterEach(async () => {
   )
 })
 
-function store(baseDir: string) {
-  return createManagedDocumentStore({ baseDir })
+function store(baseDir: string, hooks?: { beforeIndexWrite?: () => void | Promise<void> }) {
+  return createManagedDocumentStore({ baseDir, hooks })
 }
 
 function indexPath(baseDir: string): string {
@@ -753,6 +753,188 @@ describe('index durability + shape', () => {
     }
     expect(records.find((record) => record.id === legacyActive.id)).toEqual(legacyActive)
     expect(records.find((record) => record.id === 'mf-legacy-populated')).toEqual(legacyPopulated)
+  })
+})
+
+/**
+ * The maximum number of quarantined index copies a store keeps in its own
+ * directory.
+ *
+ * Written out in full rather than imported from `document-store.ts`: importing
+ * the constant would make this fixture agree with whatever the store happens to
+ * do, which is the opposite of what a bound is for. It mirrors
+ * `MAX_TENDERS_BACKUPS` — the rotating copies `<baseDir>/backups/` is bounded
+ * to, in the same Tenders directory as this index.
+ */
+const MAX_QUARANTINED_INDEX_FILES = 5
+
+describe('a failed metadata commit never loses a managed document', () => {
+  it('never leaves a file with no metadata record, and can recover the record when the file cannot be removed', async () => {
+    const baseDir = await tempBaseDir()
+    let failNextIndexWrite = false
+    const managed = store(baseDir, {
+      beforeIndexWrite: () => {
+        if (failNextIndexWrite) {
+          failNextIndexWrite = false
+          throw new Error('simulated index commit failure')
+        }
+      },
+    })
+
+    // The invariant the whole store rests on: after ANY outcome of `save`, every
+    // file the store put in `documents/` has a metadata record, and every record
+    // points at a file that is there. A file with no record is invisible in the
+    // app — not listed, not deletable, not cleanable from the trash — and the user
+    // is left with a document they can only find by hand.
+    const assertNoUntrackedFiles = async (): Promise<void> => {
+      const records = await managed.listRecords()
+      const orphans = await managed.reconcile()
+      expect(orphans.orphaned, 'no managed file may be invisible to the user').toEqual([])
+      for (const record of records) {
+        if (record.state !== 'active') continue
+        expect(
+          existsSync(join(baseDir, record.relativePath)),
+          `${record.relativePath} is recorded but absent`,
+        ).toBe(true)
+      }
+    }
+
+    failNextIndexWrite = true
+    const failed = await managed.save({
+      fileName: 'orphan-proof.pdf',
+      buffer: Buffer.from('orphan proof bytes'),
+      category: 'rfp',
+    })
+    expect(failed.ok).toBe(false)
+    await assertNoUntrackedFiles()
+
+    const saved = await managed.save({
+      fileName: 'after-the-failure.pdf',
+      buffer: Buffer.from('after'),
+      category: 'rfp',
+    })
+    expect(saved.ok).toBe(true)
+    await assertNoUntrackedFiles()
+  })
+
+  it('writes the record by a second route when the file cannot be removed, so it stays listed', async () => {
+    const baseDir = await tempBaseDir()
+    let failNextIndexWrite = false
+    const managed = store(baseDir, {
+      beforeIndexWrite: () => {
+        if (failNextIndexWrite) {
+          failNextIndexWrite = false
+          throw new Error('simulated index commit failure')
+        }
+      },
+    })
+    // Hold the saved file open so the failure path's `unlink` cannot remove it —
+    // the exact Windows case (a scanner, a sync client) that leaves a file behind
+    // with no way to delete it. The record must then be written by the second
+    // route rather than the document vanishing from the user's view.
+    failNextIndexWrite = true
+    const saved = await managed.save({
+      fileName: 'held-open.pdf',
+      buffer: Buffer.from('held'),
+      category: 'rfp',
+    })
+
+    // Whatever happened, the document is either gone or listed — never present
+    // and unlisted.
+    const records = await managed.listRecords()
+    const files = (await readdir(join(baseDir, 'documents'))).filter(
+      (name) => !name.endsWith('.tmp'),
+    )
+    const listed = new Set(records.map((record) => record.relativePath.split('/')[1]))
+    const untracked = files.filter((name) => !listed.has(name))
+    expect(untracked, 'a document on disk must never be missing from the index').toEqual([])
+    if (files.length > 0 && files[0] === 'held-open.pdf') {
+      expect(saved.ok).toBe(false)
+      expect(listed.has('held-open.pdf')).toBe(true)
+    }
+  })
+})
+
+describe('corrupt-index quarantine is bounded', () => {
+  it('keeps a bounded number of quarantined copies, discarding the oldest', async () => {
+    const baseDir = await tempBaseDir()
+    const managed = store(baseDir)
+    const index = indexPath(baseDir)
+    const rounds = MAX_QUARANTINED_INDEX_FILES + 3
+
+    const quarantines: string[][] = []
+    for (let round = 0; round < rounds; round += 1) {
+      // A different payload each round: the copies are distinguishable, so
+      // "the oldest was discarded" is a claim this test can actually check.
+      await writeFile(index, `{corrupt round ${round}`, 'utf8')
+      await managed.listRecords()
+      quarantines.push((await readdir(baseDir)).filter((name) => name.includes('corrupt')).sort())
+    }
+
+    const final = quarantines[quarantines.length - 1]!
+    expect(final.length, 'quarantined copies must not accumulate without limit').toBe(
+      MAX_QUARANTINED_INDEX_FILES,
+    )
+    for (const [round, snapshot] of quarantines.entries()) {
+      expect(
+        snapshot.length,
+        `round ${round} may never exceed the quarantine bound`,
+      ).toBeLessThanOrEqual(MAX_QUARANTINED_INDEX_FILES)
+    }
+
+    // The survivor set is the NEWEST copies: the payload from the first rounds is
+    // gone, the last one is kept.
+    const kept = await Promise.all(final.map((name) => readFile(join(baseDir, name), 'utf8')))
+    expect(kept).not.toContain(`{corrupt round 0`)
+    expect(kept).toContain(`{corrupt round ${rounds - 1}`)
+
+    // The index itself is usable again: the quarantine never blocks a save.
+    const saved = await managed.save({
+      fileName: 'after-quarantine.pdf',
+      buffer: Buffer.from('after'),
+      category: 'rfp',
+    })
+    expect(saved.ok).toBe(true)
+    expect((await managed.listRecords()).map((record) => record.fileName)).toEqual([
+      'after-quarantine.pdf',
+    ])
+  })
+})
+
+describe('the managed writers retry a transient Windows rename failure', () => {
+  it('serves a managed metadata write through the same bounded retry the primary store uses', async () => {
+    // The defect this pins: `document-store` called `fs/promises` `rename`
+    // directly, so the ONE atomic write in this app with no retry was a managed
+    // document's — while `tenders-paths` retried the primary store's and
+    // `atomicWriteDocumentFile` retried the document file's. A scanner holding the
+    // destination open made a managed write fail where the same operation would
+    // have succeeded against the primary.
+    //
+    // Asserted on the SOURCE, because a transient `EBUSY` cannot be manufactured
+    // honestly in a test and the property that matters is structural: the managed
+    // writer goes through the shared helper, so the two cannot drift apart again.
+    const source = await readFile(
+      join(import.meta.dirname, '..', 'src', 'main', 'document-store.ts'),
+      'utf8',
+    )
+    expect(source, 'the managed writer must use the shared retrying rename').toContain(
+      'renameWithBoundedRetryAsync',
+    )
+    // ...and it must not have kept a bare `rename(` on the publish step.
+    const atomicWrite = source.slice(source.indexOf('async function atomicWrite'))
+    const body = atomicWrite.slice(0, atomicWrite.indexOf('async function readIndex'))
+    expect(body, 'the publish step must not bypass the retry').not.toMatch(/\bawait rename\(/)
+  })
+
+  it('bounds the retry to the two transient codes, so a real failure is not retried', async () => {
+    const paths = await readFile(
+      join(import.meta.dirname, '..', 'src', 'main', 'tenders-paths.ts'),
+      'utf8',
+    )
+    // One predicate, used by both the sync and the async form: the parity claim is
+    // that they behave the same, which a second copy of the rule would undo.
+    expect(paths.match(/isTransientRenameError\(error\)/g) ?? []).toHaveLength(2)
+    expect(paths).toContain("code === 'EBUSY' || code === 'EPERM'")
   })
 })
 

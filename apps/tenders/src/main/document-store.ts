@@ -11,7 +11,16 @@
 // index), so the strict v2 authority document schema is untouched.
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
-import { mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import { basename, join, resolve, sep } from 'node:path'
 import type { TendersDataV2 } from '../shared/types'
 import { MAX_TENDERS_DOCUMENT_UPLOAD_BYTES } from '../shared/ipc'
@@ -26,9 +35,28 @@ import {
   type ManagedFileRecord,
   type ManagedFileTrashEntry,
 } from '../shared/tenders-persistence'
+import { renameWithBoundedRetryAsync } from './tenders-paths'
 
 export const MANAGED_DOCUMENTS_INDEX_FILE = 'managed-documents.json' as const
 export const MANAGED_DOCUMENTS_TRASH_DIR = '.trash' as const
+
+/**
+ * Quarantined copies of an unparseable metadata index kept beside it.
+ *
+ * A corrupt index is renamed to `managed-documents.json.corrupt-<timestamp>.json`
+ * so nothing is discarded, and that rename is the ONE path that can add a file to
+ * the base directory without any other bound applying to it. Without a bound, a
+ * file that keeps corrupting (a bad sector, a sync client racing the store, a
+ * reader that leaves partial bytes) accumulates one copy per read, forever — the
+ * app grows the user's disk every time it opens a document view.
+ *
+ * Five, matching `MAX_TENDERS_BACKUPS` — the rotating last-known-good copies in
+ * this same Tenders directory. Both exist for the same reason: a bounded recent
+ * window of recovery material, oldest discarded first. The newest copies are the
+ * ones that describe the failure that just happened, which are the ones worth
+ * keeping.
+ */
+export const MAX_TENDERS_INDEX_QUARANTINE_FILES = 5
 
 const MANAGED_SUBDIRS = new Set<string>(['documents', 'vault'])
 
@@ -127,11 +155,47 @@ export function assertRealManagedRoot(
   baseDir: string,
   directory: string,
 ): { ok: true } | { ok: false } {
-  for (const candidate of [baseDir, join(baseDir, directory)]) {
+  return diagnoseManagedRoot(baseDir, directory).ok ? { ok: true } : { ok: false }
+}
+
+/**
+ * Why the managed root cannot be written through, as the sentence the user is
+ * shown, or `null` when it can.
+ *
+ * `assertRealManagedRoot` answers yes/no, and both "a link is planted here" and
+ * "the path is not there at all" were reported to the user as "could not be
+ * resolved for writing" — a message that describes neither where the problem is
+ * nor what to do about it. A planted entry is also the one condition in this
+ * store that, left unexplained, reads as the feature being broken forever, so the
+ * sentence names the entry and the way out.
+ *
+ * The refusal itself is unchanged and must stay: a link at `documents/` may not
+ * be written through, because `realpath` follows it and every prefix check
+ * afterwards would then agree with the escape.
+ */
+export function diagnoseManagedRoot(
+  baseDir: string,
+  directory: string,
+): { ok: boolean; reason?: string } {
+  const candidates: Array<{ path: string; label: string }> = [
+    { path: baseDir, label: 'the Tenders data directory' },
+    { path: join(baseDir, directory), label: `${directory}/` },
+  ]
+  for (const candidate of candidates) {
+    let stats: ReturnType<typeof lstatSync>
     try {
-      if (lstatSync(candidate).isSymbolicLink()) return { ok: false }
+      stats = lstatSync(candidate.path)
     } catch {
-      return { ok: false }
+      return {
+        ok: false,
+        reason: `${candidate.label} is not readable at ${candidate.path}, so managed documents cannot be written. Reopen Tenders, or check that the folder still exists.`,
+      }
+    }
+    if (stats.isSymbolicLink()) {
+      return {
+        ok: false,
+        reason: `${candidate.label} at ${candidate.path} is a link, not a folder inside the Tenders data directory, so documents are not written through it. Rename or remove that ${stats.isDirectory() ? 'link' : 'entry'} and save again — the rest of the app keeps working.`,
+      }
     }
   }
   return { ok: true }
@@ -452,7 +516,7 @@ export function createManagedDocumentStore(
       } catch {
         // fsync unavailable — the write itself succeeded
       }
-      await rename(temporary, path)
+      await renameWithBoundedRetryAsync(temporary, path)
     } catch (error: unknown) {
       try {
         await unlink(temporary)
@@ -483,14 +547,55 @@ export function createManagedDocumentStore(
       }
     } catch (error: unknown) {
       // Never discard a corrupt index silently: quarantine it so reconciliation
-      // can report every previously-managed file as orphaned.
+      // can report every previously-managed file as orphaned. The quarantine is
+      // then PRUNED, because this rename is the one thing here that adds a file
+      // outside every other bound: an index that keeps corrupting would otherwise
+      // leave one copy per read, forever.
       const quarantine = `${indexPath}.corrupt-${Date.now()}.json`
       try {
         await rename(indexPath, quarantine)
+        await pruneIndexQuarantine()
       } catch {
         // best effort
       }
       return { version: 1, updatedAt: clockIso(), records: [] }
+    }
+  }
+
+  /**
+   * Keep only the newest `MAX_TENDERS_INDEX_QUARANTINE_FILES` quarantined copies,
+   * discarding the oldest.
+   *
+   * The timestamp is parsed out of the name rather than taken from `stat`: two
+   * copies written in the same second would otherwise sort by a filesystem mtime
+   * that cannot separate them, and the ORDER is the whole point — the newest
+   * copies describe the failure that just happened. The name is this module's own
+   * (`${indexPath}.corrupt-<Date.now()>.json`), so a non-matching entry is not a
+   * copy this store made and is left alone rather than unlinked.
+   */
+  async function pruneIndexQuarantine(): Promise<void> {
+    let names: string[]
+    try {
+      names = await readdir(baseDir)
+    } catch {
+      return
+    }
+    const prefix = `${MANAGED_DOCUMENTS_INDEX_FILE}.corrupt-`
+    const quarantines = names
+      .filter((name) => name.startsWith(prefix) && name.endsWith('.json'))
+      .map((name) => ({ name, stamp: Number.parseInt(name.slice(prefix.length, -5), 10) }))
+      .filter((entry) => Number.isFinite(entry.stamp))
+      .sort((left, right) => left.stamp - right.stamp)
+    const excess = quarantines.slice(
+      0,
+      Math.max(0, quarantines.length - MAX_TENDERS_INDEX_QUARANTINE_FILES),
+    )
+    for (const entry of excess) {
+      try {
+        await unlink(join(baseDir, entry.name))
+      } catch {
+        // best effort: a copy that cannot be removed must not fail the read
+      }
     }
   }
 
@@ -566,10 +671,13 @@ export function createManagedDocumentStore(
       // prefix has to be re-asserted against the path the filesystem resolves.
       // A root that cannot be proven is a refusal, not a write.
       const root = await realManagedRoot(baseDir, directory)
-      if (!assertRealManagedRoot(baseDir, directory).ok) {
+      const rootDiagnosis = diagnoseManagedRoot(baseDir, directory)
+      if (!rootDiagnosis.ok) {
         return {
           ok: false,
-          error: 'The managed document directory could not be resolved for writing.',
+          error:
+            rootDiagnosis.reason ??
+            'The managed document directory could not be resolved for writing.',
         }
       }
       const storedName = uniqueStoredName(root as string, cleanName)
@@ -607,17 +715,139 @@ export function createManagedDocumentStore(
       try {
         await writeIndex(index, recordsBefore)
       } catch (error: unknown) {
-        // Roll the file back so a failed metadata commit never leaves an
-        // untracked document behind.
+        // The metadata commit failed, so the file must not stay behind: a file in
+        // `documents/` with no metadata record is invisible in the app — not
+        // listed, not deletable, not cleanable from the trash. Removing it is the
+        // contract (a failed managed commit leaves nothing half-written, which
+        // `replace` depends on), so that is tried FIRST.
+        let removed = false
         try {
           await unlink(fullPath)
+          removed = true
         } catch {
-          // best effort
+          // The file could not be removed, which is the case that used to leave a
+          // document the user could only find by hand. A SECOND, independent route
+          // writes the record into the index the failure left on disk, so the file
+          // is tracked even though its commit reported failure. Only when BOTH the
+          // removal and that route fail is the index reconciled against the
+          // directory, so the file is at worst reported as an orphan the user can
+          // see.
+          if (!index.records.some((entry) => entry.id === record.id)) index.records.push(record)
+          const appended = await appendRecordToIndexOnDisk(record)
+          if (!appended) await reconcileUntrackedFiles()
         }
+        // The in-memory index is left as the failure left it. Whether the file
+        // survived or not, the next read re-reads the file on disk, so a caller
+        // never sees a record for a document that is not there.
         return { ok: false, error: errorMessage(error, 'Failed to record document metadata.') }
       }
       return { ok: true, record }
     })
+
+  /**
+   * Append one record to the metadata index sitting on disk, as a second route
+   * past a failed `writeIndex`.
+   *
+   * Returns `true` when the record is durable in the index. It re-reads the file
+   * rather than trusting the in-memory copy, because the in-memory copy is what
+   * the failing commit was holding; a record already present is left alone, so a
+   * commit that failed only AFTER the rename (the bytes are on disk, the fsync or
+   * the accounting threw) is not written twice.
+   */
+  async function appendRecordToIndexOnDisk(record: ManagedFileRecord): Promise<boolean> {
+    let current: ManagedIndexFile
+    try {
+      current = await readIndex()
+    } catch {
+      return false
+    }
+    if (current.records.some((entry) => entry.id === record.id)) return true
+    current.records.push(record)
+    try {
+      const serialized = JSON.stringify({
+        version: 1,
+        updatedAt: clockIso(),
+        records: current.records.map(toIndexRecord),
+      })
+      await atomicWrite(indexPath, serialized)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Record whatever is in `documents/` and `vault/` and has no metadata record, so
+   * a file that reached the disk without one is visible in the app instead of
+   * invisible. Used only on the path where both index-write routes have failed;
+   * the ordinary `reconcile` reports these as orphans for the user to decide on,
+   * which is why this only runs when the alternative is an unlisted file.
+   */
+  async function reconcileUntrackedFiles(): Promise<void> {
+    let index: ManagedIndexFile
+    try {
+      index = await readIndex()
+    } catch {
+      return
+    }
+    const known = new Set(index.records.map((entry) => entry.relativePath))
+    let added = 0
+    for (const directory of MANAGED_SUBDIRS) {
+      let entries: import('node:fs').Dirent[]
+      try {
+        entries = await readdir(join(baseDir, directory), { withFileTypes: true, encoding: 'utf8' })
+      } catch {
+        continue
+      }
+      for (const entry of entries) {
+        if (!entry.isFile() || entry.name.endsWith('.tmp')) continue
+        const relativePath = `${directory}/${entry.name}`
+        if (known.has(relativePath)) continue
+        const category: ManagedFileCategory = directory === 'vault' ? 'vault' : 'rfp'
+        let size = 0
+        let hash = ''
+        try {
+          const bytes = await readFile(join(baseDir, relativePath))
+          size = bytes.byteLength
+          hash = sha256Hex(bytes)
+        } catch {
+          // leave size/hash unknown; being listed is what matters here
+        }
+        const now = clockIso()
+        index.records.push({
+          id: `mf-${randomUUID()}`,
+          category,
+          relativePath,
+          fileName: sanitizeManagedFileName(entry.name.replace(/^\d+_/, ''), category),
+          mimeType: managedMimeType(entry.name),
+          size,
+          hash,
+          createdAt: now,
+          updatedAt: now,
+          state: 'active',
+          trashedAt: null,
+          trashedPath: null,
+          missingAt: null,
+          replacedBy: null,
+        })
+        known.add(relativePath)
+        added += 1
+      }
+    }
+    if (added === 0) return
+    try {
+      await atomicWrite(
+        indexPath,
+        JSON.stringify({
+          version: 1,
+          updatedAt: clockIso(),
+          records: index.records.map(toIndexRecord),
+        }),
+      )
+    } catch {
+      // best effort: the file stays reported as an orphan by the next reconcile
+    }
+  }
 
   /** Move an active (or adopted) file into the trash. Never hard-unlinks. */
   const trashInternal = async (
@@ -712,8 +942,12 @@ export function createManagedDocumentStore(
       // The trash destination is confined on the same terms: `mkdir` first, then
       // re-assert the `.trash/` prefix against the resolved root.
       const realTrashDir = await realManagedRoot(baseDir, MANAGED_DOCUMENTS_TRASH_DIR)
-      if (!assertRealManagedRoot(baseDir, MANAGED_DOCUMENTS_TRASH_DIR).ok) {
-        return { ok: false, error: 'The document trash directory could not be resolved.' }
+      const trashDiagnosis = diagnoseManagedRoot(baseDir, MANAGED_DOCUMENTS_TRASH_DIR)
+      if (!trashDiagnosis.ok) {
+        return {
+          ok: false,
+          error: trashDiagnosis.reason ?? 'The document trash directory could not be resolved.',
+        }
       }
       const trashName = await uniqueTrashName(record.id, record.fileName)
       const trashedPath = `${MANAGED_DOCUMENTS_TRASH_DIR}/${trashName}`
@@ -778,12 +1012,16 @@ export function createManagedDocumentStore(
       }
       const trashedFull = trashed.path
       let targetRelative = record.relativePath
-      const unresolvable = {
+      const unresolvable = (directory: string) => ({
         ok: false as const,
-        error: 'The managed document directory could not be resolved.',
-      }
+        error:
+          diagnoseManagedRoot(baseDir, directory).reason ??
+          'The managed document directory could not be resolved.',
+      })
       let targetRoot = await realManagedRoot(baseDir, targetRelative.split('/')[0])
-      if (!assertRealManagedRoot(baseDir, targetRelative.split('/')[0]).ok) return unresolvable
+      if (!diagnoseManagedRoot(baseDir, targetRelative.split('/')[0]).ok) {
+        return unresolvable(targetRelative.split('/')[0])
+      }
       if (
         isRealPathInside(
           targetRoot,
@@ -793,7 +1031,7 @@ export function createManagedDocumentStore(
         const directory = targetRelative.split('/')[0]
         targetRelative = `${directory}/${clock().getTime()}_${randomUUID().slice(0, 8)}_${record.fileName}`
         targetRoot = await realManagedRoot(baseDir, directory)
-        if (!assertRealManagedRoot(baseDir, targetRelative.split('/')[0]).ok) return unresolvable
+        if (!diagnoseManagedRoot(baseDir, directory).ok) return unresolvable(directory)
       }
       const restoredFull = resolve(targetRoot as string, targetRelative.split('/')[1] ?? '')
       if (!isRealPathInside(targetRoot, restoredFull)) {

@@ -88,6 +88,7 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
+import { teardownScratchProfile } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -642,6 +643,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -915,6 +922,9 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
 
   test('1a: system mode follows the OS scheme and matches the explicit light/dark token sets', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -967,16 +977,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           'system+dark matches explicit dark tokens; system+light matches explicit light tokens; the shell resolves system from nativeTheme and the renderer stamps the resolved data-theme',
         evidence: { userDataDir, dark, light, systemDark, systemLight },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-1a', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j1a').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run1`))
     }
   })
 
   test('1b: the suite theme event drives data-theme and the choice survives relaunch', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
     let userDataDir = ''
@@ -1068,17 +1085,24 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           "explicit dark/light follow the suite event and render the matching token sets; system mode is resolved and stamped by the shell against the simulated OS scheme; 'dark' persists across relaunch",
         evidence: { userDataDir, refDark, refLight, afterRelaunch },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-1b', result)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-a11y-theme-j1b-run1').catch(() => undefined)
       if (run2) await closeAndSaveVideo(run2, 'tenders-a11y-theme-j1b-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run2`))
     }
   })
 
   test('2: PDF page rendering and document colours do not change with the UI theme', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1131,11 +1155,15 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         detail: `canvas hash identical across light/dark/system-dark (${lightSig.canvasCount} canvases); page backgrounds identical`,
         evidence: { userDataDir, lightSig, darkSig, systemDarkSig },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-2', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run3`))
     }
   })
 
@@ -1154,6 +1182,9 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         ].join(' | '),
     )
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1346,6 +1377,10 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           surfaces: records,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-3', result)
       expect(
@@ -1354,12 +1389,15 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
       ).toEqual([])
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run4`))
     }
   })
 
   test('4: dialogs/drawers have labelled headings, aria-modal, Escape close, focus trap + restore', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1575,16 +1613,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         detail: `${outcomes.length} overlays verified`,
         evidence: { userDataDir, outcomes },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-4', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j4').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run5`))
     }
   })
 
   test('5: icon-only controls are named, hit targets >= 24px, and a keyboard-only journey works', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1756,16 +1801,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           visitedSample: visited.slice(0, 10),
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-5', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j5').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run6`))
     }
   })
 
   test('6: every Drawer-based aside starts below the workspace toolbar, so its close control is hit-testable', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1863,16 +1915,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         detail: `${outcomes.length} Drawer-based asides opened; each close control hit-tested at its centre and closed by a real pointer click`,
         evidence: { userDataDir, outcomes },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-6', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j6').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run7`))
     }
   })
 
   test('7: sidebar chrome is theme-token driven in dark, the collapsed rail keeps its save chip, and nav labels keep their full text', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -2099,16 +2158,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           `collapsed rail ${collapsed.sidebar.clientWidth}px with a ${collapsed.chip?.width}px save chip`,
         evidence: { userDataDir, dark, zoomed, collapsed },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-7', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j7').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run8`))
     }
   })
 
   test('8: a save failure in the collapsed rail is announced as an alert carrying the failure detail', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -2244,16 +2310,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           chipWidth: chip?.width ?? null,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-8', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j8').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run9`))
     }
   })
 
   test('9: Find tenders is a named page region, and machine provenance is in the accessible name', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -2361,16 +2434,23 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
           listingsRegionName,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-9', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j9').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run10`))
     }
   })
 
   test('10: the compact overflow menu keeps the keyboard contract its role promises', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -2474,11 +2554,15 @@ test.describe('Tenders a11y + theme (Phase 5 / WP-13)', () => {
         detail: `${enabledCount} enabled actions; one tabbable item at a time; arrows wrap; Home/End jump; Escape restores the trigger; Tab closes the menu and leaves focus on a control`,
         evidence: { userDataDir, enabledCount, focusedDisabled, afterTab },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-a11y-theme-journey-10', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-a11y-theme-j10').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-a11y-theme-run11`))
     }
   })
 })

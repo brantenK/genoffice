@@ -22,6 +22,17 @@
 // This is the LAST writer removed from the legacy stack: `writeTendersStore` is
 // no longer reachable from any IPC handler, and the sole shipping writer of
 // `tenders-data.json` is the authoritative v2 store.
+//
+//  * **It refuses a document it cannot faithfully represent.** A v2 payload
+//    (`schemaVersion`/`revision`) or an unknown `version` marker is thrown back
+//    at the caller before a directory, a temp file or a primary is touched. The
+//    v1 writer has no representation for either, and `migrateAndValidateTenders`
+//    reads a v2 document as a v1 one — so writing it would replace an
+//    authoritative v2 file with `version: 1` and destroy the revision the v2
+//    store conflicts against (see `legacyWriteRefusal`).
+//  * **It refuses a requirement it cannot read at all**, loudly, rather than
+//    dropping the row; a field it merely does not know is kept with a note naming
+//    it (see `parseLegacyRequirement`).
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -31,7 +42,10 @@ import type {
   TenderRecord,
   TendersData,
 } from '../shared/types'
-import { MAX_TENDERS_STORE_FILE_BYTES } from '../shared/tenders-persistence'
+import {
+  MAX_TENDERS_STORE_FILE_BYTES,
+  TENDERS_PERSISTENCE_FILE_NAME,
+} from '../shared/tenders-persistence'
 import { isRecord } from './readiness-snapshot'
 import { errorMessage } from './main-utils'
 import { renameWithBoundedRetry } from './tenders-paths'
@@ -58,17 +72,91 @@ export function setLegacyTendersBroadcast(broadcast: (data: TendersData) => void
 export const LEGACY_TENDERS_READ_FAILED =
   'The saved Tenders file could not be read. It was left exactly as it is; restore a recovery copy or repair the file before saving.'
 
-/** One v1 requirement, field by field, or `null` when it cannot be read honestly. */
+/** The v1 marker every payload this writer understands must carry, if it carries one. */
+const KNOWN_V1_VERSIONS = new Set<number>([0, 1])
+
+/** The store file's name, shared with the v2 store so the two cannot disagree. */
+const LEGACY_STORE_FILE_NAME = TENDERS_PERSISTENCE_FILE_NAME
+
+/**
+ * Why `writeTendersStore` may not write this payload, or `null` when it may.
+ *
+ * The v1 writer is the LAST writer left in the legacy stack and the sole file it
+ * understands is the `version: 1` envelope. It has no representation for the v2
+ * document's `schemaVersion` or `revision`, and `migrateAndValidateTenders` reads
+ * a v2 payload as a v1 one: `workspaces` still parses, `updatedAt` still parses,
+ * and everything else — the schema version, the revision the authoritative store
+ * conflicts against — is silently dropped on the way through.
+ *
+ * The consequence is not a cosmetic one. A caller that hands a v2 document to
+ * this function replaces an authoritative v2 file with `version: 1` and loses the
+ * revision metadata with it, so the next `loadStoreV2` reads a v1 envelope out of
+ * the v2 store's own file. This is the data-loss path, so an unrepresentable
+ * payload is REFUSED here rather than adapted: the caller is told, and the file
+ * it was about to overwrite is left exactly as it was.
+ */
+function legacyWriteRefusal(data: unknown): string | null {
+  if (!isRecord(data)) return null
+  if ('schemaVersion' in data) {
+    return `The Tenders writer cannot write a document that declares schemaVersion ${JSON.stringify(
+      data.schemaVersion,
+    )}: it writes only the version ${CURRENT_TENDERS_SCHEMA_VERSION} envelope, and writing this would replace an authoritative document with a v1 one.`
+  }
+  const version = data.version
+  if (version !== undefined) {
+    // A NUMBER, not a label: this is the v1 envelope's own marker, so a value
+    // this writer does not know is a payload it cannot faithfully represent.
+    // Reading tolerates an unknown version; writing one back would mint a marker
+    // nobody has defined.
+    if (
+      typeof version !== 'number' ||
+      !Number.isFinite(version) ||
+      !KNOWN_V1_VERSIONS.has(version)
+    ) {
+      return `The Tenders writer cannot write a document whose version is ${JSON.stringify(
+        version,
+      )}; it writes only the version ${CURRENT_TENDERS_SCHEMA_VERSION} envelope.`
+    }
+  }
+  return null
+}
+
+/**
+ * One v1 requirement, field by field, or `null` when it cannot be read honestly.
+ *
+ * A key this reader does not know is no longer a reason to lose the requirement.
+ * Dropping the record took the whole tender with it (the caller refuses a tender
+ * whose requirements did not all parse), and a mandatory returnable that vanishes
+ * from a tender with nothing recorded is precisely the failure this product exists
+ * to prevent. So the field is refused — no value is invented for it, and it is not
+ * carried into the document — while the requirement is kept and the unrecognised
+ * key is named in `notes`, the field this app already shows the user for exactly
+ * this kind of honest provenance.
+ *
+ * The line that stays where it was: a record with no `id`, no `title`, or a
+ * non-list `suggestedVaultDocIds` has nothing to keep and nothing this reader may
+ * invent, so it is still `null` — and the caller still refuses the tender loudly
+ * rather than dropping the row.
+ */
 function parseLegacyRequirement(raw: unknown): RequirementRecord | null {
   if (!isRecord(raw)) return null
   if (typeof raw.id !== 'string' || !raw.id || typeof raw.title !== 'string') return null
   if (!Array.isArray(raw.suggestedVaultDocIds)) return null
-  // Unknown keys are refused rather than dropped: a field this reader does not
-  // understand is a field it cannot vouch for, so the whole record fails to read.
-  if (!Object.keys(raw).every((key) => LEGACY_REQUIREMENT_KEYS.has(key))) return null
+  const unknownKeys = Object.keys(raw).filter((key) => !LEGACY_REQUIREMENT_KEYS.has(key))
   const box = isRecord(raw.boundingBox) ? raw.boundingBox : null
+  const knownNotes = typeof raw.notes === 'string' ? raw.notes : null
+  // Known fields ONLY. The record is built from the fields this reader
+  // understands rather than spread from the raw object, so a key it does not
+  // know is named in `notes` and otherwise left behind: carrying it through would
+  // hand the renderer a value nothing here has validated.
+  const known: Record<string, unknown> = {}
+  for (const key of Object.keys(raw)) {
+    if (LEGACY_REQUIREMENT_KEYS.has(key)) known[key] = raw[key]
+  }
   return {
-    ...(raw as unknown as RequirementRecord),
+    ...(known as unknown as RequirementRecord),
+    id: raw.id,
+    title: raw.title,
     category: (raw.category ?? 'GENERAL_RETURNABLE') as RequirementRecord['category'],
     isMandatory: raw.isMandatory === true,
     riskLevel: (raw.riskLevel ?? 'INFORMATIONAL') as RequirementRecord['riskLevel'],
@@ -80,10 +168,25 @@ function parseLegacyRequirement(raw: unknown): RequirementRecord | null {
     },
     linkedVaultDocId: typeof raw.linkedVaultDocId === 'string' ? raw.linkedVaultDocId : null,
     reason: typeof raw.reason === 'string' ? raw.reason : null,
+    notes:
+      unknownKeys.length === 0
+        ? (knownNotes ?? undefined)
+        : [knownNotes, unreadableRequirementNote(unknownKeys)]
+            .filter((part): part is string => Boolean(part))
+            .join(' '),
     suggestedVaultDocIds: raw.suggestedVaultDocIds.filter(
       (id): id is string => typeof id === 'string',
     ),
   }
+}
+
+/**
+ * The sentence appended to `notes` when a requirement carries a field this reader
+ * does not understand. It names the fields rather than being a generic warning:
+ * "something was not understood" is not something a bidder can act on.
+ */
+function unreadableRequirementNote(unknownKeys: string[]): string {
+  return `This requirement was saved by a newer version of the app. Its field${unknownKeys.length === 1 ? '' : 's'} ${unknownKeys.join(', ')} ${unknownKeys.length === 1 ? 'is' : 'are'} not understood here and ${unknownKeys.length === 1 ? 'was' : 'were'} not read. Everything else on this requirement is shown as saved.`
 }
 
 const LEGACY_REQUIREMENT_KEYS = new Set([
@@ -137,7 +240,24 @@ function parseLegacyWorkspaces(raw: unknown, now: string): CompanyWorkspace[] {
         const requirements = rawRequirements
           .map(parseLegacyRequirement)
           .filter((item): item is RequirementRecord => item !== null)
-        if (requirements.length !== rawRequirements.length) continue
+        if (requirements.length !== rawRequirements.length) {
+          // REFUSED LOUDLY, and the whole tender with it. This used to `continue`,
+          // which dropped the tender — its reference number, its closing date and
+          // every requirement on it — from a document the reader then returned as
+          // a success. A bidder whose tender silently disappeared from the app is
+          // the failure this product exists to prevent, and there is nothing
+          // honest to keep: a requirement with no id, no title or a non-list
+          // `suggestedVaultDocIds` cannot be repaired without inventing one.
+          //
+          // A requirement carrying an unrecognised FIELD is a different case, and
+          // it is kept with a note naming the field (see `parseLegacyRequirement`).
+          const unreadable = rawRequirements.filter(
+            (item) => parseLegacyRequirement(item) === null,
+          ).length
+          throw new LegacyTendersReadError(
+            `Tender ${String(tender.id)} could not be read: ${unreadable} of its ${rawRequirements.length} requirements are not in a shape this version understands, so the tender was not loaded rather than loaded without them. Nothing was changed on disk.`,
+          )
+        }
         tenders.push({
           ...(tender as unknown as TenderRecord),
           closingDate: typeof tender.closingDate === 'string' ? tender.closingDate : '',
@@ -224,10 +344,29 @@ export class LegacyTendersReadError extends Error {
   }
 }
 
-export function readTendersStore(baseDirOrPath: string): TendersData {
-  const filePath = baseDirOrPath.endsWith('tenders-data.json')
+/**
+ * The file an argument names: the store file itself when it already ends in
+ * `tenders-data.json`, otherwise `tenders-data.json` INSIDE the directory given.
+ *
+ * The reader and the writer used to spell this rule out twice with the same
+ * question — "does the path end in the store file name?" — answered with a
+ * suffix test. A caller's path that merely ENDS in those characters is not the
+ * store file, and the writer's copy of the rule then did the wrong thing twice
+ * over: it aimed the write one level too deep, and because the "directory" it
+ * computed was the file it had been asked to write, it turned that file into a
+ * DIRECTORY and wrote `tenders-data.json` inside it.
+ *
+ * One question, asked once: does the LAST path segment name the store file?
+ */
+function storeFilePath(baseDirOrPath: string): string {
+  const lastSegment = baseDirOrPath.split(/[/\\]/).pop() ?? ''
+  return lastSegment.toLowerCase() === LEGACY_STORE_FILE_NAME
     ? baseDirOrPath
-    : join(baseDirOrPath, 'tenders-data.json')
+    : join(baseDirOrPath, LEGACY_STORE_FILE_NAME)
+}
+
+export function readTendersStore(baseDirOrPath: string): TendersData {
+  const filePath = storeFilePath(baseDirOrPath)
   // A file that is not there yet is a genuinely not-yet-existing store: the one
   // case where "nothing" is the honest answer, because it is also what the read
   // found. Nothing is synthesized into it.
@@ -277,9 +416,14 @@ export function readTendersStore(baseDirOrPath: string): TendersData {
   }
 }
 export function writeTendersStore(baseDirOrPath: string, data: unknown): void {
-  const filePath = baseDirOrPath.endsWith('tenders-data.json')
-    ? baseDirOrPath
-    : join(baseDirOrPath, 'tenders-data.json')
+  // REFUSED BEFORE ANYTHING IS CREATED. A payload this writer cannot faithfully
+  // represent must not reach `migrateAndValidateTenders` (which reads a v2
+  // document as a v1 one) and must not cause a directory or a temp file to be
+  // made: a refused write leaves the file it was aimed at exactly as it was.
+  const refusal = legacyWriteRefusal(data)
+  if (refusal) throw new Error(refusal)
+
+  const filePath = storeFilePath(baseDirOrPath)
   const dir = filePath.replace(/[/\\][^/\\]+$/, '')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
@@ -301,9 +445,11 @@ export function writeTendersStore(baseDirOrPath: string, data: unknown): void {
   const tmp = `${filePath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
   try {
     writeFileSync(tmp, serialized, 'utf8')
-    // Same bounded EBUSY/EPERM retry the managed documents get. The primary had
-    // none, so a reader holding `tenders-data.json` open — a scanner, a sync
-    // client, OneDrive — turned a perfectly good write into a hard failure.
+    // The bounded EBUSY/EPERM retry, through the same shared constants the
+    // managed-document store's asynchronous form uses. This writer runs to
+    // completion inside one call, so it takes the SYNCHRONOUS form; the two share
+    // `isTransientRenameError`, the attempt count and the delay, which is what
+    // keeps a transient lock from failing here but not there.
     renameWithBoundedRetry(tmp, filePath)
     legacyBroadcast(validated)
   } catch (e) {

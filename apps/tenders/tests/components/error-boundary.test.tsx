@@ -39,7 +39,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, Component, type ReactNode } from 'react'
 import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { MOCK_COMPANY } from '../../src/shared/demo-seed'
 import type { TenderRecord, TendersWorkspaceV2 } from '../../src/shared/types'
 import {
@@ -379,6 +379,38 @@ function watchForRenderErrors(): unknown[] {
  */
 const WORKSPACE_RENDER_TIMEOUT_MS = 90_000
 
+/**
+ * The real `Workspace.tsx`, as an absolute path — the file the guard below probes.
+ *
+ * Resolved from THIS test file's own location, never from `process.cwd()`. The
+ * previous form (`readFileSync('src/renderer/src/components/Workspace.tsx')`)
+ * silently changed meaning with the working directory: vitest started at the repo
+ * root made it read nothing useful, and `npm test -w @genoffice/tenders` made it
+ * read the app's real file. A guard whose subject depends on where it was invoked
+ * is not a guard.
+ *
+ * `import.meta.dirname` is Node's own anchor for the module (verified available
+ * here, and it equals the containing `tests/components` directory). It is
+ * preferred over converting `import.meta.url`, because under this Vitest/Vite
+ * setup a dynamically imported module's URL is not a `file:` URL — it is
+ * `http://localhost:3000/@fs/...` — and `fileURLToPath` refuses it with
+ * "The URL must be of scheme file".
+ */
+const WORKSPACE_SOURCE = ((): string => {
+  const here = (import.meta as unknown as { dirname?: string; url: string }).dirname
+  if (here) return resolve(here, '../../src/renderer/src/components/Workspace.tsx')
+  // Fallback for a runtime without `import.meta.dirname`: a `file:` URL can still
+  // be turned into a path, and one that is not is a hard failure rather than a
+  // silent relative read.
+  const url = new URL(import.meta.url)
+  if (url.protocol !== 'file:') {
+    throw new Error(
+      `Cannot locate Workspace.tsx: this test needs a file: module URL, got ${import.meta.url}`,
+    )
+  }
+  return decodeURIComponent(url.pathname).replace(/^\/(?=[A-Za-z]:\/)/, '')
+})()
+
 /** Set only when a cold Workspace import is disambiguated at runtime. */
 let coldImportRetried = false
 
@@ -501,7 +533,14 @@ describe('Workspace renders the same tree with and without an active tender', ()
     // import must pick the change up.
     const dir = mkdtempSync(join(tmpdir(), 'tenders-hook-order-'))
     const target = join(dir, 'WorkspaceCopy.tsx')
-    const source = readFileSync('src/renderer/src/components/Workspace.tsx', 'utf8')
+    // The real component, by a path anchored to this file rather than to the
+    // working directory. Without that, the guard silently reads nothing when the
+    // suite is started from anywhere but the app root — the finding this closes.
+    const source = readFileSync(WORKSPACE_SOURCE, 'utf8')
+    expect(
+      source,
+      `the guard must read the real component, not whatever sits at ${WORKSPACE_SOURCE}`,
+    ).toContain('export function Workspace()')
     const hook = source.slice(
       source.indexOf('  useEffect(() => {\n    if (!menuOpen) return'),
       source.indexOf('  }, [menuOpen, activeMenuIndex])') +

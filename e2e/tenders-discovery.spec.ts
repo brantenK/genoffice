@@ -52,6 +52,7 @@ import {
   screenshotPath,
   type LaunchedApp,
 } from './helpers'
+import { teardownScratchProfile, writeSalvagedLogs } from './tenders-timing'
 import { DISCOVERY_CACHE_MAX_AGE_MS, describeCoverage } from '../apps/tenders/src/shared/discovery'
 import { formatRandAmount } from '../apps/tenders/src/shared/money'
 import {
@@ -182,6 +183,10 @@ test.describe('Tenders discovery pane', () => {
 
   test('1: the saved list, its limits, its filters and a refused document download', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded so a failing
+    // run names the log rather than deleting it with the profile.
+    const salvaged: Array<string | null> = []
+    let savedArtifacts: string | undefined
     let run1: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -305,12 +310,17 @@ test.describe('Tenders discovery pane', () => {
       screenshots.push(await shot(tenders, 'discovery-refused-download'))
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-discovery-run1').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-discovery-run1`))
+      savedArtifacts = await writeSalvagedLogs('tenders-discovery-journey-1', salvaged)
     }
   })
 
   test('2: a saved list that cannot be read reports the failure, never an empty list', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded so a failing
+    // run names the log rather than deleting it with the profile.
+    const salvaged: Array<string | null> = []
+    let savedArtifacts: string | undefined
     let run1: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -350,7 +360,8 @@ test.describe('Tenders discovery pane', () => {
       await expect(tenders.locator('[data-testid="discovery-empty"]')).toHaveCount(0)
     } finally {
       if (run1) await closeAndSaveVideo(run1, 'tenders-discovery-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-discovery-run2`))
+      savedArtifacts = await writeSalvagedLogs('tenders-discovery-journey-2', salvaged)
     }
   })
 })

@@ -56,6 +56,7 @@ import {
   readStore,
   pollStore,
   storeSignature,
+  teardownScratchProfile,
   STORE_COMMIT_POLL_MS,
   STORE_IMPORT_POLL_MS,
 } from './tenders-timing'
@@ -429,6 +430,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
   videos: string[]
 }
 
@@ -466,6 +473,9 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
   test('journey 1: hydrate -> create tender/requirement -> save -> restart survives', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
@@ -547,6 +557,11 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
             diskTenderCount: disk?.workspaces?.[0]?.tenders?.length ?? null,
           },
           screenshots,
+          // The salvaged diagnostics log(s) for this journey. Recorded as a path
+          // so a failing run names the artefact instead of deleting it with the
+          // profile — the result JSON is the run's own statement, the log is the
+          // evidence for it.
+          diagnosticsLogs: salvaged.filter(Boolean) as string[],
           videos: videos.filter(Boolean),
         })
         throw new Error(
@@ -597,6 +612,10 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           revisionBeforeRestart,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       }
       await writeResult('tenders-persistence-cutover-journey-1', result)
@@ -605,7 +624,7 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
         await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j1-run1').catch(() => undefined)
       if (run2)
         await closeAndSaveVideo(run2, 'tenders-persistence-cutover-j1-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run1`))
     }
   })
 
@@ -618,6 +637,9 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
   test('journey 1b: supported domain change (vault upload) survives restart', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     const vaultTitle = 'E2E Cutover Vault Doc'
     let run1: LaunchedApp | undefined
@@ -683,6 +705,10 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
         detail: `${COMPANY_ONE}; vault "${vaultTitle}" committed at revision ${revision} and present after restart`,
         evidence: { userDataDir, vaultTitle, revision },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       }
       await writeResult('tenders-persistence-cutover-journey-1b', result)
@@ -691,13 +717,16 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
         await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j1b-run1').catch(() => undefined)
       if (run2)
         await closeAndSaveVideo(run2, 'tenders-persistence-cutover-j1b-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run2`))
     }
   })
 
   test('journey 2: legacy v1 migrates once and stays v2 across a restart', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
@@ -761,6 +790,10 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           signatureAfterMigration,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       }
       await writeResult('tenders-persistence-cutover-journey-2', result)
@@ -769,13 +802,16 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
         await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j2-run1').catch(() => undefined)
       if (run2)
         await closeAndSaveVideo(run2, 'tenders-persistence-cutover-j2-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run3`))
     }
   })
 
   test('journey 3: forced WRITE_FAILED shows Save failed + Retry, keeps the edit, Retry succeeds', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     let run: LaunchedApp | undefined
     try {
@@ -826,18 +862,25 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           workspacesAfterRetry: workspaceNames(afterRetry),
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       }
       await writeResult('tenders-persistence-cutover-journey-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-persistence-cutover-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run4`))
     }
   })
 
   test('journey 4: forced REVISION_CONFLICT shows Conflict + Reload, no blind overwrite', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     let run: LaunchedApp | undefined
     try {
@@ -934,18 +977,25 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           diskOnlyCustomer: DISK_ONLY_CUSTOMER,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       }
       await writeResult('tenders-persistence-cutover-journey-4', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-persistence-cutover-j4').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run5`))
     }
   })
 
   test('journey 5: localStorage holds UI preferences only, no domain payloads', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     try {
       run = await launchShell({
@@ -1004,12 +1054,16 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           hasUiKey: keys.includes('zanostack-tenders-ui'),
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: [],
       }
       await writeResult('tenders-persistence-cutover-journey-5', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-persistence-cutover-j5').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run6`))
     }
   })
 
@@ -1028,6 +1082,9 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
   test('journey 6 (B1): a schema-rejected closing date does not brick persistence', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     const fixtureAwkward = join(userDataDir, 'closing-date-awkward.pdf')
     const fixtureValid = join(userDataDir, 'closing-date-valid.pdf')
@@ -1163,11 +1220,16 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
         },
         screenshots,
         videos,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path
+        // so a failing run names the artefact instead of deleting it with the
+        // profile — the result JSON is the run's own statement, the log is the
+        // evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-persistence-cutover-journey-6', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-persistence-cutover-j6').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run7`))
     }
   })
 
@@ -1206,6 +1268,9 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
   test('journey 7: a close inside the autosave debounce still commits the edit', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     let run1: LaunchedApp | undefined
     let run2: LaunchedApp | undefined
@@ -1443,6 +1508,11 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
             closeFlushRequests: closeFlushRequests.length,
           },
           screenshots,
+          // The salvaged diagnostics log(s) for this journey. Recorded as a path
+          // so a failing run names the artefact instead of deleting it with the
+          // profile — the result JSON is the run's own statement, the log is the
+          // evidence for it.
+          diagnosticsLogs: salvaged.filter(Boolean) as string[],
           videos: videos.filter(Boolean),
         })
         throw new Error(
@@ -1493,6 +1563,10 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
           closeFlushRequests: closeFlushRequests.length,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       })
     } finally {
@@ -1500,7 +1574,7 @@ test.describe('Tenders renderer v2 persistence cutover (Task 2B)', () => {
         await closeAndSaveVideo(run1, 'tenders-persistence-cutover-j7-run1').catch(() => undefined)
       if (run2)
         await closeAndSaveVideo(run2, 'tenders-persistence-cutover-j7-run2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-persistence-cutover-run8`))
     }
   })
 })

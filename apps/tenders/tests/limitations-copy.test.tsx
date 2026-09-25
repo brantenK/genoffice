@@ -18,9 +18,33 @@
 // components: the copy lives in JSX and is wrapped across lines, so phrases are
 // matched against whitespace-collapsed, comment-stripped file content (a phrase
 // split over two lines still fails, as it should).
+//
+// ── WHY SOME ASSERTIONS MATCH AGAINST `jsxText` INSTEAD ──────────────────────
+//
+// `copyText` strips every `<...>` run, which is right for prose but makes a whole
+// family of assertions vacuous: a guard that asserted `copyText(F).toMatch(
+// /LimitationsButton/)` was satisfied by the file's own IMPORT STATEMENT
+// (`import { LimitationsButton } from './LimitationsNotice'` — the stripped tag
+// is not there, the bare identifier is), so deleting the rendered control left
+// the guard green. It named the requirement as "the surface offers the notice"
+// while actually asserting "the surface imports the control".
+//
+// `jsxText` below is the narrow fix: comments removed, everything else intact —
+// so `<LimitationsButton …>` is still visible and an unrendered import is not.
+// The surfaces whose claim really is about what a user sees are rendered for
+// real instead (see `renders the notice control on the first-use screen`).
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { FirstUsePage } from '../src/renderer/src/components/FirstUsePage'
+import { TutorialsPage } from '../src/renderer/src/components/pages/TutorialsPage'
+import { mount, unmountAll } from './helpers/render'
+
+// The two render tests below mount real components; a mount that throws must not
+// leave its root behind for the next test to find.
+afterEach(() => {
+  unmountAll()
+})
 
 /**
  * Locate `apps/tenders/src/renderer/src` without machine-specific paths. Works
@@ -49,6 +73,26 @@ function copyText(absoluteFile: string): string {
     .map((line) => line.replace(/(^|[^:])\/\/.*$/, '$1')) // line comments (keep "https://")
     .join(' ')
     .replace(/<[^>]*>/g, ' ') // JSX tags
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Comment-stripped source with the JSX intact, whitespace collapsed.
+ *
+ * The sibling of `copyText` for assertions that are about RENDERED ELEMENTS
+ * rather than prose. `copyText` deletes every `<...>` run, so a regex naming a
+ * component can only ever be satisfied by a NON-JSX occurrence — which in this
+ * codebase means the import statement. `jsxText` keeps the tag, so presence and
+ * absence are genuinely distinguishable; comments are still removed so an
+ * assertion cannot be satisfied by prose that merely names the element.
+ */
+function jsxText(relativeFile: string): string {
+  return readFileSync(join(SRC, relativeFile), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/(^|[^:])\/\/.*$/, '$1'))
+    .join(' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -170,15 +214,66 @@ describe('limitations notice (Oracle criterion 5)', () => {
 
   it('is reachable from the sidebar Help menu', () => {
     const app = copyText(join(SRC, 'components/App.tsx'))
-    expect(app, 'App.tsx no longer renders the limitations notice').toMatch(/LimitationsNotice/)
+    // The Help menu item the user presses, and the state that opens the notice.
+    // The render itself is asserted against `jsxText`: `copyText` cannot see it,
+    // and it is the importing statement that would satisfy the old shape.
     expect(app, 'the Help menu no longer names the notice').toMatch(/what tenders does not do/i)
+    expect(
+      jsxText('components/App.tsx'),
+      'App.tsx no longer renders the limitations notice',
+    ).toMatch(/<LimitationsNotice onClose=/)
+    // A rendered element is not an imported one. The import is the only other
+    // place the name occurs, and the assertion above cannot be satisfied by it —
+    // which is exactly the hole the old `copyText(...).toMatch(/LimitationsNotice/)`
+    // fell through. Pinned: the import statement on its own must not match, so a
+    // later "simplification" back to the bare name fails here.
+    const importedOnly = jsxText('components/App.tsx')
+      .split('\n')
+      .filter((line) => !/<LimitationsNotice/.test(line))
+      .join('\n')
+    expect(
+      /<LimitationsNotice onClose=/.test(importedOnly),
+      'the importing statement must not satisfy the render assertion',
+    ).toBe(false)
   })
 
   it('is offered on the first-use screen and the tutorials page', () => {
+    // A real render, because "offered" is a claim about what is on screen. The
+    // previous form matched the control's NAME against tag-stripped source, which
+    // its own import statement satisfied — deleting `<LimitationsButton />` from
+    // either page left this test green.
     for (const file of ['components/FirstUsePage.tsx', 'components/pages/TutorialsPage.tsx']) {
-      expect(copyText(join(SRC, file)), `${file} no longer offers the notice`).toMatch(
-        /LimitationsButton/,
+      expect(jsxText(file), `${file} no longer renders the notice control`).toMatch(
+        /<LimitationsButton[\s/>]/,
       )
+    }
+  })
+
+  it('renders the notice control on the first-use screen, and it opens the notice', () => {
+    // `mount`, not a regex: the harness renders the real component, so this fails
+    // for the reason it claims — the control is gone from what the user sees.
+    const view = mount(<FirstUsePage onCreateCompany={() => {}} onExploreSample={() => {}} />)
+    try {
+      const trigger = view.getByRole('button', { name: 'What Tenders does not do' })
+      expect(view.nameOf(trigger)).toBe('What Tenders does not do')
+      // The notice is a dialog, closed until the control is pressed: that is what
+      // makes this "a way in" rather than a label.
+      expect(view.queryByRole('dialog')).toBeNull()
+      view.click(trigger)
+      expect(view.queryByRole('dialog'), 'the control must open the notice').not.toBeNull()
+    } finally {
+      view.unmount()
+    }
+  })
+
+  it('renders the notice control on the tutorials page too', () => {
+    const view = mount(<TutorialsPage />)
+    try {
+      const trigger = view.getByRole('button', { name: 'What Tenders does not do' })
+      view.click(trigger)
+      expect(view.queryByRole('dialog'), 'the tutorials page control must open too').not.toBeNull()
+    } finally {
+      view.unmount()
     }
   })
 

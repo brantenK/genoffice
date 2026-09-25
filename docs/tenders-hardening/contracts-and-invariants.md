@@ -753,12 +753,17 @@ tender with no requirements. Cancellation is its own type (`DocxImportCancelledE
 (`PDF_PREFLIGHT_LIMITS.maxBytes`, 100 MiB) and states two budgets of its own:
 
 - `maxLines` = **24 600**. A `.docx` "line" is a whole paragraph or table row, so the reason the
-  PDF path needs a line budget applies here too, but not the PDF's own figure — the PDF's
-  ~0.042 MB heap per line was measured on visual lines of ~40 characters, and a DOCX paragraph
-  is 5–25× longer. What this path measured is a cost per LINE, because the parsed block model
-  (not the text) dominates: 24 500 lines / 4.77 M characters retained ~112 MB through parse →
-  `buildClauses` → `shredExtraction` in ~4.8 s, i.e. ~4.6 KB per line whether the line is 195 or
-  1 087 characters.
+  PDF path needs a line budget applies here too, but not the PDF's own figure. That figure —
+  **~0.042 MB of heap per extracted text line** — was **extrapolated from a 2 000-page sweep** of
+  visual lines of ~40 characters, and a reviewer re-measured against the fixture the PDF byte guard
+  actually has to survive (`tests/performance/results.json`, `byteStress`): **22 000 lines /
+  5.2 MB / 4 766 389 characters peaked at ~916 MB heap against a ~168 MB baseline**, i.e.
+  **~34 MB of heap per 1 000 lines** on lines about **5× shorter** than the sweep's. So the PDF
+  path's true per-line cost is **worse than the documented one, not merely different**, and no DOCX
+  budget here is derived from it. What this path measured is a cost per LINE, because the parsed
+  block model (not the text) dominates: 24 500 lines / 4.77 M characters retained ~112 MB through
+  parse → `buildClauses` → `shredExtraction` in ~4.8 s, i.e. ~4.6 KB per line whether the line is
+  195 or 1 087 characters.
 - `maxTextChars` = **12 000 000**. `maxLines` alone does not bound what it looks like it bounds:
   `blockUnits` splits at the engine's soft/column/page breaks, so a paragraph with no break is
   ONE line of unbounded length, and a highly compressible `.docx` can declare up to
@@ -1330,12 +1335,21 @@ behaviour, and this one wins on every point of behaviour.
 
 Three things from it that this document must not contradict:
 
-- **`apps/tenders/src/main/tenders-main.ts` is now the composition root only (347 lines; it was
+- **`apps/tenders/src/main/tenders-main.ts` is now the composition root only (341 lines; it was
   3,702)**, and `main` imports **nothing** from `renderer/` — the demo dataset moved to
-  `shared/demo-seed.ts` and the renderer's mock modules re-export it. **The IPC arithmetic is
+  `shared/demo-seed.ts` and the renderer's mock modules re-export it. **The line figure here used
+  to read 347 and was stale** (a `wc -l` run in the 2026-09-25 pass reports 341; the module-map
+  table had drifted in eleven rows, all now re-read from disk). **The direction is a convention,
+  not an enforcement** — no lint rule, tsconfig boundary or guard script fails on a `main →
+renderer` import, and a **type-only** `renderer → main` edge exists today
+  (`renderer/src/diagnostics.ts` imports `DiagnosticsEntry`/`DiagnosticsLevel` from
+  `main/diagnostics-log`). Type-only, so it carries no runtime code and no browser global into
+  `main`, which is why it is tolerable where the deleted `main → renderer` edge was not — but a
+  claim that the direction is mechanically one-way would be false. **The IPC arithmetic is
   unchanged:** 33 `ipcMain.handle` registrations, now all in `main/ipc/handlers.ts`, each still
   beginning with `isTrustedTendersEvent` (verified mechanically, not by reading). §3's count and
-  channel breakdown stand.
+  channel breakdown stand, including the **36 → 33** correction to `TENDERS_CHANNELS`' own
+  declared-member count.
 - **The diagnostics log's path and bounds are `<userData>/tenders/tenders-diagnostics.log`, 1 MiB
   live × 3 files = 3 MiB maximum** (§3e), and the surface stays **write-only** from the UI. §6 item
   15's two gaps are **CLOSED**: `recordDiagnosticsStart` is called from `registerTendersIpc` before
@@ -1356,6 +1370,21 @@ Three things from it that this document must not contradict:
   never claims it is intact. It cannot catch an event-handler or async throw (React's own limit),
   which is why every cross-app call still reports its own failure visibly. Pinned by
   `tests/components/error-boundary.test.tsx`.
+
+  **It is now pinned in the built app as well, and this note used to be able to claim only jsdom.**
+  A `grep` for `ErrorBoundary` across `e2e/tenders-*.spec.ts` returned nothing, so the boundary
+  that exists to stop a render throw becoming a blank screen was proven only where no production
+  bundle, no CSP and no real mount exists. `tenders-regression-smoke.spec.ts` now drives
+  `error-boundary-fallback-in-built-app`: it walks React's fiber tree from `#root` to the **real
+  mounted boundary instance** and injects a genuine render throw through that instance's own
+  `getDerivedStateFromError` + `componentDidCatch`, then asserts the fallback's real copy and test
+  ids, that the shell's navigation stays usable beside the failed region, that the failure reached
+  the diagnostics log as an **error code** and that the thrown **message is not in the log**, and
+  that "Try this view again" remounts the page and clears the fallback. **What it does not prove,
+  and the spec says so where it asserts:** that a specific product component throws — the app has no
+  test hook and no product route that forces a page render to throw, and shipping one would put a
+  crash switch in the shipped app. That half stays the jsdom suite's job, where the real `Workspace`
+  is mounted through the same boundary.
 
 ## 6. Non-blocking follow-ups (tracked, from `cod-7` / `sec-2`)
 
@@ -1489,9 +1518,35 @@ cover is **under 1 s**.
 ### The windows, and why these figures are safe
 
 `e2e/tenders-timing.ts` is the single place the lane's poll windows are declared. It exports one
-`pollStore` / `readStore` / `storeFile` / `storeSignature`, and eight specs import them rather than
-each carrying a hand-picked number that could drift apart again (`cli-control.spec.ts` is the
-repo's precedent for a shared e2e helper with no test case of its own).
+`pollStore` / `readStore` / `storeFile` / `storeSignature`, and **all 14 Tenders specs** import them
+rather than each carrying a hand-picked number that could drift apart again (`cli-control.spec.ts`
+is the repo's precedent for a shared e2e helper with no test case of its own; this file no longer is
+one — see the salvage contract below). The count read **eight** when this section was written and is
+**14** on disk now, a figure this folder should re-derive rather than quote.
+
+### The diagnostics-log salvage is part of the lane's contract
+
+The app's own diagnostics log is the only record of what a failing run did, and it lives **inside**
+the scratch profile each spec deletes at teardown. `e2e/tenders-timing.ts` therefore owns two more
+exports the specs share:
+
+- `salvageTendersDiagnosticsLog(userDataDir, copyName)` — copies
+  `<userData>/tenders/tenders-diagnostics.log` into `e2e/artifacts/diagnostics/<copyName>-<instant>.log`.
+  The copy carries the **salvage instant**, because a run that never removed its profile leaves logs
+  from several runs in one directory.
+- `teardownScratchProfile(userDataDir, label)` — salvage **then** `rm`, in that order, so a spec
+  author cannot get the sequence backwards. Every one of the 14 specs uses it.
+
+**What this got wrong first, because the failure mode is the point.** The original salvage ran in
+the spec's `finally` but the result JSON recorded `diagnosticsLogArtifact` **before** that block, so
+a FAILING run — the only run whose log matters — reported `null` with its profile already deleted,
+while the same document's `artifacts.diagnosticsLog` field named a real path. One statement
+contradicting itself, and the evidence gone. Salvage now happens at **both** the throw site and the
+`finally`, and `e2e/tenders-diagnostics-artifact-guard.spec.ts` asserts the contract mechanically:
+a log is copied out before the profile is deleted and is byte-identical; a run whose app never
+started salvages `null` rather than becoming a second failure; a failing run's artefact exists and
+is named; and **no Tenders spec deletes a scratch profile outside the helper** (that last case is
+what stops the defect returning one file over, which is how it survived the first fix).
 
 | Constant                 | Value      | Basis                                                               |
 | ------------------------ | ---------- | ------------------------------------------------------------------- |

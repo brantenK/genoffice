@@ -104,7 +104,11 @@ import {
   writeAiSettings,
   type FakeProvider,
 } from './tenders-ai-fixtures'
-import { STORE_COMMIT_POLL_MS, STORE_IMPORT_POLL_MS } from './tenders-timing'
+import {
+  teardownScratchProfile,
+  STORE_COMMIT_POLL_MS,
+  STORE_IMPORT_POLL_MS,
+} from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -305,6 +309,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
   videos: string[]
 }
 
@@ -397,6 +407,9 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
   test('1: with AI extraction OFF, a configured model is never contacted and nothing changes', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     const provider = await startFakeProvider()
     let run: LaunchedApp | undefined
@@ -483,12 +496,16 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
           readiness,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       })
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-ai-extraction-j1').catch(() => undefined)
       await provider.close().catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-ai-extraction-run1`))
     }
   })
 
@@ -500,6 +517,9 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
   test('2: with AI extraction ON, a model suggestion lands marked, unconfirmed and not ready', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     const provider = await startFakeProvider({ mode: 'sse-ok' })
     let run: LaunchedApp | undefined
@@ -744,12 +764,16 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
           },
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       })
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-ai-extraction-j2').catch(() => undefined)
       await provider.close().catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-ai-extraction-run2`))
     }
   })
 
@@ -761,6 +785,9 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
   test('3: a failing or malformed model reply degrades to the local extraction', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     const provider = await startFakeProvider({ mode: 'http-500' })
     let run: LaunchedApp | undefined
@@ -874,12 +901,16 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
           },
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       })
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-ai-extraction-j3').catch(() => undefined)
       await provider.close().catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-ai-extraction-run3`))
     }
   })
 
@@ -897,6 +928,9 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
   test('4: a run interrupted mid-flight leaves a usable tender and writes nothing', async () => {
     const userDataDir = await scratchUserData()
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     const videos: string[] = []
     const provider = await startFakeProvider({ mode: 'hold', holdMs: 120_000 })
     let run1: LaunchedApp | undefined
@@ -992,6 +1026,10 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
           readiness,
         },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
         videos: videos.filter(Boolean),
       })
     } finally {
@@ -1000,7 +1038,7 @@ test.describe('Tenders AI extraction over the real stack (wave C)', () => {
       if (run2)
         await closeAndSaveVideo(run2, 'tenders-ai-extraction-j4-run2').catch(() => undefined)
       await provider.close().catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-ai-extraction-run4`))
     }
   })
 })

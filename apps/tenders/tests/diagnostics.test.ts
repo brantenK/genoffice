@@ -38,7 +38,15 @@
  *    component is handed is still driven for real here, so the pairing remains
  *    "real state + that render test".
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -156,6 +164,38 @@ describe('the diagnostic sink writes what it is given', () => {
     expect(text).toContain('line one line two line three')
   })
 
+  it('cannot be made to forge a line by a U+2028 or U+2029 in a detail value', () => {
+    const log = createDiagnosticsLog({ dir: logDir, now: FIXED_CLOCK })
+    // `JSON.stringify` emits these RAW — they are legal in a JSON string and are
+    // not control characters — while a log reader (grep, tail -f, an editor)
+    // treats them as line breaks. Unescaped, the forged half below would read as
+    // an entry of its own, written by a string the sink accepted.
+    const forged = 'a\u2028FORGED [error] evil: taken'
+    const paragraph = 'b\u2029FORGED [error] evil: taken too'
+    log.record(info('ordinary entry', { note: forged, other: paragraph }))
+
+    const text = readLive()
+    // One entry, one line: the record is not split, by '\n' or by a separator.
+    expect(text.trimEnd().split('\n')).toHaveLength(1)
+    expect(text.split(/[\u2028\u2029]/)).toHaveLength(1)
+    expect(text).not.toMatch(/\u2028|\u2029/)
+    // The value is still recorded, escaped rather than dropped.
+    expect(text).toContain('\\u2028')
+    expect(text).toContain('\\u2029')
+    // And the FORGED text is still inside the detail JSON, not at line start.
+    expect(text).not.toMatch(/^.*\u2028/m)
+  })
+
+  it('escapes a separator in `formatDiagnosticsLine` directly, whatever the caller passes', () => {
+    const line = formatDiagnosticsLine(
+      { level: 'warn', source: 'store', message: 'ok', detail: { note: 'x\u2028y' } },
+      new Date('2026-09-24T12:00:00.000Z'),
+    )
+    expect(line).not.toMatch(/\u2028|\u2029/)
+    expect(line).toContain('"note":"x\\u2028y"')
+    expect(line.endsWith('\n')).toBe(true)
+  })
+
   it('writes a startup line that says what wrote the file, and never throws on a bad directory', () => {
     const log = createDiagnosticsLog({ dir: logDir, now: FIXED_CLOCK })
     recordDiagnosticsStart(log, '1.2.3')
@@ -220,6 +260,54 @@ describe('the sink is bounded and rotates at the ceiling', () => {
     const text = readLive()
     expect(text.length).toBeLessThanOrEqual(120)
     expect(text).toContain('[truncated to fit the log ceiling]')
+  })
+
+  it('records the entry even when the cap is smaller than its own truncation marker', () => {
+    // ~35 bytes of marker against a 20-byte cap. This used to return `null` from
+    // the fit and the entry was DROPPED — creating no file at all — while the
+    // console had already printed the line. A salvaged log that is missing a line
+    // the console showed is how a real failure becomes unattributable.
+    const log = createDiagnosticsLog({ dir: logDir, maxBytes: 20, now: FIXED_CLOCK })
+    log.record({
+      level: 'warn',
+      source: 'store',
+      message: 'tenders: save refused [STORE_REFUSED] (store code WRITE_FAILED): EPERM',
+    })
+
+    expect(existsSync(liveFile()), 'the entry must reach the file').toBe(true)
+    const text = readLive()
+    expect(text).toContain('[truncated to fit the log ceiling]')
+    expect(text.endsWith('\n')).toBe(true)
+  })
+
+  it('append the entry rather than dropping it when the rotation cannot be done', () => {
+    // The live file is already past the cap, so recording forces a rotation. With
+    // the directory unwritable the rename fails; the entry used to be dropped and
+    // the live file EMPTIED, losing every line already in it.
+    const log = createDiagnosticsLog({ dir: logDir, maxBytes: 100, maxFiles: 3, now: FIXED_CLOCK })
+    log.record(info('the earlier line that must not be wiped'))
+    const earlier = readLive()
+    expect(earlier).toContain('must not be wiped')
+
+    const livePath = liveFile()
+    try {
+      chmodSync(logDir, 0o500)
+    } catch {
+      // A platform that cannot make the directory read-only cannot exercise this
+      // path; the assertion below still holds for the writable case.
+    }
+    try {
+      log.record(info(`a later entry long enough to force the rotation ${'q'.repeat(200)}`))
+    } finally {
+      try {
+        chmodSync(logDir, 0o700)
+      } catch {
+        // Restoring the mode is best-effort; the temp directory is removed next.
+      }
+    }
+
+    const after = readFileSync(livePath, 'utf8')
+    expect(after.length, 'the live file is never emptied behind the reader').toBeGreaterThan(0)
   })
 
   it('keeps rotation bounded when maxFiles is 1 (the live file replaces the previous one)', () => {

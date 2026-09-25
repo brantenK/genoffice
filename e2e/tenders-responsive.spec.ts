@@ -58,6 +58,7 @@ import {
   ARTIFACTS_DIR,
   type LaunchedApp,
 } from './helpers'
+import { teardownScratchProfile } from './tenders-timing'
 
 /** `%LOCALAPPDATA%\Temp\opencode` on Windows (os.tmpdir() is %TEMP%). */
 const SCRATCH_ROOT = join(tmpdir(), 'opencode')
@@ -678,6 +679,12 @@ interface JourneyResult {
   detail: string
   evidence: Record<string, unknown>
   screenshots: string[]
+  /**
+   * The salvaged diagnostics-log artefacts for this journey, so the result JSON
+   * names the run's own log rather than only describing it. The log lives inside
+   * the scratch profile and is deleted with it, so this path is the evidence.
+   */
+  diagnosticsLogs: string[]
 }
 
 async function writeResult(name: string, result: JourneyResult): Promise<string> {
@@ -708,6 +715,9 @@ test.describe('Tenders responsive workspace (Phase 5 / WP-12)', () => {
 
   test('1: 1280x800 wide — split handle keyboard resize, inline secondary actions, overflow metadata, no clipping', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -788,16 +798,23 @@ test.describe('Tenders responsive workspace (Phase 5 / WP-12)', () => {
         detail: `innerWidth=${innerWidth}; aria-valuenow ${start} -> ${left}; Home=${min} End=${max}; inline secondary actions; clean layout`,
         evidence: { userDataDir, mode, audit: report },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-responsive-journey-1', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-responsive-j1').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-responsive-run1`))
     }
   })
 
   test('2: 1024x768 compact — pane switch preserves selection + page, secondary actions move to the overflow', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -898,16 +915,23 @@ test.describe('Tenders responsive workspace (Phase 5 / WP-12)', () => {
         detail: `innerWidth=${innerWidth}; selection "${selectedBefore}" and page 2 preserved across switches; secondary actions in the overflow`,
         evidence: { userDataDir, mode, selectedBefore, audit: report },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-responsive-journey-2', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-responsive-j2').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-responsive-run2`))
     }
   })
 
   test('3: 800x600 compact — no unreachable controls, sidebar collapsed, snapshots', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -941,16 +965,23 @@ test.describe('Tenders responsive workspace (Phase 5 / WP-12)', () => {
         detail: `innerWidth=${innerWidth}; sidebar collapsed; pane switch + overflow reachable; clean layout`,
         evidence: { userDataDir, mode, audit: report },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-responsive-journey-3', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-responsive-j3').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-responsive-run3`))
     }
   })
 
   test('4: 200% text zoom stays usable at 1280x800', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -986,16 +1017,23 @@ test.describe('Tenders responsive workspace (Phase 5 / WP-12)', () => {
         detail: `root font ${zoomed.rootFontSize}; clean layout under 200% text zoom (${mode.paneSwitch ? 'compact' : 'wide'})`,
         evidence: { userDataDir, mode, audit: report },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-responsive-journey-4', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-responsive-j4').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-responsive-run4`))
     }
   })
 
   test('5: a keyboard-resized split proportion survives reload', async () => {
     const screenshots: string[] = []
+    // Salvaged diagnostics-log artefacts for this journey, recorded in the
+    // result JSON so a failing run names the log rather than deleting it.
+    const salvaged: Array<string | null> = []
     let run: LaunchedApp | undefined
     let userDataDir = ''
     try {
@@ -1043,11 +1081,15 @@ test.describe('Tenders responsive workspace (Phase 5 / WP-12)', () => {
         detail: `keyboard End -> ${max}; stored ${JSON.stringify(stored)}; restored after reload`,
         evidence: { userDataDir, max, stored },
         screenshots,
+        // The salvaged diagnostics log(s) for this journey. Recorded as a path so a
+        // failing run names the artefact instead of deleting it with the profile —
+        // the result JSON is the run's own statement, the log is the evidence for it.
+        diagnosticsLogs: salvaged.filter(Boolean) as string[],
       }
       await writeResult('tenders-responsive-journey-5', result)
     } finally {
       if (run) await closeAndSaveVideo(run, 'tenders-responsive-j5').catch(() => undefined)
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+      salvaged.push(await teardownScratchProfile(userDataDir, `tenders-responsive-run5`))
     }
   })
 })

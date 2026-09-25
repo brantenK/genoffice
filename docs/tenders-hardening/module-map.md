@@ -13,7 +13,7 @@ next to it.
 ```text
 apps/tenders/src/
   main/            the Electron main process — every privileged decision
-    tenders-main.ts          the composition root (347 lines; was 3,702)
+    tenders-main.ts          the composition root (341 lines; was 3,702)
     ipc/                     the IPC surface and its gate
     <responsibility>.ts      one module per responsibility
   preload/index.ts           functions only, never `ipcRenderer`
@@ -21,17 +21,31 @@ apps/tenders/src/
   shared/                    types, schemas, pure rules — imported by both layers
 ```
 
-The dependency direction is **one-way and enforced by the import graph, not by convention**:
-`renderer → preload → main`, and both layers → `shared`. `main` imports **nothing** from
-`renderer/` any more (see "the edge that was removed" below).
+The dependency direction is **intended to run one way** — `renderer → preload → main`, and both
+layers → `shared` — and the edge that violated it has been removed (see "the edge that was
+removed" below). But be careful with the stronger version of that claim, because it is **not
+true on disk**: the direction is **not** mechanically enforced. Nothing in the toolchain — no
+lint rule, no `tsconfig` project boundary, no guard script — fails on a new `main → renderer`
+import. What holds today is that a renderer-only import in `main` would pull browser globals
+(`window.open`, `URL.createObjectURL`, `fetch`) into the main bundle, and that is a reason a
+reviewer should reject it, not a reason the build will. The direction is a **convention kept by
+review**, and this line used to claim an enforcement that does not exist.
+
+It is also not literally one-way even now. A **type-only** edge runs `renderer → main`:
+`renderer/src/diagnostics.ts` does
+`import type { DiagnosticsEntry, DiagnosticsLevel } from '../../main/diagnostics-log'`. It is
+erased at build time, so it carries no runtime code and no browser global into `main` — which is
+why it is tolerable where the deleted `main → renderer` edge was not — but it is still an edge,
+and a document that says `renderer` never imports `main` is wrong.
 
 ## `main/` — the composition root and its modules
 
-`tenders-main.ts` is now **347 lines** and is _only_ the composition root: it constructs the
-services, owns the test reset, and re-exports each module's public surface. Measured:
+`tenders-main.ts` is now **341 lines** (measured: `wc -l`, below) and is _only_ the composition
+root: it constructs the services, owns the test reset, and re-exports each module's public
+surface. Measured:
 
 ```bash
-wc -l apps/tenders/src/main/tenders-main.ts          # 347
+wc -l apps/tenders/src/main/tenders-main.ts           # 341
 grep -rn "from '\.\./renderer" apps/tenders/src/main/ # no matches
 ```
 
@@ -39,38 +53,38 @@ Every other module in `main/` is a real unit with one responsibility. The code w
 **verbatim** in the split, so nothing about the behaviour changed; the counts below are the
 current line counts, not the pre-split ones.
 
-**The line counts move while the split is still being edited by its author**, and they did move
-once during this pass (`composition-services.ts` grew 153 → 158 between two reads). They are
-here to show the _shape_ — which module is large enough to need its own unit — not as a figure to
-quote. Re-run `wc -l apps/tenders/src/main/*.ts apps/tenders/src/main/ipc/*.ts` for the current
-numbers; the important one, `tenders-main.ts` at **347 lines against 3,702 before**, is the point
-of the split and is stable.
+**Every figure below still moves while agents edit these files.** They are here to show the
+_shape_ — which module is large enough to need its own unit — not as a figure to quote. Re-run
+`wc -l apps/tenders/src/main/*.ts apps/tenders/src/main/ipc/*.ts` for the current numbers. The
+table was re-read from disk on 2026-09-25; the previous version of it was **stale in nine rows
+and wrong about `tenders-main.ts` itself** (it said 347 against the real 341), which is what a
+line-count table does in a tree two agents are editing.
 
 | Module                      | Lines | Responsibility                                                                 |
 | --------------------------- | ----- | ------------------------------------------------------------------------------ |
-| `tenders-main.ts`           | 347   | the composition root; constructs services, owns the test reset, re-exports     |
-| `ipc/handlers.ts`           | 1258  | **all 33 `ipcMain.handle` registrations**                                      |
+| `tenders-main.ts`           | 341   | the composition root; constructs services, owns the test reset, re-exports     |
+| `ipc/handlers.ts`           | 1287  | **all 33 `ipcMain.handle` registrations**                                      |
 | `document-store.ts`         | 984   | the managed-document metadata store (index, trash, confinement)                |
 | `discovery-client.ts`       | 964   | the OCOS/discovery HTTP client — allow-list, caps, cache, retries              |
 | `tenders-store.ts`          | 751   | the authoritative v2 store: atomic write, backups, recovery, revision          |
 | `reminders-scheduler.ts`    | 672   | the deadline-reminder schedule; pure and testable, no Electron import          |
-| `ipc/engines.ts`            | 552   | builds the two wired engines and their lifecycle; the document download bridge |
+| `ipc/engines.ts`            | 553   | builds the two wired engines and their lifecycle; the document download bridge |
 | `diagnostics-log.ts`        | 445   | the rotating log sink itself (no Electron import)                              |
-| `document-lifecycle.ts`     | 401   | save / read / open / delete / restore / replace / reconcile                    |
+| `document-lifecycle.ts`     | 442   | save / read / open / delete / restore / replace / reconcile                    |
 | `proposal-generator.ts`     | 390   | markdown + DOCX proposal generation, and the readiness binding it reads        |
-| `legacy-store.ts`           | 309   | the **retired** v1 `tenders-data.json` read / validate / write                 |
-| `tenders-paths.ts`          | 222   | every path decision + the atomic-write primitives                              |
+| `legacy-store.ts`           | 426   | the **retired** v1 `tenders-data.json` read / validate / write                 |
+| `tenders-paths.ts`          | 232   | every path decision + the atomic-write primitives                              |
 | `integrations.ts`           | 185   | the CRM / Books ports and their injected overrides                             |
-| `ipc/proposal-payload.ts`   | 184   | the proposal + cross-app payload shape/bounds preflight                        |
+| `ipc/proposal-payload.ts`   | 185   | the proposal + cross-app payload shape/bounds preflight                        |
 | `readiness-snapshot.ts`     | 155   | the submission-readiness gate's snapshot rules                                 |
 | `composition-services.ts`   | 158   | runtime config, store directory, the close-flush waiter map                    |
-| `close-guard.ts`            | 121   | the shell's dirty-close guard (the flush request/answer loop)                  |
+| `close-guard.ts`            | 122   | the shell's dirty-close guard (the flush request/answer loop)                  |
 | `diagnostics-sink.ts`       | 110   | the one main-process sink instance + the `recordDiagnostic` helper             |
-| `navigation-policy.ts`      | 103   | deny-by-default navigation for the privileged view                             |
+| `navigation-policy.ts`      | 101   | deny-by-default navigation for the privileged view                             |
 | `web-contents-registry.ts`  | 87    | the live Tenders view set and the v1 broadcast channel                         |
 | `ipc/trust.ts`              | 86    | **the trusted-sender gate — the security invariant lives here**                |
-| `legacy-store-watcher.ts`   | 86    | the retired v1 `fs.watch` (kept for the tests that pin its behaviour)          |
-| `seed-workspaces.ts`        | 70    | the v1 demo seed data (no longer a live data _source_)                         |
+| `legacy-store-watcher.ts`   | 91    | the retired v1 `fs.watch` (kept for the tests that pin its behaviour)          |
+| `seed-workspaces.ts`        | 69    | the v1 demo seed data (no longer a live data _source_)                         |
 | `readiness-binding.ts`      | 62    | builds the canonical readiness report from the store                           |
 | `store-registry.ts`         | 58    | the store seam the modules above reach through, so none imports the root       |
 | `ipc/registration-state.ts` | 20    | the one "is the IPC surface registered" boolean                                |
@@ -127,11 +141,24 @@ The privileged surface is unchanged in behaviour and its arithmetic still holds:
 ```bash
 grep -cE "^\s*ipcMain\.handle" apps/tenders/src/main/ipc/handlers.ts   # 33
 grep -c "isTrustedTendersEvent"  apps/tenders/src/main/ipc/handlers.ts   # 35 (33 gates + 2 comments)
+awk '/export const TENDERS_CHANNELS/,/^} as const/' apps/tenders/src/shared/ipc.ts \
+  | grep -cE "^\s+[a-zA-Z]+:"                                          # 33
 ```
 
 - **33** `ipcMain.handle` registrations, all in `ipc/handlers.ts`.
-- **`TENDERS_CHANNELS` declares 36** channel constants; the three that have no handler are the
-  main→renderer pushes (`store-changed-v2`, `close-flush-request`, the legacy `data-changed`).
+- **`TENDERS_CHANNELS` declares 33** channel constants, and the 33 handlers are the same 33 — so
+  nothing is declared-but-unhandled and nothing is handled-but-undeclared. This bullet used to say
+  **36**, with "the three that have no handler are `store-changed-v2`, `close-flush-request` and
+  `data-changed`". The **count was wrong** (the object declares 33, not 36 — that 36 appears to
+  have been the whole file's `tenders:` string count, which also picks up constants declared
+  outside the object), and the **explanation was wrong too**: all three of those names _are_
+  members of the object. Two of them — `closeFlushRequest` and `dataChanged` — are referenced from
+  `ipc/handlers.ts` without being handled, because main **pushes** on them
+  (`webContents.send`), which is exactly what the old bullet was reaching for; the third,
+  `storeChangedV2`, is pushed through the broadcast seam in `web-contents-registry.ts` rather
+  than from `handlers.ts` at all. Re-derive it with
+  `awk '/export const TENDERS_CHANNELS/,/^} as const/' apps/tenders/src/shared/ipc.ts`,
+  which strips the comments and counts 33.
 - **Every one of the 33 begins with `isTrustedTendersEvent`** — checked mechanically, not by
   reading: splitting the file on `ipcMain.handle` and requiring the gate within the first 600
   characters of each handler reports zero exceptions.
@@ -174,9 +201,42 @@ The one place a packaged user's problem can be seen afterwards.
   surface renders `diagnosticsPath()`: `ErrorBoundary` takes an optional `diagnosticsPath` prop and
   `errorBoundaryLogHint(path, code)` names the file and an error code in its fallback — the one
   moment where telling the user where the log is matters most.
+- **What the e2e lane does with it, and what that used to get wrong.** The log is the only record
+  of what a failing app did, and it lives **inside** the scratch profile each spec deletes at
+  teardown — so the lane now salvages it first. `e2e/tenders-timing.ts` owns the two helpers
+  (`salvageTendersDiagnosticsLog`, `teardownScratchProfile`), and **every** Tenders spec tears its
+  profile down through them; the salvage copy lands in `e2e/artifacts/diagnostics/` and its path is
+  named in the spec's result JSON. The first version of this got it wrong in the exact way that
+  matters: it salvaged in the spec's `finally` but wrote `diagnosticsLogArtifact` **before** that
+  block ran, so a FAILING run — the only run whose log is worth having — recorded `null` while the
+  artefact list recorded a real path, one document contradicting itself, with the profile already
+  deleted. That is fixed at both salvage points (the throw site and the `finally`), and
+  `e2e/tenders-diagnostics-artifact-guard.spec.ts` now asserts the contract mechanically, including
+  that no Tenders spec deletes a scratch profile outside the helper.
 
 The file lives on **this** machine: nothing is uploaded, nothing is networked, and each `record()`
 is a completed synchronous append, so closing the app cannot lose an entry already written.
+
+## The Windows rename retry: **parity is partial, not complete**
+
+The two write paths do not get the same treatment, and the docs used to claim they did.
+
+- **The managed-document store has the retry.** `main/document-store.ts`'s `atomicWrite()` writes a
+  temp file, `fsync`s it, then `rename`s it into place — all through `node:fs/promises`, so the
+  rename is asynchronous and does not block the main thread.
+- **The primary store has a _different_ retry, not the same one.** `main/tenders-paths.ts` exports
+  `renameWithBoundedRetry(from, to)` — `RENAME_RETRY_ATTEMPTS` = 3, `RENAME_RETRY_DELAY_MS` = 15,
+  retrying only `EBUSY` / `EPERM` and sleeping with `Atomics.wait` rather than spinning. Its
+  callers are `writeBufferAtomic` (in `tenders-paths.ts` itself) and the **retired v1**
+  `legacy-store.ts`.
+- **What is actually asymmetric:** the retry is **synchronous** (`renameSync` + a blocking sleep) on
+  the main process's thread, while the managed store's rename is async and has **no**
+  `EBUSY`/`EPERM` retry at all. So the honest statement is that **each store has a defence the other
+  lacks** — a bounded sync retry on the v1/primary path against a non-retrying async rename on the
+  managed path — rather than "the primary now gets the same treatment the managed documents always
+  had", which is what the source comment in `legacy-store.ts` still says and what an earlier version
+  of this folder repeated. Whether the two should be unified is a code decision and is **not** made
+  here; this records what the code does today.
 
 ## Test infrastructure
 

@@ -232,7 +232,15 @@ describe('managed-file + recovery IPC', () => {
       })
 
       expect(saved.ok).toBe(false)
-      expect(saved.error).toMatch(/could not be resolved/i)
+      // The refusal is unchanged; the SENTENCE is now one a user can act on. It
+      // used to be "could not be resolved for writing", which named neither the
+      // entry that is wrong nor the way past it — and since a planted entry is
+      // what made the whole document feature fail, a message that does not say
+      // what to remove reads as the feature being broken permanently.
+      expect(saved.error).toMatch(/link/i)
+      expect(saved.error).toMatch(/documents/i)
+      expect(saved.error).toMatch(/remove|rename|quarantin/i)
+      // The property that matters is unchanged: nothing is written through it.
       expect(readdirSync(outsideDir)).toEqual([])
     })
 
@@ -307,6 +315,67 @@ describe('managed-file + recovery IPC', () => {
         'no file outside the Tenders directory may be unlinked',
       ).not.toContain(trashedName)
       rmSync(join(tendersBaseDir(), '.trash'), { force: true })
+    })
+
+    it('recovers from a planted documents/ link instead of refusing forever', async () => {
+      const outsideDir = join(testDir, 'planted-recover')
+      mkdirSync(outsideDir, { recursive: true })
+      mkdirSync(tendersBaseDir(), { recursive: true })
+      const planted = join(tendersBaseDir(), 'documents')
+      rmSync(planted, { recursive: true, force: true })
+      symlinkSync(outsideDir, planted, 'dir')
+
+      const save = handler(TENDERS_CHANNELS.saveDocument)
+      const refused = await save(trustedEvent(), {
+        fileName: 'first.pdf',
+        buffer: Buffer.from('first'),
+        category: 'rfp',
+      })
+      // Refused, because a link at `documents/` may not be written through...
+      expect(refused.ok).toBe(false)
+      expect(readdirSync(outsideDir), 'nothing may be written through the link').toEqual([])
+
+      // ...and the condition is REPORTED, naming the entry and what to do, rather
+      // than answered with "could not be resolved" — a message that describes
+      // neither where the problem is nor how to get past it.
+      expect(refused.error).toMatch(/link|symbolic/i)
+      expect(refused.error).toMatch(/documents/i)
+
+      // NOT PERMANENT: the user removes the planted entry (or the app quarantines
+      // it) and the feature works again. One filesystem entry must never disable
+      // every managed-document operation for the rest of the install's life.
+      rmSync(planted, { force: true })
+      const recovered = await save(trustedEvent(), {
+        fileName: 'second.pdf',
+        buffer: Buffer.from('second'),
+        category: 'rfp',
+      })
+      expect(recovered.ok, 'the document feature must recover once the link is gone').toBe(true)
+      expect(existsSync(join(tendersBaseDir(), recovered.storedPath))).toBe(true)
+      expect(readdirSync(outsideDir)).toEqual([])
+    })
+
+    it('names the planted entry and offers the recovery in the refusal', async () => {
+      const outsideDir = join(testDir, 'planted-vault')
+      mkdirSync(outsideDir, { recursive: true })
+      mkdirSync(tendersBaseDir(), { recursive: true })
+      const planted = join(tendersBaseDir(), 'vault')
+      rmSync(planted, { recursive: true, force: true })
+      symlinkSync(outsideDir, planted, 'dir')
+
+      const saved = await handler(TENDERS_CHANNELS.saveDocument)(trustedEvent(), {
+        fileName: 'cert.pdf',
+        buffer: Buffer.from('cert'),
+        category: 'vault',
+      })
+
+      // The refusal is actionable: it names the path that is wrong and says what
+      // the user can do about it. "Should be recoverable.
+      expect(saved.ok).toBe(false)
+      expect(saved.error).toContain('vault')
+      expect(saved.error).toMatch(/link/i)
+      expect(saved.error).toMatch(/move|remove|delete|rename|quarantin/i)
+      expect(readdirSync(outsideDir)).toEqual([])
     })
   })
 

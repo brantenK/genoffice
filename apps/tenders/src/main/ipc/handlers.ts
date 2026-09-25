@@ -816,6 +816,24 @@ export function registerTendersIpc(): void {
       const loaded = await authoritativeStore.load()
       if (!loaded.ok) return { ok: false, error: loaded.error.message }
 
+      // Validation (contracts §6 item 2): the caller's expected revision is
+      // checked FIRST, before any side effect at all. It used to be read only
+      // inside the mutate below — by which point nothing had been written, but
+      // the caller's own validation had not run either, so a caller that was
+      // simply wrong about the revision still reached the CRM port. A refusal
+      // here writes nothing and opens nothing.
+      const requestedRevision =
+        typeof dealData?.expectedRevision === 'number' ? dealData.expectedRevision : null
+      if (requestedRevision !== null && requestedRevision !== loaded.data.revision) {
+        return {
+          ok: false,
+          error:
+            `Revision conflict: expected revision ${requestedRevision} but the authoritative ` +
+            `document is at revision ${loaded.data.revision}.`,
+          currentRevision: loaded.data.revision,
+        }
+      }
+
       const payloadTender: TenderRecord | undefined =
         dealData && typeof dealData.tender === 'object'
           ? (dealData.tender as TenderRecord)
@@ -875,30 +893,12 @@ export function registerTendersIpc(): void {
           ? `Tender Ref: ${refNum}\nIssuing Authority: ${companyName}`
           : `Issuing Authority: ${companyName}`)
 
-      // Race fix (contracts §6 item 2): resolve the tender revision and commit the
-      // back-link FIRST. A revision conflict therefore aborts before the CRM
-      // write, so a conflict can never leave a deal that the tender does not
-      // reference. The CRM upsert is idempotent (deterministic id), so a retry
-      // after a later CRM failure reconciles to exactly one deal.
-      if (resolved) {
-        const expectedRevision =
-          typeof dealData?.expectedRevision === 'number'
-            ? dealData.expectedRevision
-            : loaded.data.revision
-        const committed = await authoritativeStore.mutate(expectedRevision, (document) => {
-          const target = findTenderById(document, resolved.tender.id)
-          if (target) target.tender.linkedCrmDealId = deterministicDealId
-          return document
-        })
-        if (!committed.ok) {
-          return {
-            ok: false,
-            error: committed.error.message,
-            currentRevision: committed.current?.revision ?? committed.error.current?.revision,
-          }
-        }
-      }
-
+      // The CRM upsert runs first, and the back-link is committed only once it
+      // has succeeded. `{ ok: true }` is returned only when BOTH halves are
+      // durable: a deal that was written without the back-link leaves the tender
+      // still calling itself unsynced, and a caller told "synced" for that is
+      // being lied to. The CRM upsert is idempotent (deterministic id), so a
+      // retry after a failed back-link reconciles to exactly one deal.
       let dealId = deterministicDealId
       try {
         const upserted = await upsertTenderOpportunity({
@@ -912,15 +912,41 @@ export function registerTendersIpc(): void {
           expectedCloseDate,
           notes,
         })
-        if (!upserted.ok) return { ok: false, error: upserted.error || 'CRM upsert failed.' }
+        if (!upserted.ok) {
+          // The deal was NOT written, so no back-link may be committed: the
+          // authoritative document must not claim a sync that did not happen.
+          return { ok: false, error: upserted.error || 'CRM upsert failed.' }
+        }
         dealId = upserted.dealId || dealId
       } catch (crmError: unknown) {
-        // The tender link already committed; the deterministic deal id makes a
-        // retry safe and idempotent. Surface the error for the retry UI.
+        // Same reasoning as a refused upsert: the CRM write did not complete, so
+        // the tender must not be back-linked and the caller must not be told the
+        // sync succeeded. The deterministic deal id makes a retry safe.
         return {
           ok: false,
           dealId: deterministicDealId,
           error: crmError instanceof Error ? crmError.message : String(crmError),
+        }
+      }
+
+      // The CRM write is done; commit the back-link now, against the revision the
+      // authority is actually at. A conflict here is reported as a failure — the
+      // deal exists and the retry is idempotent.
+      if (resolved && dealId !== resolved.tender.linkedCrmDealId) {
+        const committed = await authoritativeStore.mutate(loaded.data.revision, (document) => {
+          const target = findTenderById(document, resolved.tender.id)
+          if (target) target.tender.linkedCrmDealId = dealId
+          return document
+        })
+        if (!committed.ok) {
+          return {
+            ok: false,
+            dealId,
+            error:
+              `The CRM deal was saved, but the tender could not be linked to it ` +
+              `(${committed.error.message}). Retrying is safe.`,
+            currentRevision: committed.current?.revision ?? committed.error.current?.revision,
+          }
         }
       }
 

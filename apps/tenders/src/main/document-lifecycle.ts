@@ -141,15 +141,11 @@ export async function openDocumentFile(
     }
     // `shell.openPath` hands the file to the OS, which FOLLOWS a `.lnk` shortcut
     // and runs a launcher. A managed document is a PDF, a DOCX or an image —
-    // never a shortcut or a launcher script — so the extension is refused here
-    // rather than trusted to the shell.
-    const extension = extname(check.fullPath).toLowerCase()
-    if (WINDOWS_LAUNCHER_EXTENSIONS.has(extension)) {
-      return {
-        ok: false,
-        error: `A ${extension} file is a launcher or shortcut and is not opened from Tenders.`,
-      }
-    }
+    // never a shortcut, a launcher script or a macro container that would run
+    // code on open — so the extension is refused here rather than trusted to the
+    // shell.
+    const refusal = refusalForUnopenableExtension(extname(check.fullPath).toLowerCase())
+    if (refusal) return { ok: false, error: refusal }
     const openErr = await shell.openPath(check.fullPath)
     if (openErr) {
       return { ok: false, error: openErr }
@@ -181,6 +177,45 @@ const WINDOWS_LAUNCHER_EXTENSIONS = new Set([
   '.msi',
   '.exe',
 ])
+
+/**
+ * OOXML extensions whose container may carry and RUN a VBA macro project.
+ *
+ * These are what an attacker actually sends: the old binary `.doc`/`.xls` are
+ * the ones Office blocks by default, while a `.docm` from a third party is an
+ * ordinary-looking document the user is expected to open — and opening it runs
+ * its `vbaProject.bin` unless Office's own macro setting stops it. This app
+ * ingests documents from untrusted third parties and then hands them to
+ * `shell.openPath`, so "Office will probably warn about this one" is not a
+ * defence the app gets to delegate; it refuses the container instead.
+ */
+const OOXML_MACRO_EXTENSIONS = new Set([
+  '.docm',
+  '.dotm',
+  '.xlsm',
+  '.xltm',
+  '.xlam',
+  '.pptm',
+  '.potm',
+  '.ppsm',
+  '.sldm',
+])
+
+/**
+ * Why this extension may not be opened, as the sentence the user is shown, or
+ * `null` when it may. Two honest messages rather than one: a macro container is
+ * not a launcher, and telling a user their `.docm` "is a launcher or shortcut"
+ * would describe something the file is not.
+ */
+export function refusalForUnopenableExtension(extension: string): string | null {
+  if (WINDOWS_LAUNCHER_EXTENSIONS.has(extension)) {
+    return `A ${extension} file is a launcher or shortcut and is not opened from Tenders.`
+  }
+  if (OOXML_MACRO_EXTENSIONS.has(extension)) {
+    return `A ${extension} file can carry macros, so it is not opened from Tenders. Save it as a macro-free format first.`
+  }
+  return null
+}
 
 /**
  * Soft-delete a managed document: the file is MOVED to the Tenders trash (never
