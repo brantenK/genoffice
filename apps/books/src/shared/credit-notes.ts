@@ -11,7 +11,7 @@ import type {
   JournalEntryItem,
   Party,
 } from './types'
-import { round2 } from './accounting'
+import { journalLineAmount, postedInvoiceAmounts, round2 } from './accounting'
 
 /**
  * Creates a balanced JournalEntry that REVERSES a previously posted sales
@@ -21,9 +21,12 @@ import { round2 } from './accounting'
  * with every debit/credit side swapped:
  * - Sales credit note:    Cr Accounts Receivable / Dr Income groups / Dr VAT output
  * - Purchase credit note: Dr Accounts Payable / Cr Expense groups / Cr VAT input
- * Income/expense line items are grouped by item.accountId exactly like the
- * original posting (the last group absorbs any 1-cent rounding difference),
- * so totalDebit === totalCredit === grandTotal.
+ * Income/expense line items are grouped by item.accountId on the same
+ * post-discount basis (effectiveLineAmount) as the original posting, and the
+ * invoice-level discount and round-off are mirrored on the first group the
+ * original booked them to, so per account the credit note cancels the invoice
+ * it reverses. The last group still absorbs any leftover rounding difference,
+ * so the entry always balances.
  */
 export function createCreditNoteJournal(
   invoice: Invoice,
@@ -32,8 +35,10 @@ export function createCreditNoteJournal(
   entryNumber?: string,
 ): JournalEntry {
   const grandTotal = round2(invoice.grandTotal || invoice.subtotal + invoice.taxTotal)
-  const taxTotal = round2(invoice.taxTotal)
-  const subtotal = round2(grandTotal - taxTotal)
+  // The reversal must carry back exactly the VAT and the VAT-exclusive base the
+  // original posting carried, so both read the same shared rule.
+  const { subtotal: postedSubtotal, taxTotal } = postedInvoiceAmounts(invoice)
+  const discountTotal = round2(Number(invoice.discountTotal) || 0)
   const isSales = invoice.type === 'Sales'
 
   const dateStr = invoice.date || new Date().toISOString().split('T')[0]
@@ -77,18 +82,14 @@ export function createCreditNoteJournal(
     })
   }
 
-  // Group line items by income/expense account (same grouping as the
-  // original posting; the last group absorbs any 1-cent difference).
+  // Group line items by income/expense account on the same post-discount
+  // `journalLineAmount` basis as the original posting, so per account the
+  // reversal cancels the invoice it credits.
   const groups = new Map<string, { accountId: string; accountName: string; amount: number }>()
 
   if (Array.isArray(invoice.items) && invoice.items.length > 0) {
     for (const it of invoice.items) {
-      let lineAmt = 0
-      if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
-        lineAmt = round2(Number(it.qty) * Number(it.rate))
-      } else if (it.amount != null && !isNaN(Number(it.amount))) {
-        lineAmt = round2(Number(it.amount))
-      }
+      const lineAmt = journalLineAmount(it)
       const accId = it.accountId || (isSales ? 'acc-sales' : 'acc-materials')
       const matched = accounts.find((a) => a.id === accId)
       const accName =
@@ -108,6 +109,16 @@ export function createCreditNoteJournal(
     }
   }
 
+  // The original posting booked the invoice-level discount and any round-off
+  // adjustment on the first group, so the reversal carries them back on the
+  // same account. Subtracting them leaves the groups at the posted
+  // VAT-exclusive subtotal; any leftover (an unrecorded difference) is
+  // absorbed by the last group. A negative subtotal posts no discount leg on
+  // the invoice either, so the mirror must not carry one back.
+  const bookedDiscount = round2(postedSubtotal >= 0 ? Math.min(discountTotal, postedSubtotal) : 0)
+  const roundOff = round2(Number(invoice.roundOff) || 0)
+  const groupTotal = round2(grandTotal - taxTotal + bookedDiscount - roundOff)
+
   if (groups.size === 0) {
     const fallback = isSales
       ? accounts.find((a) => a.id === 'acc-sales' || a.accountType === 'Direct Income') || {
@@ -121,13 +132,14 @@ export function createCreditNoteJournal(
     groups.set(fallback.id, {
       accountId: fallback.id,
       accountName: fallback.name,
-      amount: subtotal,
+      amount: groupTotal,
     })
   } else {
-    // Ensure the grouped amount equals subtotal exactly (1-cent absorption).
+    // Ensure the grouped amount equals the posted subtotal exactly
+    // (1-cent absorption).
     const entries = Array.from(groups.values())
     const sumGroups = entries.reduce((s, e) => round2(s + e.amount), 0)
-    const diff = round2(subtotal - sumGroups)
+    const diff = round2(groupTotal - sumGroups)
     if (diff !== 0 && entries.length > 0) {
       entries[entries.length - 1].amount = round2(entries[entries.length - 1].amount + diff)
     }
@@ -135,7 +147,7 @@ export function createCreditNoteJournal(
 
   let grpIdx = 1
   for (const grp of groups.values()) {
-    if (grp.amount !== 0 || groups.size === 1 || subtotal === 0) {
+    if (grp.amount !== 0 || groups.size === 1 || groupTotal === 0) {
       const isNegative = grp.amount < 0
       const absAmt = round2(Math.abs(grp.amount))
       // Sales credit notes debit income groups; purchase credit notes credit
@@ -152,6 +164,22 @@ export function createCreditNoteJournal(
           : `Credit Note Reversal - ${invoice.invoiceNumber}`,
       })
     }
+  }
+
+  // Invoice-level discount: the reverse of the original posting's entry for
+  // it (a debit for sales, a credit for purchase), on the same first account.
+  if (bookedDiscount !== 0) {
+    const first = Array.from(groups.values())[0]
+    const absDiscount = round2(Math.abs(bookedDiscount))
+    const onDebitSide = isSales ? bookedDiscount < 0 : bookedDiscount > 0
+    items.push({
+      id: `je-i-cn-disc-${Date.now()}-${randomSuffix}`,
+      accountId: first.accountId,
+      accountName: first.accountName,
+      debit: onDebitSide ? absDiscount : 0,
+      credit: onDebitSide ? 0 : absDiscount,
+      remark: `Credit Note Discount Reversal - ${invoice.invoiceNumber}`,
+    })
   }
 
   if (taxTotal !== 0) {
@@ -179,6 +207,22 @@ export function createCreditNoteJournal(
       remark: isSales
         ? `Credit Note VAT Output Reversal - ${invoice.invoiceNumber}`
         : `Credit Note VAT Input Reversal - ${invoice.invoiceNumber}`,
+    })
+  }
+
+  // Round-off: the reverse of the original posting's adjustment, on the same
+  // first account, so a rounded invoice and its credit note cancel per account.
+  if (roundOff !== 0) {
+    const primary = Array.from(groups.values())[0]
+    const absRoundOff = round2(Math.abs(roundOff))
+    const onDebitSide = isSales ? roundOff > 0 : roundOff < 0
+    items.push({
+      id: `je-i-cn-round-${Date.now()}-${randomSuffix}`,
+      accountId: primary.accountId,
+      accountName: primary.accountName,
+      debit: onDebitSide ? absRoundOff : 0,
+      credit: onDebitSide ? 0 : absRoundOff,
+      remark: `Credit Note Round-off Reversal - ${invoice.invoiceNumber}`,
     })
   }
 
@@ -291,20 +335,50 @@ export function repostPlanForPartialSettlement(
 }
 
 /**
+ * True when a remark mentions the exact reference. References are matched as
+ * whole tokens, so INV-2026-001 does not match INV-2026-0011 (or the other way
+ * round): letters, digits, underscores and hyphens stay part of the token. An
+ * empty reference matches nothing (and would otherwise scan forever, since
+ * `indexOf('')` always finds the end of the string).
+ */
+export function mentionsReference(text: string | undefined, reference: string): boolean {
+  const haystack = String(text || '')
+  if (!haystack || !reference) return false
+  const isReferenceChar = (char: string): boolean => /[A-Za-z0-9_-]/.test(char)
+
+  let from = 0
+  for (;;) {
+    const at = haystack.indexOf(reference, from)
+    if (at === -1) return false
+    const before = at > 0 ? haystack[at - 1] : ''
+    const after = at + reference.length < haystack.length ? haystack[at + reference.length] : ''
+    if (!isReferenceChar(before) && !isReferenceChar(after)) return true
+    from = at + 1
+  }
+}
+
+/**
+ * True when the journal entry was posted for exactly this invoice number —
+ * matched as a whole reference in the entry remarks or the item remarks, never
+ * as a substring, so INV-2026-001 cannot claim the journals of INV-2026-0011.
+ */
+export function journalReferencesInvoice(journal: JournalEntry, invoiceNumber: string): boolean {
+  const reference = String(invoiceNumber || '').trim()
+  if (!reference) return false
+  if (mentionsReference(journal?.remarks, reference)) return true
+  return (journal?.items || []).some((item) => mentionsReference(item?.remark, reference))
+}
+
+/**
  * Returns the journal entries minus every entry that references the given
- * invoice number — the same matching rule the store uses when editing or
- * deleting a posted invoice (entry remarks or item remarks containing the
- * number).
+ * invoice number — the journals the store reverses when editing or deleting a
+ * posted invoice. Matching is by exact reference (see
+ * `journalReferencesInvoice`), so a number that is merely a prefix of another
+ * (INV-2026-001 vs INV-2026-0011) leaves the other invoice's journals alone.
  */
 export function reversalJournalRemoval(
   oldInvoiceNumber: string,
   journalEntries: JournalEntry[],
 ): JournalEntry[] {
-  return (journalEntries || []).filter((je) => {
-    const matchesRemarks = Boolean(je.remarks && je.remarks.includes(oldInvoiceNumber))
-    const matchesItem = (je.items || []).some(
-      (it) => it.remark && it.remark.includes(oldInvoiceNumber),
-    )
-    return !matchesRemarks && !matchesItem
-  })
+  return (journalEntries || []).filter((je) => !journalReferencesInvoice(je, oldInvoiceNumber))
 }

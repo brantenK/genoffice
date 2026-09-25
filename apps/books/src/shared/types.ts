@@ -205,6 +205,12 @@ export interface BooksData {
 export interface BooksDataEnvelope {
   version: number
   updatedAt: string
+  /**
+   * Optimistic-concurrency cursor for `books:save-data`: 0 for a store that
+   * predates revisions (the migration default) and incremented by one on
+   * every successful write.
+   */
+  revision: number
   settings: CompanySettings
   accounts: Account[]
   parties: Party[]

@@ -42,7 +42,10 @@ export function validateClosedPeriodMutation(
   const closedThrough = String(previous?.settings?.closedThrough || '').trim()
   if (!closedThrough || !isValidIsoDate(closedThrough)) return { ok: true }
   if (candidate?.settings?.closedThrough !== closedThrough) {
-    return { ok: false, error: `Closed period through ${closedThrough} cannot be changed through a raw save` }
+    return {
+      ok: false,
+      error: `Closed period through ${closedThrough} cannot be changed through a raw save`,
+    }
   }
 
   const lockedInvoices = (data: BooksData) =>
@@ -54,7 +57,12 @@ export function validateClosedPeriodMutation(
           // change an old invoice's settlement state, but never its P&L
           // content. Compare every accounting/identity field while allowing
           // status, outstandingAmount and updatedAt to move.
-          const { status: _status, outstandingAmount: _outstanding, updatedAt: _updated, ...lockedShape } = inv
+          const {
+            status: _status,
+            outstandingAmount: _outstanding,
+            updatedAt: _updated,
+            ...lockedShape
+          } = inv
           return [inv.id, JSON.stringify(lockedShape)]
         }),
     )
@@ -70,11 +78,17 @@ export function validateClosedPeriodMutation(
     ['journal entry', lockedJournals(previous), lockedJournals(candidate)],
   ] as const) {
     if (before.size !== after.size) {
-      return { ok: false, error: `Cannot add or remove a ${label} in the closed period through ${closedThrough}` }
+      return {
+        ok: false,
+        error: `Cannot add or remove a ${label} in the closed period through ${closedThrough}`,
+      }
     }
     for (const [id, serialized] of before) {
       if (after.get(id) !== serialized) {
-        return { ok: false, error: `Cannot modify ${label} ${id} in the closed period through ${closedThrough}` }
+        return {
+          ok: false,
+          error: `Cannot modify ${label} ${id} in the closed period through ${closedThrough}`,
+        }
       }
     }
   }

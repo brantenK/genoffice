@@ -1,3 +1,4 @@
+import { DEFAULT_BANK_ACCOUNT_NAME } from './chart'
 import type {
   Account,
   BankTransaction,
@@ -132,16 +133,355 @@ export function calculateInvoiceTotals(
   return result
 }
 
+export interface InvoiceTaxRow {
+  taxRate: number
+  taxable: number
+  tax: number
+}
+
+export interface InvoiceTaxInput {
+  items: InvoiceItem[]
+  /** Invoice-level VAT-exclusive discount (applied before tax). */
+  discountTotal?: number
+  /** Posted VAT-exclusive subtotal; falls back to the item lines. */
+  subtotal?: number
+  /** Posted VAT; falls back to the item lines. */
+  taxTotal?: number
+}
+
+export interface InvoiceTaxBreakdown {
+  /** VAT-exclusive base actually taxed (line and invoice discounts applied). */
+  taxable: number
+  /** VAT posted for this invoice. */
+  tax: number
+  /** Per distinct tax rate; the rows always sum back to `taxable` / `tax`. */
+  rows: InvoiceTaxRow[]
+}
+
 /**
- * Creates a balanced JournalEntry for a Sales Invoice:
+ * One item line as the reporting engine reads it. `amount` is the stored line
+ * total (the store writes it as qty x rate) and where an older row disagrees
+ * with qty x rate the stored total is the one that was posted; suppressing
+ * qty/rate makes `effectiveLineAmount` resolve the line to that amount while
+ * still applying the line's own `discountRate`.
+ */
+function postedLine(item: InvoiceItem): InvoiceItem {
+  return item.amount ? { ...item, qty: Number.NaN, rate: Number.NaN } : item
+}
+
+/**
+ * The post-discount amount a journal posts for one line, read exactly as the
+ * tax register reads it (`postedLine` above), so the accounts a journal groups
+ * a line into and the rates the register taxes it at come from the same figure.
+ */
+export function journalLineAmount(item: InvoiceItem): number {
+  return effectiveLineAmount(postedLine(item))
+}
+
+/**
+ * The single definition of an invoice's VAT: which base is taxed at which
+ * rate, how much VAT that posts, and the per-rate split of both.
+ *
+ * All discount arithmetic goes through `calculateInvoiceTotals` — each line's
+ * `discountRate` first, then the invoice-level `discountTotal` (aggregate tax
+ * for a single rate, proportional for mixed rates). The per-rate rows are the
+ * taxes the item lines imply, scaled onto those totals, so the journal VAT leg
+ * and the tax register can never report different figures.
+ *
+ * The totals are derived from the item lines unless the caller supplies the
+ * posted `subtotal` / `taxTotal` — the store writes those with this same engine
+ * and the journals post them, which is how the tax register reports exactly
+ * what was posted. The last row absorbs the rounding difference.
+ */
+export function invoiceTaxBreakdown(input: InvoiceTaxInput): InvoiceTaxBreakdown {
+  const lines = (Array.isArray(input.items) ? input.items : []).map(postedLine)
+  const discountTotal = round2(Number(input.discountTotal) || 0)
+
+  const derived = calculateInvoiceTotals(lines, { discountTotal })
+  const subtotal = input.subtotal !== undefined ? round2(input.subtotal) : derived.subtotal
+  const bookedDiscount = round2(subtotal >= 0 ? Math.min(discountTotal, subtotal) : 0)
+  const taxable = round2(subtotal - bookedDiscount)
+  const tax = input.taxTotal !== undefined ? round2(input.taxTotal) : derived.taxTotal
+
+  const groups = new Map<number, InvoiceTaxRow>()
+  for (const line of lines) {
+    const rate = round2(Number(line.taxRate) || 0)
+    const totals = calculateInvoiceTotals([line])
+    const group = groups.get(rate) || { taxRate: rate, taxable: 0, tax: 0 }
+    group.taxable = round2(group.taxable + totals.subtotal)
+    group.tax = round2(group.tax + totals.taxTotal)
+    groups.set(rate, group)
+  }
+
+  const rows = Array.from(groups.values()).sort((a, b) => a.taxRate - b.taxRate)
+  if (rows.length === 1) {
+    rows[0].taxable = taxable
+    rows[0].tax = tax
+  } else if (rows.length > 1) {
+    const baseSum = rows.reduce((sum, row) => round2(sum + row.taxable), 0)
+    const taxSum = rows.reduce((sum, row) => round2(sum + row.tax), 0)
+    const baseScale = baseSum !== 0 ? taxable / baseSum : 1
+    const taxScale = taxSum !== 0 ? tax / taxSum : 1
+    for (const row of rows) {
+      row.taxable = round2(row.taxable * baseScale)
+      row.tax = round2(row.tax * taxScale)
+    }
+    const scaledBase = rows.reduce((sum, row) => round2(sum + row.taxable), 0)
+    const scaledTax = rows.reduce((sum, row) => round2(sum + row.tax), 0)
+    const last = rows[rows.length - 1]
+    last.taxable = round2(last.taxable + round2(taxable - scaledBase))
+    last.tax = round2(last.tax + round2(tax - scaledTax))
+  }
+
+  return { taxable, tax, rows }
+}
+
+/**
+ * True when a stored row carries the totals the store wrote for it: a non-zero
+ * VAT-exclusive subtotal or VAT. A row without them (item-only and legacy
+ * data) is read from its item lines instead. The journal builders and the VAT
+ * register both gate on this one test, so the VAT they post and the VAT they
+ * report can never diverge.
+ */
+export function hasPostedTotals(invoice: Pick<Invoice, 'subtotal' | 'taxTotal'>): boolean {
+  return round2(Number(invoice.subtotal) || 0) !== 0 || round2(Number(invoice.taxTotal) || 0) !== 0
+}
+
+export interface PostedInvoiceAmounts {
+  /** VAT-exclusive base the posting carries. */
+  subtotal: number
+  /** VAT the posting carries. */
+  taxTotal: number
+}
+
+/**
+ * The VAT-exclusive subtotal and VAT one invoice posts, under the single rule
+ * the journal builders and `taxRegister` share:
+ * - a row that carries posted totals is posted exactly as stored — the store
+ *   writes those totals with `calculateInvoiceTotals`, so a store-written row
+ *   is internally consistent and its figures are the ones the invoice shows;
+ * - a row without posted totals has no stored base to post: its item lines are
+ *   authoritative for the VAT (the very lines `taxRegister` reads) and the
+ *   stored `grandTotal` fixes the base as the remainder it leaves after that
+ *   VAT, so the posting closes on the anchor instead of inventing a residual.
+ *
+ * An invoice carries no `taxInclusive` flag (that is a company setting), so a
+ * row without posted totals is read as VAT-exclusive by the journal and the
+ * register alike — one rule, never two.
+ */
+export function postedInvoiceAmounts(
+  invoice: Pick<
+    Invoice,
+    'items' | 'subtotal' | 'taxTotal' | 'grandTotal' | 'discountTotal' | 'roundOff'
+  >,
+): PostedInvoiceAmounts {
+  const storedSubtotal = round2(Number(invoice.subtotal) || 0)
+  const storedTax = round2(Number(invoice.taxTotal) || 0)
+  if (hasPostedTotals(invoice)) {
+    return { subtotal: storedSubtotal, taxTotal: storedTax }
+  }
+
+  const lines = Array.isArray(invoice.items) ? invoice.items : []
+  const discountTotal = round2(Number(invoice.discountTotal) || 0)
+  const roundOff = round2(Number(invoice.roundOff) || 0)
+  const grandTotal = round2(Number(invoice.grandTotal) || 0)
+  // The VAT the item lines imply, read exactly as the tax register reads it.
+  const taxTotal = invoiceTaxBreakdown({ items: lines, discountTotal }).tax
+  // No anchor to close against (a row whose grandTotal was never written):
+  // the item lines carry the posting on their own.
+  const subtotal =
+    grandTotal === 0
+      ? calculateInvoiceTotals(lines.map(postedLine), { discountTotal }).subtotal
+      : round2(grandTotal + discountTotal - taxTotal - roundOff)
+  return { subtotal, taxTotal }
+}
+
+/** The item lines a journal groups by account, with NaN arrays read as empty. */
+function journalLines(invoice: Invoice): InvoiceItem[] {
+  return Array.isArray(invoice.items) ? invoice.items : []
+}
+
+/** Every distinct tax rate among the lines, ascending (0 for rate-less lines). */
+function lineTaxRates(lines: InvoiceItem[]): number[] {
+  const rates = new Set<number>()
+  for (const line of lines) {
+    const rate = round2(Number(line.taxRate) || 0)
+    if (!rates.has(rate)) rates.add(rate)
+  }
+  return Array.from(rates).sort((a, b) => a - b)
+}
+
+/**
+ * The VAT remark for a posting leg, labelled with the rate(s) the posting
+ * actually carries: '15% VAT Output', '0% VAT Output Adjustment',
+ * '7.5% / 15% VAT Output' for a mixed-rate invoice. `suffix` carries the sign
+ * convention ('Adjustment' when the leg is on its reversal side).
+ */
+function vatRemark(rates: number[], suffix: string): string {
+  const labels = rates.length > 0 ? rates : [0]
+  return `${labels.map((rate) => `${rate}%`).join(' / ')} VAT ${suffix}`
+}
+
+/**
+ * Group invoice lines by their posting account, on the same post-discount
+ * `journalLineAmount` basis the totals engine and the tax register use. A line
+ * whose effective amount rounds to zero is dropped so it never produces a 0.00
+ * journal leg.
+ */
+function groupLines(
+  lines: InvoiceItem[],
+  accounts: Account[],
+  opts: {
+    defaultAccountId: string
+    defaultAccountType: Account['accountType']
+    defaultName: string
+  },
+): Map<string, { accountId: string; accountName: string; amount: number }> {
+  const groups = new Map<string, { accountId: string; accountName: string; amount: number }>()
+
+  for (const it of lines) {
+    const lineAmt = journalLineAmount(it)
+    if (lineAmt === 0) continue
+    const accId = it.accountId || opts.defaultAccountId
+    const matched = accounts.find((a) => a.id === accId)
+    const accName = it.accountName || matched?.name || opts.defaultName
+
+    const existing = groups.get(accId) || {
+      accountId: accId,
+      accountName: accName,
+      amount: 0,
+    }
+    existing.amount = round2(existing.amount + lineAmt)
+    groups.set(accId, existing)
+  }
+
+  return groups
+}
+
+/** The account a journal falls back to when an invoice carries no usable line. */
+function defaultGroupAccount(
+  accounts: Account[],
+  id: string,
+  accountType: Account['accountType'],
+  name: string,
+): { accountId: string; accountName: string } {
+  const matched = accounts.find((a) => a.id === id || a.accountType === accountType)
+  return { accountId: matched?.id || id, accountName: matched?.name || name }
+}
+
+/** Posting account a sales entry absorbs a rounding difference on. */
+const AR_INCOME_ACCOUNT = 'acc-sales'
+/** Posting account a purchase entry absorbs a rounding difference on. */
+const AP_EXPENSE_ACCOUNT = 'acc-materials'
+
+/** VAT posting accounts, which carry the posted VAT and never a residual. */
+const VAT_ACCOUNTS = new Set(['acc-vat', 'acc-vat-out', 'acc-vat-in'])
+
+/**
+ * Journal legs whose amount is fixed by the stored figures: the AR/AP control
+ * leg (the stored grandTotal) and the VAT leg (the posted VAT).
+ */
+function isFixedLeg(item: JournalEntryItem): boolean {
+  return (
+    item.accountId === 'acc-ar' || item.accountId === 'acc-ap' || VAT_ACCOUNTS.has(item.accountId)
+  )
+}
+
+/**
+ * Forces the entry to balance. The residual rides a revenue/expense leg: the
+ * preferred account when one of its legs can take the adjustment, any other
+ * revenue/expense leg otherwise, and a leg of its own on the fallback account
+ * when the entry carries none (a corrupt row whose lines all point at control
+ * accounts).
+ *
+ * The VAT leg and the AR/AP control leg are deliberately NEVER adjustment
+ * targets: the VAT leg carries the posted VAT and the control leg is the
+ * entry's anchor on the stored `grandTotal`, so a residual on either would
+ * misstate the VAT return or make the party balance, the AR/AP control account
+ * and the invoice disagree — the very defect this anchor exists to prevent.
+ */
+function absorbRoundingDifference(
+  items: JournalEntryItem[],
+  preferredAccountId: string,
+  fallback: { accountId: string; accountName: string },
+  remark: string,
+): void {
+  const debit = round2(items.reduce((s, it) => s + it.debit, 0))
+  const credit = round2(items.reduce((s, it) => s + it.credit, 0))
+  if (debit === credit) return
+
+  const delta = round2(Math.abs(debit - credit))
+  if (delta === 0) return
+
+  const candidates = items.filter((item) => !isFixedLeg(item))
+  const target =
+    candidates.find(
+      (it) => it.accountId === preferredAccountId && it.debit === 0 && it.credit > 0,
+    ) ||
+    candidates.find(
+      (it) => it.accountId === preferredAccountId && it.credit === 0 && it.debit > 0,
+    ) ||
+    candidates[candidates.length - 1]
+
+  if (!target) {
+    // Nothing to adjust: carry the residual on its own leg so the posting
+    // still balances rather than leaving one side of the entry short.
+    const addCredit = round2(debit - credit) > 0
+    items.push({
+      id: `je-i-bal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      accountId: fallback.accountId,
+      accountName: fallback.accountName,
+      debit: addCredit ? 0 : delta,
+      credit: addCredit ? delta : 0,
+      remark,
+    })
+    return
+  }
+
+  if (round2(debit - credit) > 0) {
+    target.credit = round2(target.credit + delta)
+    if (target.debit !== 0 && target.credit !== 0) {
+      const net = round2(target.credit - target.debit)
+      target.debit = net < 0 ? round2(Math.abs(net)) : 0
+      target.credit = net > 0 ? net : 0
+    }
+  } else {
+    target.debit = round2(target.debit + delta)
+    if (target.debit !== 0 && target.credit !== 0) {
+      const net = round2(target.debit - target.credit)
+      target.debit = net > 0 ? net : 0
+      target.credit = net < 0 ? round2(Math.abs(net)) : 0
+    }
+  }
+}
+
+/**
+ * Creates a balanced JournalEntry for a Sales Invoice.
+ *
+ * The entry is ANCHORED ON THE STORED `grandTotal` (never on `subtotal`): the
+ * Receivable leg is always exactly that amount, so the party balance, the AR
+ * control account and the invoice can never disagree. The posted VAT and the
+ * VAT-exclusive base the income legs start from come from `postedInvoiceAmounts`
+ * — the same rule the tax register reads — and the discount / round-off /
+ * residual legs are recomputed so that
  * - Debit: Accounts Receivable (acc-ar) for invoice.grandTotal
- * - Credit: Income Account(s) (item.accountId or acc-sales) for invoice.subtotal
+ * - Credit: Income account(s) (item.accountId or acc-sales) for the posted
+ *   subtotal; a negative subtotal (a rebate invoice) posts on the debit side
+ *   instead of being dropped
  * - Debit: invoice-level discount (invoice.discountTotal) on the first income
  *   account (remark 'Invoice discount'), keeping the VAT base consistent
- * - Credit: VAT Output Payable (acc-vat or acc-vat-out) for invoice.taxTotal (if taxTotal > 0)
- * - Final: round-off adjustment (invoice.roundOff) on the income account
- *   (remark 'Round-off adjustment') so the entry equals grandTotal
- * Total Debits strictly equal Total Credits.
+ * - Credit: VAT Output Payable (acc-vat or acc-vat-out) for the posted VAT,
+ *   labelled with the rate(s) the lines actually carry
+ * - Final: round-off adjustment on the first income account: the invoice's
+ *   `roundOff`, plus whatever residual the stored figures leave. Positive
+ *   credits income, negative debits it.
+ *
+ * Two legs are always emitted — only a posting with both sides of zero (a
+ * nil invoice) collapses to a single balanced 0.00 leg.
+ * Total Debits strictly equal Total Credits for ANY finite stored totals,
+ * internally consistent or not. A line whose effective amount is zero is not
+ * posted on its own account (the amount is already 0.00); any residual is
+ * absorbed on an income leg, never on the VAT or Receivable leg.
  */
 export function createSalesInvoiceJournal(
   invoice: Invoice,
@@ -151,11 +491,14 @@ export function createSalesInvoiceJournal(
 ): JournalEntry {
   const roundOff = round2(Number(invoice.roundOff) || 0)
   const discountTotal = round2(Number(invoice.discountTotal) || 0)
-  const taxTotal = round2(invoice.taxTotal)
-  const grandTotal = round2(invoice.grandTotal || invoice.subtotal + taxTotal + roundOff)
-  const subtotal = round2(
-    invoice.subtotal !== undefined ? invoice.subtotal : grandTotal - taxTotal - roundOff,
-  )
+  const grandTotal = round2(Number(invoice.grandTotal) || 0)
+  // The entry is anchored on grandTotal: the Receivable leg is always exactly
+  // that amount. The VAT and the base the income legs start from come from the
+  // one shared rule `taxRegister` reads too (`postedInvoiceAmounts`), so the
+  // posted VAT and the reported VAT cannot diverge.
+  const { subtotal, taxTotal } = postedInvoiceAmounts(invoice)
+
+  const lines = journalLines(invoice)
 
   const dateStr = invoice.date || new Date().toISOString().split('T')[0]
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
@@ -183,82 +526,66 @@ export function createSalesInvoiceJournal(
     },
   ]
 
-  // Group line items by revenue account if available
-  const incomeGroups = new Map<string, { accountId: string; accountName: string; amount: number }>()
-
-  if (Array.isArray(invoice.items) && invoice.items.length > 0) {
-    for (const it of invoice.items) {
-      const lineAmt = effectiveLineAmount(it)
-      const accId = it.accountId || 'acc-sales'
-      const matched = accounts.find((a) => a.id === accId)
-      const accName = it.accountName || matched?.name || 'Tender & Commercial Contracting Sales'
-
-      const existing = incomeGroups.get(accId) || {
-        accountId: accId,
-        accountName: accName,
-        amount: 0,
-      }
-      existing.amount = round2(existing.amount + lineAmt)
-      incomeGroups.set(accId, existing)
-    }
-  }
+  const incomeGroups = groupLines(lines, accounts, {
+    defaultAccountId: 'acc-sales',
+    defaultAccountType: 'Direct Income',
+    defaultName: 'Tender & Commercial Contracting Sales',
+  })
 
   if (incomeGroups.size === 0) {
-    const salesAcc = accounts.find(
-      (a) => a.id === 'acc-sales' || a.accountType === 'Direct Income',
-    ) || {
-      id: 'acc-sales',
-      name: 'Tender & Commercial Contracting Sales',
-    }
-    incomeGroups.set(salesAcc.id, {
-      accountId: salesAcc.id,
-      accountName: salesAcc.name,
-      amount: subtotal,
-    })
-  } else {
-    // Ensure sum of item credits equals subtotal exactly to avoid 1-cent discrepancy
-    const entries = Array.from(incomeGroups.values())
-    const sumCredits = entries.reduce((s, e) => round2(s + e.amount), 0)
-    const diff = round2(subtotal - sumCredits)
-    if (diff !== 0 && entries.length > 0) {
-      entries[entries.length - 1].amount = round2(entries[entries.length - 1].amount + diff)
-    }
+    const salesAcc = defaultGroupAccount(
+      accounts,
+      'acc-sales',
+      'Direct Income',
+      'Tender & Commercial Contracting Sales',
+    )
+    incomeGroups.set(salesAcc.accountId, { ...salesAcc, amount: subtotal })
+  }
+
+  // The income legs carry the posted subtotal — a negative subtotal (a rebate
+  // invoice) posts its income on the debit side like any other negative amount,
+  // so it is never dropped and the entry never loses its counterpart to the
+  // Receivable leg.
+  const groupTarget = subtotal
+  const entries = Array.from(incomeGroups.values())
+  const sumCredits = entries.reduce((s, e) => round2(s + e.amount), 0)
+  const diff = round2(groupTarget - sumCredits)
+  if (diff !== 0 && entries.length > 0) {
+    entries[entries.length - 1].amount = round2(entries[entries.length - 1].amount + diff)
   }
 
   let incIdx = 1
   for (const inc of incomeGroups.values()) {
-    if (inc.amount !== 0 || incomeGroups.size === 1 || subtotal === 0) {
-      const isNegative = inc.amount < 0
-      const absAmt = round2(Math.abs(inc.amount))
-      items.push({
-        id: `je-i-inc-${incIdx++}-${Date.now()}-${randomSuffix}`,
-        accountId: inc.accountId,
-        accountName: inc.accountName,
-        debit: isNegative ? absAmt : 0,
-        credit: isNegative ? 0 : absAmt,
-        remark: isNegative
-          ? `Sales Discount / Adjustment - ${invoice.invoiceNumber}`
-          : `Sales Revenue - ${invoice.invoiceNumber}`,
-      })
-    }
+    const absAmt = round2(Math.abs(inc.amount))
+    if (absAmt === 0) continue
+    const isNegative = inc.amount < 0
+    items.push({
+      id: `je-i-inc-${incIdx++}-${Date.now()}-${randomSuffix}`,
+      accountId: inc.accountId,
+      accountName: inc.accountName,
+      debit: isNegative ? absAmt : 0,
+      credit: isNegative ? 0 : absAmt,
+      remark: isNegative
+        ? `Sales Discount / Adjustment - ${invoice.invoiceNumber}`
+        : `Sales Revenue - ${invoice.invoiceNumber}`,
+    })
   }
 
-  // Invoice-level discount: a negative item on the first income account.
-  // The booked reduction never exceeds the (non-negative) subtotal so the
-  // entry stays balanced even when the discount equals the whole invoice.
-  if (discountTotal !== 0) {
+  // Invoice-level discount: its own leg on the first income account. A
+  // positive discount is a debit against income (it reduces revenue); when the
+  // stored discount is negative (a surcharge) the leg takes the credit side.
+  const bookedDiscount = round2(subtotal < 0 ? 0 : Math.min(discountTotal, subtotal))
+  if (bookedDiscount !== 0) {
     const first = Array.from(incomeGroups.values())[0]
-    const discAmt = round2(subtotal >= 0 ? Math.min(discountTotal, subtotal) : discountTotal)
-    if (discAmt !== 0) {
-      items.push({
-        id: `je-i-disc-${Date.now()}-${randomSuffix}`,
-        accountId: first.accountId,
-        accountName: first.accountName,
-        debit: discAmt,
-        credit: 0,
-        remark: `Invoice discount - ${invoice.invoiceNumber}`,
-      })
-    }
+    const discSigned = round2(-bookedDiscount)
+    items.push({
+      id: `je-i-disc-${Date.now()}-${randomSuffix}`,
+      accountId: first.accountId,
+      accountName: first.accountName,
+      debit: discSigned < 0 ? round2(Math.abs(discSigned)) : 0,
+      credit: discSigned > 0 ? discSigned : 0,
+      remark: `Invoice discount - ${invoice.invoiceNumber}`,
+    })
   }
 
   if (taxTotal !== 0) {
@@ -275,20 +602,22 @@ export function createSalesInvoiceJournal(
       accountName: vatAcc.name,
       debit: isNegativeVat ? absTax : 0,
       credit: isNegativeVat ? 0 : absTax,
-      remark: isNegativeVat ? '15% VAT Output Adjustment' : '15% VAT Output',
+      remark: vatRemark(lineTaxRates(lines), isNegativeVat ? 'Output Adjustment' : 'Output'),
     })
   }
 
-  // Round-off: a final signed adjustment on the income account so the entry
-  // equals grandTotal. roundOff > 0 (grand total rounded up) credits income;
-  // roundOff < 0 (rounded down) debits income.
-  if (roundOff !== 0) {
+  // Round-off: the invoice's own signed adjustment on the first income
+  // account, so the entry lands exactly on grandTotal. roundOff > 0 (grand
+  // total rounded up) credits income, roundOff < 0 debits it. Whatever
+  // residual inconsistent stored totals leave is absorbed below.
+  const roundAdjustment = round2(roundOff)
+  if (roundAdjustment !== 0) {
     const primary = Array.from(incomeGroups.values())[0] || {
       accountId: 'acc-sales',
       accountName: 'Tender & Commercial Contracting Sales',
     }
-    const isRoundOffCredit = roundOff > 0
-    const absRoundOff = round2(Math.abs(roundOff))
+    const isRoundOffCredit = roundAdjustment > 0
+    const absRoundOff = round2(Math.abs(roundAdjustment))
     items.push({
       id: `je-i-round-${Date.now()}-${randomSuffix}`,
       accountId: primary.accountId,
@@ -299,8 +628,41 @@ export function createSalesInvoiceJournal(
     })
   }
 
-  const totalDebit = round2(items.reduce((s, it) => s + it.debit, 0))
-  const totalCredit = round2(items.reduce((s, it) => s + it.credit, 0))
+  if (items.length === 1) {
+    // A nil invoice: no income, VAT, discount or round-off to post. Emit a
+    // single balanced leg rather than an entry with a debit side only.
+    items.push({
+      id: `je-i-nil-${Date.now()}-${randomSuffix}`,
+      accountId: items[0].accountId,
+      accountName: items[0].accountName,
+      partyId: invoice.partyId || party?.id,
+      partyName: invoice.partyName || party?.name,
+      debit: 0,
+      credit: 0,
+      remark: `Invoice ${invoice.invoiceNumber} — no financial effect`,
+    })
+  }
+
+  let totalDebit = round2(items.reduce((s, it) => s + it.debit, 0))
+  let totalCredit = round2(items.reduce((s, it) => s + it.credit, 0))
+  if (totalDebit !== totalCredit) {
+    // Safety net: a sales posting can never leave the ledger unbalanced. The
+    // residual rides an income leg — never the VAT leg (the posted VAT) and
+    // never the Receivable leg (the anchor on grandTotal).
+    absorbRoundingDifference(
+      items,
+      AR_INCOME_ACCOUNT,
+      defaultGroupAccount(
+        accounts,
+        'acc-sales',
+        'Direct Income',
+        'Tender & Commercial Contracting Sales',
+      ),
+      `Balancing adjustment - ${invoice.invoiceNumber}`,
+    )
+    totalDebit = round2(items.reduce((s, it) => s + it.debit, 0))
+    totalCredit = round2(items.reduce((s, it) => s + it.credit, 0))
+  }
 
   return {
     id: `je-${Date.now()}-${randomSuffix}`,
@@ -315,15 +677,20 @@ export function createSalesInvoiceJournal(
 }
 
 /**
- * Creates a balanced JournalEntry for a Purchase Bill:
- * - Debit: Expense Account(s) (item.accountId or acc-materials) for bill.subtotal
+ * Creates a balanced JournalEntry for a Purchase Bill. The mirror of
+ * `createSalesInvoiceJournal`, anchored on the stored `grandTotal` — the
+ * Payable leg is always exactly that amount — with the expense legs starting
+ * from the posted VAT-exclusive subtotal `postedInvoiceAmounts` returns:
+ * - Debit: Expense Account(s) (item.accountId or acc-materials) for the posted
+ *   subtotal; a negative subtotal posts on the credit side instead of being dropped
  * - Credit: invoice-level discount (bill.discountTotal) on the first expense
  *   account (remark 'Invoice discount'), keeping the VAT base consistent
- * - Debit: VAT Input Recoverable (acc-vat-in or acc-vat) for bill.taxTotal (if taxTotal > 0)
+ * - Debit: VAT Input Recoverable (acc-vat-in or acc-vat) for the posted VAT,
+ *   labelled with the rate(s) the lines actually carry
  * - Credit: Accounts Payable (acc-ap) for bill.grandTotal
- * - Final: round-off adjustment (bill.roundOff) on the expense account
- *   (remark 'Round-off adjustment') so the entry equals grandTotal
- * Total Debits strictly equal Total Credits.
+ * - Final: round-off adjustment plus any residual on the first expense
+ *   account (remark 'Round-off adjustment'), so the entry lands on grandTotal
+ * Total Debits strictly equal Total Credits for ANY finite stored totals.
  */
 export function createPurchaseBillJournal(
   bill: Invoice,
@@ -333,11 +700,14 @@ export function createPurchaseBillJournal(
 ): JournalEntry {
   const roundOff = round2(Number(bill.roundOff) || 0)
   const discountTotal = round2(Number(bill.discountTotal) || 0)
-  const taxTotal = round2(bill.taxTotal)
-  const grandTotal = round2(bill.grandTotal || bill.subtotal + taxTotal + roundOff)
-  const subtotal = round2(
-    bill.subtotal !== undefined ? bill.subtotal : grandTotal - taxTotal - roundOff,
-  )
+  const grandTotal = round2(Number(bill.grandTotal) || 0)
+  // The entry is anchored on grandTotal: the Payable leg is always exactly
+  // that amount. The VAT and the base the expense legs start from come from the
+  // one shared rule `taxRegister` reads too (`postedInvoiceAmounts`), so the
+  // posted VAT and the reported VAT cannot diverge.
+  const { subtotal, taxTotal } = postedInvoiceAmounts(bill)
+
+  const lines = journalLines(bill)
 
   const dateStr = bill.date || new Date().toISOString().split('T')[0]
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
@@ -347,84 +717,65 @@ export function createPurchaseBillJournal(
   const items: JournalEntryItem[] = []
 
   // Group line items by expense account if available
-  const expenseGroups = new Map<
-    string,
-    { accountId: string; accountName: string; amount: number }
-  >()
-
-  if (Array.isArray(bill.items) && bill.items.length > 0) {
-    for (const it of bill.items) {
-      const lineAmt = effectiveLineAmount(it)
-      const accId = it.accountId || 'acc-materials'
-      const matched = accounts.find((a) => a.id === accId)
-      const accName = it.accountName || matched?.name || 'Direct Project Materials & Subcontractors'
-
-      const existing = expenseGroups.get(accId) || {
-        accountId: accId,
-        accountName: accName,
-        amount: 0,
-      }
-      existing.amount = round2(existing.amount + lineAmt)
-      expenseGroups.set(accId, existing)
-    }
-  }
+  const expenseGroups = groupLines(lines, accounts, {
+    defaultAccountId: 'acc-materials',
+    defaultAccountType: 'Direct Expense',
+    defaultName: 'Direct Project Materials & Subcontractors',
+  })
 
   if (expenseGroups.size === 0) {
-    const matAcc = accounts.find(
-      (a) => a.id === 'acc-materials' || a.accountType === 'Direct Expense',
-    ) || {
-      id: 'acc-materials',
-      name: 'Direct Project Materials & Subcontractors',
-    }
-    expenseGroups.set(matAcc.id, {
-      accountId: matAcc.id,
-      accountName: matAcc.name,
-      amount: subtotal,
-    })
-  } else {
-    // Ensure sum of item debits equals subtotal exactly
-    const entries = Array.from(expenseGroups.values())
-    const sumDebits = entries.reduce((s, e) => round2(s + e.amount), 0)
-    const diff = round2(subtotal - sumDebits)
-    if (diff !== 0 && entries.length > 0) {
-      entries[entries.length - 1].amount = round2(entries[entries.length - 1].amount + diff)
-    }
+    const matAcc = defaultGroupAccount(
+      accounts,
+      'acc-materials',
+      'Direct Expense',
+      'Direct Project Materials & Subcontractors',
+    )
+    expenseGroups.set(matAcc.accountId, { ...matAcc, amount: subtotal })
+  }
+
+  // The expense legs carry the posted subtotal — a negative subtotal (a rebate
+  // bill) posts its expense on the credit side like any other negative amount,
+  // so it is never dropped and the entry never loses its counterpart to the
+  // Payable leg.
+  const groupTarget = subtotal
+  const entries = Array.from(expenseGroups.values())
+  const sumDebits = entries.reduce((s, e) => round2(s + e.amount), 0)
+  const diff = round2(groupTarget - sumDebits)
+  if (diff !== 0 && entries.length > 0) {
+    entries[entries.length - 1].amount = round2(entries[entries.length - 1].amount + diff)
   }
 
   let expIdx = 1
   for (const exp of expenseGroups.values()) {
-    if (exp.amount !== 0 || expenseGroups.size === 1 || subtotal === 0) {
-      const isNegative = exp.amount < 0
-      const absAmt = round2(Math.abs(exp.amount))
-      items.push({
-        id: `je-i-exp-${expIdx++}-${Date.now()}-${randomSuffix}`,
-        accountId: exp.accountId,
-        accountName: exp.accountName,
-        debit: isNegative ? 0 : absAmt,
-        credit: isNegative ? absAmt : 0,
-        remark: isNegative
-          ? `Direct Expense Discount / Adjustment - ${bill.invoiceNumber}`
-          : `Direct Expense - ${bill.invoiceNumber}`,
-      })
-    }
+    const absAmt = round2(Math.abs(exp.amount))
+    if (absAmt === 0) continue
+    const isNegative = exp.amount < 0
+    items.push({
+      id: `je-i-exp-${expIdx++}-${Date.now()}-${randomSuffix}`,
+      accountId: exp.accountId,
+      accountName: exp.accountName,
+      debit: isNegative ? 0 : absAmt,
+      credit: isNegative ? absAmt : 0,
+      remark: isNegative
+        ? `Direct Expense Discount / Adjustment - ${bill.invoiceNumber}`
+        : `Direct Expense - ${bill.invoiceNumber}`,
+    })
   }
 
-  // Invoice-level discount: a negative item on the first expense account.
-  // The booked reduction never exceeds the (non-negative) subtotal so the
-  // entry stays balanced even when the discount equals the whole bill.
-  if (discountTotal !== 0) {
+  // Invoice-level discount: its own leg on the first expense account. A
+  // positive discount takes the credit side (it reduces the expense); a
+  // negative stored discount takes the debit side.
+  const bookedDiscount = round2(subtotal < 0 ? 0 : discountTotal)
+  if (bookedDiscount !== 0) {
     const first = Array.from(expenseGroups.values())[0]
-    const discAmt = round2(subtotal >= 0 ? Math.min(discountTotal, subtotal) : discountTotal)
-    if (discAmt !== 0) {
-      items.push({
-        id: `je-i-disc-${Date.now()}-${randomSuffix}`,
-        accountId: first.accountId,
-        accountName: first.accountName,
-        debit: 0,
-        credit: discAmt,
-        remark: `Invoice discount - ${bill.invoiceNumber}`,
-      })
-    }
+    items.push({
+      id: `je-i-disc-${Date.now()}-${randomSuffix}`,
+      accountId: first.accountId,
+      accountName: first.accountName,
+      debit: bookedDiscount < 0 ? round2(Math.abs(bookedDiscount)) : 0,
+      credit: bookedDiscount > 0 ? bookedDiscount : 0,
+      remark: `Invoice discount - ${bill.invoiceNumber}`,
+    })
   }
 
   if (taxTotal !== 0) {
@@ -442,7 +793,10 @@ export function createPurchaseBillJournal(
       accountName: vatInAcc.name,
       debit: isNegativeTax ? 0 : absTax,
       credit: isNegativeTax ? absTax : 0,
-      remark: isNegativeTax ? '15% VAT Input Adjustment' : '15% VAT Input Recoverable',
+      remark: vatRemark(
+        lineTaxRates(lines),
+        isNegativeTax ? 'Input Adjustment' : 'Input Recoverable',
+      ),
     })
   }
 
@@ -464,16 +818,18 @@ export function createPurchaseBillJournal(
     remark: `Purchase Bill ${bill.invoiceNumber}`,
   })
 
-  // Round-off: a final signed adjustment on the expense account so the entry
-  // equals grandTotal. roundOff > 0 (bill total rounded up) debits expense;
-  // roundOff < 0 (rounded down) credits expense.
-  if (roundOff !== 0) {
+  // Round-off: the bill's own signed adjustment on the first expense account,
+  // so the entry lands exactly on grandTotal. roundOff > 0 (grand total
+  // rounded up) debits expense, roundOff < 0 credits it. Whatever residual
+  // inconsistent stored totals leave is absorbed below.
+  const roundAdjustment = round2(roundOff)
+  if (roundAdjustment !== 0) {
     const primary = Array.from(expenseGroups.values())[0] || {
       accountId: 'acc-materials',
       accountName: 'Direct Project Materials & Subcontractors',
     }
-    const isRoundOffDebit = roundOff > 0
-    const absRoundOff = round2(Math.abs(roundOff))
+    const isRoundOffDebit = roundAdjustment > 0
+    const absRoundOff = round2(Math.abs(roundAdjustment))
     items.push({
       id: `je-i-round-${Date.now()}-${randomSuffix}`,
       accountId: primary.accountId,
@@ -484,8 +840,41 @@ export function createPurchaseBillJournal(
     })
   }
 
-  const totalDebit = round2(items.reduce((s, it) => s + it.debit, 0))
-  const totalCredit = round2(items.reduce((s, it) => s + it.credit, 0))
+  if (items.length === 1) {
+    // A nil bill: no expense, VAT, discount or round-off to post. Emit a
+    // single balanced leg rather than an entry with a credit side only.
+    items.push({
+      id: `je-i-nil-${Date.now()}-${randomSuffix}`,
+      accountId: items[0].accountId,
+      accountName: items[0].accountName,
+      partyId: bill.partyId || party?.id,
+      partyName: bill.partyName || party?.name,
+      debit: 0,
+      credit: 0,
+      remark: `Purchase Bill ${bill.invoiceNumber} — no financial effect`,
+    })
+  }
+
+  let totalDebit = round2(items.reduce((s, it) => s + it.debit, 0))
+  let totalCredit = round2(items.reduce((s, it) => s + it.credit, 0))
+  if (totalDebit !== totalCredit) {
+    // Safety net: a purchase posting can never leave the ledger unbalanced. The
+    // residual rides an expense leg — never the VAT leg (the posted VAT) and
+    // never the Payable leg (the anchor on grandTotal).
+    absorbRoundingDifference(
+      items,
+      AP_EXPENSE_ACCOUNT,
+      defaultGroupAccount(
+        accounts,
+        'acc-materials',
+        'Direct Expense',
+        'Direct Project Materials & Subcontractors',
+      ),
+      `Balancing adjustment - ${bill.invoiceNumber}`,
+    )
+    totalDebit = round2(items.reduce((s, it) => s + it.debit, 0))
+    totalCredit = round2(items.reduce((s, it) => s + it.credit, 0))
+  }
 
   return {
     id: `je-${Date.now()}-${randomSuffix}`,
@@ -580,7 +969,7 @@ export function createSettlementJournal(
 
   const bankAcc = accounts.find((a) => a.id === bankAccountId || a.accountType === 'Bank') || {
     id: bankAccountId,
-    name: 'FNB Business Cheque Account',
+    name: DEFAULT_BANK_ACCOUNT_NAME,
   }
 
   const isSales = invoice.type === 'Sales'

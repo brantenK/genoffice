@@ -11,15 +11,23 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { exportBackup, listBackups, pruneBackups, restoreBackup } from '../src/main/backup-restore'
+import {
+  exportBackup,
+  listBackups,
+  listSafetyCopies,
+  pruneBackups,
+  restoreBackup,
+} from '../src/main/backup-restore'
 import {
   CURRENT_BOOKS_SCHEMA_VERSION,
   DEFAULT_BOOK_SETTINGS,
+  ledgerRecordCount,
   migrateAndValidateBooks,
   readBooksStore,
   writeBooksStore,
 } from '../src/main/books-core'
 import { CORE_ACCOUNTS } from '../src/shared/chart'
+import type { Invoice } from '../src/shared/types'
 
 describe('Backup & Restore Suite', () => {
   let testDir: string
@@ -136,6 +144,41 @@ describe('Backup & Restore Suite', () => {
     })
   })
 
+  /**
+   * The pre-restore safety copies are listed separately from the backups (so
+   * each kind can be pruned on its own terms) and carry their kind, because a
+   * restore point the user did not make has to say so.
+   */
+  describe('listSafetyCopies', () => {
+    it('lists the safety copies newest first, labelled, and never as backups', () => {
+      writeBackupFile('books-backup-20260907-100000.json', '{"seq":1}', 1)
+      writeBackupFile('pre-restore-20260907-100001.json', '{"seq":2}', 2)
+      writeBackupFile('pre-restore-20260907-100002.json', '{"seq":3}', 3)
+      writeFileSync(join(backupsDir, 'notes.txt'), 'not a restore point', 'utf8')
+      writeFileSync(join(backupsDir, 'pre-restore-20260907-100003.txt'), '{}', 'utf8')
+
+      const copies = listSafetyCopies(backupsDir)
+
+      expect(copies.map((copy) => copy.name)).toEqual([
+        'pre-restore-20260907-100002.json',
+        'pre-restore-20260907-100001.json',
+      ])
+      expect(copies.every((copy) => copy.kind === 'safety-copy')).toBe(true)
+      expect(copies[0].path).toBe(join(backupsDir, copies[0].name))
+      expect(copies[0].size).toBe('{"seq":3}'.length)
+      expect(copies[0].modifiedAt).toBe(new Date(Date.UTC(2026, 8, 7, 10, 0, 3)).toISOString())
+
+      // The two lists are disjoint, and a backup is still a backup.
+      const backups = listBackups(backupsDir)
+      expect(backups.map((backup) => backup.name)).toEqual(['books-backup-20260907-100000.json'])
+      expect(backups[0].kind).toBe('backup')
+    })
+
+    it('returns an empty list for a missing backups directory', () => {
+      expect(listSafetyCopies(join(testDir, 'does-not-exist'))).toEqual([])
+    })
+  })
+
   describe('restoreBackup', () => {
     it('round-trips: restore returns the exact backed-up state', () => {
       writeSampleStore('Zano Consulting', 'Acme Corp')
@@ -209,6 +252,72 @@ describe('Backup & Restore Suite', () => {
       expect(safety.parties[0].name).toBe('Mutated Party')
     })
 
+    it('restores a safety copy, which undoes the restore that wrote it (D2)', () => {
+      writeSampleStore('Zano Consulting', 'Acme Corp')
+      const backup = exportBackup(booksFilePath)
+      expect(backup.ok).toBe(true)
+
+      writeSampleStore('Mutated Company', 'Mutated Party')
+      expect(restoreBackup(backup.path!, booksFilePath).ok).toBe(true)
+      expect(readBooksStore(booksFilePath).settings.companyName).toBe('Zano Consulting')
+
+      // The copy the restore left behind is the data that restore replaced, and
+      // the backup engine can put it back through the same path.
+      const copies = listSafetyCopies(backupsDir)
+      expect(copies).toHaveLength(1)
+      expect(copies[0].kind).toBe('safety-copy')
+
+      const undone = restoreBackup(copies[0].path, booksFilePath)
+      expect(undone.ok).toBe(true)
+      const restored = readBooksStore(booksFilePath)
+      expect(restored.settings.companyName).toBe('Mutated Company')
+      expect(restored.parties[0].name).toBe('Mutated Party')
+      // Undoing a restore is itself a restore: it keeps its own way back.
+      expect(listSafetyCopies(backupsDir)).toHaveLength(2)
+    })
+
+    it('restores an empty backup over a populated ledger on the user’s say-so (D1)', () => {
+      writeSampleStore('Zano Consulting', 'Acme Corp')
+      // A draft invoice is a real ledger record, so this store is populated:
+      // nothing may empty it without the restore saying why it is allowed to.
+      const draft: Invoice = {
+        id: 'inv-draft-1',
+        invoiceNumber: 'INV-2026-001',
+        type: 'Sales',
+        partyId: 'p1',
+        partyName: 'Acme Corp',
+        date: '2026-08-05',
+        dueDate: '2026-09-05',
+        items: [],
+        subtotal: 0,
+        taxTotal: 0,
+        grandTotal: 0,
+        outstandingAmount: 0,
+        status: 'Draft',
+        createdAt: '2026-08-05T00:00:00.000Z',
+        updatedAt: '2026-08-05T00:00:00.000Z',
+      }
+      writeBooksStore(booksFilePath, {
+        ...JSON.parse(readFileSync(booksFilePath, 'utf8')),
+        invoices: [draft],
+      })
+      expect(ledgerRecordCount(readBooksStore(booksFilePath))).toBe(1)
+      const populated = readFileSync(booksFilePath, 'utf8')
+
+      mkdirSync(backupsDir, { recursive: true })
+      const emptyPath = join(backupsDir, 'books-backup-20260101-000000.json')
+      const empty = migrateAndValidateBooks({ version: 1, accounts: [], invoices: [] })
+      writeFileSync(emptyPath, JSON.stringify(empty), 'utf8')
+
+      const result = restoreBackup(emptyPath, booksFilePath)
+      expect(result.ok).toBe(true)
+      expect(readBooksStore(booksFilePath).invoices).toEqual([])
+
+      const safety = listSafetyCopies(backupsDir)
+      expect(safety).toHaveLength(1)
+      expect(readFileSync(safety[0].path, 'utf8')).toBe(populated)
+    })
+
     it('restores even when the live store does not exist (fresh install)', () => {
       writeSampleStore('Zano Consulting', 'Acme Corp')
       const backup = exportBackup(booksFilePath)
@@ -261,7 +370,11 @@ describe('Backup & Restore Suite', () => {
 
   describe('restoreBackup shape validation (review fix)', () => {
     it('rejects valid-JSON files that are not books ledgers, leaving the store untouched', () => {
-      writeFileSync(booksFilePath, JSON.stringify({ version: 1, accounts: [], invoices: [] }, null, 2), 'utf8')
+      writeFileSync(
+        booksFilePath,
+        JSON.stringify({ version: 1, accounts: [], invoices: [] }, null, 2),
+        'utf8',
+      )
       const original = readFileSync(booksFilePath, 'utf8')
 
       const backupsDir = join(testDir, 'backups')
@@ -284,11 +397,23 @@ describe('Backup & Restore Suite', () => {
     })
 
     it('still allows restoring a genuine empty ledger (shape-valid)', () => {
-      writeFileSync(booksFilePath, JSON.stringify({ version: 1, accounts: [], invoices: [] }, null, 2), 'utf8')
+      writeFileSync(
+        booksFilePath,
+        JSON.stringify({ version: 1, accounts: [], invoices: [] }, null, 2),
+        'utf8',
+      )
       const backupsDir = join(testDir, 'backups')
       mkdirSync(backupsDir, { recursive: true })
       const backupPath = join(backupsDir, 'books-backup-empty.json')
-      writeFileSync(backupPath, JSON.stringify({ version: 1, accounts: [], invoices: [], journalEntries: [], parties: [], settings: {} }, null, 2), 'utf8')
+      writeFileSync(
+        backupPath,
+        JSON.stringify(
+          { version: 1, accounts: [], invoices: [], journalEntries: [], parties: [], settings: {} },
+          null,
+          2,
+        ),
+        'utf8',
+      )
       const result = restoreBackup(backupPath, booksFilePath)
       expect(result.ok).toBe(true)
       const restored = JSON.parse(readFileSync(booksFilePath, 'utf8'))

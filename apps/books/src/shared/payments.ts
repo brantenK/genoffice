@@ -274,7 +274,10 @@ export function paymentCoverage(tx: BankTransaction): number {
 }
 
 /** The allocation whose invoice number appears in the statement text. */
-export function matchedInvoiceAllocation(payment: Payment, tx: BankTransaction): PaymentAllocation | undefined {
+export function matchedInvoiceAllocation(
+  payment: Payment,
+  tx: BankTransaction,
+): PaymentAllocation | undefined {
   const haystack = `${tx.description || ''} ${tx.reference || ''}`.toLowerCase()
   return (
     (payment.allocations || []).find((a) => {
@@ -320,7 +323,10 @@ export interface ImportCoverage {
  * actual amount. This prevents one payment covering two identical lines and
  * prevents multiple payments suppressing more than a line's cash movement.
  */
-export function planImportCoverage(data: BooksData, newTxs: BankTransaction[]): Map<string, ImportCoverage> {
+export function planImportCoverage(
+  data: BooksData,
+  newTxs: BankTransaction[],
+): Map<string, ImportCoverage> {
   const payments = Array.isArray(data.payments) ? data.payments : []
   // A payment may already cover only PART of an existing statement line.
   // Consume exactly the linked amount, leaving any remainder available for a
@@ -350,7 +356,8 @@ export function planImportCoverage(data: BooksData, newTxs: BankTransaction[]): 
     let matchedInvoiceId: string | undefined
     for (const payment of payments) {
       const available = round2(remaining.get(payment.id) || 0)
-      if (available <= 0 || !paymentTextMatchesTransaction(payment, tx) || remainingTx <= 0) continue
+      if (available <= 0 || !paymentTextMatchesTransaction(payment, tx) || remainingTx <= 0)
+        continue
       const covered = round2(Math.min(available, remainingTx))
       const allocation = matchedInvoiceAllocation(payment, tx)
       links.push({ paymentId: payment.id, amount: covered, invoiceId: allocation?.invoiceId })
@@ -370,7 +377,10 @@ export function planImportCoverage(data: BooksData, newTxs: BankTransaction[]): 
 }
 
 /** Finds an import-first statement line with remaining coverage capacity. */
-export function findMatchingUnreconciledTransaction(data: BooksData, payment: Payment): BankTransaction | null {
+export function findMatchingUnreconciledTransaction(
+  data: BooksData,
+  payment: Payment,
+): BankTransaction | null {
   const bankTx = Array.isArray(data.bankTransactions) ? data.bankTransactions : []
   for (const tx of bankTx) {
     if (tx.reconciled || !paymentTextMatchesTransaction(payment, tx)) continue
@@ -397,7 +407,10 @@ export function linkPaymentToBankTransaction(
   return {
     bankTransactions: bankTx.map((tx) => {
       if (tx.id !== match.id) return tx
-      const links = [...(tx.paymentLinks || []), { paymentId: payment.id, amount: coveredAmount, invoiceId: allocation?.invoiceId }]
+      const links = [
+        ...(tx.paymentLinks || []),
+        { paymentId: payment.id, amount: coveredAmount, invoiceId: allocation?.invoiceId },
+      ]
       const totalCovered = round2(links.reduce((sum, link) => sum + link.amount, 0))
       const fullyCovered = Math.abs(totalCovered - Math.abs(tx.amount)) < 0.01
       return {
@@ -437,8 +450,7 @@ export function createPaymentJournal(
   const total = round2(payment.total)
 
   const cashAccountId = opts?.bankAccountId || 'acc-bank'
-  const bankAcc =
-    accounts.find((a) => a.id === cashAccountId) ||
+  const bankAcc = accounts.find((a) => a.id === cashAccountId) ||
     accounts.find((a) => a.accountType === 'Bank') || {
       id: cashAccountId,
       name: 'Bank Account',

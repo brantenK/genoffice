@@ -9,10 +9,12 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  XCircle,
   FileSpreadsheet,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { CreditNoteModal } from './CreditNoteModal'
+import { displayInvoiceStatus, invoiceMatchesStatusFilter } from './invoice-status'
 import type { Invoice, InvoiceStatus, InvoiceType } from '../../../shared/types'
 
 interface InvoiceListProps {
@@ -27,10 +29,11 @@ export function InvoiceList({ type }: InvoiceListProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [creditNoteFor, setCreditNoteFor] = useState<Invoice | null>(null)
 
+  const asOf = new Date().toISOString().split('T')[0]
   const invoices = data.invoices.filter((i) => i.type === type)
 
   const filteredInvoices = invoices.filter((inv) => {
-    const matchesStatus = statusFilter === 'All' || inv.status === statusFilter
+    const matchesStatus = invoiceMatchesStatusFilter(inv, statusFilter, asOf)
     const matchesSearch =
       inv.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inv.partyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -42,8 +45,8 @@ export function InvoiceList({ type }: InvoiceListProps) {
     return `${data.settings.currencySymbol} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  const getStatusBadge = (status: Invoice['status']) => {
-    switch (status) {
+  const getStatusBadge = (status: InvoiceStatus, dueDate: string) => {
+    switch (displayInvoiceStatus(status, dueDate, asOf)) {
       case 'Paid':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#30A66D] border border-[#DAF0E1]">
@@ -60,6 +63,12 @@ export function InvoiceList({ type }: InvoiceListProps) {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FFF7F7] text-[#E03636] border border-[#FCD7D7]">
             <AlertCircle className="w-3 h-3" /> Overdue
+          </span>
+        )
+      case 'Cancelled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3F3F3] text-[#7C7C7C] border border-[#E2E2E2] line-through">
+            <XCircle className="w-3 h-3" /> Cancelled
           </span>
         )
       default:
@@ -119,7 +128,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
       {/* Filter and Search Bar */}
       <div className="flex items-center justify-between gap-4 mb-6 bg-white p-3 rounded-xl border border-[#EDEDED] shadow-xs">
         <div className="flex items-center gap-1">
-          {(['All', 'Unpaid', 'Paid', 'Overdue', 'Draft'] as const).map((st) => (
+          {(['All', 'Unpaid', 'Paid', 'Overdue', 'Draft', 'Cancelled'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -193,11 +202,12 @@ export function InvoiceList({ type }: InvoiceListProps) {
                   <td className="px-6 py-3.5 text-right font-medium text-[#DB7706]">
                     {formatMoney(inv.outstandingAmount)}
                   </td>
-                  <td className="px-6 py-3.5">{getStatusBadge(inv.status)}</td>
+                  <td className="px-6 py-3.5">{getStatusBadge(inv.status, inv.dueDate)}</td>
                   <td className="px-6 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button
                         title="Print / Export PDF"
+                        aria-label={`Print invoice ${inv.invoiceNumber}`}
                         onClick={() => setPrintInvoice(inv)}
                         className="p-1.5 text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3] rounded-md transition-colors"
                       >
@@ -207,6 +217,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
                       {inv.status !== 'Paid' && (
                         <button
                           title="Record Payment (Mark Paid)"
+                          aria-label={`Record payment for invoice ${inv.invoiceNumber}`}
                           onClick={() => markInvoicePaid(inv.id)}
                           className="p-1.5 text-[#30A66D] hover:bg-[#F3FCF5] rounded-md transition-colors"
                         >
@@ -220,6 +231,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
                         inv.status !== 'Cancelled' && (
                           <button
                             title="Issue Credit Note"
+                            aria-label={`Issue credit note for invoice ${inv.invoiceNumber}`}
                             onClick={() => setCreditNoteFor(inv)}
                             className="p-1.5 text-[#0F766E] hover:bg-[#F0FDFA] rounded-md transition-colors"
                           >
@@ -229,6 +241,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
 
                       <button
                         title="Delete"
+                        aria-label={`Delete invoice ${inv.invoiceNumber}`}
                         onClick={() => deleteInvoice(inv.id)}
                         className="p-1.5 text-[#E03636] hover:bg-[#FFF7F7] rounded-md transition-colors"
                       >

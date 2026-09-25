@@ -60,6 +60,7 @@ export function SetupWizard() {
     })
 
     const settings: CompanySettings = {
+      ...DEFAULT_BOOK_SETTINGS,
       companyName: companyName.trim(),
       taxNumber: taxNumber.trim(),
       currency,
@@ -87,6 +88,10 @@ export function SetupWizard() {
       invoices: [],
       journalEntries: [openingJournal],
       bankTransactions: [],
+      // Present from the first save, so no reader has to guess at an
+      // undefined collection.
+      payments: [],
+      auditLog: [],
     }
 
     setSaving(true)

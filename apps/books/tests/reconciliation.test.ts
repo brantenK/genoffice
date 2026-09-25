@@ -160,7 +160,9 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
 
       writeBooksStore(booksDataPath, {
         ...initialBooksData,
-        parties: [{ id: 'p-corp', name: 'Corporate Client', type: 'Customer', outstandingBalance: 57500 }],
+        parties: [
+          { id: 'p-corp', name: 'Corporate Client', type: 'Customer', outstandingBalance: 57500 },
+        ],
         invoices: [invoice],
         bankTransactions: [partialTx],
       })
@@ -225,19 +227,29 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
 
       writeBooksStore(booksDataPath, {
         ...initialBooksData,
-        parties: [{ id: 'p-corp', name: 'Corporate Client', type: 'Customer', outstandingBalance: 11500 }],
+        parties: [
+          { id: 'p-corp', name: 'Corporate Client', type: 'Customer', outstandingBalance: 11500 },
+        ],
         invoices: [invoice],
         bankTransactions: [tx1, tx2],
       })
 
       // First reconciliation
-      const res1 = executeReconciliation({ booksDataPath, transactionId: 'tx-step-1', invoiceId: 'inv-two-step' })
+      const res1 = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-step-1',
+        invoiceId: 'inv-two-step',
+      })
       expect(res1.ok).toBe(true)
       expect(res1.remainingOutstanding).toBe(5500)
       expect(res1.invoiceStatus).toBe('Unpaid')
 
       // Second reconciliation
-      const res2 = executeReconciliation({ booksDataPath, transactionId: 'tx-step-2', invoiceId: 'inv-two-step' })
+      const res2 = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-step-2',
+        invoiceId: 'inv-two-step',
+      })
       expect(res2.ok).toBe(true)
       expect(res2.remainingOutstanding).toBe(0)
       expect(res2.invoiceStatus).toBe('Paid')
@@ -279,7 +291,9 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
 
       writeBooksStore(booksDataPath, {
         ...initialBooksData,
-        parties: [{ id: 'p-supp', name: 'Material Supplier', type: 'Supplier', outstandingBalance: 23000 }],
+        parties: [
+          { id: 'p-supp', name: 'Material Supplier', type: 'Supplier', outstandingBalance: 23000 },
+        ],
         invoices: [bill],
         bankTransactions: [tx],
       })
@@ -365,7 +379,14 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
 
       writeBooksStore(booksDataPath, {
         ...initialBooksData,
-        parties: [{ id: 'p-wtr', name: 'Department of Water & Sanitation', type: 'Customer', outstandingBalance: 57500 }],
+        parties: [
+          {
+            id: 'p-wtr',
+            name: 'Department of Water & Sanitation',
+            type: 'Customer',
+            outstandingBalance: 57500,
+          },
+        ],
         invoices: [invoice],
         bankTransactions: [tx],
       })
@@ -442,7 +463,14 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
 
       writeBooksStore(booksDataPath, {
         ...initialBooksData,
-        parties: [{ id: 'p-wtr', name: 'Department of Water & Sanitation', type: 'Customer', outstandingBalance: 57500 }],
+        parties: [
+          {
+            id: 'p-wtr',
+            name: 'Department of Water & Sanitation',
+            type: 'Customer',
+            outstandingBalance: 57500,
+          },
+        ],
         invoices: [invoice],
         bankTransactions: [tx],
       })
@@ -493,13 +521,24 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
         bankTransactions: [tx],
       })
 
-      const res = executeReconciliation({ booksDataPath, transactionId: 'tx-done', invoiceId: 'inv-open' })
+      const res = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-done',
+        invoiceId: 'inv-open',
+      })
       expect(res.ok).toBe(false)
       expect(res.error).toMatch(/already reconciled/i)
     })
 
     it('rejects reconciliation of draft or cancelled invoices', () => {
-      const tx: BankTransaction = { id: 'tx-1', accountId: 'acc-bank', date: '2026-09-01', description: 'Test', amount: 5000, reconciled: false }
+      const tx: BankTransaction = {
+        id: 'tx-1',
+        accountId: 'acc-bank',
+        date: '2026-09-01',
+        description: 'Test',
+        amount: 5000,
+        reconciled: false,
+      }
       const draftInv: Invoice = {
         id: 'inv-draft',
         invoiceNumber: 'DRAFT-1',
@@ -519,13 +558,25 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
         status: 'Cancelled',
       }
 
-      writeBooksStore(booksDataPath, { ...initialBooksData, invoices: [draftInv, cancelledInv], bankTransactions: [tx] })
+      writeBooksStore(booksDataPath, {
+        ...initialBooksData,
+        invoices: [draftInv, cancelledInv],
+        bankTransactions: [tx],
+      })
 
-      const resDraft = executeReconciliation({ booksDataPath, transactionId: 'tx-1', invoiceId: 'inv-draft' })
+      const resDraft = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-1',
+        invoiceId: 'inv-draft',
+      })
       expect(resDraft.ok).toBe(false)
       expect(resDraft.error).toMatch(/draft/i)
 
-      const resCancel = executeReconciliation({ booksDataPath, transactionId: 'tx-1', invoiceId: 'inv-cancel' })
+      const resCancel = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-1',
+        invoiceId: 'inv-cancel',
+      })
       expect(resCancel.ok).toBe(false)
       expect(resCancel.error).toMatch(/cancelled/i)
     })
@@ -558,8 +609,22 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
         dueDate: '2026-10-01',
       }
 
-      const withdrawalTx: BankTransaction = { id: 'tx-w', accountId: 'acc-bank', date: '2026-09-01', description: 'Debit', amount: -5000, reconciled: false }
-      const depositTx: BankTransaction = { id: 'tx-d', accountId: 'acc-bank', date: '2026-09-01', description: 'Credit', amount: 5000, reconciled: false }
+      const withdrawalTx: BankTransaction = {
+        id: 'tx-w',
+        accountId: 'acc-bank',
+        date: '2026-09-01',
+        description: 'Debit',
+        amount: -5000,
+        reconciled: false,
+      }
+      const depositTx: BankTransaction = {
+        id: 'tx-d',
+        accountId: 'acc-bank',
+        date: '2026-09-01',
+        description: 'Credit',
+        amount: 5000,
+        reconciled: false,
+      }
 
       writeBooksStore(booksDataPath, {
         ...initialBooksData,
@@ -567,11 +632,19 @@ describe('F19 & F12/F13 Bank Reconciliation Engine Suite', () => {
         bankTransactions: [withdrawalTx, depositTx],
       })
 
-      const res1 = executeReconciliation({ booksDataPath, transactionId: 'tx-w', invoiceId: 'inv-sales' })
+      const res1 = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-w',
+        invoiceId: 'inv-sales',
+      })
       expect(res1.ok).toBe(false)
       expect(res1.error).toMatch(/debit\/withdrawal.*Sales/i)
 
-      const res2 = executeReconciliation({ booksDataPath, transactionId: 'tx-d', invoiceId: 'inv-purchase' })
+      const res2 = executeReconciliation({
+        booksDataPath,
+        transactionId: 'tx-d',
+        invoiceId: 'inv-purchase',
+      })
       expect(res2.ok).toBe(false)
       expect(res2.error).toMatch(/credit\/deposit.*Purchase/i)
     })

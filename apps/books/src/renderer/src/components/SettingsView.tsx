@@ -145,10 +145,11 @@ export function SettingsView() {
     }
   }
 
-  const handleRestore = async (name: string) => {
+  const handleRestore = async (name: string, safetyCopy = false) => {
     if (!window.booksApi) return
+    const what = safetyCopy ? `the pre-restore safety copy "${name}"` : `backup "${name}"`
     const confirmed = window.confirm(
-      `Restore "${name}"?\n\nYour current books data will be replaced by this backup. A pre-restore safety copy of the current data is created automatically before restoring.`,
+      `Restore ${what}?\n\nYour current books data will be replaced by it. A pre-restore safety copy of the current data is created automatically before restoring, and it stays listed under "Pre-restore safety copies" — restoring that copy is how you undo this restore.`,
     )
     if (!confirmed) return
     setRestoring(name)
@@ -171,6 +172,29 @@ export function SettingsView() {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
+
+  const backupList = backups.filter((b) => b.kind !== 'safety-copy')
+  const safetyCopyList = backups.filter((b) => b.kind === 'safety-copy')
+
+  const renderRestorePoint = (b: BackupFileInfo, safetyCopy: boolean) => (
+    <li key={b.name} className="flex items-center justify-between gap-3 px-4 py-2.5">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-[#1E293B] truncate">{b.name}</p>
+        <p className="text-[11px] text-[#7C7C7C]">
+          {new Date(b.modifiedAt).toLocaleString()} · {formatSize(b.size)}
+        </p>
+      </div>
+      <button
+        type="button"
+        disabled={restoring === b.name}
+        onClick={() => void handleRestore(b.name, safetyCopy)}
+        className="inline-flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#0F766E] border border-[#99F6E4] hover:bg-[#F0FDFA] transition-colors disabled:opacity-60"
+      >
+        <ArchiveRestore className="w-3.5 h-3.5" />
+        {restoring === b.name ? 'Restoring…' : 'Restore'}
+      </button>
+    </li>
+  )
 
   const inputCls =
     'w-full px-3 py-2 rounded-lg border border-[#E2E8F0] bg-white text-sm text-[#1E293B] focus:outline-none focus:ring-2 focus:ring-[#0F766E]/30 focus:border-[#0F766E]'
@@ -412,7 +436,8 @@ export function SettingsView() {
           <h2 className="text-sm font-bold text-[#1E293B] tracking-tight">Backup & Restore</h2>
         </div>
         <p className="text-xs text-[#7C7C7C] mb-5">
-          Back up your books data file and restore from an earlier backup at any time.
+          Back up your books data file and restore from an earlier backup at any time. Every restore
+          first copies the current data aside as a “safety copy”, so a restore can itself be undone.
         </p>
 
         <button
@@ -444,29 +469,28 @@ export function SettingsView() {
 
         <div className="mt-6">
           <h3 className="text-xs font-bold text-[#525252] mb-2">Available backups</h3>
-          {backups.length === 0 ? (
+          {backupList.length === 0 ? (
             <p className="text-xs text-[#7C7C7C]">No backups yet. Create one with “Backup now”.</p>
           ) : (
             <ul className="divide-y divide-[#EDEDED] border border-[#EDEDED] rounded-lg">
-              {backups.map((b) => (
-                <li key={b.name} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-[#1E293B] truncate">{b.name}</p>
-                    <p className="text-[11px] text-[#7C7C7C]">
-                      {new Date(b.modifiedAt).toLocaleString()} · {formatSize(b.size)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={restoring === b.name}
-                    onClick={() => void handleRestore(b.name)}
-                    className="inline-flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#0F766E] border border-[#99F6E4] hover:bg-[#F0FDFA] transition-colors disabled:opacity-60"
-                  >
-                    <ArchiveRestore className="w-3.5 h-3.5" />
-                    {restoring === b.name ? 'Restoring…' : 'Restore'}
-                  </button>
-                </li>
-              ))}
+              {backupList.map((b) => renderRestorePoint(b, false))}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-6">
+          <h3 className="text-xs font-bold text-[#525252] mb-2">Pre-restore safety copies</h3>
+          <p className="text-[11px] text-[#7C7C7C] mb-2">
+            A safety copy of your data is taken automatically each time a restore replaces it.
+            Restoring one puts your books back the way they were before that restore.
+          </p>
+          {safetyCopyList.length === 0 ? (
+            <p className="text-xs text-[#7C7C7C]">
+              No safety copies yet. One is created the first time you restore a backup.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[#EDEDED] border border-[#EDEDED] rounded-lg">
+              {safetyCopyList.map((b) => renderRestorePoint(b, true))}
             </ul>
           )}
         </div>
@@ -486,9 +510,9 @@ export function SettingsView() {
           </div>
         )}
 
-        {backups.length > 10 && (
+        {backupList.length > 10 && (
           <p className="mt-4 text-[11px] text-[#7C7C7C]">
-            You have {backups.length} backups. Oldest backups beyond the latest 10 are pruned
+            You have {backupList.length} backups. Oldest backups beyond the latest 10 are pruned
             automatically on the next backup.
           </p>
         )}

@@ -8,33 +8,31 @@
  * Node tooling (e.g. `npx tsx tools/verify-suite-workflows.mjs`) can import
  * and exercise the REAL posting logic instead of a duplicated copy.
  *
+ * The settlement engines (bank import, settlement suggestions, 1-click
+ * reconciliation) live in the pure shared module `../shared/settlement`; the
+ * thin wrappers below only own the ledger read-modify-write around them.
+ *
  * books-main.ts imports everything from here and re-exports it, so all
  * existing consumers (crm-main, tenders-main, tests) keep working unchanged.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   round2,
   createSalesInvoiceJournal,
   createOpeningJournal,
-  createBankImportJournal,
-  createReconciliationJournal,
-  createSettlementJournal,
-  computeAccountBalances,
   accountsMatchJournals,
   nextInvoiceNumber,
-  nextJournalNumber,
-  recomputePartyBalances,
-  parseBankStatementCsv,
-  deduplicateBankTransactions,
 } from '../shared/accounting'
+import { applyBankStatementImport, applyReconciliation, deriveLedger } from '../shared/settlement'
+import type { BankStatementImportResult, ReconciliationCoreResult } from '../shared/settlement'
 import { DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS } from '../shared/chart'
 import { appendAudit, createAuditEntry } from '../shared/audit'
 import { isDateLocked } from '../shared/closing'
-import { planImportCoverage } from '../shared/payments'
 import { MAX_AUDIT_ENTRIES } from '../shared/audit'
+import type { EmptyLedgerReason } from '../shared/ipc'
 import type {
   Account,
   AuditEntry,
@@ -47,43 +45,97 @@ import type {
   Party,
   Payment,
   PaymentAllocation,
-  SettlementSuggestion,
 } from '../shared/types'
 
+export { computeSettlementSuggestions } from '../shared/settlement'
+export type { BankStatementImportResult, ReconciliationCoreResult } from '../shared/settlement'
+
 export const CURRENT_BOOKS_SCHEMA_VERSION = 1
+
+/**
+ * Every schema version this build knows how to READ, oldest first. A stored
+ * version must appear here; anything else is refused rather than carried
+ * forward, because a file written by a different build can hold fields (and
+ * invariants) this one would silently drop on the next write.
+ *
+ * Version 0 is the pre-ledger format: account balances with no journals, which
+ * `normalizeLedger` migrates forward by synthesizing an opening entry. It is
+ * listed because this build really does read it, and payloads carrying it are
+ * read and then written at the current version.
+ */
+export const BOOKS_SCHEMA_MIGRATIONS = [0, 1] as const
+
+/** The oldest version the registry above covers; below it, data predates the ledger. */
+export const OLDEST_BOOKS_SCHEMA_VERSION = BOOKS_SCHEMA_MIGRATIONS[0]
+
+/**
+ * Thrown when a payload was written by a newer schema than this build
+ * supports. Destructive callers catch it; the IPC layer reports it.
+ */
+export class UnsupportedBooksSchemaError extends Error {
+  readonly version: number
+
+  constructor(version: number) {
+    super(
+      `Books data was written by a newer version of Zano Books (schema ${version}, this build supports up to ${CURRENT_BOOKS_SCHEMA_VERSION}). Update the app before opening it.`,
+    )
+    this.name = 'UnsupportedBooksSchemaError'
+    this.version = version
+  }
+}
+
+/**
+ * Thrown when the version field is present but is not a version this app ever
+ * wrote (`1.9`, `"2"`, `null`, `true`, `-5`). Distinct from
+ * `UnsupportedBooksSchemaError` — a newer schema is a future format, whereas
+ * this is not a format at all — but refused for the same reason: re-stamping it
+ * as the current version would drop whatever it meant and hand the truncated
+ * ledger back to be written over the original.
+ */
+export class InvalidBooksSchemaVersionError extends Error {
+  readonly declaredVersion: unknown
+
+  constructor(declaredVersion: unknown) {
+    super(
+      `Books data declares an unrecognised schema version (${describeVersion(declaredVersion)}). This build reads schema ${BOOKS_SCHEMA_MIGRATIONS.join(', ')}.`,
+    )
+    this.name = 'InvalidBooksSchemaVersionError'
+    this.declaredVersion = declaredVersion
+  }
+}
+
+/** A short, always-readable rendering of an untrusted version value. */
+function describeVersion(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null)
+    return String(value)
+  return Object.prototype.toString.call(value)
+}
+
+/** True for a version this build can read: an integer in the migration registry. */
+export function isSupportedBooksSchemaVersion(version: unknown): version is number {
+  return (
+    typeof version === 'number' &&
+    Number.isInteger(version) &&
+    (BOOKS_SCHEMA_MIGRATIONS as readonly number[]).includes(version)
+  )
+}
 
 /** Entry-number prefix marking a synthesized/opening-balances journal entry. */
 export const OPENING_JOURNAL_PREFIX = 'JE-OPENING'
 
 /**
- * Ledger-first normalization: synthesizes an opening-balances journal entry
- * when a legacy store has non-zero stored balances but no opening entry,
- * then recomputes every account balance strictly from journal entries.
- * Also recomputes party balances from open invoices.
- */
-/**
  * Recomputes account balances strictly from journal entries and party
  * balances from open invoices. No migration/synthesis — call this on live
- * data that has just been mutated.
+ * data that has just been mutated. Delegates the derivation to the shared
+ * settlement module so the renderer derives balances exactly the same way.
  */
 export function recomputeLedger(data: BooksDataEnvelope): BooksDataEnvelope {
-  const accounts = (Array.isArray(data.accounts) ? data.accounts : []).map((a) => ({ ...a }))
-  const journalEntries = Array.isArray(data.journalEntries) ? [...data.journalEntries] : []
-
-  const normalizedAccounts = computeAccountBalances(accounts, journalEntries)
-  const invoices = Array.isArray(data.invoices) ? data.invoices : []
-  const normalizedParties = recomputePartyBalances(
-    invoices,
-    Array.isArray(data.parties) ? data.parties : [],
-  )
-
   return {
-    ...data,
+    ...deriveLedger(data),
     version: data.version ?? CURRENT_BOOKS_SCHEMA_VERSION,
+    revision: data.revision ?? 0,
     updatedAt: data.updatedAt || new Date().toISOString(),
-    accounts: normalizedAccounts,
-    parties: normalizedParties,
-    journalEntries,
   }
 }
 
@@ -120,6 +172,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
   if (!raw || typeof raw !== 'object') {
     return {
       version: CURRENT_BOOKS_SCHEMA_VERSION,
+      revision: 0,
       updatedAt: now,
       settings: { ...DEFAULT_BOOK_SETTINGS },
       accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
@@ -133,8 +186,30 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
   }
 
   const r = raw as Record<string, unknown>
-  const version =
-    typeof r.version === 'number' && r.version >= 1 ? r.version : CURRENT_BOOKS_SCHEMA_VERSION
+  // An absent version is a pre-versioning payload (stamped with the current
+  // one). Any version that IS present must be one this build can read: a
+  // version above this build's means a newer writer, and `1.9`, `"2"`, `null`,
+  // `true` or `-5` are not schema versions at all. Both are refused, because
+  // normalizing them would drop whatever that writer meant and hand the
+  // truncated ledger back to be written over the original.
+  const declaredVersion = r.version
+  if (declaredVersion !== undefined && !isSupportedBooksSchemaVersion(declaredVersion)) {
+    if (
+      typeof declaredVersion === 'number' &&
+      Number.isInteger(declaredVersion) &&
+      declaredVersion > CURRENT_BOOKS_SCHEMA_VERSION
+    ) {
+      throw new UnsupportedBooksSchemaError(declaredVersion)
+    }
+    throw new InvalidBooksSchemaVersionError(declaredVersion)
+  }
+  // A supported version is read and migrated forward: everything this function
+  // returns is stamped with the version it will be written as.
+  const version = CURRENT_BOOKS_SCHEMA_VERSION
+  const revision =
+    typeof r.revision === 'number' && Number.isFinite(r.revision) && r.revision >= 0
+      ? Math.trunc(r.revision)
+      : 0
   const updatedAt = typeof r.updatedAt === 'string' && r.updatedAt.trim() ? r.updatedAt : now
 
   const settings: CompanySettings =
@@ -340,6 +415,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
 
   const envelope: BooksDataEnvelope = {
     version,
+    revision,
     updatedAt,
     settings,
     accounts,
@@ -359,6 +435,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
 export function createEmptyBooksEnvelope(): BooksDataEnvelope {
   return {
     version: CURRENT_BOOKS_SCHEMA_VERSION,
+    revision: 0,
     updatedAt: new Date().toISOString(),
     settings: { ...DEFAULT_BOOK_SETTINGS },
     accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
@@ -371,40 +448,185 @@ export function createEmptyBooksEnvelope(): BooksDataEnvelope {
   }
 }
 
-export function readBooksStore(baseDirOrPath: string): BooksDataEnvelope {
-  const filePath = baseDirOrPath.endsWith('books-data.json')
+/** The store file name every books path is addressed by. */
+export const BOOKS_STORE_FILENAME = 'books-data.json'
+
+/** Resolves a caller's base directory or file path to the store file path. */
+export function booksStorePath(baseDirOrPath: string): string {
+  return baseDirOrPath.endsWith(BOOKS_STORE_FILENAME)
     ? baseDirOrPath
-    : join(baseDirOrPath, 'books-data.json')
-  if (!existsSync(filePath)) {
-    return createEmptyBooksEnvelope()
+    : join(baseDirOrPath, BOOKS_STORE_FILENAME)
+}
+
+/**
+ * True when the path is the store file itself. The watcher uses it so a
+ * forensic copy, a safety copy or a `.tmp` file it just wrote cannot be
+ * mistaken for a ledger change (which used to feed a self-sustaining loop).
+ */
+export function isBooksStoreFile(candidate: string, storePath: string): boolean {
+  const name = candidate.replace(/[/\\]/g, '/').split('/').pop() || ''
+  return name === booksStorePath(storePath).replace(/[/\\]/g, '/').split('/').pop()
+}
+
+/** Why a store read could not produce a ledger. */
+export type BooksStoreReadFailureKind = 'io' | 'corrupt' | 'unsupported-schema'
+
+export interface BooksStoreReadFailure {
+  ok: false
+  kind: BooksStoreReadFailureKind
+  error: string
+  /** Present when the bytes were readable: the content-hashed forensic copy. */
+  forensicPath?: string
+}
+
+export interface BooksStoreReadSuccess {
+  ok: true
+  /** null when no store exists yet — the genuine first-run case. */
+  data: BooksDataEnvelope | null
+}
+
+export type BooksStoreReadResult = BooksStoreReadSuccess | BooksStoreReadFailure
+
+function storeSiblingName(filePath: string, sibling: string): string {
+  return filePath ? `${filePath}.${sibling}` : sibling
+}
+
+/** Stable name for the forensic copy of one distinct corrupt payload. */
+function forensicCopyName(filePath: string, contentHash: string): string {
+  return storeSiblingName(filePath, `corrupt-${contentHash.slice(0, 16)}`)
+}
+
+function writeFileAtomic(targetPath: string, content: string): void {
+  const tmp = `${targetPath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
+  try {
+    writeFileSync(tmp, content, 'utf8')
+    renameSync(tmp, targetPath)
+  } catch (err) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp)
+    } catch {}
+    throw err
   }
+}
+
+/**
+ * Writes the forensic copies for a corrupt store ONCE per distinct payload:
+ * a content-addressed `<file>.corrupt-<hash>` plus the legacy
+ * `<file>.corrupted.bak` (kept because existing tooling and tests look for
+ * it). Re-reading the same broken bytes therefore adds no files, which is
+ * what stops the forensic/watcher amplification loop.
+ */
+function writeForensicCopies(filePath: string, content: string): string {
+  const hash = createHash('sha256').update(content).digest('hex')
+  const forensics = forensicCopyName(filePath, hash)
+  const legacy = storeSiblingName(filePath, 'corrupted.bak')
+  try {
+    if (!existsSync(forensics)) writeFileAtomic(forensics, content)
+    if (!existsSync(legacy)) writeFileAtomic(legacy, content)
+  } catch (err) {
+    console.error('books-main: failed to write corrupt-store forensic copy', err)
+  }
+  return forensics
+}
+
+/**
+ * A payload that can be read as a ledger: a plain object carrying the two core
+ * arrays. `migrateAndValidateBooks` cannot gate on this — it is a
+ * never-throwing normalizer that turns anything into a ledger — so every path
+ * that reads bytes from disk checks the shape FIRST. A valid-JSON file that is
+ * not one (null, [], a string, an object without the arrays) is not an empty
+ * ledger: normalizing it would produce one, and the next save would write that
+ * empty ledger over the user's books.
+ */
+export function isBooksLedgerShape(raw: unknown): boolean {
+  return Boolean(
+    raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    Array.isArray((raw as { accounts?: unknown }).accounts) &&
+    Array.isArray((raw as { invoices?: unknown }).invoices),
+  )
+}
+
+/**
+ * Strict store read: distinguishes a genuinely absent file (first run) from a
+ * file that is present but unreadable. The absence distinction is the whole
+ * point — an I/O error, corrupt bytes or valid JSON that is not a ledger must
+ * never be reported as an empty ledger, because the next ordinary save would
+ * then write that empty ledger over the user's real books. Every unreadable
+ * payload that really was bytes keeps a forensic copy of those bytes.
+ */
+export function readBooksStoreStrict(
+  baseDirOrPath: string,
+  options: { forensic?: boolean } = {},
+): BooksStoreReadResult {
+  const filePath = booksStorePath(baseDirOrPath)
+  if (!existsSync(filePath)) return { ok: true, data: null }
 
   let content: string
   try {
     content = readFileSync(filePath, 'utf8')
-  } catch (err) {
-    console.error('books-main: failed to read books-data.json:', err)
-    return createEmptyBooksEnvelope()
+  } catch (err: any) {
+    return {
+      ok: false,
+      kind: 'io',
+      error: `The books file could not be read (${err?.message || 'unknown I/O error'})`,
+    }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch (err: any) {
+    const forensicPath =
+      options.forensic === false ? undefined : writeForensicCopies(filePath, content)
+    return {
+      ok: false,
+      kind: 'corrupt',
+      error: `The books file is not valid JSON (${err?.message || 'parse error'})`,
+      forensicPath,
+    }
+  }
+
+  // Valid JSON is not a ledger. `null`, `[]`, a string, a number, an object
+  // without the arrays and an object whose arrays are the wrong type all used
+  // to load as `readable: true` with an empty envelope — and the next save
+  // overwrote the file with that empty ledger, with no copy of the original.
+  if (!isBooksLedgerShape(parsed)) {
+    const forensicPath =
+      options.forensic === false ? undefined : writeForensicCopies(filePath, content)
+    return {
+      ok: false,
+      kind: 'corrupt',
+      error: 'The books file is not a books ledger (missing accounts/invoices)',
+      forensicPath,
+    }
   }
 
   try {
-    const parsed = JSON.parse(content)
-    return migrateAndValidateBooks(parsed)
-  } catch (parseErr) {
-    const timestamp = Date.now()
-    const timestampedBackupPath = `${filePath}.corrupt-${timestamp}`
-    const legacyBackupPath = `${filePath}.corrupted.bak`
-    try {
-      writeFileSync(timestampedBackupPath, content, 'utf8')
-      writeFileSync(legacyBackupPath, content, 'utf8')
-      console.warn(
-        `books-main: Corrupted books file detected. Backed up to ${timestampedBackupPath} and ${legacyBackupPath}`,
-      )
-    } catch (bakErr) {
-      console.error('books-main: Failed to write corrupted backup file', bakErr)
+    return { ok: true, data: migrateAndValidateBooks(parsed) }
+  } catch (err: any) {
+    if (
+      err instanceof UnsupportedBooksSchemaError ||
+      err instanceof InvalidBooksSchemaVersionError
+    ) {
+      return { ok: false, kind: 'unsupported-schema', error: err.message }
     }
-    return createEmptyBooksEnvelope()
+    throw err
   }
+}
+
+/**
+ * Lenient store read: the ledger if one can be produced, otherwise a fresh
+ * empty envelope. Read paths that only ever DISPLAY data may use this; every
+ * path that writes must use `readBooksStoreStrict` (or the serialized
+ * mutations below) so an unreadable store can never be overwritten.
+ */
+export function readBooksStore(baseDirOrPath: string): BooksDataEnvelope {
+  const result = readBooksStoreStrict(baseDirOrPath)
+  if (result.ok) return result.data ?? createEmptyBooksEnvelope()
+  console.error(`books-main: could not read books store ${baseDirOrPath}:`, result.error)
+  return createEmptyBooksEnvelope()
 }
 
 /**
@@ -419,28 +641,366 @@ export function setStoreWriteObserver(fn: ((json: string) => void) | undefined):
   storeWriteObserver = fn
 }
 
-export function writeBooksStore(baseDirOrPath: string, data: unknown): void {
-  const filePath = baseDirOrPath.endsWith('books-data.json')
-    ? baseDirOrPath
-    : join(baseDirOrPath, 'books-data.json')
+/** What one write means for the ledger it replaces. */
+export interface BooksWriteIntent {
+  /**
+   * The revision the writer believes is on disk. When it lags the stored
+   * revision another writer won the race, so the write is refused instead of
+   * silently discarding their ledger — and the refusal carries the stored
+   * ledger, so the client can adopt it and write again from that revision.
+   *
+   * This argument is the ONLY authority on what the writer had seen: the
+   * payload's own `revision` field is data, never a cursor (a client that just
+   * adopted the ledger a conflict returned carries that ledger's revision, and
+   * treating it as a claim about its snapshot would let the next write pass
+   * unnoticed while the file kept moving).
+   */
+  expectedRevision?: number
+  /**
+   * The writer's explicit statement that this write is MEANT to leave the
+   * books with no invoices and no journal entries. Only the two reasons in
+   * `EmptyLedgerReason` exist, and each names a user action that was confirmed
+   * before the write: deleting the last record from the books, or restoring a
+   * deliberately empty backup.
+   *
+   * Emptying the books is refused without it, and it is only honoured together
+   * with `expectedRevision`, so a writer that did not see the books it would be
+   * emptying is refused by the revision check instead. The reason is consulted
+   * only when the write really does empty the books, so passing it alongside an
+   * ordinary write changes nothing.
+   */
+  emptyLedger?: EmptyLedgerReason
+}
+
+/**
+ * The outcome of one write. A refusal carries `conflict` and the stored ledger
+ * when the writer lost an optimistic-revision race: the client must refresh
+ * from `current` rather than retry blindly.
+ */
+export type BooksWriteOutcome =
+  | { ok: true; revision: number }
+  | { ok: false; error: string; conflict?: true; current?: BooksDataEnvelope }
+
+/** Sentinel distinguishing "no store yet" from "the store could not be read". */
+const UNREADABLE = Symbol('books-store-unreadable')
+
+/** The stored ledger, null when absent, or UNREADABLE when it cannot be read. */
+function readStoredForWrite(filePath: string): BooksDataEnvelope | null | typeof UNREADABLE {
+  const read = readBooksStoreStrict(filePath, { forensic: false })
+  if (!read.ok) {
+    console.error(`books-main: refusing to write over an unreadable store: ${read.error}`)
+    return UNREADABLE
+  }
+  return read.data
+}
+
+/** Counts the records a shrink guard protects: the ledger-of-record kinds. */
+export function ledgerRecordCount(data: BooksDataEnvelope): number {
+  return (data.invoices?.length || 0) + (data.journalEntries?.length || 0)
+}
+
+/** One record of the two ledger-of-record kinds, as sent by a caller. */
+function isIdentifiedRecord(entry: unknown): boolean {
+  return Boolean(
+    entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string',
+  )
+}
+
+/**
+ * The record count of what the caller actually sent, judged on what the
+ * MIGRATION WOULD KEEP: `migrateAndValidateBooks` drops an invoice or journal
+ * without a string `id`, so counting the raw arrays let a payload of decoys
+ * pass the shrink guard while the write emptied the file. The opening journal
+ * `normalizeLedger` synthesizes is excluded too — it is not a record anybody
+ * entered, so "delete everything" must not look like a one-record write just
+ * because the empty payload legitimately carried account balances.
+ */
+function sentLedgerRecordCount(data: unknown): number {
+  const raw = (data ?? {}) as { invoices?: unknown; journalEntries?: unknown }
+  const kept = (value: unknown) =>
+    Array.isArray(value) ? value.filter(isIdentifiedRecord).length : 0
+  const journals = Array.isArray(raw.journalEntries)
+    ? raw.journalEntries.filter(
+        (entry) =>
+          isIdentifiedRecord(entry) &&
+          !String((entry as { entryNumber?: unknown }).entryNumber || '').startsWith(
+            OPENING_JOURNAL_PREFIX,
+          ),
+      ).length
+    : 0
+  return kept(raw.invoices) + journals
+}
+
+/**
+ * The refusal shown when an empty write would replace populated books. It is
+ * read by a person, so it says what happened, that nothing was written, and
+ * what to do next — never the record arithmetic the guard works with.
+ */
+function emptyReplacementRefusal(storedRecords: number): string {
+  const records =
+    storedRecords === 1
+      ? '1 invoice or journal entry'
+      : `${storedRecords} invoices and journal entries`
+  return (
+    `Nothing was saved: this change would have emptied your books, removing ${records}. ` +
+    `Reload the books to see the data that is really there, then delete the records you meant to remove.`
+  )
+}
+
+/**
+ * The rule that keeps an ACCIDENTAL write from replacing a populated ledger
+ * with an empty one, shared by the serialized writer and the restore engine so
+ * neither can empty the books on its own.
+ *
+ * `emptyLedgerReason` is the caller's explicit statement that emptying the
+ * books is the point of this write (see `EmptyLedgerReason`); the deliberate
+ * callers — the user's delete of their last record, and a restore of an empty
+ * backup — are the only ones that pass it. Everything else is refused, which is
+ * what stops a payload whose records the migration would drop from wiping a
+ * ledger that looked populated on the way in.
+ */
+export function mayReplaceLedger(
+  stored: BooksDataEnvelope | null,
+  incomingRecordCount: number,
+  options: { emptyLedgerReason?: EmptyLedgerReason } = {},
+): { ok: true } | { ok: false; error: string } {
+  if (!stored) return { ok: true }
+  const storedRecords = ledgerRecordCount(stored)
+  if (storedRecords === 0 || incomingRecordCount > 0) return { ok: true }
+  if (options.emptyLedgerReason) return { ok: true }
+  return { ok: false, error: emptyReplacementRefusal(storedRecords) }
+}
+
+function staleWriteError(expectedRevision: number, storedRevision: number): string {
+  return `Your books changed elsewhere while you were working (revision ${storedRevision} on disk, ${expectedRevision} sent). Nothing was saved; reload to see the newer books and apply your change again.`
+}
+
+/**
+ * One queued write: validates, applies the intent guards against the file it
+ * is about to replace, takes the pre-overwrite safety copy and commits
+ * atomically with the next revision number.
+ */
+function commitBooksStore(
+  filePath: string,
+  data: unknown,
+  options: BooksWriteIntent = {},
+): BooksWriteOutcome {
+  const validated = migrateAndValidateBooks(data)
+  // The guard must judge what the CALLER sent, not the migrated ledger:
+  // normalizeLedger synthesizes an opening journal for a payload that emptied
+  // the accounts, which would otherwise make "delete everything" look like a
+  // one-record write.
+  const sentRecordCount = sentLedgerRecordCount(data)
+
+  // Always read: the revision this write continues and the safety copy come
+  // from what is really on disk right now.
+  const stored = readStoredForWrite(filePath)
+  if (stored === UNREADABLE) {
+    return { ok: false, error: 'Refusing to overwrite books that could not be read' }
+  }
+
+  // A stale writer is REFUSED, not merged. Merging two competing ledgers cannot
+  // be made safe — it silently dropped the newer writer's payments, bank lines,
+  // parties and audit trail, reverted their edits to a shared invoice, and even
+  // resurrected records they had deleted — so the stale write is rejected whole
+  // and handed the ledger it lost the race against.
+  if (
+    stored &&
+    options.expectedRevision !== undefined &&
+    stored.revision > options.expectedRevision
+  ) {
+    return {
+      ok: false,
+      conflict: true,
+      error: staleWriteError(options.expectedRevision, stored.revision),
+      current: stored,
+    }
+  }
+
+  // What the writer declared this write MEANS to do — honoured only together
+  // with the revision it is acting on, so a client that did not see the books
+  // it would be emptying is still refused by the staleness check above.
+  const allowed = mayReplaceLedger(stored, sentRecordCount, {
+    emptyLedgerReason: options.expectedRevision === undefined ? undefined : options.emptyLedger,
+  })
+  if (!allowed.ok) return { ok: false, error: allowed.error }
+
+  // The safety copy is written by the same code that replaces the file, so a
+  // caller cannot forget it: one generation, atomically, before the rename.
+  if (stored && ledgerRecordCount(stored) > 0) {
+    try {
+      writeFileAtomic(storeSiblingName(filePath, 'bak'), JSON.stringify(stored, null, 2))
+    } catch (err) {
+      console.error('books-main: failed to write the pre-overwrite safety copy', err)
+    }
+  }
+
+  const next: BooksDataEnvelope = { ...validated, revision: (stored?.revision ?? 0) + 1 }
   const dir = filePath.replace(/[/\\][^/\\]+$/, '')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-
-  const validated = migrateAndValidateBooks(data)
-  const tmp = `${filePath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
   try {
-    writeFileSync(tmp, JSON.stringify(validated, null, 2), 'utf8')
-    renameSync(tmp, filePath)
-    storeWriteObserver?.(JSON.stringify(validated))
+    writeFileAtomic(filePath, JSON.stringify(next, null, 2))
   } catch (e) {
-    try {
-      if (existsSync(tmp)) unlinkSync(tmp)
-    } catch {}
     console.error('books-main: failed to atomically write books store', filePath, e)
     throw e
   }
+  storeWriteObserver?.(JSON.stringify(next))
+
+  return { ok: true, revision: next.revision }
+}
+
+/**
+ * Serialization of every read-modify-write on one store path.
+ *
+ * There is exactly one main process, so a module-level chain is enough to make
+ * the whole read → mutate → write sequence atomic with respect to every other
+ * writer in it (the renderer's save, CRM won-deal invoicing, Tenders milestone
+ * billing, bank import, reconciliation). Without it two writers both read
+ * revision N, both compute `INV-2026-001` and the second write silently
+ * discards the first invoice.
+ */
+const storeWriteQueue = new Map<string, Promise<unknown>>()
+
+function enqueueStoreWrite<T>(baseDirOrPath: string, task: () => Promise<T> | T): Promise<T> {
+  const key = booksStorePath(baseDirOrPath)
+  const previous = storeWriteQueue.get(key) ?? Promise.resolve()
+  const next = previous.then(task, task)
+  storeWriteQueue.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  )
+  return next
+}
+
+/**
+ * The ONE way a main-process caller performs a read-modify-write on the
+ * ledger: `fn` receives the stored ledger (null on a genuine first run) and
+ * returns the ledger to persist, or `{ abort }` to leave the store untouched
+ * (a ledger that is present but unreadable always aborts).
+ */
+export async function mutateBooksStore<T>(
+  baseDirOrPath: string,
+  fn: (
+    current: BooksDataEnvelope | null,
+  ) =>
+    | { data: BooksData }
+    | { data: BooksData; intent?: BooksWriteIntent }
+    | { abort: string }
+    | { abort: string; kind: BooksStoreReadFailureKind },
+  options: BooksWriteIntent = {},
+): Promise<BooksWriteOutcome & { value?: T }> {
+  return enqueueStoreWrite(baseDirOrPath, () => {
+    const filePath = booksStorePath(baseDirOrPath)
+    const read = readBooksStoreStrict(filePath)
+    if (!read.ok) return { ok: false as const, error: read.error }
+
+    let produced: { data?: BooksData; abort?: string; intent?: BooksWriteIntent }
+    try {
+      produced = fn(read.data)
+    } catch (err: any) {
+      return { ok: false as const, error: err?.message || 'Failed to update the books store' }
+    }
+    if (produced.abort !== undefined) return { ok: false as const, error: produced.abort }
+    if (!produced.data) return { ok: false as const, error: 'No ledger was produced' }
+
+    return commitBooksStore(filePath, produced.data, {
+      ...options,
+      ...produced.intent,
+    })
+  })
+}
+
+/**
+ * Queued, guarded store write for callers that already hold the ledger they
+ * want persisted. Serialized against every other books writer in the process.
+ */
+export function writeBooksStoreAsync(
+  baseDirOrPath: string,
+  data: unknown,
+  options: BooksWriteIntent = {},
+): Promise<BooksWriteOutcome> {
+  return enqueueStoreWrite(baseDirOrPath, () =>
+    commitBooksStore(booksStorePath(baseDirOrPath), data, options),
+  )
+}
+
+/** The reason a synchronous write could not produce a ledger. */
+export class BooksWriteRefusedError extends Error {
+  readonly conflict: boolean
+  readonly current?: BooksDataEnvelope
+
+  constructor(outcome: { error: string; conflict?: boolean; current?: BooksDataEnvelope }) {
+    super(outcome.error)
+    this.name = 'BooksWriteRefusedError'
+    this.conflict = outcome.conflict === true
+    this.current = outcome.current
+  }
+}
+
+/**
+ * Synchronous store write for pure/headless callers (tools, tests) and for
+ * the write half of a synchronous mutation. It goes through the same guards
+ * and safety copy as the async path; it only skips waiting on the queue,
+ * which a synchronous caller cannot do.
+ */
+export function writeBooksStore(
+  baseDirOrPath: string,
+  data: unknown,
+  options: BooksWriteIntent = {},
+): BooksWriteOutcome {
+  return commitBooksStore(booksStorePath(baseDirOrPath), data, options)
+}
+
+/**
+ * What a queued mutation hands back to the writer.
+ *
+ * `unchanged` is the explicit "this operation changed nothing" answer: the
+ * ledger it read is left alone, so a no-op never bumps the revision, rotates
+ * the safety copy or tells every other client the books moved.
+ */
+type BooksMutationProduct<T> =
+  | { data: BooksData; value?: T; intent?: BooksWriteIntent }
+  | { abort: string }
+  | { unchanged: true; value: T }
+
+/**
+ * Reads, mutates and persists the ledger atomically with respect to every
+ * other books writer in the process. Synchronous, so the tools and tests that
+ * drive the pure core keep their existing call shape.
+ */
+export function mutateBooksStoreSync<T>(
+  baseDirOrPath: string,
+  fn: (current: BooksDataEnvelope | null) => BooksMutationProduct<T>,
+  options: BooksWriteIntent = {},
+):
+  | { ok: true; value: T; revision: number }
+  | { ok: false; error: string; conflict?: true; current?: BooksDataEnvelope } {
+  const filePath = booksStorePath(baseDirOrPath)
+  const read = readBooksStoreStrict(filePath)
+  if (!read.ok) return { ok: false, error: read.error }
+
+  let produced: BooksMutationProduct<T>
+  try {
+    produced = fn(read.data)
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Failed to update the books store' }
+  }
+  if ('abort' in produced) return { ok: false, error: produced.abort }
+  if ('unchanged' in produced) {
+    return { ok: true, value: produced.value, revision: read.data?.revision ?? 0 }
+  }
+  if (!produced.data) return { ok: false, error: 'No ledger was produced' }
+
+  const outcome = commitBooksStore(filePath, produced.data, {
+    ...options,
+    ...produced.intent,
+  })
+  return outcome.ok ? { ok: true, value: produced.value as T, revision: outcome.revision } : outcome
 }
 
 export interface IssueSalesInvoiceInput {
@@ -483,316 +1043,164 @@ export function issueSalesInvoiceInBooks(input: IssueSalesInvoiceInput): IssueSa
     const partyName = String(input.partyName || '').trim()
     if (!partyName) return { ok: false, error: 'Party name is required' }
 
-    const booksData = readBooksStore(input.booksDataPath)
-    if (crmDealId) {
-      const existingInvoice = booksData.invoices.find((invoice) => invoice.crmDealId === crmDealId)
-      if (existingInvoice) return { ok: true, invoice: existingInvoice }
-    }
-
-    let party = booksData.parties.find((p) => p.name.toLowerCase() === partyName.toLowerCase())
-    if (!party) {
-      party = {
-        id: `party-${randomUUID().slice(0, 8)}`,
-        name: partyName,
-        type: 'Customer',
-        email: `accounts@${partyName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}.com`,
-        outstandingBalance: 0,
+    // The whole read → number → post → write cycle runs inside one queued
+    // mutation, so no other writer can slip a journal between the read and the
+    // write and leave this invoice with a duplicate number (or lost entirely).
+    const outcome = mutateBooksStoreSync<IssueSalesInvoiceResult>(input.booksDataPath, (stored) => {
+      const booksData = stored ?? createEmptyBooksEnvelope()
+      if (crmDealId) {
+        const existingInvoice = booksData.invoices.find(
+          (invoice) => invoice.crmDealId === crmDealId,
+        )
+        if (existingInvoice) {
+          return { data: booksData, value: { ok: true, invoice: existingInvoice } }
+        }
       }
-      booksData.parties.push(party)
-    }
 
-    const today = input.date || new Date().toISOString().split('T')[0]
-    if (isDateLocked(booksData, today)) {
-      return {
-        ok: false,
-        error: `Cannot issue an invoice dated in a closed period: ${today} (closed through ${booksData.settings.closedThrough})`,
+      let party = booksData.parties.find((p) => p.name.toLowerCase() === partyName.toLowerCase())
+      if (!party) {
+        party = {
+          id: `party-${randomUUID().slice(0, 8)}`,
+          name: partyName,
+          type: 'Customer',
+          email: '',
+          outstandingBalance: 0,
+        }
+        booksData.parties.push(party)
       }
-    }
-    const dueDate =
-      input.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-    // M2: an explicit 0 (zero-rated) must stay 0 — only a missing/NaN rate
-    // falls back to the 15% default.
-    const taxRate =
-      input.taxRate !== undefined && input.taxRate !== null && input.taxRate !== 0
-        ? round2(Number(input.taxRate) || 15)
-        : input.taxRate === 0
-          ? 0
-          : 15
-    // VAT-inclusive pricing: derive subtotal from the inclusive amount, then
-    // recompute tax from the subtotal so invoice totals always equal the
-    // journal posting exactly (never `grandTotal / 1.15` inversion drift).
-    const subtotal = round2(amount / (1 + taxRate / 100))
-    const taxTotal = round2(subtotal * (taxRate / 100))
-    const grandTotal = round2(subtotal + taxTotal)
 
-    const salesAcc = booksData.accounts.find((a) => a.id === (input.accountId || 'acc-sales')) || {
-      id: input.accountId || 'acc-sales',
-      name: input.accountName || 'Tender & Commercial Contracting Sales',
-    }
+      const today = input.date || new Date().toISOString().split('T')[0]
+      if (isDateLocked(booksData, today)) {
+        return {
+          data: booksData,
+          value: {
+            ok: false,
+            error: `Cannot issue an invoice dated in a closed period: ${today} (closed through ${booksData.settings.closedThrough})`,
+          },
+        }
+      }
+      const dueDate =
+        input.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+      // M2: an explicit 0 (zero-rated) must stay 0 — only a missing/NaN rate
+      // falls back to the 15% default.
+      const taxRate =
+        input.taxRate !== undefined && input.taxRate !== null && input.taxRate !== 0
+          ? round2(Number(input.taxRate) || 15)
+          : input.taxRate === 0
+            ? 0
+            : 15
+      // VAT-inclusive pricing: derive subtotal from the inclusive amount, then
+      // recompute tax from the subtotal so invoice totals always equal the
+      // journal posting exactly (never `grandTotal / 1.15` inversion drift).
+      const subtotal = round2(amount / (1 + taxRate / 100))
+      const taxTotal = round2(subtotal * (taxRate / 100))
+      const grandTotal = round2(subtotal + taxTotal)
 
-    const invoiceNumber = nextInvoiceNumber(booksData.invoices, 'Sales', today)
-    const invoice: Invoice = {
-      id: `inv-${randomUUID().slice(0, 8)}`,
-      invoiceNumber,
-      type: 'Sales',
-      partyId: party.id,
-      partyName: party.name,
-      date: today,
-      dueDate,
-      items: [
-        {
-          id: `item-${randomUUID().slice(0, 8)}`,
-          itemCode: input.itemCode || 'COMMERCIAL-DELIVERY',
-          description: input.itemDescription || 'Commercial Delivery & Services',
-          accountId: salesAcc.id,
-          accountName: salesAcc.name,
-          qty: 1,
-          rate: subtotal,
-          taxRate,
-          amount: subtotal,
-        },
-      ],
-      subtotal,
-      taxTotal,
-      grandTotal,
-      outstandingAmount: grandTotal,
-      status: 'Unpaid',
-      notes: input.notes || 'Payment terms: Net 30 days upon invoice receipt.',
-      tenderReference: input.tenderReference,
-      crmDealId: crmDealId || undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+      const salesAcc = booksData.accounts.find(
+        (a) => a.id === (input.accountId || 'acc-sales'),
+      ) || {
+        id: input.accountId || 'acc-sales',
+        name: input.accountName || 'Tender & Commercial Contracting Sales',
+      }
 
-    booksData.invoices.unshift(invoice)
-    booksData.journalEntries.unshift(createSalesInvoiceJournal(invoice, booksData.accounts, party))
-    booksData.updatedAt = new Date().toISOString()
+      const invoiceNumber = nextInvoiceNumber(booksData.invoices, 'Sales', today)
+      const invoice: Invoice = {
+        id: `inv-${randomUUID().slice(0, 8)}`,
+        invoiceNumber,
+        type: 'Sales',
+        partyId: party.id,
+        partyName: party.name,
+        date: today,
+        dueDate,
+        items: [
+          {
+            id: `item-${randomUUID().slice(0, 8)}`,
+            itemCode: input.itemCode || 'COMMERCIAL-DELIVERY',
+            description: input.itemDescription || 'Commercial Delivery & Services',
+            accountId: salesAcc.id,
+            accountName: salesAcc.name,
+            qty: 1,
+            rate: subtotal,
+            taxRate,
+            amount: subtotal,
+          },
+        ],
+        subtotal,
+        taxTotal,
+        grandTotal,
+        outstandingAmount: grandTotal,
+        status: 'Unpaid',
+        notes: input.notes || 'Payment terms: Net 30 days upon invoice receipt.',
+        tenderReference: input.tenderReference,
+        crmDealId: crmDealId || undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
 
-    const normalized = recomputeLedger(
-      appendAudit(
-        booksData,
-        createAuditEntry('invoice.issue', `Issued ${invoice.invoiceNumber} to ${party.name}`, {
-          invoiceNumber: invoice.invoiceNumber,
-          amount: invoice.grandTotal,
-        }),
-      ),
-    )
-    writeBooksStore(input.booksDataPath, normalized)
+      booksData.invoices.unshift(invoice)
+      booksData.journalEntries.unshift(
+        createSalesInvoiceJournal(invoice, booksData.accounts, party),
+      )
+      booksData.updatedAt = new Date().toISOString()
 
-    return { ok: true, invoice }
+      const normalized = recomputeLedger(
+        appendAudit(
+          booksData,
+          createAuditEntry('invoice.issue', `Issued ${invoice.invoiceNumber} to ${party.name}`, {
+            invoiceNumber: invoice.invoiceNumber,
+            amount: invoice.grandTotal,
+          }),
+        ),
+      )
+
+      return { data: normalized, value: { ok: true, invoice } }
+    })
+
+    if (!outcome.ok) return { ok: false, error: outcome.error }
+    return outcome.value ?? { ok: false, error: 'Failed to create sales invoice in Books' }
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Failed to create sales invoice in Books' }
   }
 }
 
+/**
+ * Bank-statement CSV import against the on-disk ledger. The shared
+ * settlement engine owns the behaviour (dedupe, payment coverage, import
+ * journals); this wrapper owns the ledger read-modify-write, which runs
+ * inside the serialized mutation queue so a concurrent invoice posting can
+ * never be overwritten by the import.
+ */
 export function importBankStatement({
   booksDataPath,
   csvContent,
 }: {
   booksDataPath: string
   csvContent: string
-}): {
-  ok: boolean
-  importedCount?: number
-  skippedDuplicates?: number
-  netAdjustment?: number
-  newBankBalance?: number | null
-  transactions?: BankTransaction[]
-  error?: string
-} {
-  const booksData = readBooksStore(booksDataPath)
-
-  const parsed = parseBankStatementCsv(csvContent)
-  if (parsed.length === 0) {
-    return { ok: false, error: 'No valid transactions found in statement CSV' }
-  }
-
-  const existing = booksData.bankTransactions || []
-  const { toAdd, skippedDuplicates, netAdjustment } = deduplicateBankTransactions(parsed, existing)
-
-  // Phase-3 payment ↔ bank-reconciliation unification: a statement line
-  // already covered by a recorded payment is the SAME cash the payment
-  // journal booked (Dr/Cr Bank vs AR/AP). Fully covered lines are stored
-  // pre-reconciled against the matched allocation invoice and post NO import
-  // journal — posting the bank movement again would double-count Bank and
-  // strand Suspense. PARTIALLY covered lines post an import journal for the
-  // uncovered remainder only, so Bank always matches the statement exactly.
-  const coverage = planImportCoverage(booksData, toAdd)
-  const storedToAdd: BankTransaction[] = toAdd.map((tx) => {
-    const plan = coverage.get(tx.id)
-    if (!plan || !plan.fullyCovered) return tx
-    return {
-      ...tx,
-      reconciled: true,
-      matchedInvoiceId: plan.matchedInvoiceId,
-      reconciledAt: new Date().toISOString(),
-    }
-  })
-  booksData.bankTransactions = [...existing, ...storedToAdd]
-
-  // Ledger-first: each imported transaction is posted as a journal entry
-  // (Dr/Cr Bank against Bank Suspense) for the UNCOVERED portion — a fully
-  // covered line posts nothing, a partially covered line posts the remainder,
-  // everything else posts in full. Balances are then derived from journals;
-  // entry numbers come from the journal sequence so imports never reuse one.
-  const journals = Array.isArray(booksData.journalEntries) ? [...booksData.journalEntries] : []
-  for (const tx of toAdd) {
-    const plan = coverage.get(tx.id)
-    const uncovered = round2(Math.abs(tx.amount || 0) - (plan?.coveredAmount || 0))
-    if (uncovered <= 0.005) continue
-    const remainderTx: BankTransaction = {
-      ...tx,
-      amount: tx.amount > 0 ? uncovered : -uncovered,
-    }
-    journals.unshift(
-      createBankImportJournal(
-        remainderTx,
-        booksData.accounts,
-        nextJournalNumber(journals, tx.date),
-      ),
+}): BankStatementImportResult {
+  const outcome = mutateBooksStoreSync<BankStatementImportResult>(booksDataPath, (stored) => {
+    const { result, ledger } = applyBankStatementImport(
+      stored ?? createEmptyBooksEnvelope(),
+      csvContent,
     )
-  }
-  booksData.journalEntries = journals
-
-  booksData.updatedAt = new Date().toISOString()
-  const normalized = recomputeLedger(
-    appendAudit(
-      booksData,
-      createAuditEntry(
-        'bank.import',
-        `Imported bank statement: ${toAdd.length} new transaction${toAdd.length === 1 ? '' : 's'} (${skippedDuplicates} duplicates skipped)`,
-      ),
-    ),
-  )
-  writeBooksStore(booksDataPath, normalized)
-
-  const bankAccount = normalized.accounts.find((a) => a.id === 'acc-bank')
-  return {
-    ok: true,
-    importedCount: toAdd.length,
-    skippedDuplicates,
-    netAdjustment,
-    newBankBalance: bankAccount ? bankAccount.balance : null,
-    transactions: storedToAdd,
-  }
-}
-
-export function computeSettlementSuggestions(booksData: BooksData): SettlementSuggestion[] {
-  const transactions = (booksData.bankTransactions || []).filter((t) => !t.reconciled)
-  const openInvoices = (booksData.invoices || []).filter(
-    (i) => i.status !== 'Paid' && (i.outstandingAmount ?? i.grandTotal) > 0,
-  )
-
-  const suggestions: SettlementSuggestion[] = []
-
-  for (const tx of transactions) {
-    const isDeposit = tx.amount > 0
-    const targetType = isDeposit ? 'Sales' : 'Purchase'
-    const targetAmount = round2(Math.abs(tx.amount))
-
-    const candidates = openInvoices.filter((i) => i.type === targetType)
-
-    for (const inv of candidates) {
-      const currentOutstanding = round2(
-        inv.outstandingAmount !== undefined && inv.outstandingAmount > 0
-          ? inv.outstandingAmount
-          : inv.grandTotal,
-      )
-      const amountMatches = Math.abs(currentOutstanding - targetAmount) < 0.01
-
-      // Check text tokens for match
-      const textToSearch = `${tx.description} ${tx.reference || ''}`.toLowerCase()
-      const invNoMatch = Boolean(
-        inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase()),
-      )
-      const tenderMatch = Boolean(
-        inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase()),
-      )
-
-      // Split party name into significant keywords (length >= 4, ignoring common stop words)
-      const stopWords = new Set([
-        'city',
-        'of',
-        'the',
-        'and',
-        'dept',
-        'ltd',
-        'pty',
-        'inc',
-        'corp',
-        'co',
-      ])
-      const partyTokens = (inv.partyName || '')
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter((t) => t.length >= 4 && !stopWords.has(t))
-
-      const partyMatch =
-        Boolean(inv.partyName && textToSearch.includes(inv.partyName.toLowerCase())) ||
-        (partyTokens.length > 0 && partyTokens.some((t) => textToSearch.includes(t)))
-
-      if (amountMatches) {
-        let confidence: 'HIGH' | 'MEDIUM' = 'MEDIUM'
-        let reason = 'Exact amount matches outstanding invoice'
-
-        if (invNoMatch) {
-          confidence = 'HIGH'
-          reason = `Exact amount match and contains invoice number: ${inv.invoiceNumber}`
-        } else if (tenderMatch) {
-          confidence = 'HIGH'
-          reason = `Exact amount match and contains tender reference: ${inv.tenderReference}`
-        } else if (partyMatch) {
-          confidence = 'HIGH'
-          reason = `Exact amount match and contains counterparty name: ${inv.partyName}`
-        }
-
-        suggestions.push({
-          transactionId: tx.id,
-          invoiceId: inv.id,
-          invoiceNumber: inv.invoiceNumber,
-          partyName: inv.partyName,
-          invoiceType: inv.type,
-          amount: targetAmount,
-          confidence,
-          reason,
-        })
-      } else if (targetAmount <= currentOutstanding && (invNoMatch || tenderMatch)) {
-        // Partial payment match on invoice number or tender reference
-        suggestions.push({
-          transactionId: tx.id,
-          invoiceId: inv.id,
-          invoiceNumber: inv.invoiceNumber,
-          partyName: inv.partyName,
-          invoiceType: inv.type,
-          amount: targetAmount,
-          confidence: 'MEDIUM',
-          reason: `Partial payment matching invoice ${inv.invoiceNumber}`,
-        })
-      }
+    // An import that stored no line — a CSV with nothing valid in it, or one
+    // whose every line is already a duplicate — changed nothing. Writing the
+    // ledger back would still bump the revision, rotate the `.bak` safety copy
+    // and broadcast a change, pushing every revision-tracking client into the
+    // stale path for an operation that did not touch the books.
+    if (!result.ok || !ledger || (result.importedCount ?? 0) === 0) {
+      return { unchanged: true, value: result }
     }
-  }
-
-  return suggestions
-}
-
-export interface ReconciliationCoreResult {
-  ok: boolean
-  error?: string
-  transactionId?: string
-  invoiceId?: string
-  invoiceNumber?: string
-  settledAmount?: number
-  remainingOutstanding?: number
-  invoiceStatus?: string
-  partyBalance?: number
+    return { data: ledger, value: result }
+  })
+  if (!outcome.ok) return { ok: false, error: outcome.error }
+  return outcome.value ?? { ok: false, error: 'Failed to import bank statement' }
 }
 
 /**
- * The pure settlement core of bank-statement reconciliation (no electron).
- * Marks the transaction reconciled, settles the invoice (exact or partial),
- * posts the reclass-or-direct settlement journal, recomputes balances and
- * party balances, and persists. Cross-app tender back-propagation lives in
- * books-main's executeReconciliation wrapper.
+ * 1-click bank reconciliation against the on-disk ledger. The shared
+ * settlement engine owns the settlement maths and journals; this wrapper
+ * owns the ledger read-modify-write. Cross-app tender back-propagation lives
+ * in books-main's executeReconciliation wrapper.
  */
 export function executeReconciliationCore({
   booksDataPath,
@@ -803,118 +1211,14 @@ export function executeReconciliationCore({
   transactionId: string
   invoiceId: string
 }): ReconciliationCoreResult {
-  const booksData = readBooksStore(booksDataPath)
-
-  const tx = (booksData.bankTransactions || []).find((t) => t.id === transactionId)
-  if (!tx) return { ok: false, error: `Transaction not found: ${transactionId}` }
-  if (tx.reconciled) return { ok: false, error: `Transaction already reconciled: ${transactionId}` }
-
-  const inv = (booksData.invoices || []).find((i) => i.id === invoiceId)
-  if (!inv) return { ok: false, error: `Invoice not found: ${invoiceId}` }
-  if (
-    inv.status === 'Paid' ||
-    (inv.outstandingAmount !== undefined && inv.outstandingAmount <= 0)
-  ) {
-    return { ok: false, error: `Invoice already marked Paid: ${invoiceId}` }
-  }
-  if (inv.status === 'Draft') {
-    return { ok: false, error: `Cannot reconcile a draft invoice: ${invoiceId}` }
-  }
-  if (inv.status === 'Cancelled') {
-    return { ok: false, error: `Cannot reconcile a cancelled invoice: ${invoiceId}` }
-  }
-
-  // Direction validation
-  if (inv.type === 'Sales' && tx.amount <= 0) {
-    return {
-      ok: false,
-      error: 'Cannot reconcile a debit/withdrawal transaction against a Sales invoice',
-    }
-  }
-  if (inv.type === 'Purchase' && tx.amount >= 0) {
-    return {
-      ok: false,
-      error: 'Cannot reconcile a credit/deposit transaction against a Purchase bill',
-    }
-  }
-
-  // 1. Mark transaction reconciled
-  tx.reconciled = true
-  tx.matchedInvoiceId = inv.id
-  tx.reconciledAt = new Date().toISOString()
-
-  // 2. Exact and partial settlement math
-  const txAmt = round2(Math.abs(tx.amount))
-  const currentOutstanding = round2(
-    inv.outstandingAmount !== undefined && inv.outstandingAmount > 0
-      ? inv.outstandingAmount
-      : inv.grandTotal,
-  )
-  const settledAmount = round2(Math.min(txAmt, currentOutstanding))
-  const remainingOutstanding = round2(currentOutstanding - settledAmount)
-
-  inv.outstandingAmount = remainingOutstanding
-  inv.status = remainingOutstanding <= 0 ? 'Paid' : 'Unpaid'
-  inv.updatedAt = new Date().toISOString()
-
-  // 3. Recompute party balance from open invoices
-  const party = booksData.parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
-  booksData.parties = recomputePartyBalances(booksData.invoices, booksData.parties)
-  const updatedParty = booksData.parties.find(
-    (p) => p.id === inv.partyId || p.name === inv.partyName,
-  )
-
-  // 4. Post the settlement journal entry. When the transaction was imported
-  // from a bank statement, the import journal already moved the bank account,
-  // so this leg only clears the suspense account against Receivable/Payable
-  // (ledger-first: no direct balance mutation anywhere). Legacy transactions
-  // without an import journal post the full direct settlement instead.
-  let settlementJournal: JournalEntry
-  const hasImportJournal = (booksData.journalEntries || []).some(
-    (je) => je.remarks && je.remarks.includes(`Bank statement import: ${tx.id}`),
-  )
-  if (hasImportJournal) {
-    settlementJournal = createReconciliationJournal(
-      tx,
-      inv,
-      booksData.accounts,
-      settledAmount,
-      nextJournalNumber(booksData.journalEntries, tx.date),
-    )
-  } else {
-    settlementJournal = createSettlementJournal(
-      inv,
-      booksData.accounts,
-      settledAmount,
-      updatedParty || party,
-      nextJournalNumber(booksData.journalEntries, tx.date),
-      'acc-bank',
-      `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
-    )
-  }
-  booksData.journalEntries.unshift(settlementJournal)
-
-  booksData.updatedAt = new Date().toISOString()
-  const normalized = recomputeLedger(
-    appendAudit(
-      booksData,
-      createAuditEntry(
-        'bank.reconcile',
-        `Reconciled ${tx.description || tx.id} against ${inv.invoiceNumber}`,
-        { invoiceNumber: inv.invoiceNumber, amount: settledAmount },
-      ),
-    ),
-  )
-  writeBooksStore(booksDataPath, normalized)
-
-  return {
-    ok: true,
-    transactionId: tx.id,
-    invoiceId: inv.id,
-    invoiceNumber: inv.invoiceNumber,
-    settledAmount,
-    remainingOutstanding,
-    invoiceStatus: inv.status,
-    partyBalance: updatedParty ? updatedParty.outstandingBalance : party?.outstandingBalance,
-  }
+  const outcome = mutateBooksStoreSync<ReconciliationCoreResult>(booksDataPath, (stored) => {
+    const { result, ledger } = applyReconciliation(stored ?? createEmptyBooksEnvelope(), {
+      transactionId,
+      invoiceId,
+    })
+    if (!result.ok || !ledger) return { data: stored ?? createEmptyBooksEnvelope(), value: result }
+    return { data: ledger, value: result }
+  })
+  if (!outcome.ok) return { ok: false, error: outcome.error }
+  return outcome.value ?? { ok: false, error: 'Failed to reconcile transaction' }
 }

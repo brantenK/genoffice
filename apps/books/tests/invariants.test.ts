@@ -153,7 +153,11 @@ describe('F18 Invariants & Bookkeeping Precision Suite', () => {
 
     it('returns zeros for empty or non-array items', () => {
       expect(calculateInvoiceTotals([])).toEqual({ subtotal: 0, taxTotal: 0, grandTotal: 0 })
-      expect(calculateInvoiceTotals(null as any)).toEqual({ subtotal: 0, taxTotal: 0, grandTotal: 0 })
+      expect(calculateInvoiceTotals(null as any)).toEqual({
+        subtotal: 0,
+        taxTotal: 0,
+        grandTotal: 0,
+      })
     })
 
     it('guarantees subtotal + taxTotal === grandTotal across fractional-cent rates', () => {
@@ -253,9 +257,30 @@ describe('F18 Invariants & Bookkeeping Precision Suite', () => {
         const discountRate = round2(-(5 + (seed % 9) * 2.3))
 
         const items: InvoiceItem[] = [
-          { id: `f1-${seed}`, description: `Item A ${seed}`, qty: qty1, rate: rate1, taxRate: 15, accountId: 'acc-sales' },
-          { id: `f2-${seed}`, description: `Item B ${seed}`, qty: qty2, rate: rate2, taxRate: 15, accountId: 'acc-consult' },
-          { id: `f3-${seed}`, description: `Discount ${seed}`, qty: 1, rate: discountRate, taxRate: 15, accountId: 'acc-sales' },
+          {
+            id: `f1-${seed}`,
+            description: `Item A ${seed}`,
+            qty: qty1,
+            rate: rate1,
+            taxRate: 15,
+            accountId: 'acc-sales',
+          },
+          {
+            id: `f2-${seed}`,
+            description: `Item B ${seed}`,
+            qty: qty2,
+            rate: rate2,
+            taxRate: 15,
+            accountId: 'acc-consult',
+          },
+          {
+            id: `f3-${seed}`,
+            description: `Discount ${seed}`,
+            qty: 1,
+            rate: discountRate,
+            taxRate: 15,
+            accountId: 'acc-sales',
+          },
         ]
 
         const totals = calculateInvoiceTotals(items)
@@ -412,7 +437,9 @@ describe('F18 Invariants & Bookkeeping Precision Suite', () => {
 
     it('handles empty parties or empty invoices safely', () => {
       expect(recomputePartyBalances([], [])).toEqual([])
-      const parties: Party[] = [{ id: 'p1', name: 'Customer A', type: 'Customer', outstandingBalance: 100 }]
+      const parties: Party[] = [
+        { id: 'p1', name: 'Customer A', type: 'Customer', outstandingBalance: 100 },
+      ]
       expect(recomputePartyBalances([], parties)[0].outstandingBalance).toBe(0)
     })
   })

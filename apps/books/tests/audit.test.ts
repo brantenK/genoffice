@@ -1,11 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { accountsMatchJournals, allJournalsBalanced } from '../src/shared/accounting'
 import { MAX_AUDIT_ENTRIES, appendAudit, createAuditEntry } from '../src/shared/audit'
-import { computeDataHash, useBooksStore } from '../src/renderer/src/store'
+import { applyLoadedEnvelope, computeDataHash, useBooksStore } from '../src/renderer/src/store'
 import { initialBooksData } from '../src/renderer/src/mock/initialData'
 import { migrateAndValidateBooks } from '../src/main/books-main'
 import type { BooksApi } from '../src/shared/ipc'
-import type { BooksData } from '../src/shared/types'
+import type { BooksData, BooksDataEnvelope } from '../src/shared/types'
+
+/**
+ * Builds a complete `BooksApi` stub: an object literal cast to the interface
+ * would let the surface drift silently, so missing members are supplied
+ * explicitly and the cast is the last line of defence rather than the first.
+ */
+function fakeBooksApi(overrides: Partial<BooksApi> = {}): BooksApi {
+  const unsupported = async () => {
+    throw new Error('booksApi member not provided by this test stub')
+  }
+  return {
+    loadData: async () => ({ ok: true, readable: true, data: null }),
+    saveData: async () => ({ ok: true, revision: 1 }),
+    onDataChanged: () => () => undefined,
+    exportToSheets: async () => ({ ok: true }),
+    openInPdf: async () => ({ ok: true }),
+    openInCrm: async () => false,
+    openInTenders: async () => false,
+    importBankStatementCsv: unsupported,
+    reconcileTransaction: unsupported,
+    getSettlementSuggestions: async () => [],
+    backupNow: async () => ({ ok: true }),
+    listBackups: async () => [],
+    restoreBackup: async () => ({ ok: false, error: 'no backup store in this stub' }),
+    ...overrides,
+  }
+}
 
 /**
  * Phase 3 audit-log suite: entry shape, newest-first append with a 500-entry
@@ -18,10 +45,19 @@ describe('Audit log', () => {
 
   beforeEach(() => {
     savedPayloads = []
+    // A successful load leaves the ledger, the write cursor and the load
+    // status in agreement; `persist()` refuses to write without that.
+    applyLoadedEnvelope({
+      ...JSON.parse(JSON.stringify(initialBooksData)),
+      version: 1,
+      revision: 0,
+      updatedAt: new Date().toISOString(),
+    } as BooksDataEnvelope)
     useBooksStore.setState({
       activeTab: 'dashboard',
-      data: JSON.parse(JSON.stringify(initialBooksData)),
       needsSetup: false,
+      loadError: false,
+      lastError: null,
       activeInvoiceId: null,
       invoiceStatusFilter: 'All',
       activeReport: 'profit-loss',
@@ -29,12 +65,12 @@ describe('Audit log', () => {
       searchTerm: '',
     })
     // Spy on persist(): capture every payload the store tries to save.
-    window.booksApi = {
+    window.booksApi = fakeBooksApi({
       saveData: async (data: BooksData) => {
         savedPayloads.push(data)
-        return true
+        return { ok: true, revision: savedPayloads.length }
       },
-    } as BooksApi
+    })
   })
 
   afterEach(() => {
@@ -185,6 +221,47 @@ describe('Audit log', () => {
       expect(d.auditLog![0].action).toBe('settings.update')
       expect(d.auditLog![0].summary).toContain('Zano Renamed (Pty) Ltd')
       expectStoreInvariants()
+    })
+  })
+
+  describe('actor stamping', () => {
+    it('never writes a blank or fabricated actor from a store action', () => {
+      // The main process owns the real identity — it stamps the OS user on
+      // every write. A store entry that carried an empty string would look
+      // populated and would win over that stamp, so the field must be absent
+      // when the renderer has no name to give.
+      for (const summary of [
+        'Saved invoice INV-2026-002 (Unpaid)',
+        'Added party Acme (Customer)',
+      ]) {
+        const entry = createAuditEntry('invoice.save', summary)
+        expect(entry).not.toHaveProperty('actor')
+        expect(entry.actor).toBeUndefined()
+      }
+    })
+
+    it('does not override an actor the caller supplied explicitly', () => {
+      expect(
+        createAuditEntry('invoice.save', 'Saved', { actor: 'main-process-writer' }).actor,
+      ).toBe('main-process-writer')
+    })
+
+    it('stamps the store actor only when one is really known', async () => {
+      await useBooksStore.getState().saveInvoice({
+        type: 'Sales',
+        partyName: 'Actor Customer',
+        status: 'Unpaid',
+        items: [
+          { id: 'it-a1', description: 'Works', qty: 1, rate: 1000, taxRate: 15, amount: 1000 },
+        ],
+      })
+      const entry = lastPersisted().auditLog![0]
+      expect(entry.action).toBe('invoice.save')
+      // A blank actor is the defect being guarded against; a real one is fine.
+      if ('actor' in entry) {
+        expect(typeof entry.actor).toBe('string')
+        expect(entry.actor!.trim().length).toBeGreaterThan(0)
+      }
     })
   })
 

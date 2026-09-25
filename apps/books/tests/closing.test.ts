@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { accountsMatchJournals, allJournalsBalanced, computeAccountBalances, round2 } from '../src/shared/accounting'
+import {
+  accountsMatchJournals,
+  allJournalsBalanced,
+  computeAccountBalances,
+  round2,
+} from '../src/shared/accounting'
 import { EMPTY_ACCOUNTS } from '../src/shared/chart'
 import {
   buildClosingEntries,
@@ -275,7 +280,10 @@ describe('closePeriod', () => {
     expect(allJournalsBalanced(second.data!.journalEntries)).toBe(true)
     expect(accountsMatchJournals(second.data!.accounts, second.data!.journalEntries)).toBe(true)
     const close2027 = second.data!.journalEntries.slice(0, 2)
-    expect(close2027.map((je) => je.entryNumber)).toEqual(['JE-CLOSE-2027-0331', 'JE-CLOSE-2027-0331-EXP'])
+    expect(close2027.map((je) => je.entryNumber)).toEqual([
+      'JE-CLOSE-2027-0331',
+      'JE-CLOSE-2027-0331-EXP',
+    ])
     expect(close2027[0].items).toHaveLength(0)
     expect(close2027[1].items).toHaveLength(0)
     expect(close2027[0].totalDebit).toBe(0)
@@ -383,7 +391,19 @@ describe('closePeriod', () => {
         partyName: 'Safintra Steel & Building Materials',
         date: '2026-09-20',
         dueDate: '2026-10-20',
-        items: [{ id: 'i1', itemCode: 'A', description: 'Extra', accountId: 'acc-materials', accountName: 'Materials', qty: 1, rate: 400000, taxRate: 0, amount: 400000 }],
+        items: [
+          {
+            id: 'i1',
+            itemCode: 'A',
+            description: 'Extra',
+            accountId: 'acc-materials',
+            accountName: 'Materials',
+            qty: 1,
+            rate: 400000,
+            taxRate: 0,
+            amount: 400000,
+          },
+        ],
         subtotal: 400000,
         taxTotal: 0,
         grandTotal: 400000,
@@ -411,8 +431,16 @@ describe('closePeriod', () => {
         round2(retainedBefore - loss),
       )
       // Income and expense accounts are still closed to zero.
-      expect(closed.accounts.filter((a) => a.rootType === 'Income' && !a.isGroup).every((a) => a.balance === 0)).toBe(true)
-      expect(closed.accounts.filter((a) => a.rootType === 'Expense' && !a.isGroup).every((a) => a.balance === 0)).toBe(true)
+      expect(
+        closed.accounts
+          .filter((a) => a.rootType === 'Income' && !a.isGroup)
+          .every((a) => a.balance === 0),
+      ).toBe(true)
+      expect(
+        closed.accounts
+          .filter((a) => a.rootType === 'Expense' && !a.isGroup)
+          .every((a) => a.balance === 0),
+      ).toBe(true)
     })
 
     it('a mid-period close does NOT sweep income posted after throughDate', () => {
@@ -426,7 +454,19 @@ describe('closePeriod', () => {
         partyName: 'City of Ekurhuleni Water Dept',
         date: '2026-11-15',
         dueDate: '2026-12-15',
-        items: [{ id: 'i1', itemCode: 'A', description: 'Late', accountId: 'acc-sales', accountName: 'Sales', qty: 1, rate: 100000, taxRate: 0, amount: 100000 }],
+        items: [
+          {
+            id: 'i1',
+            itemCode: 'A',
+            description: 'Late',
+            accountId: 'acc-sales',
+            accountName: 'Sales',
+            qty: 1,
+            rate: 100000,
+            taxRate: 0,
+            amount: 100000,
+          },
+        ],
         subtotal: 100000,
         taxTotal: 0,
         grandTotal: 100000,

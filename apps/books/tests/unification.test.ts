@@ -166,7 +166,6 @@ describe('Payment ↔ bank-reconciliation unification (phase 3, workstream 4)', 
     const suspense = d.accounts.find((a) => a.id === 'acc-suspense')!.balance
     expect(suspense).toBe(0)
 
-
     // Re-importing the same statement line is deduped — no third Bank journal.
     writeBooksStore(booksDataPath, storeState())
     const reimp = importBankStatement({ booksDataPath, csvContent: statementCsv })
@@ -247,7 +246,9 @@ describe('Payment ↔ bank-reconciliation unification (phase 3, workstream 4)', 
     })
     expect(pay.ok).toBe(true)
     const paymentId = storeState().payments[0].id
-    expect(storeState().bankTransactions!.find((t) => t.id === 'tx-pre-recon')!.reconciled).toBe(true)
+    expect(storeState().bankTransactions!.find((t) => t.id === 'tx-pre-recon')!.reconciled).toBe(
+      true,
+    )
 
     // Deleting the payment must un-link the tx AND post its import journal so
     // the cash stays in the Bank ledger (the tx had no import journal of its
@@ -280,22 +281,31 @@ describe('Payment ↔ bank-reconciliation unification (phase 3, workstream 4)', 
       total: 100,
       createdAt: '',
     }
-    expect(paymentMatchesTransaction(paidPayment, {
-      id: 'tx-dep',
-      accountId: 'acc-bank',
-      date: '2026-09-10',
-      description: 'EFT City of Ekurhuleni',
-      amount: 100,
-      reconciled: false,
-    })).toBe(false)
-    const receivedPayment = { ...paidPayment, type: 'received' as const, partyId: 'party-supp-1', partyName: 'Apex Valve Supplies (Pty) Ltd' }
-    expect(paymentMatchesTransaction(receivedPayment, {
-      id: 'tx-wd',
-      accountId: 'acc-bank',
-      date: '2026-09-10',
-      description: 'Apex Valve Supplies withdrawal',
-      amount: -100,
-      reconciled: false,
-    })).toBe(false)
+    expect(
+      paymentMatchesTransaction(paidPayment, {
+        id: 'tx-dep',
+        accountId: 'acc-bank',
+        date: '2026-09-10',
+        description: 'EFT City of Ekurhuleni',
+        amount: 100,
+        reconciled: false,
+      }),
+    ).toBe(false)
+    const receivedPayment = {
+      ...paidPayment,
+      type: 'received' as const,
+      partyId: 'party-supp-1',
+      partyName: 'Apex Valve Supplies (Pty) Ltd',
+    }
+    expect(
+      paymentMatchesTransaction(receivedPayment, {
+        id: 'tx-wd',
+        accountId: 'acc-bank',
+        date: '2026-09-10',
+        description: 'Apex Valve Supplies withdrawal',
+        amount: -100,
+        reconciled: false,
+      }),
+    ).toBe(false)
   })
 })

@@ -10,13 +10,17 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  XCircle,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
-import type { Invoice } from '../../../shared/types'
+import { DEFAULT_BANK_ACCOUNT_NAME } from '../../../shared/chart'
+import { displayInvoiceStatus } from './invoice-status'
+import type { InvoiceStatus } from '../../../shared/types'
 
 export function Dashboard() {
   const { data, setActiveTab, setActiveInvoiceId, setPrintInvoice } = useBooksStore()
   const { invoices, accounts, settings } = data
+  const asOf = new Date().toISOString().split('T')[0]
 
   const salesInvoices = invoices.filter((i) => i.type === 'Sales')
   const totalReceivable = salesInvoices.reduce((acc, i) => acc + i.outstandingAmount, 0)
@@ -36,6 +40,9 @@ export function Dashboard() {
     (a) => !a.isGroup && (a.accountType === 'Bank' || a.accountType === 'Cash'),
   )
   const liquidCash = bankAccounts.reduce((acc, a) => acc + a.balance, 0)
+  // The bank tile names whatever bank account the chart actually carries.
+  const bankAccountName =
+    bankAccounts.find((a) => a.accountType === 'Bank')?.name ?? DEFAULT_BANK_ACCOUNT_NAME
 
   const recentInvoices = invoices.slice(0, 6)
 
@@ -43,8 +50,8 @@ export function Dashboard() {
     return `${settings.currencySymbol} ${amount.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  const getStatusBadge = (status: Invoice['status']) => {
-    switch (status) {
+  const getStatusBadge = (status: InvoiceStatus, dueDate: string) => {
+    switch (displayInvoiceStatus(status, dueDate, asOf)) {
       case 'Paid':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#30A66D] border border-[#DAF0E1]">
@@ -61,6 +68,12 @@ export function Dashboard() {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FFF7F7] text-[#E03636] border border-[#FCD7D7]">
             <AlertCircle className="w-3 h-3" /> Overdue
+          </span>
+        )
+      case 'Cancelled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3F3F3] text-[#7C7C7C] border border-[#E2E2E2] line-through">
+            <XCircle className="w-3 h-3" /> Cancelled
           </span>
         )
       default:
@@ -154,7 +167,7 @@ export function Dashboard() {
           <div className="text-2xl font-bold text-[#1E293B] tracking-tight">
             {formatMoney(liquidCash)}
           </div>
-          <div className="text-xs text-[#7C7C7C] mt-2">FNB Cheque + Petty Cash</div>
+          <div className="text-xs text-[#7C7C7C] mt-2">{`${bankAccountName} + Petty Cash`}</div>
         </div>
       </div>
 
@@ -274,7 +287,7 @@ export function Dashboard() {
                   <td className="px-6 py-3.5 text-right font-bold text-[#1E293B]">
                     {formatMoney(inv.grandTotal)}
                   </td>
-                  <td className="px-6 py-3.5">{getStatusBadge(inv.status)}</td>
+                  <td className="px-6 py-3.5">{getStatusBadge(inv.status, inv.dueDate)}</td>
                   <td className="px-6 py-3.5 text-right">
                     <button
                       onClick={() => setPrintInvoice(inv)}

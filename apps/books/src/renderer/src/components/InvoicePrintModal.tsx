@@ -1,10 +1,25 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { X, Printer, FileDown } from 'lucide-react'
 import { useBooksStore } from '../store'
+import { effectiveLineAmount, round2 } from '../../../shared/accounting'
 
 export function InvoicePrintModal() {
   const { printInvoice, setPrintInvoice, data } = useBooksStore()
   const { settings } = data
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!printInvoice) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPrintInvoice(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [printInvoice, setPrintInvoice])
+
+  useEffect(() => {
+    if (printInvoice) closeButtonRef.current?.focus()
+  }, [printInvoice])
 
   if (!printInvoice) return null
 
@@ -18,11 +33,19 @@ export function InvoicePrintModal() {
     }
   }
 
+  // "VAT at 15%" only when every line actually carries 15% and there is VAT on
+  // the document — otherwise the rate shown beside the total would be a guess.
+  const distinctRates = Array.from(
+    new Set(printInvoice.items.map((it) => round2(Number(it.taxRate) || 0))),
+  )
+  const vatLabel =
+    distinctRates.length === 1 && printInvoice.taxTotal !== 0 ? `VAT (${distinctRates[0]}%)` : 'VAT'
+
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-3xl w-full my-8 shadow-2xl border border-[#EDEDED] flex flex-col overflow-hidden">
+    <div className="print-root fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="print-panel bg-white rounded-2xl max-w-3xl w-full my-8 shadow-2xl border border-[#EDEDED] flex flex-col overflow-hidden">
         {/* Top Control Bar */}
-        <div className="px-6 py-4 bg-[#F8F8F8] border-b border-[#EDEDED] flex items-center justify-between">
+        <div className="print-chrome px-6 py-4 bg-[#F8F8F8] border-b border-[#EDEDED] flex items-center justify-between">
           <span className="text-xs font-bold text-[#1E293B] uppercase tracking-wider">
             Document Print Preview · {printInvoice.invoiceNumber}
           </span>
@@ -43,6 +66,9 @@ export function InvoicePrintModal() {
             </button>
             <button
               onClick={() => setPrintInvoice(null)}
+              ref={closeButtonRef}
+              aria-label="Close print preview"
+              title="Close (Esc)"
               className="p-1.5 text-[#7C7C7C] hover:text-[#1E293B] rounded-lg"
             >
               <X className="w-4 h-4" />
@@ -51,7 +77,7 @@ export function InvoicePrintModal() {
         </div>
 
         {/* Printable Paper Canvas (A4 simulation) */}
-        <div className="p-10 text-xs bg-white space-y-8">
+        <div className="print-sheet p-10 text-xs bg-white space-y-8">
           {/* Header & Logo */}
           <div className="flex justify-between items-start border-b border-[#EDEDED] pb-6">
             <div>
@@ -129,7 +155,7 @@ export function InvoicePrintModal() {
                     <td className="px-4 py-2.5 text-right font-mono">{formatMoney(it.rate)}</td>
                     <td className="px-4 py-2.5 text-right">{it.taxRate}%</td>
                     <td className="px-4 py-2.5 text-right font-mono font-semibold text-[#1E293B]">
-                      {formatMoney(it.amount)}
+                      {formatMoney(effectiveLineAmount(it))}
                     </td>
                   </tr>
                 ))}
@@ -147,7 +173,7 @@ export function InvoicePrintModal() {
                 </span>
               </div>
               <div className="flex justify-between text-[#7C7C7C]">
-                <span>VAT (15%):</span>
+                <span>{vatLabel}:</span>
                 <span className="font-mono text-[#1E293B]">
                   {formatMoney(printInvoice.taxTotal)}
                 </span>

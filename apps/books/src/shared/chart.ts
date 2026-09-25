@@ -18,6 +18,19 @@ export const DEFAULT_BOOK_SETTINGS: CompanySettings = {
 }
 
 /**
+ * Payment terms applied when an invoice leaves the due date blank, in days.
+ * Single source of truth for the previous hardcoded `+ 30 days` default.
+ */
+export const DEFAULT_PAYMENT_TERMS_DAYS = 30
+
+/**
+ * Ledger name for the bank account when the chart of accounts has no banking
+ * account to resolve (see CORE_ACCOUNTS 'acc-bank'). The neutral name is
+ * used instead of naming the founder's bank.
+ */
+export const DEFAULT_BANK_ACCOUNT_NAME = 'Business Cheque Account'
+
+/**
  * Standard chart of accounts. All balances are 0 — balances are derived
  * from journal entries (ledger-first); stored balance fields are only a
  * serialization cache recomputed on every read/write.

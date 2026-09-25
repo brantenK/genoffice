@@ -276,7 +276,12 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
 
     it('syncFromMain updates in-memory state without calling persist or mutating disk', () => {
       const store = useBooksStore.getState()
-      const newParty: Party = { id: 'p-ext', name: 'External Party', type: 'Customer', outstandingBalance: 4500 }
+      const newParty: Party = {
+        id: 'p-ext',
+        name: 'External Party',
+        type: 'Customer',
+        outstandingBalance: 4500,
+      }
       const externalData: BooksData = {
         ...store.data,
         parties: [...store.data.parties, newParty],
@@ -295,7 +300,12 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
 
     it('syncFromMain correctly recomputes party balances for new invoices', () => {
       const store = useBooksStore.getState()
-      const customer: Party = { id: 'p-sync-cust', name: 'Sync Client', type: 'Customer', outstandingBalance: 0 }
+      const customer: Party = {
+        id: 'p-sync-cust',
+        name: 'Sync Client',
+        type: 'Customer',
+        outstandingBalance: 0,
+      }
       const newInvoice: Invoice = {
         id: 'inv-sync-1',
         invoiceNumber: 'INV-SYNC-01',
@@ -320,7 +330,9 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
 
       store.syncFromMain(incoming)
 
-      const updatedCustomer = useBooksStore.getState().data.parties.find((p) => p.id === customer.id)!
+      const updatedCustomer = useBooksStore
+        .getState()
+        .data.parties.find((p) => p.id === customer.id)!
       expect(updatedCustomer.outstandingBalance).toBe(11500)
     })
   })
@@ -385,7 +397,14 @@ describe('F20 & F14/F15/F16 IPC Synchronization & Event Pipeline Suite', () => {
       // second notification.
       const mutated = {
         ...initialBooksData,
-        parties: [{ id: 'p-int', name: 'Internal Party', type: 'Customer' as const, outstandingBalance: 100 }],
+        parties: [
+          {
+            id: 'p-int',
+            name: 'Internal Party',
+            type: 'Customer' as const,
+            outstandingBalance: 100,
+          },
+        ],
       }
       writeBooksStore(booksFilePath, mutated)
 

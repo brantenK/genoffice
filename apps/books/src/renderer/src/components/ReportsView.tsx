@@ -31,9 +31,10 @@ export function ReportsView() {
       days30: sum.days30 + r.days30,
       days60: sum.days60 + r.days60,
       days90: sum.days90 + r.days90,
+      credit: sum.credit + r.credit,
       total: sum.total + r.total,
     }),
-    { current: 0, days30: 0, days60: 0, days90: 0, total: 0 },
+    { current: 0, days30: 0, days60: 0, days90: 0, credit: 0, total: 0 },
   )
   const taxRows = taxRegister(invoices)
 
@@ -115,11 +116,11 @@ export function ReportsView() {
       csv += `TOTAL,,${totalDr.toFixed(2)},${totalCr.toFixed(2)}\n`
     } else if (report === 'aging') {
       reportTitle = `Aging_Report_${agingScope === 'Sales' ? 'Receivable' : 'Payable'}`
-      csv = `Party,Current,30 Days,60 Days,90+ Days,Total\n`
+      csv = `Party,Current,30 Days,60 Days,90+ Days,Credit,Total\n`
       agingRows.forEach((r) => {
-        csv += `"${r.partyName}",${r.current.toFixed(2)},${r.days30.toFixed(2)},${r.days60.toFixed(2)},${r.days90.toFixed(2)},${r.total.toFixed(2)}\n`
+        csv += `"${r.partyName}",${r.current.toFixed(2)},${r.days30.toFixed(2)},${r.days60.toFixed(2)},${r.days90.toFixed(2)},${r.credit.toFixed(2)},${r.total.toFixed(2)}\n`
       })
-      csv += `TOTAL,${agingTotals.current.toFixed(2)},${agingTotals.days30.toFixed(2)},${agingTotals.days60.toFixed(2)},${agingTotals.days90.toFixed(2)},${agingTotals.total.toFixed(2)}\n`
+      csv += `TOTAL,${agingTotals.current.toFixed(2)},${agingTotals.days30.toFixed(2)},${agingTotals.days60.toFixed(2)},${agingTotals.days90.toFixed(2)},${agingTotals.credit.toFixed(2)},${agingTotals.total.toFixed(2)}\n`
     } else if (report === 'tax-register') {
       reportTitle = 'Tax_Register'
       csv = `Tax Rate,Sales Taxable,Sales VAT (Output),Purchase Taxable,Purchase VAT (Input)\n`
@@ -456,7 +457,10 @@ export function ReportsView() {
               <h2 className="text-lg font-bold text-[#1E293B]">
                 Accounts {agingScope === 'Sales' ? 'Receivable' : 'Payable'} Aging
               </h2>
-              <p className="text-xs text-[#7C7C7C] mt-0.5">As of {asOf}</p>
+              <p className="text-xs text-[#7C7C7C] mt-0.5">
+                As of {asOf} · credit notes and overpayments are shown in the Credit column and
+                deducted from Total
+              </p>
             </div>
             <div className="flex items-center gap-1 p-1 rounded-lg bg-[#F8F8F8] border border-[#EDEDED]">
               <button
@@ -489,6 +493,12 @@ export function ReportsView() {
                 <th className="px-4 py-3 text-right">30 Days</th>
                 <th className="px-4 py-3 text-right">60 Days</th>
                 <th className="px-4 py-3 text-right">90+ Days</th>
+                <th
+                  className="px-4 py-3 text-right"
+                  title="Unapplied credit notes and overpayments"
+                >
+                  Credit
+                </th>
                 <th className="px-4 py-3 text-right">Total</th>
               </tr>
             </thead>
@@ -507,6 +517,9 @@ export function ReportsView() {
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
                     {formatMoney(row.days90)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-[#0F766E]">
+                    {row.credit ? formatMoney(row.credit) : '—'}
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono font-semibold text-[#1E293B]">
                     {formatMoney(row.total)}
@@ -528,6 +541,9 @@ export function ReportsView() {
                 </td>
                 <td className="px-4 py-3 text-right font-mono">
                   {formatMoney(agingTotals.days90)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-[#0F766E]">
+                  {formatMoney(agingTotals.credit)}
                 </td>
                 <td className="px-4 py-3 text-right font-mono">{formatMoney(agingTotals.total)}</td>
               </tr>

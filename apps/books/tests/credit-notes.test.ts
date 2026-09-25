@@ -9,6 +9,7 @@ import {
 import { EMPTY_ACCOUNTS } from '../src/shared/chart'
 import {
   createCreditNoteJournal,
+  mentionsReference,
   repostPlanForPartialSettlement,
   reversalJournalRemoval,
   validateCreditNote,
@@ -145,21 +146,86 @@ describe('createCreditNoteJournal', () => {
         lineItem('acc-sales', 100, 0),
         lineItem('acc-consult', 200, 0, 'Professional Advisory Fees'),
       ],
-      // grandTotal exceeds subtotal + taxTotal by 2c (e.g. a round-off).
+      // The stored grandTotal is exactly 1c above subtotal + taxTotal: the
+      // rounding difference a stored total may carry, nothing more.
       subtotal: 300,
       taxTotal: 0,
-      grandTotal: 300.02,
+      grandTotal: 300.01,
     })
 
     const je = createCreditNoteJournal(creditNote, EMPTY_ACCOUNTS, customer)
     const salesItem = je.items.find((i) => i.accountId === 'acc-sales')
     const consultItem = je.items.find((i) => i.accountId === 'acc-consult')
     expect(salesItem?.debit).toBe(100)
-    // The last group absorbs the 0.02 difference.
-    expect(consultItem?.debit).toBe(200.02)
-    expect(je.totalDebit).toBe(300.02)
-    expect(je.totalCredit).toBe(300.02)
+    // The last group absorbs the 0.01 difference — and only that.
+    expect(consultItem?.debit).toBe(200.01)
+    expect(round2((consultItem?.debit || 0) - 200)).toBe(0.01)
+    expect(je.totalDebit).toBe(300.01)
+    expect(je.totalCredit).toBe(300.01)
     expect(allJournalsBalanced([je])).toBe(true)
+  })
+
+  it('nets every account to zero when a full credit note reverses a negative-subtotal invoice', () => {
+    // A rebate invoice: the line, the subtotal, the VAT and the grand total are
+    // all negative. The posting must still put the rebate on its income account
+    // (debit side) and the VAT on the VAT account at the stored amount, so the
+    // mirroring credit note nets both accounts to zero.
+    const items = [lineItem('acc-sales', -100)]
+    const invoice = mkInvoice({
+      id: 'inv-rebate',
+      invoiceNumber: 'INV-2026-600',
+      items,
+      subtotal: -100,
+      taxTotal: -15,
+      grandTotal: -115,
+      outstandingAmount: -115,
+    })
+    const creditNote = mkInvoice({
+      id: 'cn-rebate',
+      invoiceNumber: 'CN-2026-600',
+      creditNote: true,
+      items,
+      subtotal: -100,
+      taxTotal: -15,
+      grandTotal: -115,
+    })
+
+    const invoiceJournal = createSalesInvoiceJournal(invoice, EMPTY_ACCOUNTS, customer)
+    const creditNoteJournal = createCreditNoteJournal(creditNote, EMPTY_ACCOUNTS, customer)
+
+    expect(allJournalsBalanced([invoiceJournal, creditNoteJournal])).toBe(true)
+
+    // The invoice's own legs: rebate on the debit side, VAT at the stored
+    // amount, Receivable at the stored grandTotal.
+    const invoiceRevenue = invoiceJournal.items.find((i) => i.accountId === 'acc-sales')
+    const invoiceVat = invoiceJournal.items.find((i) => i.accountId === 'acc-vat')
+    expect(invoiceRevenue?.debit).toBe(100)
+    expect(invoiceRevenue?.credit).toBe(0)
+    expect(invoiceVat?.debit).toBe(15)
+    expect(invoiceVat?.credit).toBe(0)
+    const controlNet = (je: JournalEntry): number =>
+      round2(
+        je.items
+          .filter((i) => i.accountId === 'acc-ar')
+          .reduce((sum, i) => sum + i.debit - i.credit, 0),
+      )
+    expect(controlNet(invoiceJournal)).toBe(-115)
+    expect(controlNet(creditNoteJournal)).toBe(115)
+
+    const nets = new Map<string, number>()
+    for (const item of [...invoiceJournal.items, ...creditNoteJournal.items]) {
+      nets.set(item.accountId, round2((nets.get(item.accountId) || 0) + item.debit - item.credit))
+    }
+    expect([...nets.keys()].sort()).toEqual(['acc-ar', 'acc-sales', 'acc-vat'])
+    for (const [accountId, net] of nets) {
+      expect(net, `${accountId} must net to zero across the invoice and its credit note`).toBe(0)
+    }
+
+    // Ledger-first: both accounts end where they started.
+    const derived = computeAccountBalances(EMPTY_ACCOUNTS, [invoiceJournal, creditNoteJournal])
+    for (const account of derived) {
+      expect(account.balance, `${account.id} must end at zero`).toBe(0)
+    }
   })
 
   it('reverses a purchase bill: Dr AP / Cr expense / Cr VAT input', () => {
@@ -362,6 +428,24 @@ describe('repostPlanForPartialSettlement', () => {
     expect(plan.paidAmount).toBe(0)
     expect(plan.newOutstanding).toBe(1200)
     expect(plan.status).toBe('Draft')
+  })
+})
+
+describe('mentionsReference', () => {
+  it('returns false for an empty reference instead of scanning forever', () => {
+    // `indexOf('')` always finds the end of the string, so an empty reference
+    // used to loop without advancing (a hang, not merely a wrong answer).
+    expect(mentionsReference('System sales invoice posting for INV-2026-001', '')).toBe(false)
+    expect(mentionsReference('INV-2026-001 ', '')).toBe(false)
+    expect(mentionsReference('', '')).toBe(false)
+    expect(mentionsReference(undefined, '')).toBe(false)
+  })
+
+  it('still matches a whole reference and never a substring', () => {
+    expect(mentionsReference('Credit Note Reversal - INV-2026-001', 'INV-2026-001')).toBe(true)
+    expect(mentionsReference('Credit Note Reversal - INV-2026-0011', 'INV-2026-001')).toBe(false)
+    expect(mentionsReference('Credit Note Reversal - INV-2026-0011', 'INV-2026-0011')).toBe(true)
+    expect(mentionsReference('System posting for INV-2026-001', 'INV-2026-99')).toBe(false)
   })
 })
 

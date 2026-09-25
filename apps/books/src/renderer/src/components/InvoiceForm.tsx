@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { Plus, Trash2, ArrowLeft, Save, Printer } from 'lucide-react'
 import { useBooksStore } from '../store'
+import { DEFAULT_PAYMENT_TERMS_DAYS } from '../../../shared/chart'
 import type { InvoiceItem, InvoiceType } from '../../../shared/types'
-import { round2, calculateInvoiceTotals } from '../../../shared/accounting'
+import { round2, calculateInvoiceTotals, effectiveLineAmount } from '../../../shared/accounting'
 
 interface InvoiceFormProps {
   type: InvoiceType
@@ -30,10 +31,13 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
   const [partyId, setPartyId] = useState(existing?.partyId || relevantParties[0]?.id || '')
   const [date, setDate] = useState(existing?.date || new Date().toISOString().split('T')[0])
   const [dueDate, setDueDate] = useState(
-    existing?.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    existing?.dueDate ||
+      new Date(Date.now() + DEFAULT_PAYMENT_TERMS_DAYS * 86400000).toISOString().split('T')[0],
   )
   const [tenderRef, setTenderRef] = useState(existing?.tenderReference || '')
-  const [notes, setNotes] = useState(existing?.notes || 'Standard 30 days payment terms.')
+  const [notes, setNotes] = useState(
+    existing?.notes || `Payment due within ${DEFAULT_PAYMENT_TERMS_DAYS} days.`,
+  )
   const [discountTotal, setDiscountTotal] = useState(
     existing?.discountTotal !== undefined ? String(existing.discountTotal) : '',
   )
@@ -325,7 +329,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
                 <td className="px-4 py-2.5">
                   <select
                     value={it.taxRate}
-                    onChange={(e) => updateItem(it.id, 'taxRate', parseFloat(e.target.value))}
+                    onChange={(e) => updateItem(it.id, 'taxRate', parseFloat(e.target.value) || 0)}
                     className="w-full px-1.5 py-1.5 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none focus:border-[#1E293B]"
                   >
                     <option value={effectiveTaxRate}>{effectiveTaxRate}%</option>
@@ -340,12 +344,14 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
                     step="0.5"
                     placeholder="0"
                     value={it.discountRate ?? ''}
-                    onChange={(e) => updateItem(it.id, 'discountRate', parseFloat(e.target.value))}
+                    onChange={(e) =>
+                      updateItem(it.id, 'discountRate', parseFloat(e.target.value) || 0)
+                    }
                     className="w-full px-1.5 py-1.5 text-right bg-[#F8F8F8] border border-[#EDEDED] rounded focus:outline-none focus:border-[#1E293B]"
                   />
                 </td>
                 <td className="px-6 py-2.5 text-right font-semibold text-[#1E293B]">
-                  {data.settings.currencySymbol} {it.amount.toFixed(2)}
+                  {data.settings.currencySymbol} {effectiveLineAmount(it).toFixed(2)}
                 </td>
                 <td className="px-4 py-2.5 text-center">
                   <button

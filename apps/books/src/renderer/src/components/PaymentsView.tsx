@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Banknote, Plus, Trash2, ArrowDownLeft, ArrowUpRight, CheckCircle2 } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { round2 } from '../../../shared/accounting'
@@ -19,6 +19,17 @@ export function PaymentsView() {
   const [amounts, setAmounts] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const partySelectRef = useRef<HTMLSelectElement>(null)
+
+  useEffect(() => {
+    if (!showModal) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowModal(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    partySelectRef.current?.focus()
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showModal])
 
   const payments = useMemo(
     () =>
@@ -352,6 +363,7 @@ export function PaymentsView() {
                   </label>
                   <select
                     required
+                    ref={partySelectRef}
                     value={partyId}
                     onChange={(e) => handlePartyChange(e.target.value)}
                     className="w-full px-3 py-2 bg-[#F8F8F8] border border-[#EDEDED] rounded-lg focus:outline-none focus:border-[#1E293B]"
@@ -476,8 +488,8 @@ export function PaymentsView() {
                   >
                     {saving
                       ? mode === 'refund'
-                        ? 'Recording...'
-                        : 'Recording...'
+                        ? 'Recording refund…'
+                        : 'Recording payment…'
                       : mode === 'refund'
                         ? 'Record Refund'
                         : 'Record Payment'}

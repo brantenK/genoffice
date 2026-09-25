@@ -1,10 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { BOOKS_CHANNELS, type BooksApi } from '../shared/ipc'
+import { BOOKS_CHANNELS, type BooksApi, type SaveIntent } from '../shared/ipc'
 import type { BooksData, Invoice } from '../shared/types'
 
 const booksApi: BooksApi = {
   loadData: () => ipcRenderer.invoke(BOOKS_CHANNELS.loadData),
-  saveData: (data: BooksData) => ipcRenderer.invoke(BOOKS_CHANNELS.saveData, data),
+  // The intent is appended only when there is one: the two-argument call is the
+  // ordinary save and its exact shape is pinned by the IPC contract suite.
+  saveData: (data: BooksData, revision: number, intent?: SaveIntent) =>
+    intent === undefined
+      ? ipcRenderer.invoke(BOOKS_CHANNELS.saveData, data, revision)
+      : ipcRenderer.invoke(BOOKS_CHANNELS.saveData, data, revision, intent),
   exportToSheets: (reportName: string, csvContent: string) =>
     ipcRenderer.invoke(BOOKS_CHANNELS.exportToSheets, reportName, csvContent),
   openInPdf: (invoice: Invoice, companyName: string) =>

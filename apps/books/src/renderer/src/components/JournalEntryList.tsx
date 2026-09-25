@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useBooksStore } from '../store'
 import type { JournalEntryItem } from '../../../shared/types'
@@ -10,6 +10,17 @@ export function JournalEntryList() {
   const [showModal, setShowModal] = useState(false)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [remarks, setRemarks] = useState('')
+  const dateInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!showModal) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowModal(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    dateInputRef.current?.focus()
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showModal])
 
   const [items, setItems] = useState<JournalEntryItem[]>([
     {
@@ -75,7 +86,9 @@ export function JournalEntryList() {
     e.preventDefault()
     if (!isBalanced) return
 
-    await addJournalEntry({
+    // A rejected entry (closed period, store refusal) leaves the form as it
+    // was so the numbers are not lost; the desk banner carries the reason.
+    const posted = await addJournalEntry({
       entryNumber: '',
       date,
       items,
@@ -83,6 +96,7 @@ export function JournalEntryList() {
       totalCredit,
       remarks,
     })
+    if (!posted) return
 
     setShowModal(false)
     setRemarks('')
@@ -161,6 +175,7 @@ export function JournalEntryList() {
                   <label className="block font-semibold text-[#525252] mb-1">Posting Date</label>
                   <input
                     type="date"
+                    ref={dateInputRef}
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     className="w-full px-3 py-2 bg-[#F8F8F8] border border-[#EDEDED] rounded-lg focus:outline-none focus:border-[#1E293B]"

@@ -1,28 +1,61 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @layer base {
   :root {
-    --bg-page: #FBFBFB;
-    --bg-surface: #FFFFFF;
-    --border-color: #EDEDED;
-    --border-hover: #E2E2E2;
-    --text-main: #1E293B;
-    --text-muted: #7C7C7C;
-    --green-badge: #30A66D;
-    --green-bg: #F3FCF5;
-    --amber-badge: #DB7706;
-    --amber-bg: #FDFAED;
-    --red-badge: #E03636;
-    --red-bg: #FFF7F7;
-    --blue-badge: #007BE0;
-    --blue-bg: #F7FBFD;
+    --bg-page: #fbfbfb;
+    --bg-surface: #ffffff;
+    --border-color: #ededed;
+    --border-hover: #e2e2e2;
+    --text-main: #1e293b;
+    --text-muted: #7c7c7c;
+    --green-badge: #30a66d;
+    --green-bg: #f3fcf5;
+    --amber-badge: #db7706;
+    --amber-bg: #fdfaed;
+    --red-badge: #e03636;
+    --red-bg: #fff7f7;
+    --blue-badge: #007be0;
+    --blue-bg: #f7fbfd;
+    --scrollbar-thumb: #e2e2e2;
+    --scrollbar-thumb-hover: #c7c7c7;
   }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans',
+      'Droid Sans', 'Helvetica Neue', sans-serif;
     color: var(--text-main);
     background-color: var(--bg-page);
   }
+
+  /*
+   * The host page sets `select-none` on <body> (src/renderer/index.html, owned
+   * by another workstream), which makes every amount in the module
+   * unselectable and un-copyable. Text fields stay editable, so re-enabling
+   * selection here costs nothing and lets an accountant copy a figure.
+   */
+  input,
+  textarea,
+  select,
+  [contenteditable='true'] {
+    user-select: text;
+  }
+}
+
+/* Error banner entrance (no animation library in the renderer). */
+@keyframes books-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-banner-in {
+  animation: books-banner-in 160ms ease-out;
 }
 
 /* Frappe Books signature custom scrollbar */
@@ -34,9 +67,101 @@
   background: transparent;
 }
 .custom-scroll::-webkit-scrollbar-thumb {
-  background: #E2E2E2;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 .custom-scroll::-webkit-scrollbar-thumb:hover {
-  background: #C7C7C7;
+  background: var(--scrollbar-thumb-hover);
+}
+
+/*
+ * Print: the module runs inside a WebContentsView, so `window.print()` would
+ * otherwise emit the whole desk — sidebar, nav and both action bars. Only the
+ * open document (.print-sheet, inside .print-root) survives, sized to fit
+ * inside the page margins so the browser has no reason to add a second,
+ * nearly-empty page.
+ */
+@media print {
+  /* Paper is paper: the print surface uses fixed white/black regardless of the
+     on-screen theme, so these two live as tokens of their own. */
+  :root {
+    --print-surface: #ffffff;
+    --print-ink: #000000;
+  }
+
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: var(--print-surface);
+    overflow: visible;
+    height: auto;
+  }
+
+  body:has(.print-root) > * {
+    visibility: hidden;
+  }
+
+  .print-root,
+  .print-root * {
+    visibility: visible;
+  }
+
+  .print-root {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    height: auto;
+    padding: 0;
+    background: var(--print-surface);
+    overflow: visible;
+    backdrop-filter: none;
+  }
+
+  /* The sheet owns the page box; the dialog that wraps it is invisible. */
+  .print-root .print-chrome,
+  .print-root > .print-panel > .print-chrome {
+    display: none !important;
+  }
+
+  /*
+   * The sheet owns the page box. `.print-root > .print-panel` is the A4 sheet
+   * itself (the dialog's direct child in InvoicePrintModal), stripped of the
+   * on-screen card: `my-8`, `max-w-3xl`, `rounded-2xl` and `shadow-2xl` are
+   * utilities, so the reset has to name the element rather than rely on them.
+   */
+  .print-root > .print-panel {
+    max-width: none;
+    margin: 0;
+    box-shadow: none;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+    background: var(--print-surface);
+  }
+
+  .print-root .print-sheet {
+    padding: 0;
+    color: var(--print-ink);
+  }
+
+  .print-root .print-sheet table {
+    page-break-inside: auto;
+  }
+
+  .print-root .print-sheet tr,
+  .print-root .print-sheet img {
+    page-break-inside: avoid;
+  }
+
+  .print-root .print-sheet thead {
+    display: table-header-group;
+  }
+
+  .print-root .print-sheet tfoot {
+    display: table-footer-group;
+  }
 }

@@ -76,7 +76,9 @@ describe('F18 Ledger Posting & Store State Machine Suite', () => {
       const arItem = journal.items.find((i) => i.accountId === 'acc-ar')
       const salesItem = journal.items.find((i) => i.accountId === 'acc-sales')
       const consultItem = journal.items.find((i) => i.accountId === 'acc-consult')
-      const vatItem = journal.items.find((i) => i.accountId === 'acc-vat' || i.accountId === 'acc-vat-out')
+      const vatItem = journal.items.find(
+        (i) => i.accountId === 'acc-vat' || i.accountId === 'acc-vat-out',
+      )
 
       expect(arItem?.debit).toBe(115000)
       expect(arItem?.credit).toBe(0)
@@ -176,7 +178,9 @@ describe('F18 Ledger Posting & Store State Machine Suite', () => {
 
       const apItem = journal.items.find((i) => i.accountId === 'acc-ap')
       const matItem = journal.items.find((i) => i.accountId === 'acc-materials')
-      const vatInItem = journal.items.find((i) => i.accountId === 'acc-vat-in' || i.accountId === 'acc-vat')
+      const vatInItem = journal.items.find(
+        (i) => i.accountId === 'acc-vat-in' || i.accountId === 'acc-vat',
+      )
 
       expect(apItem?.credit).toBe(69000)
       expect(apItem?.debit).toBe(0)
@@ -283,7 +287,9 @@ describe('F18 Ledger Posting & Store State Machine Suite', () => {
       })
 
       const journalsBeforePosting = useBooksStore.getState().data.journalEntries.length
-      const arBefore = useBooksStore.getState().data.accounts.find((a) => a.id === 'acc-ar')!.balance
+      const arBefore = useBooksStore
+        .getState()
+        .data.accounts.find((a) => a.id === 'acc-ar')!.balance
 
       // Now approve/transition to Unpaid
       await store.saveInvoice({
@@ -459,7 +465,9 @@ describe('F18 Ledger Posting & Store State Machine Suite', () => {
 
       // Confirm posted
       let intermediate = useBooksStore.getState().data
-      expect(intermediate.accounts.find((a) => a.id === 'acc-ar')!.balance).toBe(round2(baselineAr + 28750))
+      expect(intermediate.accounts.find((a) => a.id === 'acc-ar')!.balance).toBe(
+        round2(baselineAr + 28750),
+      )
 
       // Delete invoice
       await store.deleteInvoice('inv-to-delete')

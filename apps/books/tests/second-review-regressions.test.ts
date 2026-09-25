@@ -3,11 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import {
-  allJournalsBalanced,
-  accountsMatchJournals,
-  round2,
-} from '../src/shared/accounting'
+import { allJournalsBalanced, accountsMatchJournals, round2 } from '../src/shared/accounting'
 import { planImportCoverage } from '../src/shared/payments'
 import {
   importBankStatement,

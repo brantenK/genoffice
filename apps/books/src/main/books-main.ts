@@ -1,11 +1,38 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+  watch,
+  type FSWatcher,
+} from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { tmpdir, userInfo } from 'node:os'
 import { app, ipcMain, WebContentsView, type WebContents } from 'electron'
-import { BOOKS_CHANNELS } from '../shared/ipc'
-import type { BooksData, CompanySettings, Invoice } from '../shared/types'
+import {
+  BOOKS_CHANNELS,
+  validateBooksData,
+  validateCsvString,
+  validateInvoicePayload,
+  validateNonEmptyString,
+  validateRestoreName,
+  validateRevision,
+  validateSaveIntent,
+  type LoadDataResult,
+  type SaveDataResult,
+} from '../shared/ipc'
+import type { BooksData, BooksDataEnvelope, CompanySettings, Invoice } from '../shared/types'
 import { validateClosedPeriodMutation } from '../shared/closing'
-import { exportBackup, listBackups, pruneBackups, restoreBackup } from './backup-restore'
+import {
+  exportBackup,
+  listBackups,
+  listSafetyCopies,
+  pruneBackups,
+  restoreBackup,
+} from './backup-restore'
 
 // Pure books-core (no electron imports): schema constants, ledger-first
 // migration/normalization, store IO and the single sales-invoice posting
@@ -13,13 +40,17 @@ import { exportBackup, listBackups, pruneBackups, restoreBackup } from './backup
 // books-main keep working unchanged.
 export * from './books-core'
 import {
+  BOOKS_STORE_FILENAME,
   computeSettlementSuggestions,
   executeReconciliationCore,
   importBankStatement,
+  isBooksStoreFile,
   migrateAndValidateBooks,
   readBooksStore,
+  readBooksStoreStrict,
   setStoreWriteObserver,
   writeBooksStore,
+  type BooksWriteIntent,
 } from './books-core'
 
 export * from '../shared/accounting'
@@ -35,6 +66,7 @@ let booksFileWatcher: FSWatcher | null = null
 let lastBroadcastJson = ''
 let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let watchedBooksFilePath = ''
+let watchedBooksDir = ''
 
 // Every pure-core write (CRM/Tenders included) must refresh live Books
 // renderers. Renderer-originated writes carry an exclude sender through
@@ -106,18 +138,59 @@ export function broadcastBooksData(data: BooksData, excludeSender?: WebContents)
   }
 }
 
+/**
+ * The OS user stamped on audit entries whose writer could not name one. The
+ * renderer has no identity to offer, so without this the audit log is
+ * anonymous — and an unattributable ledger is not evidence.
+ */
+let auditActor: string | undefined
+
+export function setAuditActor(actor: string | undefined): void {
+  auditActor = actor
+}
+
+function resolveAuditActor(): string {
+  if (auditActor !== undefined) return auditActor
+  try {
+    auditActor = userInfo().username || ''
+  } catch {
+    auditActor = ''
+  }
+  return auditActor
+}
+
+/**
+ * Stamps the OS user onto every audit entry that arrived without one, in the
+ * single place every write passes through — so entries created by the
+ * renderer (which knows no OS identity) are attributable too.
+ */
+function stampAuditActors(data: BooksDataEnvelope, actor: string): BooksDataEnvelope {
+  if (!actor) return data
+  const auditLog = data.auditLog
+  if (!Array.isArray(auditLog) || auditLog.length === 0) return data
+  if (!auditLog.some((entry) => !entry.actor || !String(entry.actor).trim())) return data
+  return {
+    ...data,
+    auditLog: auditLog.map((entry) =>
+      !entry.actor || !String(entry.actor).trim() ? { ...entry, actor } : entry,
+    ),
+  }
+}
+
 export function persistBooksData(
   baseDirOrPath: string,
   data: unknown,
   excludeSender?: WebContents,
-): void {
+  intent: BooksWriteIntent = {},
+): SaveDataResult {
   const validated = migrateAndValidateBooks(data)
+  const actor = resolveAuditActor()
   // writeBooksStore triggers the core write observer above. Pin the sender
   // only for this synchronous atomic write so the observer emits exactly one
   // data-changed event to peers, never an echo plus a duplicate broadcast.
   coreWriteExcludeSender = excludeSender
   try {
-    writeBooksStore(baseDirOrPath, validated)
+    return writeBooksStore(baseDirOrPath, stampAuditActors(validated, actor), intent)
   } finally {
     coreWriteExcludeSender = undefined
   }
@@ -125,48 +198,56 @@ export function persistBooksData(
 
 export function startBooksStoreWatcher(targetPath?: string): void {
   const filePath = targetPath || getStoragePath()
-  const dir = filePath.replace(/[/\\][^/\\]+$/, '')
+  const dir = dirname(filePath)
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
 
   if (booksFileWatcher) {
-    if (watchedBooksFilePath === filePath) {
+    // Same directory, different file: the existing watcher covers it, because
+    // it only reacts to the one store name it was started for. Closing it and
+    // reopening would race the events of the write being made right now.
+    if (dir === watchedBooksDir) {
+      watchedBooksFilePath = filePath
       return
     }
     stopBooksStoreWatcher()
   }
 
   watchedBooksFilePath = filePath
+  watchedBooksDir = dir
   try {
     booksFileWatcher = watch(dir, (_eventType, filename) => {
-      const isBooksFile = !filename || filename.includes('books-data.json')
-      const isNotTmp = !filename || !filename.endsWith('.tmp')
-      if (isBooksFile && isNotTmp) {
-        if (watchDebounceTimer) clearTimeout(watchDebounceTimer)
-        watchDebounceTimer = setTimeout(() => {
-          try {
-            if (existsSync(filePath)) {
-              const currentData = readBooksStore(filePath)
-              const currentJson = JSON.stringify(currentData)
-              if (currentJson !== lastBroadcastJson) {
-                lastBroadcastJson = currentJson
-                broadcastBooksData(currentData)
-              }
-            }
-          } catch (err) {
-            console.warn('books-main: error in file watcher handler:', err)
+      // Only the store itself counts. The forensic copies, the safety copy and
+      // the atomic-write temporaries all live in this directory and all used
+      // to match the old `includes('books-data.json')` test, so an unreadable
+      // store fed its own recovery copies back in as fresh "changes".
+      const watchName = typeof filename === 'string' ? filename : ''
+      if (watchName && !isBooksStoreFile(watchName, watchedBooksFilePath)) return
+      if (watchDebounceTimer) clearTimeout(watchDebounceTimer)
+      watchDebounceTimer = setTimeout(() => {
+        try {
+          if (!watchedBooksFilePath || !existsSync(watchedBooksFilePath)) return
+          const read = readBooksStoreStrict(watchedBooksFilePath, { forensic: false })
+          if (!read.ok || !read.data) return
+          const currentJson = JSON.stringify(read.data)
+          if (currentJson !== lastBroadcastJson) {
+            lastBroadcastJson = currentJson
+            broadcastBooksData(read.data)
           }
-        }, 100)
-      }
+        } catch (err) {
+          console.warn('books-main: error in file watcher handler:', err)
+        }
+      }, 100)
     })
   } catch (err) {
-    console.warn('books-main: could not start books-data.json watcher:', err)
+    console.warn(`books-main: could not start ${BOOKS_STORE_FILENAME} watcher:`, err)
   }
 }
 
 export function stopBooksStoreWatcher(): void {
   watchedBooksFilePath = ''
+  watchedBooksDir = ''
   if (watchDebounceTimer) {
     clearTimeout(watchDebounceTimer)
     watchDebounceTimer = null
@@ -206,13 +287,13 @@ function getStoragePath(): string {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  return join(dir, 'books-data.json')
+  return join(dir, BOOKS_STORE_FILENAME)
 }
 
 /** Backups directory next to the live books-data.json (created on demand). */
 function getBackupsDir(): string {
   const booksDataPath = getStoragePath()
-  const dir = booksDataPath.replace(/[/\\][^/\\]+$/, '')
+  const dir = dirname(booksDataPath)
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
@@ -223,6 +304,56 @@ export function configureBooksRuntime(config: BooksRuntimeConfig): void {
   runtime = { ...runtime, ...config }
 }
 
+/** A safe file-name stem for a generated report or invoice file. */
+function safeFileStem(raw: unknown, fallback: string): string {
+  const stem = String(raw ?? '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 80)
+  return stem || fallback
+}
+
+/** Writes generated output through a temporary file so readers never see a
+ *  half-written report, and so two windows cannot interleave their bytes. */
+function writeGeneratedFile(targetPath: string, content: string | Uint8Array): void {
+  const dir = dirname(targetPath)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  const tmp = `${targetPath}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`
+  try {
+    writeFileSync(tmp, content)
+    renameSync(tmp, targetPath)
+  } catch (err) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp)
+    } catch {}
+    throw err
+  }
+}
+
+/**
+ * The directory one generated export is written into.
+ *
+ * The file NAME stays exactly what it always was, but every export gets its own
+ * directory carrying a millisecond stamp plus a process-monotonic sequence —
+ * so the path is unique because of the stamp, never because `existsSync` said
+ * the name was free. Checking the filesystem only sees the files still in
+ * place: once the shell renamed the export, or the user moved it, the old name
+ * was free again and the next export handed the shell a path it already had
+ * open in a tab.
+ */
+let generatedExportSequence = 0
+
+function uniqueGeneratedDir(): string {
+  generatedExportSequence += 1
+  return join(tmpdir(), 'zano-books-exports', `${Date.now()}-${generatedExportSequence}`)
+}
+
+/** A path no other export of this or any later run can be holding. */
+function uniqueGeneratedPath(stem: string, extension: string): string {
+  return join(uniqueGeneratedDir(), `${stem}${extension}`)
+}
+
 export function registerBooksIpc(): void {
   if (ipcRegistered) return
   ipcRegistered = true
@@ -230,50 +361,93 @@ export function registerBooksIpc(): void {
   // Start file watcher for external changes
   startBooksStoreWatcher()
 
-  const handleGetData = (_e: any) => {
+  // Load persistence. The result is discriminated so the renderer can tell
+  // "no books yet" (first run) from "the books exist but could not be read",
+  // which must never be answered with an empty ledger: saving that would
+  // overwrite the user's real books.
+  ipcMain.handle(BOOKS_CHANNELS.loadData, (_e): LoadDataResult => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
     try {
-      const p = getStoragePath()
-      if (existsSync(p)) {
-        return readBooksStore(p)
+      const read = readBooksStoreStrict(getStoragePath())
+      if (read.ok) return { ok: true, readable: true, data: read.data }
+      console.error(`[books-main] Could not read the books store: ${read.error}`)
+      // The forensic copy is the user's way back to the data, so the path goes
+      // with the diagnosis.
+      return {
+        ok: true,
+        readable: false,
+        data: null,
+        error: read.error,
+        ...(read.forensicPath ? { forensicPath: read.forensicPath } : {}),
       }
-      return null
-    } catch {
-      return null
-    }
-  }
-
-  // Load persistence (support both loadData and getData alias)
-  ipcMain.handle(BOOKS_CHANNELS.loadData, handleGetData)
-  ipcMain.handle('books:get-data', handleGetData)
-
-  // Save persistence
-  ipcMain.handle(BOOKS_CHANNELS.saveData, (_e, data: BooksData) => {
-    if (_e?.sender) registerBooksWebContents(_e.sender)
-    try {
-      const p = getStoragePath()
-      const previous = existsSync(p) ? readBooksStore(p) : undefined
-      if (previous) {
-        const guard = validateClosedPeriodMutation(previous, data)
-        if (!guard.ok) {
-          console.warn(`[books-main] Rejected raw save: ${guard.error}`)
-          return false
-        }
+    } catch (err: any) {
+      return {
+        ok: false,
+        readable: false,
+        data: null,
+        error: err?.message || 'Failed to load books data',
       }
-      persistBooksData(p, data, _e?.sender)
-      return true
-    } catch {
-      return false
     }
   })
 
+  // Save persistence. The payload carries the revision the client last loaded,
+  // so a stale snapshot is rejected instead of clobbering a newer ledger. The
+  // optional third argument is the client's explicit statement about a save
+  // the user made on purpose that leaves the books empty (deleting the last
+  // record); anything else it might carry is refused before the write.
+  ipcMain.handle(
+    BOOKS_CHANNELS.saveData,
+    (_e, data: unknown, revision: unknown, intent: unknown): SaveDataResult => {
+      if (_e?.sender) registerBooksWebContents(_e.sender)
+      const validated = validateBooksData(data)
+      if (!validated.ok) {
+        console.warn(`[books-main] Rejected raw save: ${validated.error}`)
+        return { ok: false, error: validated.error }
+      }
+      const revisionGuard = validateRevision(revision)
+      if (!revisionGuard.ok) return { ok: false, error: revisionGuard.error }
+      const intentGuard = validateSaveIntent(intent)
+      if (!intentGuard.ok) {
+        console.warn(`[books-main] Rejected raw save: ${intentGuard.error}`)
+        return { ok: false, error: intentGuard.error }
+      }
+
+      try {
+        const p = getStoragePath()
+        const read = readBooksStoreStrict(p, { forensic: false })
+        if (!read.ok) {
+          return { ok: false, error: `Could not open your books: ${read.error}` }
+        }
+        const previous = read.data
+        if (previous) {
+          const guard = validateClosedPeriodMutation(previous, validated.value)
+          if (!guard.ok) {
+            console.warn(`[books-main] Rejected raw save: ${guard.error}`)
+            return { ok: false, error: guard.error || 'The change was rejected' }
+          }
+        }
+        const outcome = persistBooksData(p, validated.value, _e?.sender, {
+          expectedRevision: revisionGuard.value,
+          ...intentGuard.value,
+        })
+        return outcome
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Failed to save books data' }
+      }
+    },
+  )
+
   // Cross-App: Export to Sheets
-  ipcMain.handle(BOOKS_CHANNELS.exportToSheets, (_e, reportName: string, csvContent: string) => {
+  ipcMain.handle(BOOKS_CHANNELS.exportToSheets, (_e, reportName: unknown, csvContent: unknown) => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
+    const csv = validateCsvString(csvContent)
+    if (!csv.ok) return { ok: false, error: csv.error }
     try {
-      const safeName = (reportName || 'Financial_Report').replace(/[^a-zA-Z0-9_-]/g, '_')
-      const targetPath = join(tmpdir(), `${safeName}_${Date.now()}.csv`)
-      writeFileSync(targetPath, csvContent, 'utf8')
+      const safeName = safeFileStem(reportName, 'Financial_Report')
+      // The stamp stays in the file name (callers and the shell both expect it
+      // there); the per-export directory is what makes the path unique.
+      const targetPath = uniqueGeneratedPath(`${safeName}_${Date.now()}`, '.csv')
+      writeGeneratedFile(targetPath, csv.value)
 
       if (runtime.openGeneratedPath) {
         runtime.openGeneratedPath(targetPath)
@@ -285,32 +459,47 @@ export function registerBooksIpc(): void {
   })
 
   // Cross-App: Print & Sign in PDF (real PDF via pdf-lib)
-  ipcMain.handle(BOOKS_CHANNELS.openInPdf, async (_e, invoice: Invoice, _companyName: string) => {
+  ipcMain.handle(BOOKS_CHANNELS.openInPdf, async (_e, invoice: unknown, companyName: unknown) => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
-    try {
-      const invoiceNo = (invoice?.invoiceNumber || 'INV-0001').replace(/[^a-zA-Z0-9_-]/g, '_')
-      const targetPath = join(tmpdir(), `Tax_Invoice_${invoiceNo}.pdf`)
+    const validated = validateInvoicePayload(invoice)
+    if (!validated.ok) return { ok: false, error: validated.error }
+    const invoiceNo = safeFileStem(validated.value.invoiceNumber, 'INV-0001')
+    // One directory per export: two exports of the same invoice number — or of
+    // the same number after the shell renamed the first file — never share a
+    // path, and the file name stays the one the shell titles the tab with.
+    const targetPath = uniqueGeneratedPath(`Tax_Invoice_${invoiceNo}`, '.pdf')
 
-      // Company details come from the books store; fall back to the passed
-      // name only when the store is unreachable.
-      let settings: CompanySettings
-      try {
-        settings = readBooksStore(getStoragePath()).settings
-      } catch {
+    // Company details come from the books store; fall back to the passed
+    // name only when the store is unreachable.
+    let settings: CompanySettings
+    try {
+      const stored = readBooksStoreStrict(getStoragePath(), { forensic: false })
+      if (!stored.ok || !stored.data) {
         settings = {
           ...DEFAULT_BOOK_SETTINGS,
-          companyName: _companyName || DEFAULT_BOOK_SETTINGS.companyName,
+          companyName:
+            typeof companyName === 'string' && companyName.trim()
+              ? companyName
+              : DEFAULT_BOOK_SETTINGS.companyName,
         }
+      } else {
+        settings = stored.data.settings
       }
-
-      const result = await writeInvoicePdf(invoice, settings, targetPath)
-      if (result.ok && runtime.openGeneratedPath) {
-        runtime.openGeneratedPath(targetPath)
+    } catch {
+      settings = {
+        ...DEFAULT_BOOK_SETTINGS,
+        companyName:
+          typeof companyName === 'string' && companyName.trim()
+            ? companyName
+            : DEFAULT_BOOK_SETTINGS.companyName,
       }
-      return result
-    } catch (e: any) {
-      return { ok: false, error: e?.message || 'Failed to open invoice in PDF' }
     }
+
+    const result = await writeInvoicePdf(validated.value, settings, targetPath)
+    if (result.ok && runtime.openGeneratedPath) {
+      runtime.openGeneratedPath(targetPath)
+    }
+    return result
   })
 
   // Cross-App: Open CRM
@@ -334,14 +523,19 @@ export function registerBooksIpc(): void {
   })
 
   // Bank reconciliation: Import CSV
-  ipcMain.handle(BOOKS_CHANNELS.importBankStatementCsv, (_e, csvContent: string) => {
+  ipcMain.handle(BOOKS_CHANNELS.importBankStatementCsv, (_e, csvContent: unknown) => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
+    const csv = validateCsvString(csvContent)
+    if (!csv.ok) return { ok: false, error: csv.error }
     try {
       const p = getStoragePath()
-      const result = importBankStatement({ booksDataPath: p, csvContent })
-      if (result.ok) {
-        const freshData = readBooksStore(p)
-        broadcastBooksData(freshData)
+      const result = importBankStatement({ booksDataPath: p, csvContent: csv.value })
+      // Only a landed import moved the books: a CSV with nothing valid in it,
+      // or one whose lines were all duplicates, wrote nothing and has nothing
+      // to announce.
+      if (result.ok && (result.importedCount ?? 0) > 0) {
+        const read = readBooksStoreStrict(p, { forensic: false })
+        if (read.ok && read.data) broadcastBooksData(read.data)
       }
       return result
     } catch (err: any) {
@@ -352,14 +546,22 @@ export function registerBooksIpc(): void {
   // Bank reconciliation: Reconcile transaction with invoice
   ipcMain.handle(
     BOOKS_CHANNELS.reconcileTransaction,
-    (_e, transactionId: string, invoiceId: string) => {
+    (_e, transactionId: unknown, invoiceId: unknown) => {
       if (_e?.sender) registerBooksWebContents(_e.sender)
+      const txGuard = validateNonEmptyString(transactionId, 'transactionId')
+      if (!txGuard.ok) return { ok: false, error: txGuard.error }
+      const invoiceGuard = validateNonEmptyString(invoiceId, 'invoiceId')
+      if (!invoiceGuard.ok) return { ok: false, error: invoiceGuard.error }
       try {
         const p = getStoragePath()
-        const result = executeReconciliation({ booksDataPath: p, transactionId, invoiceId })
+        const result = executeReconciliation({
+          booksDataPath: p,
+          transactionId: txGuard.value,
+          invoiceId: invoiceGuard.value,
+        })
         if (result.ok) {
-          const freshData = readBooksStore(p)
-          broadcastBooksData(freshData)
+          const read = readBooksStoreStrict(p, { forensic: false })
+          if (read.ok && read.data) broadcastBooksData(read.data)
         }
         return result
       } catch (err: any) {
@@ -372,9 +574,11 @@ export function registerBooksIpc(): void {
   ipcMain.handle(BOOKS_CHANNELS.getSettlementSuggestions, (_e) => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
     try {
-      const p = getStoragePath()
-      const data = readBooksStore(p)
-      return computeSettlementSuggestions(data)
+      const read = readBooksStoreStrict(getStoragePath(), { forensic: false })
+      // A store that cannot be read yields no suggestions rather than
+      // suggestions computed from a fabricated empty ledger.
+      if (!read.ok || !read.data) return []
+      return computeSettlementSuggestions(read.data)
     } catch {
       return []
     }
@@ -397,26 +601,39 @@ export function registerBooksIpc(): void {
     }
   })
 
-  // Backup & Restore: list available backups (newest first)
+  // Backup & Restore: list the restore points (newest first) — the backups the
+  // user made, plus the pre-restore safety copies this app writes before every
+  // restore. They are labelled by kind so the two never blur: a safety copy is
+  // the undo of a restore, and it is restorable in turn.
   ipcMain.handle(BOOKS_CHANNELS.listBackups, (_e) => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
     try {
-      return listBackups(getBackupsDir())
+      const dir = getBackupsDir()
+      return [...listBackups(dir), ...listSafetyCopies(dir)].sort((a, b) =>
+        b.modifiedAt.localeCompare(a.modifiedAt),
+      )
     } catch {
       return []
     }
   })
 
-  // Backup & Restore: restore a backup by name (resolved inside the backups
-  // dir — the renderer never supplies a raw path)
-  ipcMain.handle(BOOKS_CHANNELS.restoreBackup, (_e, backupName: string) => {
+  // Backup & Restore: restore a backup (or a pre-restore safety copy) by name.
+  // The name is resolved inside the backups dir — the renderer never supplies a
+  // raw path — and only ever to a plain file name matching one of the two
+  // restore-point shapes this app writes.
+  ipcMain.handle(BOOKS_CHANNELS.restoreBackup, (_e, backupName: unknown) => {
     if (_e?.sender) registerBooksWebContents(_e.sender)
+    const nameGuard = validateRestoreName(backupName)
+    if (!nameGuard.ok) {
+      // A name that tries to escape the backups directory never resolves to a
+      // file inside it, so it is reported exactly like a missing one. Anything
+      // else is simply not a restore-point name.
+      const escapes = typeof backupName === 'string' && /(^|[\\/])\.\.([\\/]|$)/.test(backupName)
+      return { ok: false, error: escapes ? 'Backup file not found' : 'Invalid backup name' }
+    }
     try {
       const p = getStoragePath()
-      const name = basename(String(backupName || ''))
-      if (!/^books-backup-.*\.json$/.test(name)) {
-        return { ok: false, error: 'Invalid backup name' }
-      }
+      const name = basename(nameGuard.value)
       const result = restoreBackup(join(getBackupsDir(), name), p)
       if (result.ok && result.restoredData) {
         // restoreBackup already made one atomic audited commit (including a
@@ -434,7 +651,8 @@ export function registerBooksIpc(): void {
 /**
  * Generates a real PDF for an invoice via buildInvoicePdf and writes it to
  * disk. Exported so tests can exercise the openInPdf generation path without
- * an electron runtime.
+ * an electron runtime. The write is atomic: a partial file must never be
+ * opened, and a concurrent export must not interleave with this one.
  */
 export async function writeInvoicePdf(
   invoice: Invoice,
@@ -443,7 +661,7 @@ export async function writeInvoicePdf(
 ): Promise<{ ok: boolean; path?: string; error?: string }> {
   try {
     const pdfBytes = await buildInvoicePdf(invoice, settings)
-    writeFileSync(targetPath, pdfBytes)
+    writeGeneratedFile(targetPath, pdfBytes)
     return { ok: true, path: targetPath }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'Failed to generate invoice PDF' }
@@ -467,6 +685,8 @@ export function executeReconciliation({
   invoiceId?: string
   invoiceNumber?: string
   settledAmount?: number
+  /** Cash on the line the invoice could not absorb; held as a party credit. */
+  unappliedAmount?: number
   remainingOutstanding?: number
   invoiceStatus?: string
   partyBalance?: number

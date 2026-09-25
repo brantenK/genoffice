@@ -12,7 +12,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
-import type { SettlementSuggestion } from '../../../shared/types'
+import { computeSettlementSuggestions } from '../../../shared/settlement'
 
 export function BankingView() {
   const { data, importBankStatementCsv, reconcileTransaction } = useBooksStore()
@@ -25,85 +25,15 @@ export function BankingView() {
   const [isImporting, setIsImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Current ledger account for acc-bank
+  // Current ledger account for acc-bank. No fallback figure: an account that
+  // is not in the chart shows a dash rather than a made-up balance.
   const bankAccount = accounts.find((a) => a.id === 'acc-bank')
-  const currentBalance = bankAccount ? bankAccount.balance : 485250
+  const currentBalance = bankAccount ? bankAccount.balance : null
 
-  // Compute settlement suggestions from current store state
-  const suggestions: SettlementSuggestion[] = useMemo(() => {
-    const unreconciledTx = bankTransactions.filter((t) => !t.reconciled)
-    const openInvoices = invoices.filter((i) => i.status !== 'Paid' && i.outstandingAmount > 0)
-    const res: SettlementSuggestion[] = []
-
-    for (const tx of unreconciledTx) {
-      const isDeposit = tx.amount > 0
-      const targetType = isDeposit ? 'Sales' : 'Purchase'
-      const targetAmount = Math.abs(tx.amount)
-
-      const candidates = openInvoices.filter((i) => i.type === targetType)
-
-      for (const inv of candidates) {
-        const amountMatches = Math.abs(inv.outstandingAmount - targetAmount) < 0.01
-        if (!amountMatches) continue
-
-        const textToSearch = `${tx.description} ${tx.reference || ''}`.toLowerCase()
-        const invNoMatch = Boolean(
-          inv.invoiceNumber && textToSearch.includes(inv.invoiceNumber.toLowerCase()),
-        )
-        const tenderMatch = Boolean(
-          inv.tenderReference && textToSearch.includes(inv.tenderReference.toLowerCase()),
-        )
-
-        const stopWords = new Set([
-          'city',
-          'of',
-          'the',
-          'and',
-          'dept',
-          'ltd',
-          'pty',
-          'inc',
-          'corp',
-          'co',
-        ])
-        const partyTokens = (inv.partyName || '')
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .filter((t) => t.length >= 4 && !stopWords.has(t))
-
-        const partyMatch =
-          Boolean(inv.partyName && textToSearch.includes(inv.partyName.toLowerCase())) ||
-          (partyTokens.length > 0 && partyTokens.some((t) => textToSearch.includes(t)))
-
-        let confidence: 'HIGH' | 'MEDIUM' = 'MEDIUM'
-        let reason = 'Exact amount matches outstanding invoice'
-
-        if (invNoMatch) {
-          confidence = 'HIGH'
-          reason = `Exact amount match and contains invoice number: ${inv.invoiceNumber}`
-        } else if (tenderMatch) {
-          confidence = 'HIGH'
-          reason = `Exact amount match and contains tender reference: ${inv.tenderReference}`
-        } else if (partyMatch) {
-          confidence = 'HIGH'
-          reason = `Exact amount match and contains counterparty name: ${inv.partyName}`
-        }
-
-        res.push({
-          transactionId: tx.id,
-          invoiceId: inv.id,
-          invoiceNumber: inv.invoiceNumber,
-          partyName: inv.partyName,
-          invoiceType: inv.type,
-          amount: targetAmount,
-          confidence,
-          reason,
-        })
-      }
-    }
-
-    return res
-  }, [bankTransactions, invoices])
+  // Settlement suggestions come from the shared settlement engine — the same
+  // one the main process runs — so the UI can never propose a match the
+  // backend would refuse, and it sees the partial-payment matches too.
+  const suggestions = useMemo(() => computeSettlementSuggestions(data), [data])
 
   const unreconciledCount = bankTransactions.filter((t) => !t.reconciled).length
   const reconciledCount = bankTransactions.filter((t) => t.reconciled).length
@@ -169,10 +99,21 @@ export function BankingView() {
     reader.readAsText(file)
   }
 
-  // Helper button: Load standard sample FNB statement
+  /**
+   * Dev-only helper: load a sample FNB statement. It fabricates statement
+   * lines (and invoice numbers when the ledger has none) and pushes them
+   * straight through the real import channel, so it is compiled out of
+   * production builds. That render gate is the only defence, and correctly so:
+   * `books:import-bank-statement-csv` is the channel real statements arrive
+   * through, and nothing at the handler can tell a fabricated statement from a
+   * real one — gating it on the build type would break genuine imports.
+   */
+  const DEV_SAMPLE_STATEMENT = import.meta.env.DEV
   const handleLoadSampleStatement = async () => {
+    if (!DEV_SAMPLE_STATEMENT) return
     setIsImporting(true)
     // Find open invoices to craft matched realistic transactions
+
     const wonDealInv = invoices.find(
       (i) => i.crmDealId || i.partyName.toLowerCase().includes('helios'),
     )
@@ -213,9 +154,18 @@ export function BankingView() {
     try {
       const res = await reconcileTransaction(txId, invId)
       if (res.ok) {
-        showToast(
-          `Reconciled transaction with Invoice ${invNum}. Invoice marked Paid and Journal Entry posted.`,
-        )
+        // Report what actually happened: a line can settle part of an invoice,
+        // clear it, or leave an unapplied credit, and the invoice is only
+        // marked Paid in the first of those.
+        const settled = res.settledAmount ?? 0
+        const unapplied = res.unappliedAmount ?? 0
+        const outcome: string[] = [`Reconciled the transaction with Invoice ${invNum}`]
+        if (settled > 0) outcome.push(`${formatMoney(settled)} settled`)
+        if (res.invoiceStatus === 'Paid') outcome.push('invoice marked Paid')
+        else if (settled > 0) outcome.push(`invoice left ${res.invoiceStatus ?? 'open'}`)
+        if (unapplied > 0) outcome.push(`${formatMoney(unapplied)} unapplied, held as a credit`)
+        outcome.push('journal posted')
+        showToast(outcome.join(' — '))
       } else {
         showToast(`Reconciliation failed: ${res.error || 'Unknown error'}`)
       }
@@ -271,7 +221,7 @@ export function BankingView() {
                 Current Ledger Balance
               </div>
               <div className="text-2xl font-bold text-[#1E293B] mt-0.5">
-                {formatMoney(currentBalance)}
+                {currentBalance === null ? '—' : formatMoney(currentBalance)}
               </div>
             </div>
 
@@ -311,15 +261,17 @@ export function BankingView() {
             <span>{isImporting ? 'Importing...' : 'Import Bank Statement (CSV)'}</span>
           </button>
 
-          <button
-            onClick={handleLoadSampleStatement}
-            disabled={isImporting}
-            title="Inject realistic FNB statement matching CRM won deals and Tenders milestones"
-            className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-[#1E293B] bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-xs"
-          >
-            <Zap className="w-3.5 h-3.5 text-[#DB7706]" />
-            <span>Load Sample FNB Statement</span>
-          </button>
+          {DEV_SAMPLE_STATEMENT && (
+            <button
+              onClick={handleLoadSampleStatement}
+              disabled={isImporting}
+              title="Development only: inject a sample FNB statement matching CRM won deals and Tenders milestones"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-[#1E293B] bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-xs"
+            >
+              <Zap className="w-3.5 h-3.5 text-[#DB7706]" />
+              <span>Load Sample FNB Statement (dev)</span>
+            </button>
+          )}
         </div>
 
         <div className="text-xs text-[#7C7C7C]">
@@ -485,8 +437,9 @@ export function BankingView() {
                         No bank transactions found
                       </div>
                       <p className="text-xs text-[#94A3B8] max-w-sm">
-                        Import a bank statement CSV or click "Load Sample FNB Statement" to see
-                        transactions and automated settlement suggestions.
+                        Import a bank statement CSV to see transactions and automated settlement
+                        suggestions.
+                        {DEV_SAMPLE_STATEMENT && ' In development you can also load a sample.'}
                       </p>
                     </div>
                   </td>

@@ -13,7 +13,8 @@
     "verify:workflows": "tsx ../../tools/verify-suite-workflows.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json"
   },
   "dependencies": {
     "clsx": "^2.1.1",

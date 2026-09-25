@@ -55,6 +55,7 @@ export function AuditLogView() {
                 <th className="px-6 py-3">Timestamp</th>
                 <th className="px-6 py-3">Action</th>
                 <th className="px-6 py-3">Summary</th>
+                <th className="px-6 py-3">Actor</th>
                 <th className="px-6 py-3">Invoice</th>
                 <th className="px-6 py-3">Payment</th>
                 <th className="px-6 py-3 text-right">Amount</th>
@@ -72,6 +73,12 @@ export function AuditLogView() {
                     </span>
                   </td>
                   <td className="px-6 py-3.5 text-xs text-[#525252]">{entry.summary}</td>
+                  <td
+                    className="px-6 py-3.5 text-xs text-[#525252]"
+                    title={entry.actor || 'No actor recorded for this entry'}
+                  >
+                    {entry.actor || '—'}
+                  </td>
                   <td className="px-6 py-3.5 font-mono text-xs text-[#1E293B]">
                     {entry.invoiceNumber || '—'}
                   </td>

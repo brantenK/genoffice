@@ -11,32 +11,32 @@ import type { BankTransaction } from '../src/shared/types'
 describe('F19 Bank CSV Statement Parser & Deduplication Suite', () => {
   describe('parseBankAmount Financial Cleaning', () => {
     it('handles standard South African Rand tokens (R, ZAR, $) and commas', () => {
-      expect(parseBankAmount('R 1,250.50')).toBe(1250.50)
+      expect(parseBankAmount('R 1,250.50')).toBe(1250.5)
       expect(parseBankAmount('ZAR 45,000.00')).toBe(45000)
       expect(parseBankAmount('$500.25')).toBe(500.25)
       expect(parseBankAmount('R123.45')).toBe(123.45)
     })
 
     it('handles parenthetical negatives (1,250.00) -> -1250.00', () => {
-      expect(parseBankAmount('(1,250.00)')).toBe(-1250.00)
+      expect(parseBankAmount('(1,250.00)')).toBe(-1250.0)
       expect(parseBankAmount('(R 450.75)')).toBe(-450.75)
-      expect(parseBankAmount('(350,00)')).toBe(-350.00)
+      expect(parseBankAmount('(350,00)')).toBe(-350.0)
     })
 
     it('handles trailing minus signs and accounting DR/CR suffixes', () => {
-      expect(parseBankAmount('1250.00-')).toBe(-1250.00)
-      expect(parseBankAmount('500.00DR')).toBe(-500.00)
-      expect(parseBankAmount('500.00CR')).toBe(500.00)
-      expect(parseBankAmount('1250.00 dr')).toBe(-1250.00)
+      expect(parseBankAmount('1250.00-')).toBe(-1250.0)
+      expect(parseBankAmount('500.00DR')).toBe(-500.0)
+      expect(parseBankAmount('500.00CR')).toBe(500.0)
+      expect(parseBankAmount('1250.00 dr')).toBe(-1250.0)
     })
 
     it('handles South African decimal commas and spaces as thousands separators', () => {
       // SABS / South African decimal comma: 1250,50 -> 1250.50
-      expect(parseBankAmount('1250,50')).toBe(1250.50)
-      expect(parseBankAmount('1 250,50')).toBe(1250.50)
-      expect(parseBankAmount('1 250.50')).toBe(1250.50)
-      expect(parseBankAmount('1.250,50')).toBe(1250.50)
-      expect(parseBankAmount('12,345,678.90')).toBe(12345678.90)
+      expect(parseBankAmount('1250,50')).toBe(1250.5)
+      expect(parseBankAmount('1 250,50')).toBe(1250.5)
+      expect(parseBankAmount('1 250.50')).toBe(1250.5)
+      expect(parseBankAmount('1.250,50')).toBe(1250.5)
+      expect(parseBankAmount('12,345,678.90')).toBe(12345678.9)
     })
 
     it('handles null, undefined, empty, and invalid strings gracefully', () => {
@@ -69,17 +69,17 @@ describe('F19 Bank CSV Statement Parser & Deduplication Suite', () => {
       expect(txs).toHaveLength(3)
 
       expect(txs[0].date).toBe('2026-09-01')
-      expect(txs[0].amount).toBe(25000.00)
+      expect(txs[0].amount).toBe(25000.0)
       expect(txs[0].description).toBe('Cust Settlement Transnet')
       expect(txs[0].reference).toBe('INV-2026-001')
       expect(txs[0].accountId).toBe('acc-bank')
 
       expect(txs[1].date).toBe('2026-09-02')
-      expect(txs[1].amount).toBe(-1250.00)
+      expect(txs[1].amount).toBe(-1250.0)
       expect(txs[1].description).toBe('Monthly Account Fee')
 
       expect(txs[2].date).toBe('2026-09-03')
-      expect(txs[2].amount).toBe(-3500.00)
+      expect(txs[2].amount).toBe(-3500.0)
     })
 
     it('parses Standard Bank CSV format with separate Debit and Credit columns', () => {
@@ -92,16 +92,16 @@ describe('F19 Bank CSV Statement Parser & Deduplication Suite', () => {
       expect(txs).toHaveLength(3)
 
       // Debit column is negative
-      expect(txs[0].amount).toBe(-45000.00)
+      expect(txs[0].amount).toBe(-45000.0)
       expect(txs[0].description).toBe('Supplier Payment Fasteners')
       expect(txs[0].reference).toBe('PB-001')
 
       // Credit column is positive
-      expect(txs[1].amount).toBe(115000.00)
+      expect(txs[1].amount).toBe(115000.0)
       expect(txs[1].description).toBe('Client Milestone Payment')
 
       // Debit column with negative sign is still negative (not double inverted)
-      expect(txs[2].amount).toBe(-850.50)
+      expect(txs[2].amount).toBe(-850.5)
     })
 
     it('parses Nedbank format by dynamically skipping introductory account metadata headers', () => {
@@ -120,10 +120,10 @@ Total Turnover: 33001.00`
       expect(txs[0].date).toBe('2026-09-05')
       expect(txs[0].description).toBe('EFT From Customer Alpha')
       expect(txs[0].reference).toBe('INV-NED-01')
-      expect(txs[0].amount).toBe(34500.00)
+      expect(txs[0].amount).toBe(34500.0)
 
       expect(txs[1].date).toBe('2026-09-06')
-      expect(txs[1].amount).toBe(-1499.00)
+      expect(txs[1].amount).toBe(-1499.0)
     })
 
     it('parses Absa format with UTF-8 BOM, metadata header, and decimal comma numbers', () => {
@@ -137,12 +137,12 @@ Date,Particulars,Reference,Transaction Amount
       expect(txs).toHaveLength(2)
 
       expect(txs[0].date).toBe('2026-09-08')
-      expect(txs[0].amount).toBe(1250.50)
+      expect(txs[0].amount).toBe(1250.5)
       expect(txs[0].description).toBe('Customer Progress Payment')
       expect(txs[0].reference).toBe('INV-ABSA-01')
 
       expect(txs[1].date).toBe('2026-09-09')
-      expect(txs[1].amount).toBe(-350.00)
+      expect(txs[1].amount).toBe(-350.0)
     })
 
     it('returns empty array when CSV text is empty or has no transaction lines', () => {
@@ -161,7 +161,7 @@ Date,Particulars,Reference,Transaction Amount
       const res1 = deduplicateBankTransactions(firstPass, [])
       expect(res1.toAdd).toHaveLength(2)
       expect(res1.skippedDuplicates).toBe(0)
-      expect(res1.netAdjustment).toBe(13750.00)
+      expect(res1.netAdjustment).toBe(13750.0)
 
       // Re-import with firstPass existing
       const res2 = deduplicateBankTransactions(firstPass, res1.toAdd)
@@ -173,8 +173,24 @@ Date,Particulars,Reference,Transaction Amount
     it('preserves legitimate identical same-day charges and avoids duplicates on re-import', () => {
       // Two identical R45 charges on same date
       const incoming: BankTransaction[] = [
-        { id: 'tx-1', accountId: 'acc-bank', date: '2026-09-01', description: 'ATM Cash Withdrawal Fee', reference: 'FEE', amount: -45, reconciled: false },
-        { id: 'tx-2', accountId: 'acc-bank', date: '2026-09-01', description: 'ATM Cash Withdrawal Fee', reference: 'FEE', amount: -45, reconciled: false },
+        {
+          id: 'tx-1',
+          accountId: 'acc-bank',
+          date: '2026-09-01',
+          description: 'ATM Cash Withdrawal Fee',
+          reference: 'FEE',
+          amount: -45,
+          reconciled: false,
+        },
+        {
+          id: 'tx-2',
+          accountId: 'acc-bank',
+          date: '2026-09-01',
+          description: 'ATM Cash Withdrawal Fee',
+          reference: 'FEE',
+          amount: -45,
+          reconciled: false,
+        },
       ]
 
       // First import: both must be accepted
@@ -192,10 +208,26 @@ Date,Particulars,Reference,Transaction Amount
 
     it('does not collide transactions with different references or descriptions', () => {
       const existing: BankTransaction[] = [
-        { id: 'tx-1', accountId: 'acc-bank', date: '2026-09-01', description: 'Contractor Payment A', reference: 'REF-001', amount: -5000, reconciled: false },
+        {
+          id: 'tx-1',
+          accountId: 'acc-bank',
+          date: '2026-09-01',
+          description: 'Contractor Payment A',
+          reference: 'REF-001',
+          amount: -5000,
+          reconciled: false,
+        },
       ]
       const incoming: BankTransaction[] = [
-        { id: 'tx-2', accountId: 'acc-bank', date: '2026-09-01', description: 'Contractor Payment B', reference: 'REF-002', amount: -5000, reconciled: false },
+        {
+          id: 'tx-2',
+          accountId: 'acc-bank',
+          date: '2026-09-01',
+          description: 'Contractor Payment B',
+          reference: 'REF-002',
+          amount: -5000,
+          reconciled: false,
+        },
       ]
 
       const res = deduplicateBankTransactions(incoming, existing)
