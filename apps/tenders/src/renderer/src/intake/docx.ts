@@ -35,6 +35,33 @@
 //    body was read in full, so no body content on it is unread — while a
 //    picture-only page still fails closed.
 //
+// ── responsiveness and cancellation ──────────────────────────────────────────
+//
+// The PDF path reports progress per page and checks its abort signal between
+// pages (pdf/extract.ts), because a PDF is read page by page and each
+// `getTextContent()` resolves before the next page begins. A .docx has no such
+// seam: `parseDocx` is one library call, and this module holds no hooks inside it.
+//
+// Measured on the reference machine, that call is NOT one long block, though.
+// JSZip's media path inflates each picture part in 16 KiB blocks and awaits each
+// block, and pako emits its output in 16 KiB chunks, so the whole decode is a long
+// chain of resolved promises with the event loop running between them: an 11.5 MB
+// package holding 80 incompressible 1 MB pictures took ~26 s of wall clock but
+// never held the thread for more than ~0.4 s. The event loop therefore DOES turn
+// during the parse on that machine; what the renderer was missing was not a yield
+// but anything to turn it FOR — no progress, and an abort that was only ever
+// checked before and after the parse.
+//
+// So this path reports progress the way the PDF path does — a callback that
+// samples the document while the parse is running — and checks the abort signal
+// at every sample, which is what bounds a cancel to one sample's work. The signal
+// is a callback rather than something this layer awaits, so a caller whose
+// environment cannot schedule a timer in the middle of a parse (`setTimeout` is
+// clamped to ~1 s between the app's own frames, but `setImmediate`/frames are
+// not) is not forced into a 1 s-polling document. `emitDocxProgressEvery` blocks
+// the event loop for as long as it is given, so the renderer's own entry point
+// does not use it — see `shredFile` in components/TenderList.tsx.
+//
 // NOT read, deliberately: header/footer parts, footnotes and endnotes, and
 // comments (separate parts, not body text — the body is where requirements
 // live), plus Word's saved `w:lastRenderedPageBreak` layout hints. That hint is
@@ -295,6 +322,112 @@ export interface DocxIntakeOptions {
   limits?: DocxPreflightLimits
   /** Abort signal, checked before and after the parse (the parse itself is not interruptible). */
   signal?: AbortSignal
+  /**
+   * Called as the parse advances. The first call is `{ phase: 'parsing' }` and
+   * later ones report `bytes` = the size of the whole package, which is a bound on
+   * the work rather than a measurement of it: no internal offset exists to sample.
+   * A caller that wants a bounded-cadence UI derives its own number from this (see
+   * `docxProgressFraction`); nothing here may claim a percentage the parse did not
+   * measure.
+   *
+   * **This callback is where cancellation happens.** If it is synchronous and the
+   * parse takes a long time, nothing else can run, so `options.signal` is only
+   * ever *checked* at the moments this function calls it — once before the bytes
+   * are read, once after the read, and then at each progress sample. A caller that
+   * passes no callback keeps today's behaviour exactly: the signal is checked
+   * before and after the parse, and the cancel is delivered when the parse
+   * returns.
+   */
+  onProgress?: (progress: DocxIntakeProgress) => void
+}
+
+/** A progress sample. `bytes: 0` means the phase reports no measurable progress. */
+export interface DocxIntakeProgress {
+  phase: 'reading' | 'parsing' | 'mapping'
+  /** Bytes of the package, 0 before the buffer is read. */
+  bytes: number
+}
+
+/**
+ * The fraction of the import to display, in 0–1, from the parse's own bound.
+ *
+ * Returns 0 when nothing reportable has happened yet and 1 once the parse has
+ * finished. `DocxIntakeProgress` carries a bound on the parse work, not a
+ * measurement of it, so this number is deliberately derived from the bound and is
+ * never presented as a measurement — the surface pairs it with a message that says
+ * what is actually happening (see `docxParseProgressMessage`).
+ */
+export function docxProgressFraction(progress: DocxIntakeProgress): number {
+  switch (progress.phase) {
+    case 'reading':
+      return 0
+    case 'mapping':
+      return 1
+    default:
+      return progress.bytes > 0 ? 1 : 0
+  }
+}
+
+/**
+ * What the import is doing, in plain language, for the surface showing it.
+ *
+ * Deliberately no percentage and no page count: the parse has neither. A .docx is
+ * read as one package, so the only two things this path can honestly say are that
+ * it is opening the file and that it is reading the document's content.
+ *
+ * The wait is dominated by the document's PICTURES, not its text — each media part
+ * is inflated and then inlined as base64, which is a ~4/3 expansion plus a
+ * character-by-character encode. Measured on this path: an 11.5 MB package holding
+ * 80 incompressible one-megabyte pictures took ~26 s, while a 0.6 MB text-only
+ * document of 6 000 paragraphs took ~1.3 s. An operator reading a stopwatch should
+ * therefore expect the wait to track the .docx's image weight, not its page count
+ * or its word count. `docxMediaByteBudget` measures that weight from the package
+ * without inflating anything.
+ */
+export function docxParseProgressMessage(progress: DocxIntakeProgress): string {
+  if (progress.phase === 'reading') return 'Opening the package…'
+  if (progress.phase === 'mapping') return 'Matching compliance rules…'
+  return 'Reading document content…'
+}
+
+/** How many bytes of image data a parse will inline as base64 — the dominant cost. */
+export function docxMediaByteBudget(
+  parts: Array<{ name: string; uncompressedBytes: number }>,
+): number {
+  return parts.reduce(
+    (total, part) => (/\.(?:bmp|emf|gif|jpe?g|png|tiff?|wmf)$/i.test(part.name) ? total + part.uncompressedBytes : total),
+    0,
+  )
+}
+
+/**
+ * Run `run`, calling `onProgress` once per `everyMs` while it is pending.
+ *
+ * This is a convenience for tests and for hosts that tolerate it — NOT what the
+ * app uses. `setTimeout` and `setInterval` are clamped to about 1 s between a
+ * document's own frames, so a 1 s poll yields only when the parse lets the loop
+ * turn, and in app code `ShredProgress` already carries a CSS spinner whose
+ * rotation is the indeterminate signal a frozen frame would deny it.
+ *
+ * `everyMs <= 0` disables the timer and samples once before `run` is called, which
+ * still checks the signal; that is the renderer's path.
+ */
+export async function emitDocxProgressEvery<T>(
+  run: () => Promise<T>,
+  onProgress: (progress: DocxIntakeProgress) => void,
+  everyMs: number,
+  bytes = 0,
+): Promise<T> {
+  if (!(everyMs > 0)) {
+    onProgress({ phase: 'parsing', bytes })
+    return run()
+  }
+  const timer = setInterval(() => onProgress({ phase: 'parsing', bytes }), everyMs)
+  try {
+    return await run()
+  } finally {
+    clearInterval(timer)
+  }
 }
 
 /**
@@ -505,6 +638,12 @@ async function readBytes(
  * Every failure is typed and user-surfaceable (`DocxPreflightError`); nothing
  * returns a silent empty extraction that would look like a tender with no
  * requirements. No network, no clock: the result is a pure function of the bytes.
+ *
+ * The transform is pure, but the call is not free: it samples `options.onProgress`
+ * so a surface can show that the import is alive and so `options.signal` is
+ * checked at more than two moments — see the responsiveness note at the top of
+ * this module for what was measured and why a callback is the seam rather than an
+ * internal yield.
  */
 export async function extractDocxIntake(
   source: DocxIntakeSource,
@@ -512,13 +651,25 @@ export async function extractDocxIntake(
 ): Promise<DocxIntake> {
   const limits = options.limits ?? DOCX_PREFLIGHT_LIMITS
   const signal = options.signal
+  const onProgress = options.onProgress
   const throwIfAborted = (): void => {
     if (signal?.aborted) throw new DocxImportCancelledError()
   }
+  // Every sample is a cancellation checkpoint. `emitDocxProgressEvery` guarantees
+  // there is at least one before the parse runs, so a signal aborted while the
+  // caller was still reading the file still refuses the work — and the check
+  // deliberately precedes the report, so a sample is never delivered for an import
+  // that is already cancelled.
+  const sample = (phase: DocxIntakeProgress['phase'], bytes: number): void => {
+    throwIfAborted()
+    onProgress?.({ phase, bytes })
+  }
 
   throwIfAborted()
+  sample('reading', 0)
   const bytes = await readBytes(source, limits)
   throwIfAborted()
+  sample('parsing', bytes.byteLength)
 
   const format = sniffFormat(bytes)
   if (format === 'cfb') throw new DocxPreflightError('PROTECTED', null, null, PROTECTED_MESSAGE)
@@ -527,12 +678,25 @@ export async function extractDocxIntake(
   let parsed: ParsedDoc & { extras: ParseExtras }
   let sections: SectionInfo[]
   try {
-    parsed = await parseDocx(bytes)
+    parsed = await emitDocxProgressEvery(
+      () => parseDocx(bytes),
+      (progress) => sample(progress.phase, progress.bytes),
+      0,
+      bytes.byteLength,
+    )
     sections = readSections(parsed)
+    // A cancel delivered while the parse was running: the library call cannot
+    // observe the signal, so this is the first moment the cancel CAN be honoured
+    // — and it is inside the window whose catch maps failures to `CORRUPT`.
+    throwIfAborted()
   } catch (error) {
+    // A cancellation raised in that window is a cancellation, not a damaged
+    // package. Without this, cancelling a long Word import tells the user their
+    // own document is corrupt — a lie about a file that parsed perfectly.
+    if (error instanceof DocxImportCancelledError) throw error
     throw docxFailure(error)
   }
-  throwIfAborted()
+  sample('mapping', bytes.byteLength)
 
   // A section that starts on a new page is a declared page boundary; the first
   // section's own type is meaningless (there is no previous section).

@@ -541,11 +541,33 @@ describe('Workspace renders the same tree with and without an active tender', ()
       source,
       `the guard must read the real component, not whatever sits at ${WORKSPACE_SOURCE}`,
     ).toContain('export function Workspace()')
-    const hook = source.slice(
-      source.indexOf('  useEffect(() => {\n    if (!menuOpen) return'),
-      source.indexOf('  }, [menuOpen, activeMenuIndex])') +
-        '  }, [menuOpen, activeMenuIndex])'.length,
-    )
+    // The roving-tabindex hook, taken as the run from its own declaration to the
+    // next top-level section comment.
+    //
+    // The previous form pinned two literal anchor strings, both typed with LF:
+    // `source.indexOf('  useEffect(() => {\n    if (!menuOpen) return')` and
+    // `source.indexOf('  }, [menuOpen, activeMenuIndex])')`. Neither can be found
+    // in a CRLF copy of this component — measured, on this same file: the first
+    // anchor returns -1, the slice comes back empty, and the assertion below
+    // fires. So the guard failed on the line endings git handed it rather than on
+    // the component, and it could not move the hook even on the checkout it was
+    // written for: `indexOf('  }, [menuOpen, activeMenuIndex])')` also returns -1
+    // against a CRLF file, and the slice it took ran from the file's first line
+    // through the overflow-menu handler to line ~1050.
+    //
+    // Matching the declaration as a line-anchored pattern (with an optional CR)
+    // and ending on the next section comment leaves both assertions exactly as
+    // strict as they were: the hook must be found, and it must contain its own
+    // logic. It also keeps the "moved below the early return" rewrite honest — a
+    // hook run ending 9 500 characters later would have carried unrelated code
+    // with it.
+    const hookStart = source.search(/^  useEffect\(\(\) => \{$[\r]?\n    if \(!menuOpen\) return$/m)
+    expect(
+      hookStart,
+      'the roving-tabindex hook must be found before it can be moved',
+    ).toBeGreaterThan(-1)
+    const nextSection = source.indexOf('\n  // ', hookStart + 1)
+    const hook = source.slice(hookStart, nextSection === -1 ? source.length : nextSection)
     expect(hook, 'the roving-tabindex hook must be present to move').toContain('menuRef.current')
 
     const moved = source

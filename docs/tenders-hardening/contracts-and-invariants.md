@@ -754,16 +754,28 @@ tender with no requirements. Cancellation is its own type (`DocxImportCancelledE
 
 - `maxLines` = **24 600**. A `.docx` "line" is a whole paragraph or table row, so the reason the
   PDF path needs a line budget applies here too, but not the PDF's own figure. That figure —
-  **~0.042 MB of heap per extracted text line** — was **extrapolated from a 2 000-page sweep** of
-  visual lines of ~40 characters, and a reviewer re-measured against the fixture the PDF byte guard
-  actually has to survive (`tests/performance/results.json`, `byteStress`): **22 000 lines /
-  5.2 MB / 4 766 389 characters peaked at ~916 MB heap against a ~168 MB baseline**, i.e.
-  **~34 MB of heap per 1 000 lines** on lines about **5× shorter** than the sweep's. So the PDF
-  path's true per-line cost is **worse than the documented one, not merely different**, and no DOCX
-  budget here is derived from it. What this path measured is a cost per LINE, because the parsed
-  block model (not the text) dominates: 24 500 lines / 4.77 M characters retained ~112 MB through
-  parse → `buildClauses` → `shredExtraction` in ~4.8 s, i.e. ~4.6 KB per line whether the line is
-  195 or 1 087 characters.
+  **~0.042 MB of heap per extracted text line** — was read off the **2 000-page sweep** in
+  `tests/performance/results.json` (`nativeParseSweep`: 40 000 visual lines of ~40 characters,
+  ~405 MB peak heap). Re-measured against the fixture the PDF **byte** guard actually has to
+  survive (`byteStress`: 22 000 lines / 5.2 MB / ~916 MB peak heap) the number is **not** per-line
+  worse — it is **~0.042 MB per line again** (41.7 MB per 1 000 lines against the sweep's 10.1) —
+  the disagreement is in the **unit**. The two points carry lines of very different weight:
+  **247 bytes of file per line in `byteStress` against 38.5 in the sweep, a 6.4× difference**.
+  Measured **per byte of file** the two invert, **177 MB of peak heap per MB of file** at the stress
+  point against **276** at the sweep, so a figure stated "per extracted text line" is only true of
+  the fixture it was taken on and must not be read as a per-character memory budget: a byte-bounded
+  intake can be handed 6.4× more characters per line than the sweep's, and the cost that matters
+  for the byte guard is the per-character one. Whatever the direction of the discrepancy, the
+  operating rule is the same and is why this note exists: **size a line-count guard from the stress
+  point rather than from the sweep**, and re-derive both from the file rather than quoting this
+  table. (The `byteStress` point is the only text-density entry the JSON records; the
+  **4 766 389 characters** in the DOCX note below are that path's own measurement over a
+  24 500-line fixture, which this documentation pass could not find recorded anywhere in the
+  repository, so they are carried as the DOCX path's claim rather than as a number this note
+  derives from.) What that path measured is a cost per LINE, because the parsed block model (not
+  the text) dominates: 24 500 lines / 4.77 M characters retained ~112 MB through parse →
+  `buildClauses` → `shredExtraction` in ~4.8 s, i.e. ~4.6 KB per line whether the line is 195 or
+  1 087 characters.
 - `maxTextChars` = **12 000 000**. `maxLines` alone does not bound what it looks like it bounds:
   `blockUnits` splits at the engine's soft/column/page breaks, so a paragraph with no break is
   ONE line of unbounded length, and a highly compressible `.docx` can declare up to

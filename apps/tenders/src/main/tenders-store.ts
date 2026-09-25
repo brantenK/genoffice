@@ -410,7 +410,20 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
     }
   }
 
-  const validateRequest = (request: SaveTendersRequest): SaveTendersResult | null => {
+  /**
+   * Full validation of a save request: shape, revision agreement, the published
+   * compact-document ceiling, and the schema walk.
+   *
+   * The walk's own `TendersDataV2` is returned rather than discarded, because it is
+   * what the commit writes: the walk is the only thing that decides the parsed shape
+   * (it defaults absent optionals and drops unknown keys), so a caller that kept the
+   * request's object would be committing a document the walk never approved. Returning
+   * it is also what makes a second walk of the same payload unnecessary — see
+   * `commitDurably`.
+   */
+  const validateRequest = (
+    request: SaveTendersRequest,
+  ): { ok: true; data: TendersDataV2 } | { ok: false; data: SaveTendersResult } => {
     if (
       !request ||
       typeof request !== 'object' ||
@@ -420,19 +433,25 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
     ) {
       return {
         ok: false,
-        error: persistenceError(
-          'INVALID_REQUEST',
-          'A valid expectedRevision and document are required.',
-        ),
+        data: {
+          ok: false,
+          error: persistenceError(
+            'INVALID_REQUEST',
+            'A valid expectedRevision and document are required.',
+          ),
+        },
       }
     }
     if (request.document.revision !== request.expectedRevision) {
       return {
         ok: false,
-        error: persistenceError(
-          'INVALID_REQUEST',
-          'expectedRevision must match document.revision.',
-        ),
+        data: {
+          ok: false,
+          error: persistenceError(
+            'INVALID_REQUEST',
+            'expectedRevision must match document.revision.',
+          ),
+        },
       }
     }
     // The compact document ceiling is measured before the schema walk so an
@@ -446,10 +465,13 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
       if (compactBytes > MAX_TENDERS_DOCUMENT_BYTES) {
         return {
           ok: false,
-          error: persistenceError(
-            'INVALID_DATA',
-            `Serialized Tenders document size exceeds limit of ${MAX_TENDERS_DOCUMENT_BYTES} bytes.`,
-          ),
+          data: {
+            ok: false,
+            error: persistenceError(
+              'INVALID_DATA',
+              `Serialized Tenders document size exceeds limit of ${MAX_TENDERS_DOCUMENT_BYTES} bytes.`,
+            ),
+          },
         }
       }
     } catch {
@@ -459,20 +481,34 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
     if (!validated.ok) {
       const code =
         validated.error.code === 'UNSUPPORTED' ? 'UNSUPPORTED_SCHEMA_VERSION' : 'INVALID_DATA'
-      return { ok: false, error: persistenceError(code, validated.error.message, validated.issues) }
+      return {
+        ok: false,
+        data: { ok: false, error: persistenceError(code, validated.error.message, validated.issues) },
+      }
     }
-    return null
+    return { ok: true, data: validated.data }
   }
 
   const commitDurably = async (request: SaveTendersRequest): Promise<SaveTendersResult> => {
-    const requestError = validateRequest(request)
-    if (requestError) return requestError
-    const validated = validateTendersDataV2(request.document)
-    if (!validated.ok)
-      return {
-        ok: false,
-        error: persistenceError('INVALID_DATA', validated.error.message, validated.issues),
-      }
+    // ONE validation of the request's document for the whole commit. `validateRequest`
+    // returns the walk's own `TendersDataV2` because the walk is what decides the
+    // parsed shape: it defaults absent optional fields, drops unknown keys, and runs
+    // the cross-field checks in `semanticChecks` that a structural read cannot. The
+    // document that is WRITTEN is that parsed value, not the caller's object, so
+    // validating the caller's object again below it would be a second full walk of
+    // the same payload — through `aggregateStrings` and every value parser — over
+    // the same bytes, for an answer already in hand.
+    //
+    // This cost is paid in the process that drives the UI: the same synchronous walk
+    // ran twice per commit, and nothing between the two calls reads the payload or
+    // suspends (it is followed directly by the file read). The guarantee is unchanged
+    // because `validateRequest` validates exactly what is later written — `clone(of
+    // the walk's data)`, with only `revision` and `updatedAt` replaced, both of which
+    // are themselves checked (revision against the request, the timestamp as a finite
+    // value here and again by `parseV2` on the read-back) — and the write is followed
+    // by a full re-parse of the file that was written.
+    const validated = validateRequest(request)
+    if (!validated.ok) return validated.data
 
     const currentState = await readState()
     if (currentState.kind === 'error') return { ok: false, error: currentState.error }
@@ -506,24 +542,21 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
         ),
       }
     }
+    // `validated.data` is the walk's own parsed document, and the delta applied to
+    // it is two fields the walk has just checked on the same object: `revision` is
+    // the request's own (already asserted to be a valid non-negative integer and
+    // already compared against `document.revision`) incremented, and `updatedAt` is
+    // the commit clock's RFC3339 string. Neither can change another field, and both
+    // are re-checked on the way back in — `readState` re-parses the file this writes
+    // with `validateTendersDataV2` and the read-back is compared to this value below.
     const committed: TendersDataV2 = {
       ...clone(validated.data),
       revision: request.expectedRevision + 1,
       updatedAt,
     }
-    const committedValidation = validateTendersDataV2(committed)
-    if (!committedValidation.ok)
-      return {
-        ok: false,
-        error: persistenceError(
-          'INVALID_DATA',
-          committedValidation.error.message,
-          committedValidation.issues,
-        ),
-      }
 
-    const serialized = JSON.stringify(committedValidation.data, null, 2)
-    const compactBytes = Buffer.byteLength(JSON.stringify(committedValidation.data), 'utf8')
+    const serialized = JSON.stringify(committed, null, 2)
+    const compactBytes = Buffer.byteLength(JSON.stringify(committed), 'utf8')
     if (compactBytes > MAX_TENDERS_DOCUMENT_BYTES) {
       return {
         ok: false,
@@ -575,7 +608,7 @@ export function createTendersStore(options: TendersStoreOptions): TendersStore {
     }
 
     const readback = await readState()
-    if (readback.kind !== 'loaded' || !sameDocument(readback.data, committedValidation.data)) {
+    if (readback.kind !== 'loaded' || !sameDocument(readback.data, committed)) {
       return {
         ok: false,
         error: persistenceError(

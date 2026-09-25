@@ -5,14 +5,17 @@ trustworthy paid local-first desktop tender product. Written so a **new session 
 resume without re-discovery**.
 
 - Repo: `C:\Users\brant\OneDrive\Documents\GenOffice\genoffice`
-- Branch: `product`. **HEAD is `e634250`** (`refactor(tenders): close the 10-reviewer code review
-findings`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
+- Branch: `product`. **HEAD is `d24ead6`** (`fix(tenders): the defects the remediation wave
+introduced`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
   `284c312`…`5711775` on top of it; the five-wave hardening fix set is **committed** as
   `a22b5e6`, the optional-AI wave as `c188470`, the DOCX/discovery/reminders wave as
-  `7f7067b`, and the two remediation waves (review findings, then coordination sweep) as
-  **`e634250`**. A **third wave (structural) is uncommitted** on top of `e634250`, alongside a
-  concurrent, unrelated `apps/books` + `.agents/` workstream. That number moves while agents edit,
-  so run `git status --porcelain` rather than quoting a figure from here.
+  `7f7067b`, and the two remediation waves as `e634250` and **`d24ead6`** (`e634250` closed the
+  first review's findings; `d24ead6` closed the defects the remediation itself introduced and
+  recorded that pass's four refuted findings). On top of `d24ead6` there are **two in-flight
+  waves**: the structural wave (the `main/` composition-root split — now extended into an
+  `ipc/` domain split — and these documents) and a concurrent, unrelated `apps/books` +
+  `.agents/` workstream. Neither is committed. That number moves while agents edit, so run
+  `git status --porcelain` rather than quoting a figure from here.
 - Deepwork coordination state: `.slim/deepwork/tenders-9of10.md` (git-local; read it too)
 - Original audit artifacts: `C:\Users\brant\AppData\Local\Temp\opencode\tenders-live-audit-Lpyf1l\`
 - Full 15-work-package roadmap + release gates: produced by planner `pla-1`, pressure-tested
@@ -45,13 +48,20 @@ findings`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
 - **The four newest features — DOCX intake, tender discovery, deadline reminders and optional AI
   extraction — are documented in `contracts-and-invariants.md` §3b (discovery), §3c (reminders),
   §3d (DOCX intake), §3e (diagnostics) and §5a (AI).** The privileged handler count is **33** and
-  unchanged by the composition-root split (it was stated as 14, then 23, then 31 as channels were
-  added — §3 now shows the arithmetic and the command that counts it): after the split all 33
-  `ipcMain.handle` calls live in `apps/tenders/src/main/ipc/handlers.ts`, and **every one of the 33
-  begins with `isTrustedTendersEvent`** — verified mechanically by splitting that file on
-  `ipcMain.handle` and requiring the gate within each handler, which reports zero exceptions. The
-  eight discovery/reminder channels plus the two diagnostics channels are in §3's list with their
-  preload member names.
+  unchanged by either structural split (it was stated as 14, then 23, then 31 as channels were
+  added — §3 now shows the arithmetic and the command that counts it). **After the `ipc/` domain
+  split the 33 registrations are spread across seven `ipc/handlers-*.ts` modules**, which
+  `ipc/handlers.ts` (now **79 lines**, down from 1 287) calls one domain at a time; the count of
+  registrations is still 33, and **every one of the 33 still has `isTrustedTendersEvent` as the
+  first statement of its body** — verified mechanically after the split by splitting every
+  `handlers*.ts` on `ipc.handle(`, taking each handler's first statement and requiring the gate
+  there, which reports **33 of 33, zero exceptions**. `module-map.md` carries the per-module table.
+  The eight discovery/reminder channels plus the two diagnostics channels are in §3's list with
+  their preload member names.
+  **One consequence worth knowing before quoting a count:** the old one-file check
+  (`grep -cE "^\s*ipcMain\.handle" apps/tenders/src/main/ipc/handlers.ts`) now returns **0** —
+  the registration call is `ipc.handle(` inside a domain module, not `ipcMain.handle` in the
+  root — so that command reads like the handlers disappeared. Count across `handlers*.ts`.
 - **The structural reference is now `module-map.md`** (wave 3): the per-module responsibility map,
   the line counts, the import-graph direction, the diagnostics log, the test infrastructure and the
   no-blank-screen invariant. It also records that **`main` no longer imports `renderer/`** — the
@@ -65,24 +75,42 @@ findings`). The Phase 1–5 work landed as `ff822c0` with the fork/e2e commits
 - **Three items this file used to record as open have closed, verified on disk:** the **error
   boundary** landed (`renderer/src/components/ErrorBoundary.tsx`, mounted in `main.tsx` around
   `<App />` and in `App.tsx` around the page area — a render throw is now a recoverable, honest
-  fallback rather than a blank window; `tests/components/error-boundary.test.tsx` pins it); and
-  **both diagnostics wiring gaps** closed (`recordDiagnosticsStart` is called from
-  `registerTendersIpc` before anything else can record, and `ErrorBoundary` renders the log path to
-  the user in its fallback). §6 item 15 and §3e were corrected against disk; the earlier wording in
-  this folder described all three as un-landed and was wrong.
-- Full Tenders suite — **the figures below are stale and must be re-measured, not quoted.** The
-  wave-3 pass reported `npm test -w @genoffice/tenders` as **Test Files 10 failed | 48 passed (58)**
-  and **Tests 8 failed | 1604 passed | 7 skipped (1619)**, read at the time as a concurrent-edit
-  artefact rather than a regression (three of the failures — `adversarial-stress.test.ts`,
-  `ai-e2e-contract.test.ts`, `renderer-display-locale.test.ts` — passed when run alone: 61/61).
-  **Those counts are written from a tree that no longer exists.** The verified figures for the
-  current tree are **1854 passing / 7 skipped / 0 failing across 58 test files**, and
-  `find apps/tenders/tests -name "*.test.ts*" | wc -l` reports **58 files** on disk (it reported 57
-  when this bullet was written). Every pass total this folder has carried — 1056, then 1604, then
-  this one — went stale within a wave; treat a count here as a dated observation and re-run
-  `npm test -w @genoffice/tenders` for the current one.
-- `npm run check:e2e-types` and `npx tsc --noEmit -p e2e/tsconfig.json`: run in the wave-3 pass,
-  both **clean (exit 0)** after the wave-3 spec edits.
+  fallback rather than a blank window; `tests/components/error-boundary.test.tsx` pins it, and its
+  hook-order guard was **repaired in this pass** — see the EOL note in the next bullet); and
+  **both diagnostics wiring gaps** closed (`recordDiagnosticsStart` is reached from
+  `registerTendersIpc` before any channel can record — since the `ipc/` split the call itself sits
+  in `handlers-startup.ts`, which `handlers.ts` runs first — and `ErrorBoundary` renders the log
+  path to the user in its fallback). §6 item 15 and §3e were corrected against disk; the earlier
+  wording in this folder described all three as un-landed and was wrong.
+- **A source guard was repaired, and the finding behind it doubles as a review rule.**
+  `tests/components/error-boundary.test.tsx`'s hook-order guard read the real `Workspace.tsx`
+  through two literal **LF** anchors. Measured: `indexOf` returns **-1** for both against a CRLF
+  copy, so the slice came back empty and the assertion that fired blamed the component — and even
+  on the checkout it was written for, the slice it took was **not** the hook (it ran from the
+  file's first line through the overflow-menu handler to roughly line 1 050). The guard now
+  matches its start as a line-anchored pattern with an optional CR and ends on the next top-level
+  section comment, with both original assertions left exactly as strict. **It cannot be
+  reproduced in a normal clone**: `.gitattributes` sets `* text=auto eol=lf`, so this file lands
+  as LF everywhere — it breaks only on a checkout that violates `eol=lf`, which is what this
+  working copy is. That is recorded in `module-map.md` and as an operational rule in
+  `fork/RUNBOOK.md`: an agent-driven review reading a CRLF tree will report real-looking source
+  defects that exist nowhere else.
+- Full Tenders suite — **no pass total in this file may be quoted; re-measure it.** The figures
+  this bullet has carried are a history of staleness, not a record: the wave-3 pass reported
+  `npm test -w @genoffice/tenders` as **Test Files 10 failed | 48 passed (58)** and **Tests 8
+  failed | 1604 passed | 7 skipped (1619)**, read at the time as a concurrent-edit artefact rather
+  than a regression (three of the failures — `adversarial-stress.test.ts`,
+  `ai-e2e-contract.test.ts`, `renderer-display-locale.test.ts` — passed when run alone: 61/61);
+  `fork/BASELINE.md` was then re-recorded at **1854 passed / 0 failed / 7 skipped over 58 files**;
+  and the last remediation wave measured **1890 passing / 7 skipped / 0 failing**. **That 1890 is
+  the freshest figure this folder has, and it was already stale when written** — the `ipc/` domain
+  split landed after it, and the test tree is being edited while this is written (`find
+apps/tenders/tests -name "*.test.ts*" | wc -l` reports **64** on disk, against the 58 the 1854
+  run was taken over). Treat any count here as a dated observation, note that `-w` and
+  `--root` are **not** interchangeable for this suite, and re-run `npm test -w @genoffice/tenders`
+  for the current one.
+- `npm run check:e2e-types` and `npx tsc --noEmit -p e2e/tsconfig.json`: **clean (exit 0)** in the
+  wave-3 pass. Not re-run in this documentation pass — a separate agent owns that lane.
 - Built-Electron E2E — **14 Tenders specs on disk** (`ls e2e/tenders-*.spec.ts | wc -l` → 14), plus
   the shared modules `e2e/tenders-ai-fixtures.ts`, `e2e/tenders-discovery-fixtures.ts` and
   `e2e/tenders-timing.ts`. The specs declare **63** `test(` cases statically
@@ -391,20 +419,21 @@ Product-boundary reminder above; the contracts are in `contracts-and-invariants.
   is not covered by a test here.
 - **The PDF path still has no line-count guard.** The published byte ceiling is measured (a
   91.6 MB image-heavy PDF parses in ~0.66 s), but text density drives memory, and the PDF preflight
-  bounds only bytes and pages. **The text-dense figure is worse than this folder used to state.**
-  It said **~0.042 MB heap per extracted text line** (≈24 600 lines at a 1 GB budget), which was
-  **extrapolated from the 2 000-page sweep** in `tests/performance/results.json` (40 000 lines,
-  ~405 MB peak heap against a ~168 MB baseline). The reviewer's measurement is against the
-  **`byteStress`** point in the same file — the fixture the byte guard actually has to survive:
-  **22 000 lines / 5.2 MB / 4 766 389 characters peaked at ~916 MB heap**, same baseline, i.e.
-  **~34 MB of heap per 1 000 lines**, on lines roughly **5× shorter** than the sweep's. That is
-  **~4× the sweep's per-line cost**, which is the correction: at the measured rate a 1 GB budget
-  buys on the order of **25 000 text-dense lines**, so a line-count guard must be sized from the
-  stress point rather than from the sweep. The **DOCX** path closed its half of this in the
-  remediation wave: it now enforces a line budget (24 600) **and** a character budget (12 000 000),
-  because a single unbounded paragraph defeats a line count
-  (`contracts-and-invariants.md` §3d). A PDF line-count guard alongside the byte/page guards is
-  still recommended, not required.
+  bounds only bytes and pages. **The published text-dense figure was stated in the wrong unit, and
+  this is the corrected reading.** This folder said **~0.042 MB heap per extracted text line**
+  from the **2 000-page sweep** in `tests/performance/results.json` (`nativeParseSweep`: 40 000
+  lines, ~405 MB peak heap); the `byteStress` point in the same file — the 22 000-line / 5.2 MB
+  fixture the byte guard actually has to survive — peaks at **~916 MB**, which is **41.7 MB per
+  1 000 lines against the sweep's 10.1**, i.e. the same ~0.042 MB per line on lines that are
+  **6.4× heavier** (247 bytes of file per line against 38.5). Measured **per byte of file** the two
+  invert — **177 MB of heap per MB of file** at the stress point against **276** at the sweep — so
+  "per extracted text line" is a property of the fixture it was taken on and **not** a
+  per-character budget a byte-bounded intake can be sized against. Derive both figures from the
+  file on the day, and size a line-count guard from the **stress point** rather than the sweep.
+  The **DOCX** path closed its half of this in the remediation wave: it now enforces a line budget
+  (24 600) **and** a character budget (12 000 000), because a single unbounded paragraph defeats a
+  line count (`contracts-and-invariants.md` §3d). A PDF line-count guard alongside the byte/page
+  guards is still recommended, not required.
 - **Workspace-level `dataOrigin` trust.** The per-tender `dataOrigin` field is closed (only
   `'demo'` is representable), but billing/CRM privilege is gated on the **workspace** field,
   which the renderer still writes through `saveStoreV2` and which defaults to the permissive

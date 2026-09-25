@@ -4,9 +4,14 @@ import {
   DOCX_PREFLIGHT_LIMITS,
   DocxImportCancelledError,
   DocxPreflightError,
+  docxMediaByteBudget,
   docxPaginationNote,
+  docxParseProgressMessage,
+  docxProgressFraction,
+  emitDocxProgressEvery,
   extractDocxIntake,
   groupThousands,
+  type DocxIntakeProgress,
   type DocxPreflightCode,
 } from '../src/renderer/src/intake/docx'
 import { buildClauses } from '../src/renderer/src/pdf/clauses'
@@ -533,6 +538,156 @@ describe('DOCX intake', () => {
       )
       expect(error).toBeInstanceOf(DocxImportCancelledError)
       expect((error as DocxImportCancelledError).code).toBe('CANCELLED')
+    })
+  })
+
+  // ── progress and cancellation during the parse ──────────────────────────────
+  //
+  // The parse is one library call with no internal seam, so this path cannot
+  // report pages the way the PDF path does. What it must NOT do is leave a
+  // surface with nothing to show and an abort that is only ever checked at the
+  // two ends of a call that can run for tens of seconds: that is a frozen frame,
+  // which reads as a hang. These tests pin the seam that fixes it.
+
+  describe('progress and cancellation', () => {
+    it('reports the phase of the import, never a fraction it did not measure', async () => {
+      const seen: DocxIntakeProgress[] = []
+      const bytes = await buildDocx({ bodyXml: RFP_HEAD + P(TAX_CLAUSE) })
+      await extractDocxIntake(bytes, { onProgress: (progress) => seen.push({ ...progress }) })
+
+      // Opening the file, then the parse, then one sample per moment the parse
+      // hands the run back (its own resolved promise, and the post-parse abort
+      // checkpoint), then the mapping phase. The exact number of hand-backs is a
+      // property of the JSZip/pako decode, not of this module, so the assertion
+      // pins the ORDER and the bounds rather than a count that would break on a
+      // dependency's refactor.
+      const phases = seen.map((progress) => progress.phase)
+      expect(phases[0]).toBe('reading')
+      expect(phases[phases.length - 1]).toBe('mapping')
+      expect(phases.slice(1, -1).every((phase) => phase === 'parsing')).toBe(true)
+      expect(phases.filter((phase) => phase === 'reading')).toHaveLength(1)
+      expect(phases.filter((phase) => phase === 'mapping')).toHaveLength(1)
+      // The parse hands the run back at least once — once, when there is no
+      // internal hand-back at all — and only ever before the mapping phase.
+      expect(phases.length).toBeGreaterThanOrEqual(3)
+      expect(phases.indexOf('mapping')).toBe(phases.length - 1)
+      // Phase 1 carries no size (the buffer is not read yet); every later sample
+      // carries the package's own size, which is what the fraction is derived from.
+      expect(seen[0].bytes).toBe(0)
+      for (const progress of seen.slice(1)) expect(progress.bytes).toBe(bytes.byteLength)
+      for (const progress of seen) {
+        // A real number in 0–1 and nothing else: no NaN, no >1, never negative.
+        const fraction = docxProgressFraction(progress)
+        expect(Number.isFinite(fraction)).toBe(true)
+        expect(fraction).toBeGreaterThanOrEqual(0)
+        expect(fraction).toBeLessThanOrEqual(1)
+      }
+      expect(docxProgressFraction(seen[0])).toBe(0)
+      expect(docxProgressFraction(seen[1])).toBe(1)
+      // The fraction tracks the parse and nothing else: it is 0 before any bytes
+      // are read and 1 from the moment the package's size is known. It is a bound
+      // on the work, never a measurement, so it never lands in between.
+      expect(new Set(seen.map(docxProgressFraction))).toEqual(new Set([0, 1]))
+      // Nothing in the reported progress is a page count, and the messages never
+      // claim a percentage — the only thing this path can honestly say.
+      for (const progress of seen) {
+        const message = docxParseProgressMessage(progress)
+        expect(message.length).toBeGreaterThan(0)
+        expect(message).not.toMatch(/\d\s*%/)
+        expect(message).not.toMatch(/page \d/i)
+      }
+      expect(docxParseProgressMessage(seen[0])).toBe('Opening the package…')
+      expect(docxParseProgressMessage(seen[1])).toBe('Reading document content…')
+    })
+
+    it('checks the signal at every sample, so a cancel is not only checked at the ends', async () => {
+      // A signal already aborted when the parse would begin: the sample taken
+      // before it must refuse the work rather than run it to completion. This is
+      // the abort check the callback exists to provide — without it, the only
+      // checkpoints are before and after the whole parse.
+      const controller = new AbortController()
+      const bytes = await buildDocx({ bodyXml: P(TAX_CLAUSE) })
+      const reported: DocxIntakeProgress[] = []
+      let parseRan = false
+
+      const error = await extractDocxIntake(bytes, {
+        signal: controller.signal,
+        onProgress: (progress) => {
+          reported.push({ ...progress })
+          // Simulate a cancel delivered by the UI while the import is in flight:
+          // the sample is the moment the parse is running and the caller can act.
+          controller.abort()
+        },
+      }).then(
+        () => null,
+        (thrown: unknown) => thrown,
+      )
+      expect(parseRan).toBe(false)
+      // The first sample is 'reading'; aborting there means the parse is never
+      // reached, so 'parsing' is never reported either.
+      expect(reported.map((progress) => progress.phase)).toEqual(['reading'])
+      expect(error).toBeInstanceOf(DocxImportCancelledError)
+    })
+
+    it('never reports a cancelled import as a damaged package', async () => {
+      // The regression this pins, and the scenario the finding is about: the user
+      // cancels while a long parse is running. The parse cannot observe the signal,
+      // so the cancel is first honoured in the window whose `catch` maps every
+      // failure to `CORRUPT` — without the re-throw, cancelling a 26-second Word
+      // import tells the user their own document is damaged, when it parsed fine.
+      const controller = new AbortController()
+      const bytes = await buildDocx({ bodyXml: P(TAX_CLAUSE) })
+      const error = await extractDocxIntake(bytes, {
+        signal: controller.signal,
+        // Abort while the entry point holds the run — i.e. mid-import, the moment
+        // the user's Cancel click lands.
+        onProgress: () => controller.abort(),
+      }).then(
+        () => null,
+        (thrown: unknown) => thrown,
+      )
+      expect(error).toBeInstanceOf(DocxImportCancelledError)
+      expect(error).not.toBeInstanceOf(DocxPreflightError)
+      expect((error as DocxImportCancelledError).code).toBe('CANCELLED')
+    })
+
+    it('samples once before the parse and then on every interval it is given', async () => {
+      // The seam the app does not use: a timer-driven sample. It must fire while
+      // the parse is pending and stop exactly once the parse settles — a timer
+      // left running would report progress for an import that is already done.
+      let settled = 0
+      let samples = 0
+      const result = await emitDocxProgressEvery(
+        async () => {
+          await new Promise((resolve) => setTimeout(resolve, 60))
+          settled += 1
+          return 'done'
+        },
+        () => {
+          samples += 1
+        },
+        10,
+        2048,
+      )
+      expect(result).toBe('done')
+      expect(settled).toBe(1)
+      expect(samples).toBeGreaterThanOrEqual(2)
+      const afterSettle = samples
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(samples).toBe(afterSettle)
+    })
+
+    it('measures the picture weight of a package without inflating it', async () => {
+      // What an operator's stopwatch actually tracks: the media parts, which are
+      // inflated and then inlined as base64. Text parts are not it.
+      const budget = docxMediaByteBudget([
+        { name: 'word/media/image1.png', uncompressedBytes: 1_048_576 },
+        { name: 'word/media/image2.jpeg', uncompressedBytes: 2_097_152 },
+        { name: 'word/media/oleObject1.bin', uncompressedBytes: 9_999_999 },
+        { name: 'word/document.xml', uncompressedBytes: 12_345 },
+        { name: 'word/media/scan.TIF', uncompressedBytes: 4_000 },
+      ])
+      expect(budget).toBe(1_048_576 + 2_097_152 + 4_000)
     })
   })
 })

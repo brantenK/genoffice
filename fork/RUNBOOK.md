@@ -238,17 +238,20 @@ node fork/tools/baseline.mjs --write --with-e2e --repeat 2
 ```
 
 Both lanes are stale, and this paragraph used to quote counts that were never re-measured.
-What is verifiable without running a suite: **HEAD is `e634250`** with an **uncommitted**
-structural wave on top of it (the `main/` composition-root split, `shared/demo-seed.ts`, the
-e2e timing contract, and these documents) plus a concurrent `apps/books` workstream, so
-`check:baseline` reports both lanes as changed until it is re-recorded. The old claim here
-("the Tenders unit suite is green: 1011 passed / 0 failed / 7 skipped") is withdrawn rather
-than restated.
+What is verifiable without running a suite: **HEAD is `d24ead6`** with **two in-flight waves** on
+top of it — the structural wave (the `main/` composition-root split and the `ipc/` domain split,
+`shared/demo-seed.ts`, the e2e timing contract, and these documents) and a concurrent `apps/books`
+workstream — so `check:baseline` reports both lanes as changed until it is re-recorded. The old
+claim here ("the Tenders unit suite is green: 1011 passed / 0 failed / 7 skipped") is withdrawn
+rather than restated.
 
 **`fork/BASELINE.md`'s Tenders entry has been re-measured.** It said
 `1068 passed, 0 failed, 7 skipped`; it now records **1854 passed / 0 failed / 7 skipped over
 58 test files**, taken from two clean identical runs (`npx vitest run` from `apps/tenders`,
-104 s and 103 s) at `e634250` plus the uncommitted structural wave. The two earlier figures in
+104 s and 103 s) at `e634250` plus the uncommitted structural wave. **That was not the last
+movement either:** the remediation wave that landed as `d24ead6` measured **1890 passing /
+7 skipped / 0 failing**, and the `ipc/` domain split arrived after that — so treat 1854 and 1890
+both as dated observations and re-record before the next sync. The two earlier figures in
 this section are superseded and kept only as a caution: `1604 passed / 8 failed / 7 skipped`
 over 58 files was measured while the tree was being edited by two other agents (a `main/` split
 and a `shared/demo-seed.ts` extraction landing mid-run, and an in-flight
@@ -324,6 +327,76 @@ npm run check:e2e-types   # cheap; tsc over e2e/tsconfig.json only
 `npm run verify:sync` runs `check:e2e-types` among its cheap gates and only reaches
 e2e after `build:all`; `--fast` stops before both. Prefer `--fast` while iterating,
 and reserve a full `test:e2e` for a machine you are not sharing.
+
+## An agent-driven review: a finding is a lead, not a fact
+
+**This is the most expensive lesson in this runbook, and it has now been paid twice.**
+Three review passes over `apps/tenders` produced roughly forty findings each. In the
+last pass, **four of about forty were false, and two of the false ones were
+load-bearing** — they were what made the lowest-scoring category read as low as it
+did. A scorer who accepts findings at face value, and an agent that "fixes" them,
+both pay for it: one of the four would have **caused damage** if acted on.
+
+So the rule, before any finding counts toward a score or a fix:
+
+> **Reproduce it — run it, grep it, render it, measure it — and record refutations
+> alongside findings.** A refuted claim is reported as **refuted**, never as
+> "fixed". Do not change code to satisfy an unreproduced finding.
+
+The four refuted findings, as they were actually disposed of:
+
+| The finding                                                 | What verification showed                                                                                                                                                                        |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "A test cannot pass"                                        | It ran: **16/16 green**. The reviewer had not executed it.                                                                                                                                      |
+| "1 of 34 IPC handlers is unguarded"                         | **33** handles, **33** first-statement gates, **none missing**. The count was wrong first, then the claim.                                                                                      |
+| `Workspace.tsx:838` is a subscription over an early return  | The grep returns **nothing**; no such subscription exists. The real component renders across four transition shapes with zero console errors. Acting on it would have **damaged working code**. |
+| "A half-built `IPC_WRAP_LANES` containment fix is shipping" | That identifier has **never existed** in this repository.                                                                                                                                       |
+| "24 source guards share a blind spot"                       | **2** did. The other 22 candidates were legitimate static checks.                                                                                                                               |
+
+**How to verify a claim of each common shape.** Most review findings arrive as one of
+five shapes, and each has a cheap decisive test. Run the test; do not reason about it.
+
+- **"A guard is missing."** Count the guarded units and the guards, mechanically.
+  Split the file on the registration call, take **the first statement of each body**,
+  and require the gate there — do not grep for the gate's _name_, which also matches
+  imports, comments and second-occurrence calls. In the Tenders IPC case this is
+  `node -e` over `apps/tenders/src/main/ipc/handlers*.ts`, splitting on `ipc.handle(`
+  and asserting `if (!isTrustedTendersEvent` opens each body. It reports 33/33.
+- **"That call site is wrong."** Read the call site and its callee, then **run the
+  lib/unit test that covers it**. Line-number claims rot the moment another agent
+  edits the file — the citation may be stale even when the defect was once real.
+- **"That render is broken."** Render the **real** component through
+  `apps/tenders/tests/helpers/render.tsx` with the console watched, across the
+  transition shapes the claim names. A source-level reading cannot distinguish a
+  render defect from a refactor.
+- **"A module/dead code path is shipping."** `git grep` the identifier across the
+  whole worktree **and** `git log -S`. An identifier that has never existed in any
+  commit is a hallucination, not a finding; a git-history search settles it in
+  seconds.
+- **"That test is weak/vacuous."** Read what it **asserts**, then **delete the
+  behaviour it pins and re-run it**. A guard that still passes with the defect
+  reintroduced is genuinely vacuous and must be repaired; one that fails is doing its
+  job, whatever its shape looks like.
+
+**Two failure modes of this repo that make a review lie to you, both seen:**
+
+1. **The checkout's line endings.** `.gitattributes` sets `* text=auto eol=lf`, so
+   every normal clone is LF. A worktree that violates it — CRLF on disk — makes
+   source guards that pin multi-line string anchors against LF **fail on the checkout
+   rather than on the component**, and an agent reviewing that tree will report real-
+   looking source defects that exist nowhere else. Seen concretely:
+   `tests/components/error-boundary.test.tsx`'s hook-order guard read the real
+   `Workspace.tsx` through two LF anchors; on CRLF both `indexOf` calls returned
+   `-1`, the slice came back empty, and the assertion that fired blamed the
+   component. **If the tree you are reviewing is CRLF, that is itself the finding —
+   fix the checkout before scoring anything read from source.**
+2. **Two agents in one tree.** A pass run while another agent is splitting a file
+   reads half-moved code as a defect. Counts and line numbers are the first things to
+   lie; re-derive them from disk after the other workstream stops.
+
+**Record refutations where the next reader will find them** — in the commit message
+and in the pass's notes — with the evidence that disposed of each one. A refutation
+that lives only in a scratch file gets re-raised by the next pass at full cost.
 
 ## Porting an upstream spec to the fork's UI
 

@@ -14,7 +14,7 @@ next to it.
 apps/tenders/src/
   main/            the Electron main process — every privileged decision
     tenders-main.ts          the composition root (341 lines; was 3,702)
-    ipc/                     the IPC surface and its gate
+    ipc/                     the IPC surface, its gate, and one module per domain
     <responsibility>.ts      one module per responsibility
   preload/index.ts           functions only, never `ipcRenderer`
   renderer/                  the UI — no privileged capability of its own
@@ -56,40 +56,52 @@ current line counts, not the pre-split ones.
 **Every figure below still moves while agents edit these files.** They are here to show the
 _shape_ — which module is large enough to need its own unit — not as a figure to quote. Re-run
 `wc -l apps/tenders/src/main/*.ts apps/tenders/src/main/ipc/*.ts` for the current numbers. The
-table was re-read from disk on 2026-09-25; the previous version of it was **stale in nine rows
-and wrong about `tenders-main.ts` itself** (it said 347 against the real 341), which is what a
-line-count table does in a tree two agents are editing.
+table was re-read from disk on 2026-09-25, **mid-split**, and four rows in it are already known to
+be moving: `ipc/handlers.ts` went from 1 287 lines to **79** while this was written, `tenders-store.ts`
+grew 11 lines on the same day, and the seven new `ipc/handlers-*.ts` modules below landed between
+two reads. The previous version of the table was **stale in eleven rows and wrong about
+`tenders-main.ts` itself** (it said 347 against the real 341), which is what a line-count table
+does in a tree two agents are editing.
 
-| Module                      | Lines | Responsibility                                                                 |
-| --------------------------- | ----- | ------------------------------------------------------------------------------ |
-| `tenders-main.ts`           | 341   | the composition root; constructs services, owns the test reset, re-exports     |
-| `ipc/handlers.ts`           | 1287  | **all 33 `ipcMain.handle` registrations**                                      |
-| `document-store.ts`         | 984   | the managed-document metadata store (index, trash, confinement)                |
-| `discovery-client.ts`       | 964   | the OCOS/discovery HTTP client — allow-list, caps, cache, retries              |
-| `tenders-store.ts`          | 751   | the authoritative v2 store: atomic write, backups, recovery, revision          |
-| `reminders-scheduler.ts`    | 672   | the deadline-reminder schedule; pure and testable, no Electron import          |
-| `ipc/engines.ts`            | 553   | builds the two wired engines and their lifecycle; the document download bridge |
-| `diagnostics-log.ts`        | 445   | the rotating log sink itself (no Electron import)                              |
-| `document-lifecycle.ts`     | 442   | save / read / open / delete / restore / replace / reconcile                    |
-| `proposal-generator.ts`     | 390   | markdown + DOCX proposal generation, and the readiness binding it reads        |
-| `legacy-store.ts`           | 426   | the **retired** v1 `tenders-data.json` read / validate / write                 |
-| `tenders-paths.ts`          | 232   | every path decision + the atomic-write primitives                              |
-| `integrations.ts`           | 185   | the CRM / Books ports and their injected overrides                             |
-| `ipc/proposal-payload.ts`   | 185   | the proposal + cross-app payload shape/bounds preflight                        |
-| `readiness-snapshot.ts`     | 155   | the submission-readiness gate's snapshot rules                                 |
-| `composition-services.ts`   | 158   | runtime config, store directory, the close-flush waiter map                    |
-| `close-guard.ts`            | 122   | the shell's dirty-close guard (the flush request/answer loop)                  |
-| `diagnostics-sink.ts`       | 110   | the one main-process sink instance + the `recordDiagnostic` helper             |
-| `navigation-policy.ts`      | 101   | deny-by-default navigation for the privileged view                             |
-| `web-contents-registry.ts`  | 87    | the live Tenders view set and the v1 broadcast channel                         |
-| `ipc/trust.ts`              | 86    | **the trusted-sender gate — the security invariant lives here**                |
-| `legacy-store-watcher.ts`   | 91    | the retired v1 `fs.watch` (kept for the tests that pin its behaviour)          |
-| `seed-workspaces.ts`        | 69    | the v1 demo seed data (no longer a live data _source_)                         |
-| `readiness-binding.ts`      | 62    | builds the canonical readiness report from the store                           |
-| `store-registry.ts`         | 58    | the store seam the modules above reach through, so none imports the root       |
-| `ipc/registration-state.ts` | 20    | the one "is the IPC surface registered" boolean                                |
-| `main-utils.ts`             | 10    | two tiny shared helpers                                                        |
-| `index.ts`                  | 1     | `export * from './tenders-main'` — the entry point                             |
+| Module                        | Lines | Responsibility                                                                 |
+| ----------------------------- | ----- | ------------------------------------------------------------------------------ |
+| `tenders-main.ts`             | 341   | the composition root; constructs services, owns the test reset, re-exports     |
+| `ipc/handlers.ts`             | 79    | **the registration root** — calls the seven domain modules, holds no bodies    |
+| `document-store.ts`           | 1222  | the managed-document metadata store (index, trash, confinement)                |
+| `discovery-client.ts`         | 964   | the OCOS/discovery HTTP client — allow-list, caps, cache, retries              |
+| `tenders-store.ts`            | 784   | the authoritative v2 store: atomic write, backups, recovery, revision          |
+| `reminders-scheduler.ts`      | 672   | the deadline-reminder schedule; pure and testable, no Electron import          |
+| `ipc/engines.ts`              | 553   | builds the two wired engines and their lifecycle; the document download bridge |
+| `ipc/handlers-cross-app.ts`   | 506   | CRM sync/outcome/open, Books tab + billing, Sheets export (5 handles)          |
+| `diagnostics-log.ts`          | 481   | the rotating log sink itself (no Electron import)                              |
+| `legacy-store.ts`             | 462   | the **retired** v1 `tenders-data.json` read / validate / write                 |
+| `document-lifecycle.ts`       | 436   | save / read / open / delete / restore / replace / reconcile                    |
+| `proposal-generator.ts`       | 390   | markdown + DOCX proposal generation, and the readiness binding it reads        |
+| `ipc/handlers-store.ts`       | 304   | authoritative v2 load/save, close-flush reply, legacy pair, Sheets export (6)  |
+| `tenders-paths.ts`            | 282   | every path decision + the atomic-write primitives                              |
+| `ipc/proposal-payload.ts`     | 185   | the proposal + cross-app payload shape/bounds preflight                        |
+| `integrations.ts`             | 185   | the CRM / Books ports and their injected overrides                             |
+| `composition-services.ts`     | 158   | runtime config, store directory, the close-flush waiter map                    |
+| `readiness-snapshot.ts`       | 155   | the submission-readiness gate's snapshot rules                                 |
+| `ipc/handlers-documents.ts`   | 130   | documents, trash, recovery candidates (11 handles)                             |
+| `close-guard.ts`              | 122   | the shell's dirty-close guard (the flush request/answer loop)                  |
+| `ipc/handlers-discovery.ts`   | 118   | the feed list/cache/refresh/release/download (5 handles)                       |
+| `diagnostics-sink.ts`         | 110   | the one main-process sink instance + the `recordDiagnostic` helper             |
+| `navigation-policy.ts`        | 101   | deny-by-default navigation for the privileged view                             |
+| `legacy-store-watcher.ts`     | 91    | the retired v1 `fs.watch` (kept for the tests that pin its behaviour)          |
+| `ipc/handlers-reminders.ts`   | 90    | reminder settings and a manual check (3 handles)                               |
+| `ipc/handlers-diagnostics.ts` | 89    | the renderer's failure report and the log path (2 handles)                     |
+| `web-contents-registry.ts`    | 87    | the live Tenders view set and the v1 broadcast channel                         |
+| `ipc/trust.ts`                | 86    | **the trusted-sender gate — the security invariant lives here**                |
+| `ipc/handlers-proposals.ts`   | 69    | the one proposal channel (1 handle)                                            |
+| `seed-workspaces.ts`          | 69    | the v1 demo seed data (no longer a live data _source_)                         |
+| `readiness-binding.ts`        | 62    | builds the canonical readiness report from the store                           |
+| `store-registry.ts`           | 58    | the store seam the modules above reach through, so none imports the root       |
+| `ipc/handlers-startup.ts`     | 43    | the work that must precede every channel (registers no channel)                |
+| `ipc/handler-context.ts`      | 42    | the shared shape of one IPC registration module                                |
+| `ipc/registration-state.ts`   | 20    | the one "is the IPC surface registered" boolean                                |
+| `main-utils.ts`               | 10    | two tiny shared helpers                                                        |
+| `index.ts`                    | 1     | `export * from './tenders-main'` — the entry point                             |
 
 Shared by both layers (`shared/`, no Electron and no Node import except `demo-seed.ts`, which is a
 frozen literal):
@@ -134,36 +146,65 @@ What this does **not** change: the values themselves are frozen, including the a
 `/demo/vault/…` form of `VaultDoc.fileUrl`, which is part of the historical demo domain the schema
 recognises. The demo classification rule is untouched.
 
-## The IPC surface, counted
+## The IPC surface, counted — and it is now split across nine files
 
-The privileged surface is unchanged in behaviour and its arithmetic still holds:
+The privileged surface is unchanged in behaviour; its **arithmetic** is unchanged too, but the
+**file that holds it is not what it was**. `ipc/handlers.ts` was 1 287 lines holding all 33 handler
+bodies; it is now **79 lines** and holds none of them. It is the registration root: it runs the
+startup work, then calls one `register*Channels(ipc)` per domain. The bodies moved **verbatim**
+into seven domain modules plus a shared context module.
 
 ```bash
-grep -cE "^\s*ipcMain\.handle" apps/tenders/src/main/ipc/handlers.ts   # 33
-grep -c "isTrustedTendersEvent"  apps/tenders/src/main/ipc/handlers.ts   # 35 (33 gates + 2 comments)
+# the registration root (no bodies, one call per domain)
+wc -l apps/tenders/src/main/ipc/handlers.ts                        # 79
+# the 33 registrations, counted across all the domain modules
+grep -hE "^\s*ipc\.handle\(" apps/tenders/src/main/ipc/handlers*.ts | wc -l   # 33
+# the channels the shared contract declares
 awk '/export const TENDERS_CHANNELS/,/^} as const/' apps/tenders/src/shared/ipc.ts \
-  | grep -cE "^\s+[a-zA-Z]+:"                                          # 33
+  | grep -cE "^\s+[a-zA-Z]+:"                                      # 33
 ```
 
-- **33** `ipcMain.handle` registrations, all in `ipc/handlers.ts`.
-- **`TENDERS_CHANNELS` declares 33** channel constants, and the 33 handlers are the same 33 — so
-  nothing is declared-but-unhandled and nothing is handled-but-undeclared. This bullet used to say
-  **36**, with "the three that have no handler are `store-changed-v2`, `close-flush-request` and
-  `data-changed`". The **count was wrong** (the object declares 33, not 36 — that 36 appears to
-  have been the whole file's `tenders:` string count, which also picks up constants declared
-  outside the object), and the **explanation was wrong too**: all three of those names _are_
-  members of the object. Two of them — `closeFlushRequest` and `dataChanged` — are referenced from
-  `ipc/handlers.ts` without being handled, because main **pushes** on them
-  (`webContents.send`), which is exactly what the old bullet was reaching for; the third,
-  `storeChangedV2`, is pushed through the broadcast seam in `web-contents-registry.ts` rather
-  than from `handlers.ts` at all. Re-derive it with
-  `awk '/export const TENDERS_CHANNELS/,/^} as const/' apps/tenders/src/shared/ipc.ts`,
-  which strips the comments and counts 33.
-- **Every one of the 33 begins with `isTrustedTendersEvent`** — checked mechanically, not by
-  reading: splitting the file on `ipcMain.handle` and requiring the gate within the first 600
-  characters of each handler reports zero exceptions.
+| Module                        | Handles | Channels                                                                                                                                                                                                                        |
+| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ipc/handlers-store.ts`       | 6       | `loadStoreV2`, `saveStoreV2`, `closeFlushResult`, `getStoredData`, `saveStoredData`, `exportMatrixToSheets`                                                                                                                     |
+| `ipc/handlers-documents.ts`   | 11      | `readDocument`, `saveDocument`, `openDocument`, `deleteDocument`, `replaceDocument`, `restoreDocument`, `listDocumentTrash`, `cleanupDocumentTrash`, `reconcileDocuments`, `listRecoveryCandidates`, `restoreRecoveryCandidate` |
+| `ipc/handlers-discovery.ts`   | 5       | `discoveryList`, `discoveryReadCache`, `discoveryRefresh`, `discoveryRelease`, `discoveryDownloadDocument`                                                                                                                      |
+| `ipc/handlers-reminders.ts`   | 3       | `remindersGet`, `remindersSet`, `remindersCheck`                                                                                                                                                                                |
+| `ipc/handlers-diagnostics.ts` | 2       | `diagnosticsRecord`, `diagnosticsPath`                                                                                                                                                                                          |
+| `ipc/handlers-cross-app.ts`   | 5       | `syncWithCrm`, `updateTenderOutcome`, `openInCrm`, `openBooks`, `billMilestoneInBooks`                                                                                                                                          |
+| `ipc/handlers-proposals.ts`   | 1       | `draftProposalDoc`                                                                                                                                                                                                              |
+| **total**                     | **33**  | **33**                                                                                                                                                                                                                          |
+
+`ipc/handlers-startup.ts` registers **no** channel: it is the work that must precede every one of
+them (the diagnostics `recordDiagnosticsStart` line, the store directory, the reminder schedule),
+and `ipc/handler-context.ts` is the `TendersIpcContext` / `TendersIpcRegistry` shape the seven
+modules share. `handlers.ts` refuses to register anything before the startup work has run — a
+channel module called out of order throws rather than reading a store that does not exist yet.
+
+- **33** `ipc.handle` registrations, across the seven domain modules; **33** `TENDERS_CHANNELS`
+  constants, and they are the same 33 — so nothing is declared-but-unhandled and nothing is
+  handled-but-undeclared. This bullet used to say **36**, with "the three that have no handler are
+  `store-changed-v2`, `close-flush-request` and `data-changed`". The **count was wrong** (the
+  object declares 33, not 36 — that 36 appears to have been the whole file's `tenders:` string
+  count, which also picks up constants declared outside the object), and the **explanation was
+  wrong too**: all three of those names _are_ members of the object. Two of them —
+  `closeFlushRequest` and `dataChanged` — are pushed by main on `webContents.send` rather than
+  handled; the third, `storeChangedV2`, is pushed through the broadcast seam in
+  `web-contents-registry.ts` rather than from any handler module at all. Re-derive the count with
+  the `awk` above, which strips the comments.
+- **Every one of the 33 still begins with `isTrustedTendersEvent`** — checked mechanically, not by
+  reading, and re-checked after the split: splitting every `handlers*.ts` on `ipc.handle(`, taking
+  the first statement of each handler body and requiring the gate there reports **33 of 33, zero
+  exceptions**. The registrations moved; the first-statement property did not.
 - The gate itself lives in `ipc/trust.ts`; `ipc/registration-state.ts` holds the registered
   boolean, so neither `handlers.ts` nor the root has to import the other.
+
+**What the split changed about how to check it.** A guard written against one file no longer sees
+the whole surface: `grep -cE "^\s*ipcMain\.handle" apps/tenders/src/main/ipc/handlers.ts` now
+returns **0**, which reads exactly like "the handlers vanished" and is why the count above is
+taken across `handlers*.ts`. The harness is now injectable — `registerTendersIpc(ipc)` takes a
+`TendersIpcRegistry` that defaults to `ipcMain` — so a test can register the surface against its
+own stub and assert what each channel was asked to do without an Electron process.
 
 `contracts-and-invariants.md` §3 carries the full per-channel breakdown and the rejection shapes.
 
@@ -195,9 +236,11 @@ The one place a packaged user's problem can be seen afterwards.
   `TendersApi`, because a stale preload legitimately lacks them.
 - **The coverage gap is CLOSED on both halves, and this note used to record them as open.** (a)
   `recordDiagnosticsStart(log, version)` — the one line a fresh session should open with, so a file
-  attached to a support request says what wrote it — **is called from `registerTendersIpc`
-  (`main/ipc/handlers.ts`), before anything else can record**, and the `isTendersIpcRegistered`
-  guard keeps it from being written twice, so a real session's log does open with that line. (b) A
+  attached to a support request says what wrote it — **is reached from `registerTendersIpc`,
+  before any channel can record**. Since the IPC split the call itself lives one level deeper:
+  `handlers-startup.ts` calls it, and `handlers.ts` runs the startup work first and throws if a
+  channel module is reached before it. The `isTendersIpcRegistered` guard keeps it from being
+  written twice, so a real session's log does open with that line. (b) A
   surface renders `diagnosticsPath()`: `ErrorBoundary` takes an optional `diagnosticsPath` prop and
   `errorBoundaryLogHint(path, code)` names the file and an error code in its fallback — the one
   moment where telling the user where the log is matters most.
@@ -217,30 +260,60 @@ The one place a packaged user's problem can be seen afterwards.
 The file lives on **this** machine: nothing is uploaded, nothing is networked, and each `record()`
 is a completed synchronous append, so closing the app cannot lose an entry already written.
 
-## The Windows rename retry: **parity is partial, not complete**
+## The Windows rename retry: **parity is now complete, and it is shared code**
 
-The two write paths do not get the same treatment, and the docs used to claim they did.
+This section used to say the opposite — that each store had a defence the other lacked. That was
+true of `e634250` and is **not true on disk now**, so it is corrected here rather than carried.
 
-- **The managed-document store has the retry.** `main/document-store.ts`'s `atomicWrite()` writes a
-  temp file, `fsync`s it, then `rename`s it into place — all through `node:fs/promises`, so the
-  rename is asynchronous and does not block the main thread.
-- **The primary store has a _different_ retry, not the same one.** `main/tenders-paths.ts` exports
-  `renameWithBoundedRetry(from, to)` — `RENAME_RETRY_ATTEMPTS` = 3, `RENAME_RETRY_DELAY_MS` = 15,
-  retrying only `EBUSY` / `EPERM` and sleeping with `Atomics.wait` rather than spinning. Its
-  callers are `writeBufferAtomic` (in `tenders-paths.ts` itself) and the **retired v1**
-  `legacy-store.ts`.
-- **What is actually asymmetric:** the retry is **synchronous** (`renameSync` + a blocking sleep) on
-  the main process's thread, while the managed store's rename is async and has **no**
-  `EBUSY`/`EPERM` retry at all. So the honest statement is that **each store has a defence the other
-  lacks** — a bounded sync retry on the v1/primary path against a non-retrying async rename on the
-  managed path — rather than "the primary now gets the same treatment the managed documents always
-  had", which is what the source comment in `legacy-store.ts` still says and what an earlier version
-  of this folder repeated. Whether the two should be unified is a code decision and is **not** made
-  here; this records what the code does today.
+- **Both forms of the retry live in one file.** `main/tenders-paths.ts` exports **two** helpers that
+  share everything that decides behaviour: `renameWithBoundedRetry(from, to)` (the synchronous one)
+  and `renameWithBoundedRetryAsync(from, to)` (the asynchronous one). Both read
+  `RENAME_RETRY_ATTEMPTS` = **3** and `RENAME_RETRY_DELAY_MS` = **15**, both retry only `EBUSY` /
+  `EPERM` through the same `isTransientRenameError`, and both sleep rather than spin — `Atomics.wait`
+  for the sync form, a `setTimeout` for the async one.
+- **They differ in exactly one respect, and it is deliberate:** the synchronous form blocks the
+  main process's thread (it belongs to a writer that must answer before its call returns); the
+  asynchronous form awaits and does not. That is why there are two, not one.
+- **The managed-document store takes the async form.** `main/document-store.ts`'s `atomicWrite()`
+  writes a temp file with `flag: 'wx'` and mode `0o600`, best-effort `fsync`s it through an
+  `r+` handle, then calls `renameWithBoundedRetryAsync(temporary, path)` — and unlinks the temp
+  file if any of that throws.
+- **The primary path and the retired v1 writer take the sync form.** `writeBufferAtomic` (in
+  `tenders-paths.ts` itself) and `legacy-store.ts` both call `renameWithBoundedRetry`.
+
+**So the comment in `legacy-store.ts` is accurate as it stands.** It reads: "_The bounded
+EBUSY/EPERM retry, through the same shared constants the managed-document store's asynchronous
+form uses. This writer runs to completion inside one call, so it takes the SYNCHRONOUS form; the
+two share `isTransientRenameError`, the attempt count and the delay..._" — checked against disk,
+every clause of that holds: `legacy-store.ts:453` calls `renameWithBoundedRetry`, and the two
+helpers are three hundred lines apart in `tenders-paths.ts` with the shared constants named in
+the paragraph above both of them. The earlier version of **this file** (not the source comment)
+claimed the retry was asymmetric and that the managed store had none; that was a true observation
+of the tree it was written in and is stale now. Whether the two should be collapsed into one is
+still a code decision and is **not** made here; this records what the code does today.
 
 ## Test infrastructure
 
 Three additions matter structurally, and each closes a way the suite could have gone quiet.
+
+**A source guard that reads a file must not depend on the line endings it is handed.** This is not
+hypothetical: `tests/components/error-boundary.test.tsx` holds the guard for the crash class that
+produced the error boundary in the first place, and it was reading the real `Workspace.tsx` with
+two literal LF anchors, `source.indexOf('  useEffect(() => {\n    if (!menuOpen) return')` and
+`source.indexOf('  }, [menuOpen, activeMenuIndex])')`. Measured on this file: the first anchor
+returns **-1** against a CRLF copy, the slice comes back empty, the `menuRef.current` assertion
+fires, and the message blames the component. The second anchor returns -1 there too, so the run
+it did take ran from the file's first line through the overflow-menu handler to roughly line 1 050
+— it was never the roving-tabindex hook, on either checkout. The guard now matches its start as a
+line-anchored pattern with an optional CR and ends on the next top-level section comment.
+**Why it cannot be reproduced here, and why that is the whole lesson:** `.gitattributes` says
+`* text=auto eol=lf`, so every clone checks this file out as LF and the broken form passes. It
+breaks only on a **documented exception** — this working copy carries `CRLF` on all 1 775 lines of
+`Workspace.tsx`, against `eol=lf`, in a tree whose `.gitattributes` exists specifically to stop
+that. So the correction is two-part: the guard above takes either ending, and a reviewer who sees
+this repo checked out with CRLF should treat **the checkout** as the finding. An agent-driven
+review reading a CRLF tree will otherwise report real-looking source defects that exist nowhere
+else — see the operational rule in `fork/RUNBOOK.md`.
 
 **`apps/tenders/tests/helpers/render.tsx` — a renderer-component harness with no test-library
 dependency.** Several honesty claims in this app live in JSX: a chip that must be **visible text**,
@@ -254,7 +327,7 @@ accessible-name filter, `getByTestId`, `click` (a real bubbling click inside `ac
 the whole collapsed rendered text — and its `accessibleName` is an **approximation of accname**
 (`aria-labelledby` → `aria-label` → rendered text → `title`), deliberately _content-aware_ so a
 marker that lives only in a `title` still has a name. Specifics are in the file's own header.
-Used by `tests/components/*.test.tsx` (three component specs) plus `tests/diagnostics.test.ts` and
+Used by `tests/components/*.test.tsx` (four component specs) plus `tests/diagnostics.test.ts` and
 `tests/renderer-display-locale.test.ts`.
 
 **The CI job that gates `product` and runs the Tenders e2e.** `.github/workflows/ci.yml` declares a

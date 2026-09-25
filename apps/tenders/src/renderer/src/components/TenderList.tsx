@@ -35,6 +35,7 @@ import {
   DOCX_PREFLIGHT_LIMITS,
   DocxImportCancelledError,
   DocxPreflightError,
+  docxParseProgressMessage,
   extractDocxIntake,
   groupThousands,
 } from '../intake/docx'
@@ -134,7 +135,6 @@ export function intakeLimitDisclosure(): string {
 
 /** Label shown on a tender that came from the bundled sample RFP. */
 export const DEMO_TENDER_LABEL = 'Demo import'
-
 /** Why a demo-imported tender is labelled: it is not the user's own document. */
 export const DEMO_TENDER_HINT =
   'Imported from the bundled sample RFP — demonstration data, not a real tender.'
@@ -826,7 +826,26 @@ export async function shredTenderFile(
       throwIfAborted()
       fileBytes = await file.arrayBuffer()
       throwIfAborted()
-      ex = await extractDocxIntake(fileBytes, { signal })
+      // The parse is one library call with no internal seam, so this is the only
+      // place progress for it can come from. `everyMs: 0` samples once before the
+      // parse runs — which is a cancellation check at a third moment, after the
+      // bytes have been read — and installs no timer: `setInterval` is clamped to
+      // about 1 s between this document's own frames, so polling could not report
+      // anything the parse had not already yielded, while the sample itself would
+      // block the loop for the interval it waited out. The wait is instead shown
+      // honestly and continuously by the spinner `ShredProgress` already renders,
+      // with the message saying what the parse is doing and never how far along it
+      // is (nothing measured that).
+      ex = await extractDocxIntake(fileBytes, {
+        signal,
+        onProgress: (progress) =>
+          setShredding({
+            stage: 'loading',
+            message: `Reading Word document… ${docxParseProgressMessage(progress)}`,
+            page: 0,
+            total: 0,
+          }),
+      })
       throwIfAborted()
     } else {
       // Preflight BEFORE reading the file buffer.
@@ -863,7 +882,8 @@ export async function shredTenderFile(
 
     // No per-page progress for a Word document: it has no pages being read, so
     // the bar would count something that never happens (the store renders the
-    // counter only when there is a total — see `ShredProgress`).
+    // counter only when there is a total — see `ShredProgress`). What the Word
+    // path reports instead is the phase of its parse, never a fraction of it.
     const progressTotal = wordDocument ? 0 : ex.numPages
     setShredding({
       stage: 'shredding',
