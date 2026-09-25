@@ -86,7 +86,30 @@ beforeEach(() => {
   installTendersApiMock()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // F6: close the isolation seam. The store module's save machinery (debounce
+  // timer, queued follow-up, in-flight chain) must not survive the per-test
+  // boundary (`vi.resetModules()` + a fresh mock): a continuation that does
+  // fires against the NEXT test's mock with THIS test's document. Drain it
+  // against the current test's mock first — cancel the armed timer (real or
+  // fake), fire + drain any fake-timer chain, then cancel again in case a
+  // continuation re-armed it. An unresolved deferred from a failed test cannot
+  // be drained and equally cannot fire, so it is left alone.
+  try {
+    const module = (await importStoreModule()) as unknown as {
+      cancelPendingSave: () => void
+    }
+    module.cancelPendingSave()
+    if (vi.isFakeTimers()) {
+      await vi.advanceTimersByTimeAsync(2000)
+    }
+    await flushMicrotasks()
+    module.cancelPendingSave()
+    await flushMicrotasks()
+  } catch {
+    // The store module was not imported by a test that failed before its first
+    // import; there is nothing to drain.
+  }
   vi.useRealTimers()
   window.localStorage.clear()
   ;(window as unknown as Record<string, unknown>).tendersApi = undefined
@@ -97,6 +120,8 @@ type StoreModule = {
   useTendersStore: StoreApi
   checkTendersSaveSize: (document: TendersDataV2) => TendersSaveSizeCheck
   flushSaveToMain: () => Promise<{ dirty: boolean; ok: boolean; error: string | null }>
+  cancelPendingSave: () => void
+  scheduleSaveToMain: () => void
 }
 
 async function importStoreModule(): Promise<StoreModule> {
@@ -1239,5 +1264,44 @@ describe('Tenders renderer store v2 cutover', () => {
       expect(state(store).hasWorkspaces).toBe(false)
       expect(state(store).workspaces).toHaveLength(0)
     })
+  })
+})
+
+describe('test isolation', () => {
+  it('a test that ends with a scheduled save must not arm a timer that fires into the next test', async () => {
+    // F6: the store module's 300 ms debounce can outlive the per-test boundary
+    // (`vi.resetModules()` + a fresh `window.tendersApi`). The captured failure:
+    // `expect(api.saveStoreV2).not.toHaveBeenCalled()` saw one call whose payload
+    // was the PREVIOUS test's loaded document — revision 7, this fixture —
+    // firing against the next test's fresh mock. A fake-timer debounce is
+    // dropped by `vi.useRealTimers()` at the boundary, but a timer armed against
+    // the real clock survives it: nothing at the boundary cancels a real timer.
+    // End THIS test with the store holding exactly that state — a scheduled save
+    // on the real clock, the loaded fixture untouched.
+    api.loadStoreV2.mockResolvedValue(loadOk('loaded', makeLoadedDoc(7), false))
+    useSuccessfulSave()
+
+    const store = await importStore()
+    await hydrate(store)
+
+    // After the boundary, a timer armed here fires into the next test and calls
+    // ITS `saveStoreV2` with `makeLoadedDoc(7)` — revision 7, this fixture.
+    vi.useRealTimers()
+    const module = await importStoreModule()
+    module.scheduleSaveToMain()
+  })
+
+  it('the next test sees no stray save call from the previous test', async () => {
+    // Wait past the 300 ms debounce the previous test armed (if it survived the
+    // boundary), then prove the fresh mock was never called with its document.
+    vi.useRealTimers()
+    useSuccessfulSave()
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    api.loadStoreV2.mockResolvedValue(loadOk('not-found', emptyDoc(), false))
+    const store = await importStore()
+    await hydrate(store)
+
+    expect(api.saveStoreV2).not.toHaveBeenCalled()
   })
 })
