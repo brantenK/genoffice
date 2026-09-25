@@ -427,6 +427,78 @@ function megabyteLabel(bytes: number): string {
 }
 
 /**
+ * Bytes a 2-space-indented `JSON.stringify` adds to the compact one, counted from
+ * the compact text alone.
+ *
+ * Indenting changes separators and whitespace only: every string, number and
+ * literal is quoted exactly as in the compact form, so the indented document *is*
+ * the compact document plus newlines and indentation, all ASCII (one byte each).
+ * Walking the text outside its string literals and adding up what indenting would
+ * insert therefore gives the indented form's size exactly — no second
+ * serialization (72-98 ms for the 3.0 MB document below) and no second encode
+ * (a further ~30 ms) are needed for it.
+ *
+ * The count per line is `1 + 2 * depth` (the newline plus two spaces per nesting
+ * level); a container that prints empty on one line contributes nothing, which is
+ * why the open/close cases test the adjacent character. An object member's colon
+ * gains one space.
+ *
+ * `tests/renderer-store-v2.test.ts` pins this against the real
+ * `TextEncoder.encode(JSON.stringify(value, null, 2)).length` over a corpus of the
+ * shapes that separate the two figures: empty containers, empty strings in an
+ * array, nested records, unicode, escaped quotes and backslashes, tabs, newlines
+ * and a lone surrogate.
+ */
+function indentedJsonAddedBytes(compact: string): number {
+  const QUOTE = 0x22
+  const BACKSLASH = 0x5c
+  const OPEN_OBJECT = 0x7b
+  const OPEN_ARRAY = 0x5b
+  const CLOSE_OBJECT = 0x7d
+  const CLOSE_ARRAY = 0x5d
+  const COMMA = 0x2c
+  const COLON = 0x3a
+  let added = 0
+  let depth = 0
+  let index = 0
+  while (index < compact.length) {
+    const code = compact.charCodeAt(index)
+    if (code === QUOTE) {
+      // Skip the whole literal. A quote preceded by an odd run of backslashes is
+      // escaped and does not close the string, so step over those.
+      let end = compact.indexOf('"', index + 1)
+      while (end !== -1) {
+        let backslashes = 0
+        while (compact.charCodeAt(end - 1 - backslashes) === BACKSLASH) backslashes += 1
+        if (backslashes % 2 === 0) break
+        end = compact.indexOf('"', end + 1)
+      }
+      index = (end === -1 ? compact.length : end) + 1
+      continue
+    }
+    if (code === OPEN_OBJECT || code === OPEN_ARRAY) {
+      const closing = code === OPEN_OBJECT ? CLOSE_OBJECT : CLOSE_ARRAY
+      if (compact.charCodeAt(index + 1) !== closing) {
+        depth += 1
+        added += 1 + 2 * depth
+      }
+    } else if (code === CLOSE_OBJECT || code === CLOSE_ARRAY) {
+      const opening = code === CLOSE_OBJECT ? OPEN_OBJECT : OPEN_ARRAY
+      if (compact.charCodeAt(index - 1) !== opening) {
+        added += 1 + 2 * (depth - 1)
+        depth -= 1
+      }
+    } else if (code === COMMA) {
+      added += 1 + 2 * depth
+    } else if (code === COLON) {
+      added += 1
+    }
+    index += 1
+  }
+  return added
+}
+
+/**
  * Renderer-side size pre-check for one save attempt, mirroring the two ceilings
  * main enforces: the compact document (`MAX_TENDERS_DOCUMENT_BYTES`) and the
  * pretty-printed file `tenders-store` writes (`MAX_TENDERS_STORE_FILE_BYTES`).
@@ -435,8 +507,15 @@ function megabyteLabel(bytes: number): string {
  * every autosave with no way for the user to know what to do. This measures bytes
  * only — schema validation stays in `validateTendersDataV2` and still runs after
  * it (it is what reports a field-level problem), so the pre-check is an
- * *addition* to that walk, not a replacement: measured, the two serializations
- * cost ~108 ms for a 5.4 MB document, and the schema walk runs on top.
+ * *addition* to that walk, not a replacement.
+ *
+ * Both ceilings come from ONE serialization. The document used to be serialized
+ * three times per save (compact, 2-space, then encoded twice), which measured
+ * 188-209 ms of the 353-396 ms a save attempt spent on the UI thread for the
+ * 3.0 MB document `tests/tenders-persistence-bounds.test.ts` builds — on every
+ * 300 ms autosave. Both figures are now derived from the compact text (see
+ * `indentedJsonAddedBytes`); the derivation is exact rather than an estimate, so
+ * the numbers stay the ones the store enforces and the copy keeps quoting them.
  */
 export interface TendersSaveSizeCheck {
   /** Bytes of the compact JSON document, as main measures it. */
@@ -457,10 +536,12 @@ export interface TendersSaveSizeCheck {
 
 export function checkTendersSaveSize(document: TendersDataV2): TendersSaveSizeCheck {
   const encoder = new TextEncoder()
-  const documentBytes = encoder.encode(JSON.stringify(document)).length
-  // Exactly what the authoritative store writes: the same document, 2-space
-  // indented, so indentation-driven growth cannot slip past this check.
-  const fileBytes = encoder.encode(JSON.stringify(document, null, 2)).length
+  // One serialization, reused by both ceilings: `documentBytes` is the compact
+  // document as main measures it, and the file `tenders-store` writes is that
+  // same document with a 2-space gap.
+  const compact = JSON.stringify(document)
+  const documentBytes = encoder.encode(compact).length
+  const fileBytes = documentBytes + indentedJsonAddedBytes(compact)
   const overDocument = documentBytes > MAX_TENDERS_DOCUMENT_BYTES
   const overFile = fileBytes > MAX_TENDERS_STORE_FILE_BYTES
   const overLimit = overDocument || overFile
@@ -839,6 +920,19 @@ async function performSaveToMain(): Promise<void> {
   // (for example a human closing-date string) must surface as a field-level
   // error instead of failing whole-document validation on every save and
   // bricking the workspace.
+  //
+  // This walk runs on every attempt, and deliberately is NOT memoized on the
+  // previous save even though it is the largest single cost here (~150-185 ms for
+  // the 3.0 MB document `tests/tenders-persistence-bounds.test.ts` builds). Both
+  // available keys would trade the guarantee away: the document holds the store's
+  // own arrays (`document.workspaces` IS `state.workspaces`), so an
+  // object-identity key would miss an in-place edit entirely; and a key over the
+  // compact serialization would miss the values `JSON.stringify` cannot tell
+  // apart — `JSON.stringify({ confidence: NaN })` is byte-identical to
+  // `JSON.stringify({ confidence: null })`, and the walk rejects the first
+  // ("Expected a finite number"), so a reused verdict would send a document the
+  // schema refuses on to `saveStoreV2`. Refusing before IPC is what this walk is
+  // here for; it is not paid away for speed.
   const validation = validateTendersDataV2(document)
   if (!validation.ok) {
     isSaveInFlight = false

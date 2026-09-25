@@ -1,7 +1,7 @@
 // DOCX intake, wired into the product — the decisions this wave makes, pinned.
 //
 // `intake/docx.ts` already reads a .docx into the shape the rest of the pipeline
-// consumes (its own 19 tests are in `docx-intake.test.ts`). What is pinned here
+// consumes (its own 31 tests are in `docx-intake.test.ts`). What is pinned here
 // is everything the SURFACES had to decide once a Word document could arrive
 // through the same dropzone as a PDF:
 //
@@ -373,6 +373,66 @@ describe('a picture-only Word page is not called scanned', () => {
     expect(workspace).toMatch(/wordDocumentPaginationNote\(tender\)/)
     expect(workspace, 'the PDF branch must keep printing its page count').toMatch(
       /\{tender\.numPages\} pages/,
+    )
+  })
+})
+
+// ── the Word import's progress is honest, and it yields where it can ──────────
+//
+// Measured on this path: a .docx parse yields the thread while it inflates
+// pictures (16 MB of them took 4.7 s with no gap longer than 345 ms) but NOT
+// while it parses text (24 500 paragraphs in a 72 KB package held the thread for
+// 3 599 ms of its 3.9 s). So the import can honestly report a PHASE and cannot
+// honestly report a fraction or a bar — and the stages it runs after the parse
+// are its own, where a real task boundary IS available. Both halves are pinned
+// here against the source, because the failure each prevents is a future edit.
+
+describe('a Word import is given no progress it did not measure', () => {
+  it('shows the module’s own phase message and derives no fraction from the bound', () => {
+    const code = codeText(TENDER_LIST)
+    // The surface shows the module's message, so nothing paraphrases what the
+    // parse can and cannot say — including why it cannot say how far along it is.
+    expect(code).toMatch(/message: docxParseProgressMessage\(progress\)/)
+    // `docxProgressFraction` answers "is the package's size known yet", and the
+    // size is known before any of a text-heavy document's parse has run. A bar
+    // built from it would fill to 100 % while seconds of work remained, so the
+    // Word path must not reach for it at all.
+    expect(code, 'no surface may turn the bound into a bar').not.toMatch(/docxProgressFraction/)
+    // `total: 0` is what makes the indicator indeterminate: `ShredProgress`
+    // renders the bar and the page counter only when there is a total. The exact
+    // wiring is pinned — the module's message, no page, no total — because that
+    // combination IS the honest state: an indeterminate spinner and a sentence
+    // that says why it cannot advance.
+    const wordBranch = code.slice(
+      code.indexOf('if (wordDocument) {'),
+      code.indexOf('assertPdfBytesWithinLimit(file.size)'),
+    )
+    expect(wordBranch.length, 'the Word branch of the import must exist').toBeGreaterThan(0)
+    expect(wordBranch).toMatch(
+      /onProgress: \(progress\) =>\s*setShredding\(\{\s*stage: 'loading',\s*message: docxParseProgressMessage\(progress\),\s*page: 0,\s*total: 0,\s*\}\)/,
+    )
+    expect(wordBranch, 'the Word branch has no page total to pass').not.toMatch(
+      /total: progressTotal/,
+    )
+    // …and the PDF path still reports real pages beside it.
+    expect(code).toMatch(/total: doc\.numPages/)
+  })
+
+  it('yields the thread between its own stages instead of running them together', () => {
+    const code = codeText(TENDER_LIST)
+    // A real task boundary — the point at which the frame repaints and a queued
+    // Cancel click is dispatched — followed by a cancellation checkpoint, so a
+    // cancel landing in the gap stops the import before the next stage's work
+    // rather than after it.
+    expect(code).toMatch(
+      /const paintAndCheckAbort = async \(\): Promise<void> => \{\s*await new Promise\(\(resolve\) => setTimeout\(resolve, 0\)\)\s*throwIfAborted\(\)\s*\}/,
+    )
+    // Measured on a 24 500-line Word document: `shredExtraction` holds the thread
+    // ~1.05 s and `extractTenderMeta` ~0.8 s, so run together they are one 1.85 s
+    // stretch the frame cannot paint through. The seams must be used.
+    const seams = code.match(/await paintAndCheckAbort\(\)/g) ?? []
+    expect(seams.length, 'the post-parse stages must not run back to back').toBeGreaterThanOrEqual(
+      2,
     )
   })
 })

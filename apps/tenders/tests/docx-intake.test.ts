@@ -546,8 +546,13 @@ describe('DOCX intake', () => {
   // The parse is one library call with no internal seam, so this path cannot
   // report pages the way the PDF path does. What it must NOT do is leave a
   // surface with nothing to show and an abort that is only ever checked at the
-  // two ends of a call that can run for tens of seconds: that is a frozen frame,
-  // which reads as a hang. These tests pin the seam that fixes it.
+  // two ends of a call that can run for tens of seconds. Measured, that call is
+  // two different animals: a picture-heavy package yields throughout (16 MB of
+  // pictures, 4.7 s, no gap over 345 ms) while a text-heavy one holds the thread
+  // in one block (24 500 paragraphs in a 72 KB package, 3 599 ms of its 3.9 s) —
+  // and on THAT shape a bar or a percentage would be an invention, so what the
+  // copy must carry is the reason it cannot report one. These tests pin the seam
+  // and the honesty of what it reports.
 
   describe('progress and cancellation', () => {
     it('reports the phase of the import, never a fraction it did not measure', async () => {
@@ -596,8 +601,36 @@ describe('DOCX intake', () => {
         expect(message).not.toMatch(/\d\s*%/)
         expect(message).not.toMatch(/page \d/i)
       }
-      expect(docxParseProgressMessage(seen[0])).toBe('Opening the package…')
-      expect(docxParseProgressMessage(seen[1])).toBe('Reading document content…')
+      expect(docxParseProgressMessage(seen[0])).toBe('Opening the Word document…')
+      // The parse's own message carries the REASON the indicator cannot move,
+      // because on a text-heavy document it cannot: measured, 24 500 paragraphs in
+      // a 72 KB package held the thread for 3 599 ms of its 3.9 s in one unbroken
+      // block, so a bar — or a spinner beside a number — would be an invention.
+      // Without this assertion the reason could be dropped from the copy silently
+      // and the surface would be back to showing progress that never advances.
+      const parsingMessage = docxParseProgressMessage(seen[1])
+      expect(parsingMessage).toMatch(/Reading the Word document/)
+      expect(parsingMessage).toMatch(/no progress can be reported until it finishes/)
+      expect(docxParseProgressMessage({ phase: 'mapping', bytes: 1 })).toBe(
+        'Matching compliance rules…',
+      )
+    })
+
+    it('reports no fraction a surface could mistake for how far along the parse is', () => {
+      // `docxProgressFraction` answers "is the package's size known yet", and the
+      // size is known before any of the parse has run on a text-heavy document —
+      // where seconds of work remain. A bar built from it would jump to 100 %
+      // while that work ran, which is the fabricated percentage this path refuses,
+      // so no surface renders it: the Word import reports `total: 0` and
+      // `ShredProgress` then draws neither bar nor counter. Pinned as a property
+      // here and as the surface's own wiring in `docx-intake-copy.test.ts`.
+      const parseNotStarted = { phase: 'parsing' as const, bytes: 0 }
+      const sizeKnown = { phase: 'parsing' as const, bytes: 2048 }
+      expect(docxProgressFraction(parseNotStarted)).toBe(0)
+      expect(docxProgressFraction(sizeKnown)).toBe(1)
+      // The same 1 the whole parse through: reaching 1 is not finishing.
+      expect(docxProgressFraction({ phase: 'mapping', bytes: 2048 })).toBe(1)
+      expect(docxProgressFraction({ phase: 'reading', bytes: 0 })).toBe(0)
     })
 
     it('checks the signal at every sample, so a cancel is not only checked at the ends', async () => {

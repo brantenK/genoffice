@@ -771,6 +771,133 @@ describe('Tenders renderer store v2 cutover', () => {
       expect(check.error).toMatch(/store file limit/)
     })
 
+    it('measures both ceilings from one serialization, and never pretty-prints the document', async () => {
+      const module = await importStoreModule()
+      const encoder = new TextEncoder()
+      const document = documentV2(1, [workspace('ws-1', 'Loaded Co')])
+      // Computed before the spy is installed, so the only `JSON.stringify` the
+      // assertion below can observe is the one the pre-check makes.
+      const exactDocumentBytes = encoder.encode(JSON.stringify(document)).length
+      const exactFileBytes = encoder.encode(JSON.stringify(document, null, 2)).length
+
+      const stringify = vi.spyOn(JSON, 'stringify')
+      let check: TendersSaveSizeCheck
+      try {
+        check = module.checkTendersSaveSize(document)
+        // Serialized exactly once, and with no gap argument: the 2-space copy is
+        // derived from this same text instead of being built a second time.
+        expect(stringify.mock.calls).toHaveLength(1)
+        expect(stringify.mock.calls[0]).toHaveLength(1)
+      } finally {
+        stringify.mockRestore()
+      }
+
+      // Derivation, not estimate: both figures are still the exact byte counts of
+      // the two forms main measures.
+      expect(check.documentBytes).toBe(exactDocumentBytes)
+      expect(check.fileBytes).toBe(exactFileBytes)
+    })
+
+    it('keeps both byte figures exact for the shapes that separate them', async () => {
+      const module = await importStoreModule()
+      const encoder = new TextEncoder()
+      const withConflicts = (count: number): TendersDataV2 => {
+        const document = documentV2(1, [workspace('ws-1', 'Loaded Co')])
+        document.workspaces[0].tenders[0].intakeVerification = {
+          fields: {},
+          requirements: {},
+          conflicts: Array.from({ length: count }, () => ''),
+          contactEmail: null,
+          createdAt: LOADED_AT,
+          updatedAt: LOADED_AT,
+        }
+        return document
+      }
+      const nested = documentV2(1, [workspace('ws-1', 'Loaded Co')])
+      nested.workspaces[0].company.directors = []
+      nested.workspaces[0].company.projects = []
+      nested.workspaces[0].customers[0].requiredDocs = []
+      nested.workspaces[0].vault[0].metadata = {}
+      nested.workspaces[0].tenders[0].requirements[0].suggestedVaultDocIds = []
+      nested.workspaces[0].tenders[0].intakeVerification = {
+        fields: {
+          title: {
+            extractedValue: 'quote " backslash \\ comma , brace } bracket ] colon :',
+            sourcePage: 1,
+            sourceClause: 'tab\tnewline\nunicode é 中 😀 lone \ud800 trailing \\',
+            confidence: 0.5,
+            candidates: [],
+            state: 'unconfirmed',
+            reviewedAt: null,
+          },
+        },
+        requirements: {},
+        pages: [],
+        contactEmail: null,
+        conflicts: [],
+        createdAt: LOADED_AT,
+        updatedAt: LOADED_AT,
+      }
+      const corpus: TendersDataV2[] = [
+        makeLoadedDoc(7),
+        emptyDoc(),
+        documentV2(0, [workspace('ws-1', 'Loaded Co', { tenders: [], customers: [], vault: [] })]),
+        withConflicts(0),
+        withConflicts(1),
+        withConflicts(500),
+        nested,
+      ]
+
+      for (const document of corpus) {
+        const check = module.checkTendersSaveSize(document)
+        expect(check.documentBytes).toBe(encoder.encode(JSON.stringify(document)).length)
+        // Empty containers print on one line, empty strings in an array each take
+        // an indented line — the two shapes the derived figure has to get right.
+        expect(check.fileBytes).toBe(encoder.encode(JSON.stringify(document, null, 2)).length)
+      }
+    })
+
+    it('serializes the saved document once per autosave, with no pretty-printed pass', async () => {
+      api.loadStoreV2.mockResolvedValue(loadOk('loaded', makeLoadedDoc(7), false))
+      // A save mock that does not itself re-serialize the request, so every
+      // `JSON.stringify` of the document observed below belongs to the save path.
+      api.saveStoreV2.mockImplementation(async (request: SaveTendersRequest) =>
+        saveOk({
+          ...request.document,
+          revision: request.expectedRevision + 1,
+          updatedAt: NEXT_AT,
+        }),
+      )
+
+      const store = await importStore()
+      await hydrate(store)
+
+      const stringify = vi.spyOn(JSON, 'stringify')
+      try {
+        state(store).addVaultDoc(vaultDoc('vd-serialized-once', 'Serialized once'))
+        await settle()
+        expect(saveCallCount()).toBeGreaterThanOrEqual(1)
+
+        const documentCalls = stringify.mock.calls.filter((call) => {
+          const value = call[0] as { schemaVersion?: unknown; workspaces?: unknown } | undefined
+          return (
+            !!value &&
+            typeof value === 'object' &&
+            value.schemaVersion === 2 &&
+            Array.isArray(value.workspaces)
+          )
+        })
+        expect(documentCalls).toHaveLength(1)
+        // One argument: the pre-check still measures two ceilings, but from this
+        // single string rather than a second, 2-space serialization of it.
+        expect(documentCalls[0]).toHaveLength(1)
+      } finally {
+        stringify.mockRestore()
+      }
+
+      expect(state(store).saveStatus).toBe('saved')
+    })
+
     it('refuses an over-size document locally instead of failing every autosave round trip', async () => {
       api.loadStoreV2.mockResolvedValue(loadOk('loaded', makeLoadedDoc(7), false))
       useSuccessfulSave()

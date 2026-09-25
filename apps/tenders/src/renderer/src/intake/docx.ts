@@ -42,25 +42,46 @@
 // `getTextContent()` resolves before the next page begins. A .docx has no such
 // seam: `parseDocx` is one library call, and this module holds no hooks inside it.
 //
-// Measured on the reference machine, that call is NOT one long block, though.
-// JSZip's media path inflates each picture part in 16 KiB blocks and awaits each
-// block, and pako emits its output in 16 KiB chunks, so the whole decode is a long
-// chain of resolved promises with the event loop running between them: an 11.5 MB
-// package holding 80 incompressible 1 MB pictures took ~26 s of wall clock but
-// never held the thread for more than ~0.4 s. The event loop therefore DOES turn
-// during the parse on that machine; what the renderer was missing was not a yield
-// but anything to turn it FOR — no progress, and an abort that was only ever
-// checked before and after the parse.
+// What that one call does to the renderer depends on what the document is made
+// of, and both shapes were measured on the reference machine with a
+// self-rescheduling macrotask ticker, which reports the longest stretch in which
+// no macrotask ran — the window in which a renderer cannot paint and cannot
+// dispatch the user's click. (The instrument reads 501 ms for a 500 ms busy loop,
+// 404 ms for a 400 ms chain of resolved promises and 12 ms for a 200 ms chain of
+// `setTimeout`s, so it measures the absence of a task boundary rather than a
+// clock.)
 //
-// So this path reports progress the way the PDF path does — a callback that
-// samples the document while the parse is running — and checks the abort signal
-// at every sample, which is what bounds a cancel to one sample's work. The signal
-// is a callback rather than something this layer awaits, so a caller whose
-// environment cannot schedule a timer in the middle of a parse (`setTimeout` is
-// clamped to ~1 s between the app's own frames, but `setImmediate`/frames are
-// not) is not forced into a 1 s-polling document. `emitDocxProgressEvery` blocks
-// the event loop for as long as it is given, so the renderer's own entry point
-// does not use it — see `shredFile` in components/TenderList.tsx.
+//  * A PICTURE-heavy package yields throughout. JSZip's media path inflates each
+//    picture part in chunks and pako emits its output in chunks, so the decode is
+//    a long chain of resolved promises: 16 pictures of 1 MB took 4.7 s of wall
+//    clock with a longest gap of 345 ms, and 40 of them 11.1 s with a longest gap
+//    of 316 ms.
+//  * A TEXT-heavy package does NOT. The body is parsed in one unbroken pass:
+//    24 500 paragraphs (4.7 M characters in a 72 KB package) held the thread for
+//    3 599 ms of its 3.9 s, and one 12 000 000-character paragraph — the shape
+//    `maxTextChars` admits — held it for 5 512 ms of 6.0 s.
+//
+// So on a text-heavy document the frame cannot repaint and a click on Cancel is
+// queued until the block ends, while on a picture-heavy one the loop turns
+// throughout. Neither is fixable here: the block is inside `parseDocx` and there
+// is no seam to yield at. What this module owes a surface instead is the truth —
+// the PHASE of the parse and never a fraction of it, with the parse's own message
+// saying that no progress can be reported while it runs (see
+// `docxParseProgressMessage`) — so the indicator is honestly indeterminate rather
+// than a spinner beside a bar this path would have had to invent.
+//
+// The progress seam is a callback rather than something this layer awaits, so a
+// caller whose environment cannot schedule a timer in the middle of a parse is
+// not forced into a polling document, and this path checks the abort signal at
+// every sample, which is what bounds a cancel to one sample's work.
+// `emitDocxProgressEvery` blocks the event loop for as long as it is given, so
+// the renderer's own entry point does not use it — see `shredFile` in
+// components/TenderList.tsx.
+//
+// No fixture for the figures above is committed to this repository, so they are
+// reference-machine readings rather than something a checkout re-derives — unlike
+// the PDF envelope's, which `tests/performance/results.json` records (the same
+// admission is recorded in docs/tenders-hardening/contracts-and-invariants.md).
 //
 // NOT read, deliberately: header/footer parts, footnotes and endnotes, and
 // comments (separate parts, not body text — the body is where requirements
@@ -90,12 +111,16 @@ export interface DocxPreflightLimits {
    * Extracted text lines (one paragraph or table row each).
    *
    * A .docx "line" is a whole paragraph or table row, so the reason the PDF path
-   * needs a line budget applies here too — but NOT the PDF's own figure: its
-   * ~0.042 MB heap per line was measured on VISUAL lines of ~40 characters, and a
-   * DOCX paragraph is 5–25 times longer. What was measured for this path is a
-   * cost per LINE rather than per character, because the parsed block model (not
-   * the text) dominates it: 24 500 lines / 4.77 M characters retained ~112 MB
-   * through parse → `buildClauses` → `shredExtraction` in ~4.8 s on the reference
+   * needs a line budget applies here too — but the PDF's own figure is not
+   * transferable, and the two are different measurements rather than one scaled.
+   * The PDF path's ~0.042 MB is HEAP PER VISUAL LINE, taken on the short visual
+   * lines of a rendered page (`tests/performance/results.json`, `byteStress`: a
+   * 22 000-line synthetic document whose lines run ~85–118 characters). A DOCX
+   * line is a whole paragraph or table row, several times longer, and what it
+   * costs is its parsed BLOCK rather than its characters — so a per-line figure
+   * has to be measured on this path, never derived from the PDF one by length.
+   * Measured here: 24 500 lines / 4.77 M characters retained ~112 MB through
+   * parse → `buildClauses` → `shredExtraction` in ~4.8 s on the reference
    * machine, i.e. ~4.6 KB per line whether the line is 195 or 1 087 characters.
    * 24 600 lines is therefore ~115 MB and ~5 s — well inside the same 1 GB heap
    * budget the PDF envelope is written against, and the reason it is safe to hold
@@ -121,6 +146,13 @@ export interface DocxPreflightLimits {
    * on the reference machine. That is 2.5× the 4 766 389 characters of the
    * 24 500-line realistic fixture, so `maxLines` still binds first for a normal
    * document and this budget exists for the shape a line count cannot see.
+   *
+   * Both DOCX figures in this interface are this path's own reference-machine
+   * readings and no fixture for them is committed, so a checkout cannot re-derive
+   * them (the same admission is recorded in
+   * docs/tenders-hardening/contracts-and-invariants.md). They are the basis of the
+   * budgets, not numbers any test enforces; each budget's VALUE is pinned in
+   * `tests/docx-intake.test.ts`.
    */
   maxTextChars: number
 }
@@ -351,11 +383,15 @@ export interface DocxIntakeProgress {
 /**
  * The fraction of the import to display, in 0–1, from the parse's own bound.
  *
- * Returns 0 when nothing reportable has happened yet and 1 once the parse has
- * finished. `DocxIntakeProgress` carries a bound on the parse work, not a
- * measurement of it, so this number is deliberately derived from the bound and is
- * never presented as a measurement — the surface pairs it with a message that says
- * what is actually happening (see `docxParseProgressMessage`).
+ * Returns 0 before the package's size is known and 1 from the moment it is, which
+ * is a statement about the BOUND and not about the import: the parse of a
+ * text-heavy document runs for seconds after this has reached 1 (see the
+ * responsiveness note at the top of this module). So a surface must not render it
+ * as a progress bar — a bar built from it would jump to full while seconds of work
+ * remain, which is the fabricated percentage this path exists to refuse. The app
+ * renders none: the Word import reports `total: 0` and `ShredProgress` draws no bar
+ * (see `shredFile` in components/TenderList.tsx), and the value here is what tells
+ * a surface whether the size is known yet.
  */
 export function docxProgressFraction(progress: DocxIntakeProgress): number {
   switch (progress.phase) {
@@ -372,30 +408,45 @@ export function docxProgressFraction(progress: DocxIntakeProgress): number {
  * What the import is doing, in plain language, for the surface showing it.
  *
  * Deliberately no percentage and no page count: the parse has neither. A .docx is
- * read as one package, so the only two things this path can honestly say are that
- * it is opening the file and that it is reading the document's content.
- *
- * The wait is dominated by the document's PICTURES, not its text — each media part
- * is inflated and then inlined as base64, which is a ~4/3 expansion plus a
- * character-by-character encode. Measured on this path: an 11.5 MB package holding
- * 80 incompressible one-megabyte pictures took ~26 s, while a 0.6 MB text-only
- * document of 6 000 paragraphs took ~1.3 s. An operator reading a stopwatch should
- * therefore expect the wait to track the .docx's image weight, not its page count
- * or its word count. `docxMediaByteBudget` measures that weight from the package
- * without inflating anything.
+ * read as one package, so the only things this path can honestly say are that it
+ * is opening the file, that it is reading the document's content, and — for the
+ * document's content — that no progress can be reported while that step runs.
+ * That last clause is the reason this function returns prose rather than a
+ * number, and it is not decoration: the parse of a text-heavy document holds the
+ * renderer for seconds in one unbroken block, so the honest indicator is an
+ * indeterminate one whose message explains why it cannot advance (see the
+ * responsiveness note at the top of this module for what was measured, and
+ * `docxMediaByteBudget` for the media weight on the other shape).
  */
 export function docxParseProgressMessage(progress: DocxIntakeProgress): string {
-  if (progress.phase === 'reading') return 'Opening the package…'
+  if (progress.phase === 'reading') return 'Opening the Word document…'
   if (progress.phase === 'mapping') return 'Matching compliance rules…'
-  return 'Reading document content…'
+  return (
+    'Reading the Word document — one pass over the whole file, so no progress can ' +
+    'be reported until it finishes.'
+  )
 }
 
-/** How many bytes of image data a parse will inline as base64 — the dominant cost. */
+/**
+ * How many bytes of image data a parse will inline as base64.
+ *
+ * A LOWER bound on the wait, never the whole of it: the media path yields while it
+ * inflates (so a picture-heavy package stays responsive), while a text-heavy one
+ * blocks the thread in proportion to its text and has no media at all. Each media
+ * part is inflated and then inlined as base64 — a ~4/3 expansion plus a
+ * character-by-character encode. Measured on this path: 16 pictures of 1 MB (16 MB
+ * of media, no text) parsed in 4.7 s, while a 72 KB package holding 4.7 M
+ * characters of text parsed in 3.9 s — so media weight explains the wait on one
+ * shape and nothing at all about it on the other.
+ */
 export function docxMediaByteBudget(
   parts: Array<{ name: string; uncompressedBytes: number }>,
 ): number {
   return parts.reduce(
-    (total, part) => (/\.(?:bmp|emf|gif|jpe?g|png|tiff?|wmf)$/i.test(part.name) ? total + part.uncompressedBytes : total),
+    (total, part) =>
+      /\.(?:bmp|emf|gif|jpe?g|png|tiff?|wmf)$/i.test(part.name)
+        ? total + part.uncompressedBytes
+        : total,
     0,
   )
 }

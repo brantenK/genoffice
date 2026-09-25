@@ -801,6 +801,19 @@ export async function shredTenderFile(
     if (!signal.aborted) return
     throw wordDocument ? new DocxImportCancelledError() : new PdfImportCancelledError()
   }
+  // ONE macrotask between the app's own stages. Each stage below holds the thread
+  // by itself — the .docx parse for seconds on a text-heavy document (see the
+  // responsiveness note in intake/docx.ts), `shredExtraction` ~1 s on a
+  // 24 500-line one — and running two of them back to back makes one unbroken
+  // stretch in which the frame cannot repaint and a queued Cancel click cannot be
+  // dispatched. A task boundary is where both happen, so the stretches are bounded
+  // by the longest single stage instead of by their sum, and the abort check is
+  // placed after it so a cancel that lands in the gap stops the import before the
+  // next stage's work rather than after it.
+  const paintAndCheckAbort = async (): Promise<void> => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    throwIfAborted()
+  }
   let openedDoc: PDFDocumentProxy | null = null
   // ONE read of the file for the whole import: the same buffer feeds the reader
   // (the PDF parse, or the .docx parse) and the persistence write.
@@ -834,14 +847,17 @@ export async function shredTenderFile(
       // anything the parse had not already yielded, while the sample itself would
       // block the loop for the interval it waited out. The wait is instead shown
       // honestly and continuously by the spinner `ShredProgress` already renders,
-      // with the message saying what the parse is doing and never how far along it
-      // is (nothing measured that).
+      // with the message saying what the parse is doing and, for the parse itself,
+      // why it cannot say how far along it is — a text-heavy .docx holds the
+      // thread for seconds in one unbroken block, so a bar derived from any of
+      // this would be an invention. `total: 0` is what keeps it indeterminate:
+      // `ShredProgress` draws no bar and no page counter without a total.
       ex = await extractDocxIntake(fileBytes, {
         signal,
         onProgress: (progress) =>
           setShredding({
             stage: 'loading',
-            message: `Reading Word document… ${docxParseProgressMessage(progress)}`,
+            message: docxParseProgressMessage(progress),
             page: 0,
             total: 0,
           }),
@@ -894,6 +910,10 @@ export async function shredTenderFile(
     await new Promise((r) => setTimeout(r, 120)) // let the UI paint
     throwIfAborted()
     const extracted = shredExtraction(ex)
+    // A task boundary between the two: measured on a 24 500-line Word document,
+    // `shredExtraction` holds the thread ~1.05 s and `extractTenderMeta` ~0.8 s, so
+    // back to back they are one 1.85 s stretch the frame cannot paint through.
+    await paintAndCheckAbort()
     const meta = extractTenderMeta(ex, file.name.replace(/\.(?:pdf|docx)$/i, ''))
 
     setShredding({
@@ -902,6 +922,8 @@ export async function shredTenderFile(
       page: progressTotal,
       total: progressTotal,
     })
+    // …so the message above is actually painted before the analysis below runs.
+    await paintAndCheckAbort()
     // ONE vault keyword index for this analysis pass; each requirement matches
     // against a prefiltered candidate set instead of rescanning the vault.
     const vaultIndex = buildVaultKeywordIndex(useTendersStore.getState().vault)
