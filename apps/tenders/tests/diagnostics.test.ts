@@ -48,9 +48,23 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The seam the F4 pin below uses: the sink (and the retry helper it routes
+// through) read `renameSync` from the REAL `node:fs` CommonJS exports, which
+// vitest's module runner leaves native for builtins. A wrapper installed there
+// before the sink module is (re-)evaluated therefore intercepts exactly the
+// calls the rotation makes — no `vi.mock` on the builtin involved.
+const require = createRequire(import.meta.url)
+
+// The sink routes its rotation renames through `renameWithBoundedRetry`
+// (`main/tenders-paths.ts`), which imports `electron` for its path decisions.
+// Nothing here calls it, but the import chain needs the standard stub, exactly
+// as every other test that reaches a main module does.
+vi.mock('electron', () => ({ app: { getPath: (): string => '' } }))
 
 import {
   DEFAULT_DIAGNOSTICS_MAX_BYTES,
@@ -186,6 +200,45 @@ describe('the diagnostic sink writes what it is given', () => {
     expect(text).not.toMatch(/^.*\u2028/m)
   })
 
+  it('cannot be made to forge a line by `source` or `level` content either', () => {
+    const log = createDiagnosticsLog({ dir: logDir, now: FIXED_CLOCK })
+    // The d24ead6 remediation hardened `message` and `detail`, but `source` and
+    // `level` were interpolated RAW — a newline or U+2028/U+2029 in either
+    // splits one entry into two lines and the second half reads as a genuine
+    // forged entry. The IPC boundary caps `source` at 64 chars with no
+    // line-separator check, so this shape can reach the sink.
+    const hostile = (level: string, source: string, message: string): DiagnosticsEntry =>
+      ({ level, source, message }) as unknown as DiagnosticsEntry
+    log.record(hostile('info', 'store\nFORGED [error] evil: taken', 'first entry'))
+    log.record(hostile('info', 'reminders\u2028FORGED [warn] evil: taken\u2029again', 'second entry'))
+    log.record(hostile('info\u2028FORGED', 'store', 'third entry'))
+
+    const text = readLive()
+    // One entry, one line: three records, three lines — no raw separator of any
+    // kind survives, and no forged half starts a line.
+    expect(text.trimEnd().split('\n')).toHaveLength(3)
+    expect(text).not.toMatch(/[\u2028\u2029]/)
+    expect(text).not.toMatch(/^.*\u2028/m)
+    // The hostile text is still recorded — collapsed to spaces, not dropped.
+    expect(text).toContain('[info] store FORGED [error] evil: taken: first entry')
+    expect(text).toContain('[info] reminders FORGED [warn] evil: taken again: second entry')
+    expect(text).toContain('[info FORGED] store: third entry')
+  })
+
+  it('collapses a separator in `source` or `level` inside `formatDiagnosticsLine` directly', () => {
+    const line = formatDiagnosticsLine(
+      {
+        level: 'info\u2028X',
+        source: 'a\u2029b\nc',
+        message: 'ok',
+      } as unknown as DiagnosticsEntry,
+      new Date('2026-09-24T12:00:00.000Z'),
+    )
+    expect(line.trimEnd()).not.toMatch(/[\n\u2028\u2029]/)
+    expect(line).toContain('[info X] a b c: ok')
+    expect(line.endsWith('\n')).toBe(true)
+  })
+
   it('escapes a separator in `formatDiagnosticsLine` directly, whatever the caller passes', () => {
     const line = formatDiagnosticsLine(
       { level: 'warn', source: 'store', message: 'ok', detail: { note: 'x\u2028y' } },
@@ -246,6 +299,59 @@ describe('the sink is bounded and rotates at the ceiling', () => {
       if (!existsSync(file)) continue
       const text = readFileSync(file, 'utf8')
       expect(text.endsWith('\n'), `${file} ends mid-line`).toBe(true)
+    }
+  })
+
+  it('retries a transient EBUSY on rotation instead of disabling rotation for the session', async () => {
+    // One transient Windows lock (a scanner or sync client holding the file
+    // open) used to fail the rotation rename, set `rotationDisabled = true`
+    // and leave the sink appending forever — the live file grew past every
+    // ceiling. The rotation renames now route through the shared retry helper
+    // (`renameWithBoundedRetry`, the same one every other rename in the app
+    // uses), so the single EBUSY is retried to success and rotation keeps
+    // working afterwards. The wrapper below intercepts the real `node:fs`
+    // export — the one the sink and the helper actually call — and the sink
+    // module is re-imported so its rename binding is taken after the seam is
+    // installed.
+    const nativeFs = require('node:fs') as { renameSync: (from: string, to: string) => void }
+    const originalRename = nativeFs.renameSync
+    let transientLocks = 0
+    nativeFs.renameSync = ((from, to) => {
+      if (transientLocks === 0) {
+        transientLocks += 1
+        throw Object.assign(new Error('EBUSY: the destination is locked'), { code: 'EBUSY' })
+      }
+      return originalRename(from, to)
+    }) as typeof nativeFs.renameSync
+    try {
+      vi.resetModules()
+      const { createDiagnosticsLog: freshCreateDiagnosticsLog } = await import(
+        '../src/main/diagnostics-log'
+      )
+
+      const maxBytes = 300
+      const maxFiles = 2
+      const log = freshCreateDiagnosticsLog({ dir: logDir, maxBytes, maxFiles, now: FIXED_CLOCK })
+
+      for (let index = 0; index < 50; index += 1) {
+        log.record(info(`entry number ${index} ${'x'.repeat(60)}`))
+      }
+
+      // The live file stayed bounded: the transient lock was retried, not
+      // treated as a permanent failure.
+      const live = readFileSync(liveFile(), 'utf8')
+      expect(live.length).toBeLessThanOrEqual(maxBytes * maxFiles)
+      // And rotation was not disabled for the rest of the session: generations
+      // exist, and the directory as a whole honours cap × files.
+      expect(existsSync(`${liveFile()}.1`), 'rotation happened after the retry').toBe(true)
+      const total = [liveFile(), `${liveFile()}.1`]
+        .filter((file) => existsSync(file))
+        .map((file) => readFileSync(file, 'utf8').length)
+        .reduce((sum, size) => sum + size, 0)
+      expect(total).toBeLessThanOrEqual(maxBytes * maxFiles)
+      expect(transientLocks, 'the injected lock must actually have fired').toBe(1)
+    } finally {
+      nativeFs.renameSync = originalRename
     }
   })
 

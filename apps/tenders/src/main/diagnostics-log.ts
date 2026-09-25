@@ -42,8 +42,9 @@
 // machine. Nothing here is uploaded, nothing is networked, and closing the app
 // cannot lose an entry that was already recorded (each `record()` is a completed
 // synchronous append).
-import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { appendFileSync, mkdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { renameWithBoundedRetry } from './tenders-paths'
 
 // ── the contract ─────────────────────────────────────────────────────────────
 
@@ -245,6 +246,18 @@ function trimMessage(message: unknown): string {
 }
 
 /**
+ * Reduce any field that is interpolated raw into the line to a single-line
+ * string. JavaScript's `\s` covers every line terminator the file must not
+ * contain — LF, CR, and the U+2028/U+2029 separators — so one replace makes
+ * "one entry is one line" hold for `source` and `level` exactly as
+ * {@link trimMessage} makes it hold for the message.
+ */
+function collapseForOneLine(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+/**
  * Render one entry as the single line that goes in the file: a UTC timestamp, the
  * level, the source, the message, then the sanitized detail as compact JSON.
  *
@@ -260,14 +273,18 @@ function trimMessage(message: unknown): string {
  * forged line, produced by a string the sink accepted. {@link escapeLineSeparators}
  * is what closes that; CR and LF never reach here in the first place, because
  * `JSON.stringify` already escapes control characters as `\r`/`\n`.
+ *
+ * `source` and `level` are interpolated raw in the same way, so they go through
+ * {@link collapseForOneLine}: whatever a caller passes in either field, it
+ * cannot split the entry or plant a forged line in the file.
  */
 export function formatDiagnosticsLine(entry: DiagnosticsEntry, at: Date): string {
   const detail = sanitizeDiagnosticsDetail(entry.detail)
   const suffix =
     Object.keys(detail).length > 0 ? ` ${escapeLineSeparators(JSON.stringify(detail))}` : ''
-  return `${isoTimestamp(at)} [${entry.level}] ${String(entry.source)}: ${trimMessage(
-    entry.message,
-  )}${suffix}\n`
+  return `${isoTimestamp(at)} [${collapseForOneLine(entry.level)}] ${collapseForOneLine(
+    entry.source,
+  )}: ${trimMessage(entry.message)}${suffix}\n`
 }
 
 /**
@@ -336,6 +353,14 @@ export function createDiagnosticsLog(options: CreateDiagnosticsLogOptions): Diag
    * Rotate `file → file.1 → file.2 …`, dropping the oldest kept generation. The
    * highest index is `maxFiles - 1`, so with the default of 3 the files kept are
    * `name`, `name.1`, `name.2` — never a fourth.
+   *
+   * Every rename goes through {@link renameWithBoundedRetry}, the same bounded
+   * retry every other rename in the app uses. Without it, a single transient
+   * Windows lock (a scanner or sync client holding the file open, EBUSY/EPERM)
+   * failed the rename and permanently disabled rotation for the session — the
+   * live file then grew past every ceiling. A transient lock is now retried to
+   * success; only a genuinely persistent failure (an unwritable directory, a
+   * live file that is itself a directory) still disables rotation.
    */
   function rotate(): boolean {
     if (rotationDisabled) return false
@@ -350,13 +375,13 @@ export function createDiagnosticsLog(options: CreateDiagnosticsLogOptions): Diag
       }
       for (let index = maxFiles - 2; index >= 1; index -= 1) {
         try {
-          renameSync(`${filePath}.${index}`, `${filePath}.${index + 1}`)
+          renameWithBoundedRetry(`${filePath}.${index}`, `${filePath}.${index + 1}`)
         } catch {
           // This generation was never written; the chain simply has a gap.
         }
       }
       if (maxFiles > 1) {
-        renameSync(filePath, `${filePath}.1`)
+        renameWithBoundedRetry(filePath, `${filePath}.1`)
       } else {
         // Keeping only the live file: the previous generation is discarded.
         unlinkSync(filePath)
