@@ -22,7 +22,15 @@
 //   navigation-policy.ts      deny-by-default navigation for the view
 //   close-guard.ts            the shell's dirty-close guard
 //   ipc/trust.ts              the trusted-sender gate (the security invariant)
-//   ipc/handlers.ts           all thirty-three `ipcMain.handle` registrations
+//   ipc/handlers.ts           the registration root — no bodies, one call per domain
+//   ipc/handlers-store.ts     the store channels: v2 load/save, close-flush reply,
+//                             legacy read/write, compliance export (6)
+//   ipc/handlers-documents.ts the document lifecycle channels (11)
+//   ipc/handlers-discovery.ts the discovery channels (5)
+//   ipc/handlers-reminders.ts the reminder channels (3)
+//   ipc/handlers-diagnostics.ts the diagnostics channels (2)
+//   ipc/handlers-proposals.ts the proposal channel (1)
+//   ipc/handlers-cross-app.ts the CRM/Books cross-app channels (5)
 //   ipc/engines.ts            the discovery client + reminder scheduler wiring
 //   ipc/proposal-payload.ts   the proposal payload bounds
 //

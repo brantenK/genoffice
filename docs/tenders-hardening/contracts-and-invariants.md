@@ -266,6 +266,19 @@ stop the UI describing a persistence path it does not have:
   `STORE_REFUSED`, `SAVE_THREW`) is **diagnostic only** — no state, no retry, no user-visible
   copy — and a save that commits logs nothing at all, which is what keeps the log from becoming
   noise (`renderer/src/store.ts`, §3e).
+- **The save path's cost is one serialization, not three (the `77c6b68` perf wave).** The size
+  pre-check used to serialize the document three times per save (compact, a 2-space pretty pass
+  purely to size it, then a re-encode); it now serializes once and derives the pretty size from
+  the compact text in a single pass (`indentedJsonAddedBytes` — an 8.9 ms scan instead of a
+  91 ms stringify). Measured on the heavy fixture, best of 3: the pre-check fell from 188.1 to
+  85.1 ms and from 209.3 to 80.4 ms, and a whole save attempt from ~400 to ~250-267 ms on the
+  UI thread, every 300 ms autosave. The derived byte figures still equal an independent
+  `TextEncoder` measurement, so nothing the user sees changed. A skipped-schema-walk cache was
+  considered and REFUTED as unsound — `JSON.stringify({confidence: NaN})` is byte-identical to
+  `({confidence: null})`, so a content-keyed verdict would send a document the walk rejects
+  straight to `saveStoreV2` and would lose the failing field path the refusal names — and the
+  reason is recorded in the source. The figures are HEAD's own; no fixture is committed, so a
+  checkout re-derives nothing (see the same admission in `module-map.md`).
 
 ### 2b. The legacy v1 stack is retired — what that does and does not mean
 
@@ -309,8 +322,9 @@ say otherwise. Tracked in §6 item 14 (a Books-owned change; not made here).
 ## 3. IPC + preload bridge
 
 Files: `apps/tenders/src/shared/ipc.ts`, `apps/tenders/src/preload/index.ts`, and — after the
-composition-root split — `apps/tenders/src/main/ipc/handlers.ts` (all 33 registrations),
-`apps/tenders/src/main/ipc/trust.ts` (the gate) and `apps/tenders/src/main/ipc/registration-state.ts`
+composition-root split — `apps/tenders/src/main/ipc/handlers.ts` (the registration root; the 33
+handler bodies live in the seven `handlers-*.ts` domain modules), `apps/tenders/src/main/ipc/trust.ts`
+(the gate) and `apps/tenders/src/main/ipc/registration-state.ts`
 (the registered boolean). `apps/tenders/src/main/tenders-main.ts` is now the composition root and
 re-exports the surface; see `module-map.md`.
 
@@ -318,11 +332,13 @@ v2 channels: `tenders:load-store-v2`, `tenders:save-store-v2`, `tenders:store-ch
 Preload API: `loadStoreV2`, `saveStoreV2`, `onStoreChangedV2` (direct objects, not JSON strings).
 
 **The arithmetic, stated once so it can be checked.** `TENDERS_CHANNELS` in `shared/ipc.ts`
-declares **36** channel constants; **33** of them have an `ipcMain.handle` in
-`apps/tenders/src/main/tenders-main.ts` (count it: `grep -c "ipcMain.handle" ` on that file
-returns 33). The three that do not are main→renderer pushes: `store-changed-v2` (the commit
-broadcast), `close-flush-request` (the shell's dirty-close guard, §3a) and the legacy
-`data-changed`. The 33 handlers break down as: 2 v2 store (`load-store-v2`, `save-store-v2`),
+declares **36** channel constants; **33** of them have an `ipc.handle` in the seven
+`apps/tenders/src/main/ipc/handlers-*.ts` domain modules (count it:
+`grep -hE "^\s*ipc\.handle\(" apps/tenders/src/main/ipc/handlers*.ts | wc -l` returns 33;
+`tenders-main.ts` is the composition root and registers none). The three that do not are
+main→renderer pushes: `store-changed-v2` (the commit broadcast), `close-flush-request` (the
+shell's dirty-close guard, §3a) and the legacy `data-changed`. The 33 handlers break down as:
+2 v2 store (`load-store-v2`, `save-store-v2`),
 1 close-flush reply (`close-flush-result`), 2 legacy (`get-stored-data`, `save-stored-data`),
 9 document lifecycle (`save-document`, `read-document`, `open-document`, `delete-document`,
 `list-document-trash`, `restore-document`, `replace-document`, `reconcile-documents`,
@@ -806,6 +822,21 @@ picture-only Word page is never called "scanned": no scanner ran, and the copy s
 (`PAGE_STATUS_EXPLANATION_WORD`). Pinned by `tests/docx-intake-copy.test.ts` ("checks the document
 before the model, so a vision-capable model is not asked either").
 
+**The yield seams, and the freeze that is a published limit (the `77c6b68` perf wave).**
+`parseDocx` is one library call with no seam inside it: a text-heavy 24 500-paragraph document
+held the renderer's thread for one unbroken 3 599 ms block (16 MB of pictures froze it for at
+most 345 ms, because the media path yields throughout). The renderer's own stages now yield
+between themselves — `paintAndCheckAbort()` in `components/TenderList.tsx` (`shredFile`), one
+`setTimeout(0)` macrotask plus the abort check, awaited between `shredExtraction`,
+`extractTenderMeta` and the vault pass — so the longest unpaintable stretch fell from 2 087 ms
+to 1 003 ms and a cancel landing in the gap stops the next stage. The module reports the PHASE
+of the parse and never a fraction of it, so the indicator is honestly indeterminate rather than
+a bar this path would have had to invent. **What remains, as a named product decision:** a
+two-line document can hold the thread for ~5.5 s (measured 5 512 ms of 6.0 s) because a single
+12 000 000-character paragraph is legal inside `maxTextChars` — closing it by design means
+lowering that published limit, so it is reported and deferred, not taken. Both measured figures
+are reference-machine readings with no committed fixture; a checkout re-derives nothing.
+
 ### 3e. Diagnostics (the local log a support engineer can read)
 
 The finding this answers is blunt: the app had **no log sink at all**. Every diagnostic in main
@@ -865,9 +896,10 @@ and both returning a bare string `error` when refused (§3):
   scheduler's own log events.
 - **Both former wiring gaps are now CLOSED, and this line used to say the opposite.** (a)
   `recordDiagnosticsStart(log, version)` — the one line a fresh session should start with, so a
-  file attached to a support request says what wrote it — **is called from `registerTendersIpc`**
-  in `main/ipc/handlers.ts`, before anything else can record (the `isTendersIpcRegistered` guard
-  keeps it from being written twice), so a real session's log now opens with that line. §3e's
+  file attached to a support request says what wrote it — **is called from `registerTendersIpc`**;
+  since the IPC split the call itself lives in `main/ipc/handlers-startup.ts`, which `handlers.ts`
+  runs before any channel module, and the `isTendersIpcRegistered` guard
+  keeps it from being written twice, so a real session's log now opens with that line. §3e's
   earlier wording and §6 item 15 both described this as un-wired and were corrected against disk.
   (b) The renderer **does** render the log path to the user: `ErrorBoundary` takes an optional
   `diagnosticsPath` prop and `errorBoundaryLogHint(path, code)` names the file (and the code) in
@@ -1358,10 +1390,11 @@ renderer` import, and a **type-only** `renderer → main` edge exists today
   `main/diagnostics-log`). Type-only, so it carries no runtime code and no browser global into
   `main`, which is why it is tolerable where the deleted `main → renderer` edge was not — but a
   claim that the direction is mechanically one-way would be false. **The IPC arithmetic is
-  unchanged:** 33 `ipcMain.handle` registrations, now all in `main/ipc/handlers.ts`, each still
+  unchanged:** 33 `ipc.handle` registrations, now spread across the seven `main/ipc/handlers-*.ts`
+  domain modules (`handlers.ts` is the registration root and holds no bodies), each still
   beginning with `isTrustedTendersEvent` (verified mechanically, not by reading). §3's count and
-  channel breakdown stand, including the **36 → 33** correction to `TENDERS_CHANNELS`' own
-  declared-member count.
+  channel breakdown stand; `TENDERS_CHANNELS` declares **36** keys — the 33 handled channels plus
+  the 3 push-only sends (`store-changed-v2`, `close-flush-request`, `data-changed`).
 - **The diagnostics log's path and bounds are `<userData>/tenders/tenders-diagnostics.log`, 1 MiB
   live × 3 files = 3 MiB maximum** (§3e), and the surface stays **write-only** from the UI. §6 item
   15's two gaps are **CLOSED**: `recordDiagnosticsStart` is called from `registerTendersIpc` before

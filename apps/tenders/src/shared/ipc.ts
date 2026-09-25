@@ -119,8 +119,9 @@ export const TENDERS_CHANNELS = {
   // Tender discovery (National Treasury's eTenders open data). Additive and
   // optional: the local rule engine stays the offline, always-available default,
   // and nothing here is reachable without an explicit user action. The handlers
-  // live in `main/tenders-main.ts` and pass every call through to the injected
-  // discovery client (`main/discovery-client.ts`).
+  // live in `ipc/handlers-discovery.ts` and pass every call through to the
+  // discovery client wired in `ipc/engines.ts` (the HTTP client itself is
+  // `main/discovery-client.ts`).
   discoveryList: 'tenders:discovery-list',
   discoveryRefresh: 'tenders:discovery-refresh',
   discoveryReadCache: 'tenders:discovery-read-cache',
@@ -694,9 +695,9 @@ export interface TendersApi extends TendersApiBridge {
   /** Subscribe to this view's stream chunks; returns an unsubscribe function. */
   onAiStream: (handler: (chunk: AiStreamChunk) => void) => () => void
   // ── Tender discovery + deadline reminders ─────────────────────────────────
-  // Thin pass-throughs to the handlers in `main/tenders-main.ts`. The bridge
-  // validates nothing: the allow-list, the byte caps, the trusted-sender check
-  // and the store all stay in main.
+  // Thin pass-throughs to the handlers in `ipc/handlers-discovery.ts` and
+  // `ipc/handlers-reminders.ts`. The bridge validates nothing: the allow-list,
+  // the byte caps, the trusted-sender check and the store all stay in main.
   /** List opportunities published in a window (at most seven days wide). */
   discoveryList: (request: DiscoveryListRequest) => Promise<DiscoveryListResponse>
   /** Refresh the saved list. Optional window; defaults to the documented lookback. */

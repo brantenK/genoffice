@@ -34,8 +34,10 @@
 //                            billing (5)
 //
 // The domain table above sums to 6 + 11 + 5 + 3 + 2 + 1 + 5 = 33 channels — the
-// figure `TENDERS_CHANNELS` declares and the figure a per-module
-// `grep -cE "^\s*ipc\.handle"` still reproduces.
+// 33 `ipc.handle` registrations a per-module `grep -cE "^\s*ipc\.handle"`
+// reproduces. `TENDERS_CHANNELS` declares 36 keys: these 33 handled channels
+// plus the 3 push-only sends main emits (`dataChanged`, `storeChangedV2`,
+// `closeFlushRequest`).
 import { ipcMain } from 'electron'
 import { markTendersIpcRegistered, isTendersIpcRegistered } from './registration-state'
 import type { TendersIpcContext, TendersIpcRegistry } from './handler-context'

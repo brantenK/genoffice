@@ -1,9 +1,10 @@
 // The trusted-sender gate for the Tenders IPC surface.
 //
 // Split out of `main/tenders-main.ts` with no behaviour change. This is the
-// module the invariant lives in: EVERY `ipcMain.handle` in `ipc/handlers.ts`
-// begins with `isTrustedTendersEvent`, and a request that fails it never reaches
-// a side effect.
+// module the invariant lives in: EVERY handler body across the seven
+// `ipc/handlers-*.ts` domain modules begins with `isTrustedTendersEvent`
+// (`ipc/handlers.ts` itself is the registration root and holds no bodies), and
+// a request that fails it never reaches a side effect.
 //
 // The gate is deliberately paranoid and fails closed:
 //  * the sender must be a REGISTERED Tenders WebContents (`registerTendersWebContents`),

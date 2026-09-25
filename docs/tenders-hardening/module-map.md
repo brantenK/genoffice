@@ -159,9 +159,9 @@ into seven domain modules plus a shared context module.
 wc -l apps/tenders/src/main/ipc/handlers.ts                        # 79
 # the 33 registrations, counted across all the domain modules
 grep -hE "^\s*ipc\.handle\(" apps/tenders/src/main/ipc/handlers*.ts | wc -l   # 33
-# the channels the shared contract declares
+# the channels the shared contract declares (36 keys: 33 handled + 3 push-only)
 awk '/export const TENDERS_CHANNELS/,/^} as const/' apps/tenders/src/shared/ipc.ts \
-  | grep -cE "^\s+[a-zA-Z]+:"                                      # 33
+  | grep -cE "^\s+[A-Za-z0-9_]+:"                                 # 36
 ```
 
 | Module                        | Handles | Channels                                                                                                                                                                                                                        |
@@ -181,17 +181,16 @@ and `ipc/handler-context.ts` is the `TendersIpcContext` / `TendersIpcRegistry` s
 modules share. `handlers.ts` refuses to register anything before the startup work has run — a
 channel module called out of order throws rather than reading a store that does not exist yet.
 
-- **33** `ipc.handle` registrations, across the seven domain modules; **33** `TENDERS_CHANNELS`
-  constants, and they are the same 33 — so nothing is declared-but-unhandled and nothing is
-  handled-but-undeclared. This bullet used to say **36**, with "the three that have no handler are
-  `store-changed-v2`, `close-flush-request` and `data-changed`". The **count was wrong** (the
-  object declares 33, not 36 — that 36 appears to have been the whole file's `tenders:` string
-  count, which also picks up constants declared outside the object), and the **explanation was
-  wrong too**: all three of those names _are_ members of the object. Two of them —
-  `closeFlushRequest` and `dataChanged` — are pushed by main on `webContents.send` rather than
-  handled; the third, `storeChangedV2`, is pushed through the broadcast seam in
-  `web-contents-registry.ts` rather than from any handler module at all. Re-derive the count with
-  the `awk` above, which strips the comments.
+- **33** `ipc.handle` registrations, across the seven domain modules; **36** `TENDERS_CHANNELS`
+  constants — 33 handled + 3 push-only — so nothing is declared-but-unhandled and nothing is
+  handled-but-undeclared. The three without a handler are `closeFlushRequest` and `dataChanged`
+  (pushed by main on `webContents.send` rather than handled) and `storeChangedV2` (pushed through
+  the broadcast seam in `web-contents-registry.ts` rather than from any handler module at all).
+  This bullet used to claim the object declares **33** and that "36" was a miscount from the whole
+  file's `tenders:` string count; the object declares **36** keys, and the earlier command that
+  read 33 missed the three `V2`-suffixed names because their trailing digit sits between the
+  letters and the colon (`[a-zA-Z]+:` stops at a digit). Re-derive the count with the `awk` above,
+  which strips the comments and matches `[A-Za-z0-9_]+:` keys.
 - **Every one of the 33 still begins with `isTrustedTendersEvent`** — checked mechanically, not by
   reading, and re-checked after the split: splitting every `handlers*.ts` on `ipc.handle(`, taking
   the first statement of each handler body and requiring the gate there reports **33 of 33, zero
@@ -388,6 +387,38 @@ rather than relying on a boundary to catch it.
 
 It is pinned by a component test through `tests/helpers/render.tsx` — precisely the harness that can
 assert "the screen says something", which a source guard cannot.
+
+## The perf wave at HEAD (`77c6b68`), and where its three pieces live
+
+The last two measured Performance defects landed at HEAD after the rest of this folder was
+written, so they are recorded here rather than left as a gap. The figures are HEAD's own
+measurements; **no fixture for them is committed**, so a checkout re-derives nothing (the
+same admission `intake/docx.ts` makes for its numbers).
+
+- **The save-cost derivation lives in `renderer/src/store.ts`.** The size pre-check used to
+  serialize the document three times per save (compact, a 2-space pretty pass purely to size
+  it, then a re-encode); it now serializes once and derives the pretty size from the compact
+  text in a single pass (`indentedJsonAddedBytes`, an 8.9 ms scan instead of a 91 ms
+  stringify). Measured on the heavy fixture, best of 3: the pre-check fell from 188.1 to
+  85.1 ms and from 209.3 to 80.4 ms, and a whole save attempt from ~400 to ~250-267 ms. The
+  derived byte figures still equal an independent `TextEncoder` measurement. A
+  skipped-schema-walk cache was considered and REFUTED as unsound
+  (`JSON.stringify({confidence: NaN})` is byte-identical to `({confidence: null})`), and the
+  reason is recorded in the source where the next reader will find it.
+- **The DOCX yield seams live in `renderer/src/components/TenderList.tsx` (`shredFile`) and
+  are measured in `renderer/src/intake/docx.ts`.** `parseDocx` is one library call with no
+  seam inside it — a text-heavy 24 500-paragraph document held the thread for one unbroken
+  3 599 ms block (16 MB of pictures froze it for at most 345 ms, because media yields
+  throughout). `paintAndCheckAbort()` — one `setTimeout(0)` macrotask plus the abort check —
+  now sits between the post-parse stages (`shredExtraction`, `extractTenderMeta`, the vault
+  pass), so the longest unpaintable stretch fell from 2 087 ms to 1 003 ms, and a cancel that
+  lands in the gap stops the next stage before its work. The module reports the PHASE of the
+  parse and never a fraction of it, so the indicator is honestly indeterminate.
+- **The 12M-char-paragraph freeze is a published limit, not a defect fixed here.** A two-line
+  document can hold the renderer for ~5.5 s (measured 5 512 ms of 6.0 s) because a single
+  12 000 000-character paragraph is legal inside `maxTextChars`. Closing it by design means
+  lowering that published limit — a product decision, so it is reported and deferred, not
+  taken (recorded the same way in `contracts-and-invariants.md` §3d).
 
 ## What this file is not
 

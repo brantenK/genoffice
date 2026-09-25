@@ -435,8 +435,9 @@ function megabyteLabel(bytes: number): string {
  * the compact document plus newlines and indentation, all ASCII (one byte each).
  * Walking the text outside its string literals and adding up what indenting would
  * insert therefore gives the indented form's size exactly — no second
- * serialization (72-98 ms for the 3.0 MB document below) and no second encode
- * (a further ~30 ms) are needed for it.
+ * serialization (72-98 ms for the 4 MiB document `tests/tenders-persistence-bounds.test.ts`
+ * builds; the 3.79 MB measured fixture lives in `tests/renderer-store-v2.test.ts`) and no
+ * second encode (a further ~30 ms) are needed for it.
  *
  * The count per line is `1 + 2 * depth` (the newline plus two spaces per nesting
  * level); a container that prints empty on one line contributes nothing, which is
@@ -512,7 +513,7 @@ function indentedJsonAddedBytes(compact: string): number {
  * Both ceilings come from ONE serialization. The document used to be serialized
  * three times per save (compact, 2-space, then encoded twice), which measured
  * 188-209 ms of the 353-396 ms a save attempt spent on the UI thread for the
- * 3.0 MB document `tests/tenders-persistence-bounds.test.ts` builds — on every
+ * 4 MiB document `tests/tenders-persistence-bounds.test.ts` builds — on every
  * 300 ms autosave. Both figures are now derived from the compact text (see
  * `indentedJsonAddedBytes`); the derivation is exact rather than an estimate, so
  * the numbers stay the ones the store enforces and the copy keeps quoting them.
@@ -923,7 +924,7 @@ async function performSaveToMain(): Promise<void> {
   //
   // This walk runs on every attempt, and deliberately is NOT memoized on the
   // previous save even though it is the largest single cost here (~150-185 ms for
-  // the 3.0 MB document `tests/tenders-persistence-bounds.test.ts` builds). Both
+  // the 4 MiB document `tests/tenders-persistence-bounds.test.ts` builds). Both
   // available keys would trade the guarantee away: the document holds the store's
   // own arrays (`document.workspaces` IS `state.workspaces`), so an
   // object-identity key would miss an in-place edit entirely; and a key over the

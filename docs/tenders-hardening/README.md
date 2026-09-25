@@ -269,6 +269,17 @@ apps/tenders/tests -name "*.test.ts*" | wc -l` reports **64** on disk, against t
   says exactly that on the dropzone, and `tests/docx-intake.test.ts` ("the advertised import
   limits are the enforced ones") fails if any published figure drifts from the constant that
   enforces it. `contracts-and-invariants.md` §1 and §3d carry the same numbers.
+- **The `77c6b68` perf wave is documented, with its measurements and its refutations.** The
+  renderer's save pre-check serializes once instead of three times and derives the pretty size
+  from the compact text (`indentedJsonAddedBytes`), measured 188.1 → 85.1 ms / 209.3 → 80.4 ms
+  per pre-check and ~400 → ~250-267 ms per save attempt on the heavy fixture; DOCX intake now
+  yields between its post-parse stages (`paintAndCheckAbort` in
+  `components/TenderList.tsx`), cutting the longest unpaintable stretch from 2 087 ms to
+  1 003 ms; and the 12 000 000-character-paragraph freeze (~5.5 s inside the published
+  envelope) is recorded as a named product decision rather than papered over. The derived byte
+  figures still equal an independent `TextEncoder` measurement, and the refuted claims (a
+  content-keyed schema cache; image-dominated DOCX cost) are recorded with the evidence that
+  disposed of them. Details in `contracts-and-invariants.md` §2a/§3d and `module-map.md`.
 - **A "no reminders" gap is closed — with a caveat that must be carried by the copy.** Before
   the reminders wave the app had no reminder mechanism at all beyond a manual `.ics` export and an
   on-screen countdown, so a user who closed the app was never warned about a closing time. Main
@@ -450,6 +461,12 @@ Product-boundary reminder above; the contracts are in `contracts-and-invariants.
 - **OCR-Beta (in-app OCR)** remains deferred; image-only pages are detected and block
   readiness until the optional AI pass reads them or a person marks them reviewed, and the
   product copy says so.
+- **The 12 000 000-character paragraph freeze is accepted as a published limit.** A two-line
+  `.docx` can hold the renderer for ~5.5 s because a single paragraph at the published
+  `maxTextChars` ceiling is legal; closing it by design means lowering that published limit,
+  so it is reported and deferred as a product decision, never silently accepted as "fixed".
+  Mechanism verified; the figures are reference-machine readings with no committed fixture
+  (`contracts-and-invariants.md` §3d).
 
 **Known environmental (non-product) notes:** a terminal Playwright worker-teardown timeout
 can yield a non-zero E2E exit after all tests pass, and `apps/shell` has a pre-existing,

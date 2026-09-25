@@ -2,7 +2,7 @@
 // dirty-close reply, the retired-but-served legacy read (and its write twin),
 // and the compliance-matrix CSV export.
 //
-// What holds these five together is that they are the only channels that touch
+// What holds these six together is that they are the only channels that touch
 // the AUTHORITATIVE DOCUMENT or the legacy v1 file on it, and that both write
 // paths go through the same store lock, revision check and atomic write. Split
 // out of `ipc/handlers.ts` with no behaviour change; the store those two paths
