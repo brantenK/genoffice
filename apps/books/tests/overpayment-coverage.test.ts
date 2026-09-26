@@ -11,7 +11,7 @@ import {
   writeBooksStore,
 } from '../src/main/books-core'
 import { allJournalsBalanced, round2 } from '../src/shared/accounting'
-import { computeSettlementSuggestions } from '../src/shared/settlement'
+import { applyReconciliation, computeSettlementSuggestions } from '../src/shared/settlement'
 import { agingBuckets } from '../src/shared/reports'
 import { applyLoadedEnvelope, useBooksStore } from '../src/renderer/src/store'
 import { emptyLedger } from './e2e/fixtures'
@@ -204,6 +204,15 @@ describe('D1 — a statement line a recorded payment already covered', () => {
       invoiceStatus: 'Paid',
       partyBalance: 0,
       unappliedAmount: 0,
+      applied: [
+        {
+          invoiceId: invoice.id,
+          invoiceNumber: 'INV-2026-001',
+          settledAmount: 150,
+          remainingOutstanding: 0,
+          invoiceStatus: 'Paid',
+        },
+      ],
     })
 
     const ledger = storedData()
@@ -261,6 +270,15 @@ describe('D1 — a statement line a recorded payment already covered', () => {
       invoiceStatus: 'Paid',
       partyBalance: 0,
       unappliedAmount: 0,
+      applied: [
+        {
+          invoiceId: invoice.id,
+          invoiceNumber: 'INV-2026-001',
+          settledAmount: 150,
+          remainingOutstanding: 0,
+          invoiceStatus: 'Paid',
+        },
+      ],
     })
 
     const ledger = storedData()
@@ -497,5 +515,116 @@ describe('suggestions: an over-amount line naming its invoice is offered', () =>
     const match = suggestions.find((s) => s.invoiceNumber === 'INV-2026-010')
     expect(match).toBeDefined()
     expect(match!.reason).toMatch(/unapplied receipt/)
+  })
+})
+
+describe('split allocation: one statement line across several invoices', () => {
+  it('allocates in caller order, each invoice capped at its own outstanding', () => {
+    const a = issueInvoice()
+    const issued = issueSalesInvoiceInBooks({
+      booksDataPath,
+      partyName: CUSTOMER,
+      itemDescription: 'Second works order',
+      amount: INVOICE_TOTAL,
+      date: '2026-08-02',
+      dueDate: '2026-08-31',
+    })
+    expect(issued.ok, JSON.stringify(issued)).toBe(true)
+    const b = fromMainTransport().invoices.find((i) => i.invoiceNumber === 'INV-2026-002')!
+
+    importViaMain([depositRow('2026-08-07', 1500, `DEPOSIT ${CUSTOMER} INV-2026-001 INV-2026-002`)])
+    const tx = unreconciledTransaction(storedData())
+
+    const { result, ledger } = applyReconciliation(storedData(), {
+      transactionId: tx.id,
+      invoiceIds: [a.id, b.id],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.applied).toEqual([
+      {
+        invoiceId: a.id,
+        invoiceNumber: 'INV-2026-001',
+        settledAmount: 1150,
+        remainingOutstanding: 0,
+        invoiceStatus: 'Paid',
+      },
+      {
+        invoiceId: b.id,
+        invoiceNumber: 'INV-2026-002',
+        settledAmount: 350,
+        remainingOutstanding: 800,
+        invoiceStatus: 'Unpaid',
+      },
+    ])
+    expect(result.settledAmount).toBe(1500)
+    expect(result.unappliedAmount).toBe(0)
+
+    const settled = ledger!.invoices
+    expect(settled.find((i) => i.id === a.id)).toMatchObject({
+      status: 'Paid',
+      outstandingAmount: 0,
+    })
+    expect(settled.find((i) => i.id === b.id)).toMatchObject({
+      status: 'Unpaid',
+      outstandingAmount: 800,
+    })
+    expect(ledger!.bankTransactions![0].reconciled).toBe(true)
+    expect(allJournalsBalanced(ledger!.journalEntries)).toBe(true)
+    expect(partyBalance(ledger!)).toBe(800)
+    expect(agingTotals(ledger!)).toEqual({ total: 800, credit: 0 })
+  })
+
+  it('books the leftover as an unapplied receipt when the split cannot absorb the line', () => {
+    const a = issueInvoice()
+    importViaMain([depositRow('2026-08-07', 1500)])
+    const tx = unreconciledTransaction(storedData())
+
+    const { result, ledger } = applyReconciliation(storedData(), {
+      transactionId: tx.id,
+      invoiceIds: [a.id],
+    })
+    expect(result.ok).toBe(true)
+    expect(result.applied![0].settledAmount).toBe(1150)
+    expect(result.unappliedAmount).toBe(350)
+    expect(ledger!.invoices[0]).toMatchObject({ status: 'Unpaid', outstandingAmount: -350 })
+    expect(Math.round(balance(ledger!, 'acc-suspense') * 100)).toBe(0)
+    expect(allJournalsBalanced(ledger!.journalEntries)).toBe(true)
+  })
+
+  it('rejects the whole split when one target is settled (all-or-nothing)', () => {
+    const a = issueInvoice()
+    const issuedB = issueSalesInvoiceInBooks({
+      booksDataPath,
+      partyName: CUSTOMER,
+      itemDescription: 'Second works order',
+      amount: INVOICE_TOTAL,
+      date: '2026-08-02',
+      dueDate: '2026-08-31',
+    })
+    expect(issuedB.ok, JSON.stringify(issuedB)).toBe(true)
+    fromMainTransport()
+    importViaMain([depositRow('2026-08-07', 500)])
+    const tx = unreconciledTransaction(storedData())
+
+    // Put the second invoice into a settled state on disk after the import,
+    // so the file edit is not overwritten by the store transport.
+    const stored = storedData()
+    const b = stored.invoices.find((i) => i.invoiceNumber === 'INV-2026-002')!
+    writeBooksStore(booksDataPath, {
+      ...stored,
+      invoices: stored.invoices.map((i) =>
+        i.id === b.id ? { ...i, status: 'Paid' as const, outstandingAmount: 0 } : i,
+      ),
+    })
+
+    const { result, ledger } = applyReconciliation(storedData(), {
+      transactionId: tx.id,
+      invoiceIds: [a.id, b.id],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/already settled/)
+    expect(ledger).toBeNull()
+    expect(storedData().bankTransactions![0].reconciled).toBe(false)
   })
 })

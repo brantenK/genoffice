@@ -546,18 +546,35 @@ export function registerBooksIpc(): void {
   // Bank reconciliation: Reconcile transaction with invoice
   ipcMain.handle(
     BOOKS_CHANNELS.reconcileTransaction,
-    (_e, transactionId: unknown, invoiceId: unknown) => {
+    (_e, transactionId: unknown, invoiceId: unknown, invoiceIds: unknown) => {
       if (_e?.sender) registerBooksWebContents(_e.sender)
       const txGuard = validateNonEmptyString(transactionId, 'transactionId')
       if (!txGuard.ok) return { ok: false, error: txGuard.error }
       const invoiceGuard = validateNonEmptyString(invoiceId, 'invoiceId')
       if (!invoiceGuard.ok) return { ok: false, error: invoiceGuard.error }
+      // A split reconcile carries the full target list (the primary invoice
+      // first); anything that is not an array of ids is refused.
+      let splitTargets: string[] | undefined
+      if (invoiceIds !== undefined && invoiceIds !== null) {
+        if (
+          !Array.isArray(invoiceIds) ||
+          invoiceIds.some((id) => !validateNonEmptyString(id, 'invoiceId').ok)
+        ) {
+          return { ok: false, error: 'invoiceIds must be an array of invoice ids' }
+        }
+        splitTargets = (invoiceIds as unknown[]).map((id) =>
+          validateNonEmptyString(id, 'invoiceId').ok
+            ? (validateNonEmptyString(id, 'invoiceId') as { value: string }).value
+            : '',
+        )
+      }
       try {
         const p = getStoragePath()
         const result = executeReconciliation({
           booksDataPath: p,
           transactionId: txGuard.value,
           invoiceId: invoiceGuard.value,
+          invoiceIds: splitTargets,
         })
         if (result.ok) {
           const read = readBooksStoreStrict(p, { forensic: false })
@@ -672,11 +689,13 @@ export function executeReconciliation({
   booksDataPath,
   transactionId,
   invoiceId,
+  invoiceIds,
   tendersDataPath,
 }: {
   booksDataPath: string
   transactionId: string
-  invoiceId: string
+  invoiceId?: string
+  invoiceIds?: string[]
   tendersDataPath?: string
 }): {
   ok: boolean
@@ -693,27 +712,39 @@ export function executeReconciliation({
   tenderMilestonePaid?: boolean
   matchedMilestoneId?: string
   matchedTenderId?: string
+  /** One row per invoice the line was split across, in the caller's order. */
+  applied?: Array<{
+    invoiceId: string
+    invoiceNumber?: string
+    settledAmount: number
+    remainingOutstanding: number
+    invoiceStatus: string
+  }>
 } {
   // The pure settlement core (no electron) marks the transaction reconciled,
   // settles the invoice, posts the journal, recomputes and persists. This
   // wrapper adds the cross-app tender milestone back-propagation.
-  const core = executeReconciliationCore({ booksDataPath, transactionId, invoiceId })
+  const core = executeReconciliationCore({ booksDataPath, transactionId, invoiceId, invoiceIds })
   if (!core.ok) return { ...core, tenderMilestonePaid: false }
 
   let tenderMilestonePaid = false
   let matchedMilestoneId: string | undefined
   let matchedTenderId: string | undefined
 
-  // CRITICAL: Only propagate PAID to tender milestone if invoice is FULLY settled!
-  const isFullySettled = core.invoiceStatus === 'Paid' || (core.remainingOutstanding ?? 1) <= 0
+  // CRITICAL: Only propagate PAID to a tender milestone when the invoice is
+  // FULLY settled. A split line can fully settle several invoices, so every
+  // applied row that closed gets its own back-propagation pass.
+  const settledRows = (core.applied ?? []).filter(
+    (row) => row.invoiceStatus === 'Paid' || (row.remainingOutstanding ?? 1) <= 0,
+  )
 
-  if (isFullySettled) {
+  for (const settledRow of settledRows) {
     try {
       let inv: Invoice | undefined
       try {
-        inv = readBooksStore(booksDataPath).invoices.find((i) => i.id === invoiceId)
+        inv = readBooksStore(booksDataPath).invoices.find((i) => i.id === settledRow.invoiceId)
       } catch {}
-      const settledAmount = round2(core.settledAmount || 0)
+      const settledAmount = round2(settledRow.settledAmount || 0)
 
       let candidatePath = tendersDataPath
       if (!candidatePath && booksDataPath) {

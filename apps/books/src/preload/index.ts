@@ -18,8 +18,15 @@ const booksApi: BooksApi = {
   openInTenders: () => ipcRenderer.invoke(BOOKS_CHANNELS.openInTenders),
   importBankStatementCsv: (csvContent: string) =>
     ipcRenderer.invoke(BOOKS_CHANNELS.importBankStatementCsv, csvContent),
-  reconcileTransaction: (transactionId: string, invoiceId: string) =>
-    ipcRenderer.invoke(BOOKS_CHANNELS.reconcileTransaction, transactionId, invoiceId),
+  reconcileTransaction: (transactionId: string, invoiceId: string, invoiceIds?: string[]) =>
+    invoiceIds === undefined
+      ? ipcRenderer.invoke(BOOKS_CHANNELS.reconcileTransaction, transactionId, invoiceId)
+      : ipcRenderer.invoke(
+          BOOKS_CHANNELS.reconcileTransaction,
+          transactionId,
+          invoiceId,
+          invoiceIds,
+        ),
   getSettlementSuggestions: () => ipcRenderer.invoke(BOOKS_CHANNELS.getSettlementSuggestions),
   backupNow: () => ipcRenderer.invoke(BOOKS_CHANNELS.backupNow),
   listBackups: () => ipcRenderer.invoke(BOOKS_CHANNELS.listBackups),

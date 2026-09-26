@@ -29,6 +29,7 @@ import type {
   BankTransaction,
   BooksData,
   Invoice,
+  Party,
   JournalEntry,
   JournalEntryItem,
   SettlementSuggestion,
@@ -88,6 +89,17 @@ export interface ReconciliationCoreResult {
    * receipt on the party's account).
    */
   unappliedAmount?: number
+  /**
+   * One row per invoice the line was split across, in the caller's order.
+   * Present for both the single-invoice path (one row) and a split.
+   */
+  applied?: Array<{
+    invoiceId: string
+    invoiceNumber?: string
+    settledAmount: number
+    remainingOutstanding: number
+    invoiceStatus: string
+  }>
 }
 
 /**
@@ -386,7 +398,11 @@ export function computeSettlementSuggestions(booksData: BooksData): SettlementSu
  */
 export function applyReconciliation(
   booksData: BooksData,
-  { transactionId, invoiceId }: { transactionId: string; invoiceId: string },
+  {
+    transactionId,
+    invoiceId,
+    invoiceIds,
+  }: { transactionId: string; invoiceId?: string; invoiceIds?: string[] },
 ): AppliedLedger<ReconciliationCoreResult> {
   const reject = (error: string): AppliedLedger<ReconciliationCoreResult> => ({
     result: { ok: false, error },
@@ -397,137 +413,185 @@ export function applyReconciliation(
   if (!tx) return reject(`Transaction not found: ${transactionId}`)
   if (tx.reconciled) return reject(`Transaction already reconciled: ${transactionId}`)
 
-  const inv = (booksData.invoices || []).find((i) => i.id === invoiceId)
-  if (!inv) return reject(`Invoice not found: ${invoiceId}`)
+  // The split targets: an explicit list allocates the line across several
+  // invoices; a single invoiceId is the one-invoice case and behaves exactly
+  // as before. Duplicates collapse, order is the caller's.
+  const requested: string[] = []
+  for (const id of [...(invoiceIds ?? []), ...(invoiceId ? [invoiceId] : [])]) {
+    if (id && !requested.includes(id)) requested.push(id)
+  }
+  if (requested.length === 0) {
+    return reject('No invoice selected to reconcile against')
+  }
 
-  // The invoice's own balance decides whether it can receive the line. A
-  // settled invoice (nothing outstanding) is closed and stays refused, with a
-  // message that says so. A NEGATIVE balance is not settled: it is a party
-  // credit carried on the invoice (the aging report's credit column), and the
-  // line is accepted as an unapplied receipt that extends that credit — the
-  // only route that clears the line's Suspense balance.
-  const currentOutstanding = round2(
-    inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal,
-  )
-  if (inv.status === 'Paid' || currentOutstanding === 0) {
-    return reject(
-      `Invoice ${inv.invoiceNumber} is already settled (nothing outstanding): a statement line cannot be applied to it`,
+  // Validation is all-or-nothing: every target must be open, of the matching
+  // direction, and not already settled — the same rules the single-invoice
+  // path applies, checked for the whole split before anything is posted. A
+  // NEGATIVE balance is not settled: it is a party credit carried on the
+  // invoice (the aging report's credit column), and the line is accepted as
+  // an unapplied receipt that extends that credit — the only route that
+  // clears the line's Suspense balance.
+  const invoicesAll = booksData.invoices || []
+  const targets = requested.map((id) => {
+    const inv = invoicesAll.find((i) => i.id === id)
+    if (!inv) return { inv: undefined as Invoice | undefined, id, outstanding: 0 }
+    const outstanding = round2(
+      inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal,
     )
-  }
-  if (inv.status === 'Draft') return reject(`Cannot reconcile a draft invoice: ${invoiceId}`)
-  if (inv.status === 'Cancelled') {
-    return reject(`Cannot reconcile a cancelled invoice: ${invoiceId}`)
-  }
+    return { inv, id, outstanding }
+  })
 
-  // Direction validation
-  if (inv.type === 'Sales' && tx.amount <= 0) {
-    return reject('Cannot reconcile a debit/withdrawal transaction against a Sales invoice')
-  }
-  if (inv.type === 'Purchase' && tx.amount >= 0) {
-    return reject('Cannot reconcile a credit/deposit transaction against a Purchase bill')
+  for (const { inv, id, outstanding } of targets) {
+    if (!inv) return reject(`Invoice not found: ${id}`)
+    if (inv.status === 'Paid' || outstanding === 0) {
+      return reject(
+        `Invoice ${inv.invoiceNumber} is already settled (nothing outstanding): a statement line cannot be applied to it`,
+      )
+    }
+    if (inv.status === 'Draft') return reject(`Cannot reconcile a draft invoice: ${id}`)
+    if (inv.status === 'Cancelled') {
+      return reject(`Cannot reconcile a cancelled invoice: ${id}`)
+    }
+    if (inv.type === 'Sales' && tx.amount <= 0) {
+      return reject('Cannot reconcile a debit/withdrawal transaction against a Sales invoice')
+    }
+    if (inv.type === 'Purchase' && tx.amount >= 0) {
+      return reject('Cannot reconcile a credit/deposit transaction against a Purchase bill')
+    }
   }
 
   const nowIso = new Date().toISOString()
+  const primary = targets[0].inv as Invoice
 
-  // 1. Mark transaction reconciled
+  // 1. Mark transaction reconciled (the first invoice is the match of record)
   const settledTx: BankTransaction = {
     ...tx,
     reconciled: true,
-    matchedInvoiceId: inv.id,
+    matchedInvoiceId: primary.id,
     reconciledAt: nowIso,
   }
 
-  // 2. Exact, partial and over-amount settlement maths. The line's cash is
-  // placed in two parts:
-  //  - the part a recorded payment already posted against this invoice is NOT
-  //    placed again: the payment's allocation cut the invoice before the line
-  //    arrived and its journal already moved the money, so booking it here
-  //    would double-count the cash and invent a party credit;
-  //  - what is left settles the invoice up to its own balance, and anything
-  //    beyond that is an unapplied receipt. The excess rides on the invoice as
-  //    a negative outstanding, which is how this product carries a party credit
-  //    (see the aging report's credit column), so the control account, the
-  //    derived party balance and the aging report all show the same figure
-  //    instead of a Bank Suspense balance nothing can ever clear.
+  // 2. Settlement maths. The line's cash is placed in two parts:
+  //  - the part a recorded payment already posted against the named invoices
+  //    is NOT placed again (its journal already moved the money);
+  //  - what is left fills the invoices in the requested order, each up to its
+  //    own balance, and anything beyond that is an unapplied receipt riding on
+  //    the last invoice as a negative outstanding — how this product carries a
+  //    party credit (see the aging report's credit column).
   const txAmt = round2(Math.abs(tx.amount))
   const alreadyPosted = round2(Math.min(paymentCoverage(tx), txAmt))
   const lineAmount = round2(txAmt - alreadyPosted)
-  const settledAmount = round2(Math.min(lineAmount, Math.max(currentOutstanding, 0)))
-  const remainingOutstanding = round2(currentOutstanding - lineAmount)
-  const unappliedAmount = round2(lineAmount - settledAmount)
 
-  const settledInvoice: Invoice = {
-    ...inv,
-    outstandingAmount: remainingOutstanding,
-    // Only a zero residual closes the invoice: an over-settled one stays open
-    // precisely because a party credit remains against it.
-    status: remainingOutstanding === 0 ? 'Paid' : 'Unpaid',
-    updatedAt: nowIso,
-  }
+  let cashLeft = lineAmount
+  const allocations = targets.map(({ inv, outstanding }, index) => {
+    const invoice = inv as Invoice
+    const settled = round2(Math.min(cashLeft, Math.max(outstanding, 0)))
+    cashLeft = round2(cashLeft - settled)
+    const isLast = index === targets.length - 1
+    const remainingOutstanding = isLast
+      ? round2(outstanding - settled - cashLeft)
+      : round2(outstanding - settled)
+    return {
+      invoice,
+      outstanding,
+      settled,
+      remainingOutstanding,
+      status: (remainingOutstanding === 0 ? 'Paid' : 'Unpaid') as Invoice['status'],
+    }
+  })
+  const unappliedAmount = round2(cashLeft)
+  const settledAmount = round2(allocations.reduce((s, a) => s + a.settled, 0))
 
-  const bankTransactions = (booksData.bankTransactions || []).map((t) =>
-    t.id === settledTx.id ? settledTx : t,
+  const updatedInvoices = new Map(
+    allocations.map((a) => [
+      a.invoice.id,
+      {
+        ...a.invoice,
+        outstandingAmount: a.remainingOutstanding,
+        status: a.status,
+        updatedAt: nowIso,
+      } as Invoice,
+    ]),
   )
-  const invoices = (booksData.invoices || []).map((i) =>
-    i.id === settledInvoice.id ? settledInvoice : i,
-  )
+  const invoices = (booksData.invoices || []).map((i) => updatedInvoices.get(i.id) ?? i)
 
-  // 3. Recompute party balance from open invoices
-  const party = (booksData.parties || []).find(
-    (p) => p.id === inv.partyId || p.name === inv.partyName,
-  )
+  // 3. Recompute party balances from the updated invoices
   const parties = recomputePartyBalances(invoices, booksData.parties || [])
-  const updatedParty = parties.find((p) => p.id === inv.partyId || p.name === inv.partyName)
+  const partyFor = (inv: Invoice) =>
+    parties.find((p) => p.id === inv.partyId || p.name === inv.partyName) ??
+    (booksData.parties || []).find((p) => p.id === inv.partyId || p.name === inv.partyName)
 
-  // 4. Post the settlement journal entry. When the transaction was imported
-  // from a bank statement, the import journal already moved the bank account,
-  // so this leg only clears the suspense account against Receivable/Payable
-  // (ledger-first: no direct balance mutation anywhere). Legacy transactions
-  // without an import journal post the full direct settlement instead.
+  // 4. One balanced settlement entry per invoice that received cash. When the
+  // transaction was imported from a bank statement, the import journal already
+  // moved the bank account, so each entry only clears suspense against the
+  // invoice; legacy transactions post the direct settlement instead. The
+  // unapplied receipt rides on the last entry's legs.
   const journals = Array.isArray(booksData.journalEntries) ? [...booksData.journalEntries] : []
   const hasImportJournal = journals.some(
     (je) => je.remarks && je.remarks.includes(`Bank statement import: ${tx.id}`),
   )
-  const entryNumber = nextJournalNumber(journals, tx.date)
-  const settlementEntryFor = (amount: number): JournalEntry =>
+  let entryNumber = nextJournalNumber(journals, tx.date)
+  const settlementEntryFor = (
+    invoice: Invoice,
+    amount: number,
+    party: Party | undefined,
+  ): JournalEntry =>
     hasImportJournal
-      ? createReconciliationJournal(
-          settledTx,
-          settledInvoice,
-          booksData.accounts,
-          amount,
-          entryNumber,
-        )
+      ? createReconciliationJournal(settledTx, invoice, booksData.accounts, amount, entryNumber)
       : createSettlementJournal(
-          settledInvoice,
+          invoice,
           booksData.accounts,
           amount,
-          updatedParty || party,
+          party,
           entryNumber,
           'acc-bank',
-          `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${inv.invoiceNumber}`,
+          `1-Click Bank Reconciliation: Transaction ${tx.description} for Invoice ${invoice.invoiceNumber}`,
         )
 
-  let settlementJournal = settlementEntryFor(settledAmount)
-  if (unappliedAmount > 0) {
-    settlementJournal = withUnappliedReceipt(
-      settlementJournal,
-      settlementEntryFor(unappliedAmount),
-      unappliedAmount,
-      `Unapplied ${inv.type === 'Sales' ? 'receipt' : 'payment'}: Transaction ${
-        tx.description || tx.id
-      }`,
+  const funded = allocations.filter((a) => a.settled > 0)
+  const newEntries: JournalEntry[] = []
+  for (const a of funded) {
+    newEntries.push(
+      settlementEntryFor(updatedInvoices.get(a.invoice.id)!, a.settled, partyFor(a.invoice)),
     )
+    entryNumber = nextJournalNumber([...journals, ...newEntries], tx.date)
   }
-  // When a recorded payment already posted the whole line there is nothing left
-  // to place, and an entry of two zero legs would only be journal noise.
-  if (settledAmount > 0 || unappliedAmount > 0) journals.unshift(settlementJournal)
+  const carrier = allocations[allocations.length - 1]
+  const unappliedRemark = `Unapplied ${
+    carrier.invoice.type === 'Sales' ? 'receipt' : 'payment'
+  }: Transaction ${tx.description || tx.id}`
+  if (unappliedAmount > 0) {
+    const unappliedEntry = settlementEntryFor(
+      updatedInvoices.get(carrier.invoice.id)!,
+      unappliedAmount,
+      partyFor(carrier.invoice),
+    )
+    if (newEntries.length > 0) {
+      newEntries[newEntries.length - 1] = withUnappliedReceipt(
+        newEntries[newEntries.length - 1],
+        unappliedEntry,
+        unappliedAmount,
+        unappliedRemark,
+      )
+    } else {
+      // Nothing was settled (every target already in credit): the whole line
+      // is one unapplied receipt entry of its own. The base entry is built for
+      // the settled amount (zero), so only the receipt legs survive.
+      const emptyBase = settlementEntryFor(carrier.invoice, 0, partyFor(carrier.invoice))
+      newEntries.push(
+        withUnappliedReceipt(emptyBase, unappliedEntry, unappliedAmount, unappliedRemark),
+      )
+    }
+  }
+  journals.unshift(...newEntries)
 
   const ledger = deriveLedger(
     appendAudit(
       {
         ...booksData,
-        bankTransactions,
+        bankTransactions: (booksData.bankTransactions || []).map((t) =>
+          t.id === settledTx.id ? settledTx : t,
+        ),
         invoices,
         parties,
         journalEntries: journals,
@@ -535,25 +599,36 @@ export function applyReconciliation(
       },
       createAuditEntry(
         'bank.reconcile',
-        `Reconciled ${tx.description || tx.id} against ${inv.invoiceNumber}${
-          unappliedAmount > 0 ? ` (${unappliedAmount} unapplied)` : ''
-        }`,
-        { invoiceNumber: inv.invoiceNumber, amount: settledAmount },
+        `Reconciled ${tx.description || tx.id} against ${allocations
+          .map((a) => a.invoice.invoiceNumber)
+          .join(', ')}${unappliedAmount > 0 ? ` (${unappliedAmount} unapplied)` : ''}`,
+        {
+          invoiceNumber: allocations.map((a) => a.invoice.invoiceNumber).join(', '),
+          amount: settledAmount,
+        },
       ),
     ),
   )
 
+  const last = allocations[allocations.length - 1]
   return {
     result: {
       ok: true,
       transactionId: settledTx.id,
-      invoiceId: settledInvoice.id,
-      invoiceNumber: settledInvoice.invoiceNumber,
+      invoiceId: last.invoice.id,
+      invoiceNumber: last.invoice.invoiceNumber,
       settledAmount,
-      remainingOutstanding,
-      invoiceStatus: settledInvoice.status,
-      partyBalance: updatedParty ? updatedParty.outstandingBalance : party?.outstandingBalance,
+      remainingOutstanding: last.remainingOutstanding,
+      invoiceStatus: last.status,
+      partyBalance: partyFor(last.invoice)?.outstandingBalance,
       unappliedAmount,
+      applied: allocations.map((a) => ({
+        invoiceId: a.invoice.id,
+        invoiceNumber: a.invoice.invoiceNumber,
+        settledAmount: a.settled,
+        remainingOutstanding: a.remainingOutstanding,
+        invoiceStatus: a.status,
+      })),
     },
     ledger,
   }

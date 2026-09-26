@@ -75,6 +75,14 @@ export interface ReconcileTransactionResult {
   tenderMilestonePaid?: boolean
   matchedMilestoneId?: string
   matchedTenderId?: string
+  /** One row per invoice the line was split across, in the caller's order. */
+  applied?: Array<{
+    invoiceId: string
+    invoiceNumber?: string
+    settledAmount: number
+    remainingOutstanding: number
+    invoiceStatus: string
+  }>
 }
 
 /** Result of `books:restore-backup` (backup-restore restoreBackup). */
@@ -183,6 +191,7 @@ export interface BooksApi {
   reconcileTransaction: (
     transactionId: string,
     invoiceId: string,
+    invoiceIds?: string[],
   ) => Promise<ReconcileTransactionResult>
   getSettlementSuggestions: () => Promise<SettlementSuggestion[]>
   backupNow: () => Promise<BackupResult>

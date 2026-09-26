@@ -1216,15 +1216,18 @@ export function executeReconciliationCore({
   booksDataPath,
   transactionId,
   invoiceId,
+  invoiceIds,
 }: {
   booksDataPath: string
   transactionId: string
-  invoiceId: string
+  invoiceId?: string
+  invoiceIds?: string[]
 }): ReconciliationCoreResult {
   const outcome = mutateBooksStoreSync<ReconciliationCoreResult>(booksDataPath, (stored) => {
     const { result, ledger } = applyReconciliation(stored ?? createEmptyBooksEnvelope(), {
       transactionId,
       invoiceId,
+      invoiceIds,
     })
     if (!result.ok || !ledger) return { data: stored ?? createEmptyBooksEnvelope(), value: result }
     return { data: ledger, value: result }

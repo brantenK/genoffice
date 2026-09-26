@@ -35,6 +35,20 @@ export function BankingView() {
   // backend would refuse, and it sees the partial-payment matches too.
   const suggestions = useMemo(() => computeSettlementSuggestions(data), [data])
 
+  // One bank line can settle several invoices; the UI groups a line's
+  // suggestions so the user ticks which invoices the cash covers. A missing
+  // entry means checked — the suggestion is the starting recommendation.
+  const [splitSelection, setSplitSelection] = useState<Record<string, boolean>>({})
+  const suggestionGroups = useMemo(() => {
+    const groups = new Map<string, typeof suggestions>()
+    for (const sug of suggestions) {
+      const group = groups.get(sug.transactionId) || []
+      group.push(sug)
+      groups.set(sug.transactionId, group)
+    }
+    return [...groups.values()]
+  }, [suggestions])
+
   const unreconciledCount = bankTransactions.filter((t) => !t.reconciled).length
   const reconciledCount = bankTransactions.filter((t) => t.reconciled).length
 
@@ -150,16 +164,28 @@ export function BankingView() {
   }
 
   // Execute 1-click reconciliation
-  const handleReconcile = async (txId: string, invId: string, invNum: string) => {
+  const handleReconcile = async (
+    txId: string,
+    invId: string,
+    invNum: string,
+    invoiceIds?: string[],
+  ) => {
     try {
-      const res = await reconcileTransaction(txId, invId)
+      const res = await reconcileTransaction(txId, invId, invoiceIds)
       if (res.ok) {
         // Report what actually happened: a line can settle part of an invoice,
         // clear it, or leave an unapplied credit, and the invoice is only
         // marked Paid in the first of those.
         const settled = res.settledAmount ?? 0
         const unapplied = res.unappliedAmount ?? 0
-        const outcome: string[] = [`Reconciled the transaction with Invoice ${invNum}`]
+        const appliedRows = res.applied ?? []
+        const outcome: string[] = [
+          appliedRows.length > 1
+            ? `Reconciled the transaction across ${appliedRows.length} invoices (${appliedRows
+                .map((row) => `${row.invoiceNumber} ${formatMoney(row.settledAmount)}`)
+                .join(', ')})`
+            : `Reconciled the transaction with Invoice ${invNum}`,
+        ]
         if (settled > 0) outcome.push(`${formatMoney(settled)} settled`)
         if (res.invoiceStatus === 'Paid') outcome.push('invoice marked Paid')
         else if (settled > 0) outcome.push(`invoice left ${res.invoiceStatus ?? 'open'}`)
@@ -298,64 +324,138 @@ export function BankingView() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {suggestions.map((sug) => {
-              const isHigh = sug.confidence === 'HIGH'
+            {suggestionGroups.map((group) => {
+              const isSplit = group.length > 1
+              const checked = group.filter(
+                (sug) => splitSelection[`${sug.transactionId}:${sug.invoiceId}`] !== false,
+              )
+              const selected = isSplit ? checked : group
+              const total = selected.reduce((sum, sug) => sum + sug.amount, 0)
               return (
                 <div
-                  key={`${sug.transactionId}-${sug.invoiceId}`}
-                  className="bg-white border border-[#E2E8F0] hover:border-[#CBD5E1] rounded-xl p-4 shadow-xs transition-all flex flex-col justify-between"
+                  key={group[0].transactionId}
+                  className={
+                    isSplit
+                      ? 'md:col-span-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4'
+                      : 'contents'
+                  }
                 >
-                  <div>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-[#1E293B]">{sug.partyName}</span>
-                          <span
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                              sug.invoiceType === 'Sales'
-                                ? 'bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]'
-                                : 'bg-[#EFF6FF] text-[#2563EB] border-[#BFDBFE]'
-                            }`}
-                          >
-                            {sug.invoiceType}
-                          </span>
-                        </div>
-                        <div className="text-xs text-[#64748B] font-mono mt-0.5">
-                          Invoice: {sug.invoiceNumber}
-                        </div>
+                  {isSplit && (
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-semibold text-[#475569]">
+                        One line, several invoices — tick what this cash covers ({selected.length}{' '}
+                        of {group.length} selected)
                       </div>
-
-                      <div className="text-right">
-                        <div className="text-base font-bold text-[#1E293B]">
-                          {formatMoney(sug.amount)}
-                        </div>
-                        <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            isHigh
-                              ? 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
-                              : 'bg-[#FFFBEB] text-[#D97706] border border-[#FDE68A]'
-                          }`}
+                      <div className="text-sm font-bold text-[#1E293B]">{formatMoney(total)}</div>
+                    </div>
+                  )}
+                  <div className={isSplit ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'contents'}>
+                    {group.map((sug) => {
+                      const isHigh = sug.confidence === 'HIGH'
+                      const cardChecked =
+                        !isSplit ||
+                        splitSelection[`${sug.transactionId}:${sug.invoiceId}`] !== false
+                      return (
+                        <div
+                          key={`${sug.transactionId}-${sug.invoiceId}`}
+                          className={`bg-white border rounded-xl p-4 shadow-xs transition-all flex flex-col justify-between ${
+                            isSplit && cardChecked ? 'border-[#0F766E]' : 'border-[#E2E8F0]'
+                          } ${isSplit && !cardChecked ? 'opacity-60' : ''}`}
                         >
-                          {isHigh ? 'HIGH CONFIDENCE' : 'MEDIUM MATCH'}
-                        </span>
-                      </div>
-                    </div>
+                          <div>
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-sm text-[#1E293B]">
+                                    {sug.partyName}
+                                  </span>
+                                  <span
+                                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                                      sug.invoiceType === 'Sales'
+                                        ? 'bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]'
+                                        : 'bg-[#EFF6FF] text-[#2563EB] border-[#BFDBFE]'
+                                    }`}
+                                  >
+                                    {sug.invoiceType}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-[#64748B] font-mono mt-0.5">
+                                  Invoice: {sug.invoiceNumber}
+                                </div>
+                              </div>
 
-                    <div className="text-xs text-[#64748B] bg-[#F8FAFC] border border-[#F1F5F9] rounded-lg p-2 mb-3">
-                      <span className="font-medium text-[#475569]">Match Reason: </span>
-                      {sug.reason}
-                    </div>
+                              <div className="text-right">
+                                <div className="text-base font-bold text-[#1E293B]">
+                                  {formatMoney(sug.amount)}
+                                </div>
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    isHigh
+                                      ? 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
+                                      : 'bg-[#FFFBEB] text-[#D97706] border border-[#FDE68A]'
+                                  }`}
+                                >
+                                  {isHigh ? 'HIGH CONFIDENCE' : 'MEDIUM MATCH'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-xs text-[#64748B] bg-[#F8FAFC] border border-[#F1F5F9] rounded-lg p-2 mb-3">
+                              <span className="font-medium text-[#475569]">Match Reason: </span>
+                              {sug.reason}
+                            </div>
+                          </div>
+
+                          {isSplit ? (
+                            <label className="flex items-center gap-2 px-1 py-1 text-xs font-medium text-[#475569] cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={cardChecked}
+                                onChange={(e) =>
+                                  setSplitSelection((prev) => ({
+                                    ...prev,
+                                    [`${sug.transactionId}:${sug.invoiceId}`]: e.target.checked,
+                                  }))
+                                }
+                              />
+                              Include {sug.invoiceNumber} ({formatMoney(sug.amount)})
+                            </label>
+                          ) : (
+                            <button
+                              onClick={() =>
+                                handleReconcile(sug.transactionId, sug.invoiceId, sug.invoiceNumber)
+                              }
+                              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#0D655E] transition-colors shadow-xs"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-amber-300" />
+                              <span>Reconcile with 1-Click</span>
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
 
-                  <button
-                    onClick={() =>
-                      handleReconcile(sug.transactionId, sug.invoiceId, sug.invoiceNumber)
-                    }
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#0D655E] transition-colors shadow-xs"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Reconcile with 1-Click</span>
-                  </button>
+                  {isSplit && (
+                    <button
+                      disabled={selected.length === 0}
+                      onClick={() =>
+                        handleReconcile(
+                          group[0].transactionId,
+                          selected[0].invoiceId,
+                          selected[0].invoiceNumber,
+                          selected.map((sug) => sug.invoiceId),
+                        )
+                      }
+                      className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#0D655E] disabled:opacity-50 transition-colors shadow-xs"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-300" />
+                      <span>
+                        Reconcile {selected.length} invoice{selected.length === 1 ? '' : 's'} (
+                        {formatMoney(total)})
+                      </span>
+                    </button>
+                  )}
                 </div>
               )
             })}

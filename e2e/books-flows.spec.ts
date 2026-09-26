@@ -422,3 +422,62 @@ test.describe('Zano Books flows: the other half of the product', () => {
     }
   })
 })
+
+test('one deposit naming two invoices splits across both from the UI', async () => {
+  test.setTimeout(240_000)
+  const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-split' })
+  const { userDataDir } = launched
+  try {
+    const books = await openBooks(launched)
+    await setupWizard(books, 'Split Allocation Trading (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+    await goto(books, 'Sales Invoices')
+    await postInvoice(books, CUSTOMER, 'Works phase 1', '2', '1000')
+    await waitForInvoice(books, 'INV-2026-001')
+    await postInvoice(books, CUSTOMER, 'Works phase 2', '1', '1000')
+    await waitForInvoice(books, 'INV-2026-002')
+
+    // One deposit line whose remittance names both invoices: the UI must
+    // offer the split (two suggestions, one transaction) instead of leaving
+    // the line Unmatched or silently reconciling only the first.
+    const csv = join(userDataDir, 'split.csv')
+    writeFileSync(
+      csv,
+      'Date,Description,Reference,Amount\n2026-09-26,EFT Buyer Co INV-2026-001 INV-2026-002,,3000.00',
+      'utf8',
+    )
+    await goto(books, 'Banking & Statements')
+    await books.locator('input[type="file"]').setInputFiles(csv)
+    await expect(books.locator('text=/One line, several invoices/i').first()).toBeVisible({
+      timeout: 20_000,
+    })
+    const groupButton = books.getByRole('button', { name: /Reconcile 2 invoices/i })
+    await expect(groupButton).toBeVisible({ timeout: 15_000 })
+    await books.screenshot({ path: screenshotPath('books-split-group') })
+    await groupButton.click()
+
+    await expect
+      .poll(
+        () => {
+          const d = booksData(userDataDir)
+          const one = d.invoices.find((i) => i.invoiceNumber === 'INV-2026-001')!
+          const two = d.invoices.find((i) => i.invoiceNumber === 'INV-2026-002')!
+          return `${one.status}:${one.outstandingAmount}:${two.status}:${two.outstandingAmount}`
+        },
+        { timeout: 20_000 },
+      )
+      .toBe('Paid:0:Paid:0')
+    await books.screenshot({ path: screenshotPath('books-split-reconciled') })
+
+    const data = booksData(userDataDir)
+    expect(Math.round(account(data, 'acc-suspense') * 100)).toBe(0)
+    expect(account(data, 'acc-bank')).toBe(13000)
+    expect(data.bankTransactions![0].reconciled).toBe(true)
+    for (const j of data.journalEntries) {
+      expect(Math.round(j.totalDebit * 100)).toBe(Math.round(j.totalCredit * 100))
+    }
+    expect(data.journalEntries.length).toBeGreaterThanOrEqual(4)
+  } finally {
+    await closeAndSaveVideo(launched, 'books-split')
+  }
+})

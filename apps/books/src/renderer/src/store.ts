@@ -117,6 +117,7 @@ interface BooksState {
   reconcileTransaction: (
     transactionId: string,
     invoiceId: string,
+    invoiceIds?: string[],
   ) => Promise<ReconcileTransactionResult>
   recordPayment: (input: {
     partyId: string
@@ -1298,10 +1299,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     return result
   },
 
-  reconcileTransaction: async (transactionId: string, invoiceId: string) => {
+  reconcileTransaction: async (transactionId: string, invoiceId: string, invoiceIds?: string[]) => {
     const api = getBooksApi()
     if (api?.reconcileTransaction) {
-      const res = await api.reconcileTransaction(transactionId, invoiceId)
+      const res = await api.reconcileTransaction(transactionId, invoiceId, invoiceIds)
       if (res.ok) {
         await get().loadData()
         succeeded('bank.reconcile')
@@ -1314,7 +1315,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     // No IPC bridge (dev browser): run the shared engine in-process instead
     // of a private copy, so the UI and the backend settle identically.
     const { data, persist } = get()
-    const { result, ledger } = applyReconciliation(data, { transactionId, invoiceId })
+    const { result, ledger } = applyReconciliation(data, { transactionId, invoiceId, invoiceIds })
     if (!result.ok || !ledger) {
       failed('bank.reconcile', result.error || 'The transaction could not be reconciled.')
       return result
