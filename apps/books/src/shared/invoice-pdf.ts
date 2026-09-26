@@ -5,7 +5,8 @@
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from 'pdf-lib'
 import { round2 } from './accounting'
-import type { CompanySettings, Invoice } from './types'
+import { DEFAULT_INVOICE_ACCENT, isValidInvoiceAccent } from './chart'
+import type { CompanySettings, Invoice, PrintTemplate } from './types'
 const PAGE_W = 595.28 // A4 portrait, points
 const PAGE_H = 841.89
 const MARGIN = 48
@@ -16,6 +17,20 @@ const COLOR_GRAY = rgb(0.486, 0.486, 0.486)
 const COLOR_LINE = rgb(0.929, 0.929, 0.929)
 const COLOR_LIGHT = rgb(0.973, 0.973, 0.973)
 const COLOR_ACCENT = rgb(0.047, 0.463, 0.435)
+const COLOR_WHITE = rgb(1, 1, 1)
+
+/** Height of the modern template's full-width accent header band (points). */
+const MODERN_BAND_H = 64
+/** Opacity of the modern template's tinted table-header row. */
+const MODERN_TINT_OPACITY = 0.14
+/** The footer line every template draws when no letterhead footer is set. */
+const DEFAULT_FOOTER_TEXT = 'Generated via Zano Books — Sovereign Financial Management'
+
+/** A #RRGGBB literal as pdf-lib RGB. */
+function hexToRgb(hex: string): RGB {
+  const value = parseInt(hex.slice(1), 16)
+  return rgb(((value >> 16) & 0xff) / 255, ((value >> 8) & 0xff) / 255, (value & 0xff) / 255)
+}
 
 export function formatMoney(amount: number, symbol: string): string {
   return `${symbol} ${amount.toLocaleString('en-ZA', {
@@ -113,6 +128,25 @@ export async function buildInvoicePdf(
   const rightX = PAGE_W - MARGIN
   let y = PAGE_H - MARGIN
 
+  // --- Template & accent resolution ---
+  // classic keeps its historical palette byte-for-byte: the built-in accent
+  // constant stays in play until the user picks a different colour, and the
+  // letterhead footer only extends the existing footer line. modern draws the
+  // settings accent everywhere (the default `#0F766E` when none is stored).
+  const template: PrintTemplate = settings.printTemplate === 'modern' ? 'modern' : 'classic'
+  const accentChanged =
+    isValidInvoiceAccent(settings.invoiceAccent) &&
+    settings.invoiceAccent.toUpperCase() !== DEFAULT_INVOICE_ACCENT.toUpperCase()
+  const accent =
+    template === 'modern' || accentChanged
+      ? hexToRgb(
+          isValidInvoiceAccent(settings.invoiceAccent)
+            ? settings.invoiceAccent
+            : DEFAULT_INVOICE_ACCENT,
+        )
+      : COLOR_ACCENT
+  const letterhead = (settings.letterheadFooter || '').trim()
+
   const draw = (
     font: PDFFont,
     size: number,
@@ -134,12 +168,12 @@ export async function buildInvoicePdf(
   const down = (gap: number): void => {
     y -= gap
   }
-  const divider = (): void => {
+  const divider = (color: RGB = COLOR_LINE): void => {
     page.drawLine({
       start: { x: MARGIN, y },
       end: { x: rightX, y },
       thickness: 0.75,
-      color: COLOR_LINE,
+      color,
     })
     y -= 1
   }
@@ -158,13 +192,24 @@ export async function buildInvoicePdf(
 
   /** Draws one line-items table header row at the current `y`. */
   const drawTableHeader = (): void => {
-    page.drawRectangle({
-      x: MARGIN,
-      y: y - 15,
-      width: CONTENT_W,
-      height: 16,
-      color: COLOR_LIGHT,
-    })
+    if (template === 'modern') {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - 15,
+        width: CONTENT_W,
+        height: 16,
+        color: accent,
+        opacity: MODERN_TINT_OPACITY,
+      })
+    } else {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - 15,
+        width: CONTENT_W,
+        height: 16,
+        color: COLOR_LIGHT,
+      })
+    }
     draw(bold, 8.5, 'Description', colDesc, COLOR_GRAY)
     draw(regular, 8.5, 'Qty', colQty + 1, COLOR_GRAY)
     draw(regular, 8.5, 'Rate', colRate.right, COLOR_GRAY, 'right', colRate.right)
@@ -191,9 +236,37 @@ export async function buildInvoicePdf(
 
   // --- Header: issuer (left) + document title/meta (right) ---
   const title = invoice.creditNote ? 'CREDIT NOTE' : 'TAX INVOICE'
-  draw(bold, 18, settings.companyName || 'Company Name', MARGIN, COLOR_DARK)
-  draw(bold, 16, title, rightX, COLOR_DARK, 'right')
-  down(26)
+  const companyName = settings.companyName || 'Company Name'
+  if (template === 'modern') {
+    // The modern template opens with a full-width accent band carrying the
+    // issuer and the document title in white; the meta block starts below it.
+    page.drawRectangle({
+      x: 0,
+      y: PAGE_H - MODERN_BAND_H,
+      width: PAGE_W,
+      height: MODERN_BAND_H,
+      color: accent,
+    })
+    page.drawText(companyName, {
+      x: MARGIN,
+      y: PAGE_H - 40,
+      size: 18,
+      font: bold,
+      color: COLOR_WHITE,
+    })
+    page.drawText(title, {
+      x: rightX - bold.widthOfTextAtSize(title, 16),
+      y: PAGE_H - 40,
+      size: 16,
+      font: bold,
+      color: COLOR_WHITE,
+    })
+    y = PAGE_H - MODERN_BAND_H - 14
+  } else {
+    draw(bold, 18, companyName, MARGIN, COLOR_DARK)
+    draw(bold, 16, title, rightX, COLOR_DARK, 'right')
+    down(26)
+  }
 
   draw(regular, 9, `VAT Reg: ${settings.taxNumber || '-'}`, MARGIN, COLOR_GRAY)
   draw(bold, 11, invoice.invoiceNumber || '', rightX, COLOR_DARK, 'right')
@@ -263,7 +336,9 @@ export async function buildInvoicePdf(
   }
 
   down(8)
-  divider()
+  // The "totals rule": modern always draws it in the accent, classic only
+  // when the user picked a colour other than the built-in teal.
+  divider(template === 'modern' || accentChanged ? accent : COLOR_LINE)
   down(18)
 
   // --- Totals block ---
@@ -292,12 +367,15 @@ export async function buildInvoicePdf(
   drawTotal('Grand Total', formatMoney(Number(invoice.grandTotal) || 0, symbol), {
     font: bold,
     size: 11,
+    // modern emphasises the totals row in the accent; classic keeps its dark
+    // grand total unless the accent was changed (see the Amount Due colour).
+    color: template === 'modern' ? accent : COLOR_DARK,
   })
   down(2)
   drawTotal('Amount Due', formatMoney(Number(invoice.outstandingAmount) || 0, symbol), {
     font: bold,
     size: 11,
-    color: COLOR_ACCENT,
+    color: template === 'modern' || accentChanged ? accent : COLOR_ACCENT,
   })
 
   // --- Notes ---
@@ -317,6 +395,15 @@ export async function buildInvoicePdf(
   }
 
   // --- Footer & page numbers on every page ---
+  // The letterhead footer rides the existing footer line: classic appends it
+  // after the generated-by text, modern replaces that text with it. The line
+  // is clipped so it can never run into the right-aligned page marker.
+  const footerText =
+    template === 'modern'
+      ? letterhead || DEFAULT_FOOTER_TEXT
+      : letterhead
+        ? `${DEFAULT_FOOTER_TEXT}  ·  ${letterhead}`
+        : DEFAULT_FOOTER_TEXT
   const pageCount = pdfDoc.getPageCount()
   for (let index = 0; index < pageCount; index++) {
     const footerPage = pdfDoc.getPage(index)
@@ -326,16 +413,17 @@ export async function buildInvoicePdf(
       thickness: 0.75,
       color: COLOR_LINE,
     })
-    footerPage.drawText('Generated via Zano Books — Sovereign Financial Management', {
+    const marker = `Page ${index + 1} of ${pageCount}`
+    const markerWidth = regular.widthOfTextAtSize(marker, 8)
+    footerPage.drawText(clipText(footerText, regular, 8, rightX - MARGIN - markerWidth - 12), {
       x: MARGIN,
       y: 40,
       size: 8,
       font: regular,
       color: COLOR_GRAY,
     })
-    const marker = `Page ${index + 1} of ${pageCount}`
     footerPage.drawText(marker, {
-      x: rightX - regular.widthOfTextAtSize(marker, 8),
+      x: rightX - markerWidth,
       y: 40,
       size: 8,
       font: regular,

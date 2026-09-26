@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import {
+  Banknote,
   BookOpen,
   CheckSquare,
   Clock,
@@ -10,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { agingBuckets, taxRegister } from '../../../shared/reports'
+import { computeCashFlowStatement } from '../../../shared/cash-flow'
 import type { ReportType } from '../../../shared/types'
 
 export function ReportsView() {
@@ -17,9 +19,10 @@ export function ReportsView() {
   const { accounts, settings, journalEntries, invoices, parties } = data
   const [agingScope, setAgingScope] = useState<'Sales' | 'Purchase'>('Sales')
 
-  // ReportType in shared/types covers the four legacy statements; the Aging
-  // and Tax Register tabs live in this view only (store/types untouched).
-  type ReportTab = ReportType | 'aging' | 'tax-register'
+  // ReportType in shared/types covers the four legacy statements; the Aging,
+  // Tax Register and Cash Flow tabs live in this view only (store/types
+  // untouched).
+  type ReportTab = ReportType | 'aging' | 'tax-register' | 'cash-flow'
   const report = activeReport as ReportTab
   const setReportTab = (tab: ReportTab) => setActiveReport(tab as ReportType)
 
@@ -37,6 +40,14 @@ export function ReportsView() {
     { current: 0, days30: 0, days60: 0, days90: 0, credit: 0, total: 0 },
   )
   const taxRows = taxRegister(invoices)
+
+  // --- 3. CASH FLOW ---
+  // Same journals-derived rule as every other statement: the P&L's period
+  // convention (year-to-date from the financial year start) scopes it.
+  const cashFlow = computeCashFlowStatement(data)
+  const cashFlowAccountNames = cashFlow.cashAccountIds
+    .map((id) => accounts.find((a) => a.id === id)?.name || id)
+    .join(', ')
 
   const formatMoney = (val: number) => {
     return `${settings.currencySymbol} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -128,6 +139,15 @@ export function ReportsView() {
         const label = r.taxRate === null ? 'TOTAL' : `${r.taxRate}%`
         csv += `"${label}",${r.salesTaxable.toFixed(2)},${r.salesTax.toFixed(2)},${r.purchaseTaxable.toFixed(2)},${r.purchaseTax.toFixed(2)}\n`
       })
+    } else if (report === 'cash-flow') {
+      reportTitle = 'Cash_Flow_Statement'
+      csv = `Statement of Cash Flows,${cashFlow.from} to ${cashFlow.to},Amount (${settings.currency})\n`
+      csv += `Opening Cash Balance,,${cashFlow.opening.toFixed(2)}\n`
+      csv += `Cash from Operating Activities,,${cashFlow.operating.toFixed(2)}\n`
+      csv += `Cash from Investing Activities,,${cashFlow.investing.toFixed(2)}\n`
+      csv += `Cash from Financing Activities,,${cashFlow.financing.toFixed(2)}\n`
+      csv += `Net Change in Cash,,${cashFlow.netChange.toFixed(2)}\n`
+      csv += `Closing Cash Balance,,${cashFlow.closing.toFixed(2)}\n`
     } else {
       reportTitle = 'General_Ledger'
       csv = `Date,Entry Number,Account,Debit,Credit,Remark\n`
@@ -235,6 +255,18 @@ export function ReportsView() {
         >
           <Receipt className="w-3.5 h-3.5" />
           Tax Register
+        </button>
+
+        <button
+          onClick={() => setReportTab('cash-flow')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+            report === 'cash-flow'
+              ? 'bg-[#1E293B] text-white'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+          }`}
+        >
+          <Banknote className="w-3.5 h-3.5" />
+          Cash Flow
         </button>
       </div>
 
@@ -609,6 +641,55 @@ export function ReportsView() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* --- REPORT 7: CASH FLOW --- */}
+      {report === 'cash-flow' && (
+        <div className="bg-white rounded-xl border border-[#EDEDED] p-8 shadow-xs max-w-4xl">
+          <div className="text-center pb-6 border-b border-[#EDEDED] mb-6">
+            <h2 className="text-lg font-bold text-[#1E293B]">{settings.companyName}</h2>
+            <p className="text-xs text-[#6B6B6B] font-semibold mt-1 uppercase tracking-wider">
+              Statement of Cash Flows
+            </p>
+            <p className="text-xs text-[#6B6B6B] mt-0.5">
+              {cashFlow.from} to {cashFlow.to} — the same year-to-date scope as the Profit and Loss
+              view, derived from the journals ({cashFlowAccountNames})
+            </p>
+          </div>
+
+          <div className="divide-y divide-[#EDEDED] border-t border-[#EDEDED] mb-6">
+            <div className="py-2.5 flex justify-between text-xs">
+              <span className="text-[#525252] pl-4">Opening Cash Balance</span>
+              <span className="font-mono text-[#1E293B]">{formatMoney(cashFlow.opening)}</span>
+            </div>
+            <div className="py-2.5 flex justify-between text-xs">
+              <span className="text-[#525252] pl-4">Cash from Operating Activities</span>
+              <span className="font-mono text-[#1E293B]">{formatMoney(cashFlow.operating)}</span>
+            </div>
+            <div className="py-2.5 flex justify-between text-xs">
+              <span className="text-[#525252] pl-4">Cash from Investing Activities</span>
+              <span className="font-mono text-[#1E293B]">{formatMoney(cashFlow.investing)}</span>
+            </div>
+            <div className="py-2.5 flex justify-between text-xs">
+              <span className="text-[#525252] pl-4">Cash from Financing Activities</span>
+              <span className="font-mono text-[#1E293B]">{formatMoney(cashFlow.financing)}</span>
+            </div>
+            <div className="py-2.5 flex justify-between text-xs font-bold text-[#1E293B] bg-[#F8F8F8] px-4 rounded-md">
+              <span>Net Change in Cash</span>
+              <span>{formatMoney(cashFlow.netChange)}</span>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-[#F0FDFA] border border-[#BAE8E1] flex justify-between items-center text-sm font-bold text-[#0F766E]">
+            <span>Closing Cash Balance</span>
+            <span className="text-base font-mono">{formatMoney(cashFlow.closing)}</span>
+          </div>
+          <p className="text-[11px] text-[#6B6B6B] mt-3">
+            Closing cash equals the journal-derived balances of {cashFlowAccountNames} at{' '}
+            {cashFlow.to}. Internal transfers between cash accounts (bank to petty cash) net to zero
+            movement.
+          </p>
         </div>
       )}
     </div>

@@ -8,10 +8,17 @@ import {
   DatabaseBackup,
   ArchiveRestore,
   Lock,
+  Printer,
 } from 'lucide-react'
 import { useBooksStore } from '../store'
-import { DEFAULT_BOOK_SETTINGS } from '../../../shared/chart'
-import type { CompanySettings } from '../../../shared/types'
+import {
+  DEFAULT_BOOK_SETTINGS,
+  DEFAULT_INVOICE_ACCENT,
+  INVOICE_ACCENT_SWATCHES,
+  LETTERHEAD_FOOTER_MAX,
+  isValidInvoiceAccent,
+} from '../../../shared/chart'
+import type { CompanySettings, PrintTemplate } from '../../../shared/types'
 import type { BackupFileInfo, BackupResult } from '../../../shared/ipc'
 
 const CURRENCIES: { code: string; symbol: string }[] = [
@@ -39,6 +46,13 @@ export function SettingsView() {
   const [currency, setCurrency] = useState(settings.currency || 'ZAR')
   const [financialYearStart, setFinancialYearStart] = useState(
     settings.financialYearStart || '2026-03-01',
+  )
+  const [printTemplate, setPrintTemplate] = useState<PrintTemplate>(
+    settings.printTemplate === 'modern' ? 'modern' : 'classic',
+  )
+  const [letterheadFooter, setLetterheadFooter] = useState(settings.letterheadFooter || '')
+  const [invoiceAccent, setInvoiceAccent] = useState(
+    isValidInvoiceAccent(settings.invoiceAccent) ? settings.invoiceAccent : DEFAULT_INVOICE_ACCENT,
   )
 
   const [saving, setSaving] = useState(false)
@@ -101,6 +115,9 @@ export function SettingsView() {
       currency,
       currencySymbol,
       financialYearStart,
+      printTemplate,
+      letterheadFooter: letterheadFooter.trim() ? letterheadFooter.trim() : undefined,
+      invoiceAccent: isValidInvoiceAccent(invoiceAccent) ? invoiceAccent : DEFAULT_INVOICE_ACCENT,
     }
 
     setSaving(true)
@@ -355,6 +372,98 @@ export function SettingsView() {
                 value={financialYearStart}
                 onChange={(e) => setFinancialYearStart(e.target.value)}
               />
+            </div>
+          </div>
+        </section>
+
+        {/* Print & letterhead */}
+        <section className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs">
+          <div className="flex items-center gap-2 mb-5">
+            <Printer className="w-4 h-4 text-[#0F766E]" />
+            <h2 className="text-sm font-bold text-[#1E293B] tracking-tight">
+              Print &amp; Letterhead
+            </h2>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className={labelCls}>Invoice template</label>
+              <div className="grid grid-cols-2 gap-3">
+                {(
+                  [
+                    {
+                      value: 'classic',
+                      title: 'Classic',
+                      blurb: 'The original layout — a clean issuer line above the document.',
+                    },
+                    {
+                      value: 'modern',
+                      title: 'Modern',
+                      blurb: 'A full-width accent band across the top and tinted table headings.',
+                    },
+                  ] as const
+                ).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={printTemplate === option.value}
+                    onClick={() => setPrintTemplate(option.value)}
+                    className={`text-left px-4 py-3 rounded-lg border transition-colors ${
+                      printTemplate === option.value
+                        ? 'border-[#0F766E] bg-[#F0FDFA]'
+                        : 'border-[#E2E8F0] bg-white hover:bg-[#F8F8F8]'
+                    }`}
+                  >
+                    <span className="block text-xs font-bold text-[#1E293B]">{option.title}</span>
+                    <span className="block text-[11px] text-[#6B6B6B] mt-0.5">{option.blurb}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className={labelCls} htmlFor="letterhead-footer">
+                Letterhead footer
+              </label>
+              <textarea
+                id="letterhead-footer"
+                className={inputCls}
+                rows={2}
+                maxLength={LETTERHEAD_FOOTER_MAX}
+                value={letterheadFooter}
+                onChange={(e) => setLetterheadFooter(e.target.value)}
+                placeholder="e.g. Zano Consulting (Pty) Ltd · Reg 2016/123456/07"
+              />
+              <p className="text-[11px] text-[#6B6B6B] mt-1">
+                Prints on every invoice and credit note you issue.
+              </p>
+            </div>
+
+            <div>
+              <label className={labelCls}>Accent colour</label>
+              <div className="flex items-center gap-2">
+                {INVOICE_ACCENT_SWATCHES.map((swatch) => {
+                  const selected = invoiceAccent.toUpperCase() === swatch.value.toUpperCase()
+                  return (
+                    <button
+                      key={swatch.value}
+                      type="button"
+                      aria-label={`Accent colour: ${swatch.label}`}
+                      aria-pressed={selected}
+                      title={swatch.label}
+                      onClick={() => setInvoiceAccent(swatch.value)}
+                      className={`h-8 w-8 rounded-full border-2 transition-transform ${
+                        selected
+                          ? 'border-[#1E293B] scale-110'
+                          : 'border-transparent hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: swatch.value }}
+                    />
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-[#6B6B6B] mt-1">
+                Colours the print/PDF totals and the modern template's header band.
+              </p>
             </div>
           </div>
         </section>

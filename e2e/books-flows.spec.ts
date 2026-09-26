@@ -272,6 +272,15 @@ test.describe('Zano Books flows: the other half of the product', () => {
       await books.waitForTimeout(400)
       await books.screenshot({ path: screenshotPath('books-flows-aging') })
 
+      // ── 4b) The cash-flow statement derives from the same journals ──────
+      await books
+        .getByRole('button', { name: /Cash Flow/i })
+        .first()
+        .click()
+      await expect(books.locator('text=Statement of Cash Flows')).toBeVisible()
+      await expect(books.locator('text=Closing Cash Balance')).toBeVisible()
+      await books.screenshot({ path: screenshotPath('books-flows-cash-flow') })
+
       // ── 5) Accessibility scan over the module's screens ─────────────────
       const violations: string[] = []
       for (const label of [

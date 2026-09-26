@@ -2,12 +2,30 @@ import React, { useEffect, useRef } from 'react'
 import { X, Printer, FileDown } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { effectiveLineAmount, round2 } from '../../../shared/accounting'
+import { DEFAULT_INVOICE_ACCENT, isValidInvoiceAccent } from '../../../shared/chart'
 import { isBaseCurrency } from './currencies'
+
+/** A #RRGGBB accent as a CSS colour with `alpha`, for the tinted header. */
+function withAlpha(hex: string, alpha: number): string {
+  const value = parseInt(hex.slice(1), 16)
+  return `rgba(${(value >> 16) & 0xff}, ${(value >> 8) & 0xff}, ${value & 0xff}, ${alpha})`
+}
+
+/** The footer text the PDF builder draws when no letterhead footer is set. */
+const PDF_DEFAULT_FOOTER = 'Generated via Zano Books — Sovereign Financial Management'
 
 export function InvoicePrintModal() {
   const { printInvoice, setPrintInvoice, data } = useBooksStore()
   const { settings } = data
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  // The preview agrees with the PDF builder: same template, same accent, same
+  // letterhead footer treatment.
+  const template = settings.printTemplate === 'modern' ? 'modern' : 'classic'
+  const accent = isValidInvoiceAccent(settings.invoiceAccent)
+    ? settings.invoiceAccent
+    : DEFAULT_INVOICE_ACCENT
+  const letterhead = (settings.letterheadFooter || '').trim()
 
   useEffect(() => {
     if (!printInvoice) return
@@ -86,35 +104,65 @@ export function InvoicePrintModal() {
 
         {/* Printable Paper Canvas (A4 simulation) */}
         <div className="print-sheet p-10 text-xs bg-white space-y-8">
-          {/* Header & Logo */}
-          <div className="flex justify-between items-start border-b border-[#EDEDED] pb-6">
-            <div>
-              <h1 className="text-xl font-bold text-[#1E293B] tracking-tight">
-                {settings.companyName}
-              </h1>
-              <p className="text-[#6B6B6B] mt-1">{settings.address}</p>
-              <p className="text-[#6B6B6B]">
-                VAT Reg: {settings.taxNumber} · Email: {settings.email}
-              </p>
+          {template === 'modern' ? (
+            /* Modern: full-width accent header band carrying the issuer
+               and the document title, matching the PDF's band. */
+            <div
+              className="px-6 py-6 flex justify-between items-start"
+              style={{ backgroundColor: accent }}
+            >
+              <div>
+                <h1 className="text-xl font-bold text-white tracking-tight">
+                  {settings.companyName}
+                </h1>
+                <p className="text-white/80 mt-1">{settings.address}</p>
+                <p className="text-white/80">
+                  VAT Reg: {settings.taxNumber} · Email: {settings.email}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-2xl font-black text-white uppercase tracking-wider">
+                  {printInvoice.type === 'Sales' ? 'TAX INVOICE' : 'PURCHASE BILL'}
+                </span>
+                <p className="font-mono text-sm font-bold text-white mt-1">
+                  {printInvoice.invoiceNumber}
+                </p>
+                <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 bg-white/15 text-white">
+                  {printInvoice.status.toUpperCase()}
+                </span>
+              </div>
             </div>
-            <div className="text-right">
-              <span className="text-2xl font-black text-[#1E293B] uppercase tracking-wider">
-                {printInvoice.type === 'Sales' ? 'TAX INVOICE' : 'PURCHASE BILL'}
-              </span>
-              <p className="font-mono text-sm font-bold text-[#1E293B] mt-1">
-                {printInvoice.invoiceNumber}
-              </p>
-              <span
-                className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 ${
-                  printInvoice.status === 'Paid'
-                    ? 'bg-[#F3FCF5] text-[#30A66D]'
-                    : 'bg-[#FDFAED] text-[#B45309]'
-                }`}
-              >
-                {printInvoice.status.toUpperCase()}
-              </span>
+          ) : (
+            /* Header & Logo */
+            <div className="flex justify-between items-start border-b border-[#EDEDED] pb-6">
+              <div>
+                <h1 className="text-xl font-bold text-[#1E293B] tracking-tight">
+                  {settings.companyName}
+                </h1>
+                <p className="text-[#6B6B6B] mt-1">{settings.address}</p>
+                <p className="text-[#6B6B6B]">
+                  VAT Reg: {settings.taxNumber} · Email: {settings.email}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-2xl font-black text-[#1E293B] uppercase tracking-wider">
+                  {printInvoice.type === 'Sales' ? 'TAX INVOICE' : 'PURCHASE BILL'}
+                </span>
+                <p className="font-mono text-sm font-bold text-[#1E293B] mt-1">
+                  {printInvoice.invoiceNumber}
+                </p>
+                <span
+                  className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 ${
+                    printInvoice.status === 'Paid'
+                      ? 'bg-[#F3FCF5] text-[#30A66D]'
+                      : 'bg-[#FDFAED] text-[#B45309]'
+                  }`}
+                >
+                  {printInvoice.status.toUpperCase()}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Bill To & Dates */}
           <div className="grid grid-cols-2 gap-8">
@@ -124,7 +172,7 @@ export function InvoicePrintModal() {
               </span>
               <p className="text-sm font-bold text-[#1E293B] mt-1">{printInvoice.partyName}</p>
               {printInvoice.tenderReference && (
-                <p className="text-xs text-[#0F766E] font-medium mt-1">
+                <p className="text-xs font-medium mt-1" style={{ color: accent }}>
                   Contract / Tender: {printInvoice.tenderReference}
                 </p>
               )}
@@ -144,7 +192,14 @@ export function InvoicePrintModal() {
           {/* Items Table */}
           <div className="border border-[#EDEDED] rounded-lg overflow-hidden">
             <table className="w-full text-left">
-              <thead className="bg-[#F8F8F8] font-bold text-[#525252] border-b border-[#EDEDED]">
+              <thead
+                className={`font-bold text-[#525252] border-b border-[#EDEDED] ${
+                  template === 'modern' ? '' : 'bg-[#F8F8F8]'
+                }`}
+                style={
+                  template === 'modern' ? { backgroundColor: withAlpha(accent, 0.14) } : undefined
+                }
+              >
                 <tr>
                   <th className="px-4 py-2.5 w-12 text-center">#</th>
                   <th className="px-4 py-2.5">Description</th>
@@ -186,13 +241,25 @@ export function InvoicePrintModal() {
                   {formatMoney(printInvoice.taxTotal)}
                 </span>
               </div>
-              <div className="flex justify-between font-bold text-sm text-[#1E293B] pt-2 border-t border-[#EDEDED]">
-                <span>Grand Total:</span>
-                <span className="font-mono text-base text-[#1E293B]">
+              <div
+                className="flex justify-between font-bold text-sm pt-2 border-t border-[#EDEDED]"
+                style={template === 'modern' ? { color: accent } : undefined}
+              >
+                <span className={template === 'modern' ? undefined : 'text-[#1E293B]'}>
+                  Grand Total:
+                </span>
+                <span
+                  className={`font-mono text-base ${
+                    template === 'modern' ? undefined : 'text-[#1E293B]'
+                  }`}
+                >
                   {formatMoney(printInvoice.grandTotal)}
                 </span>
               </div>
-              <div className="flex justify-between font-bold text-xs text-[#B45309] pt-1">
+              <div
+                className="flex justify-between font-bold text-xs pt-1"
+                style={{ color: accent }}
+              >
                 <span>Balance Due:</span>
                 <span className="font-mono">{formatMoney(printInvoice.outstandingAmount)}</span>
               </div>
@@ -209,6 +276,17 @@ export function InvoicePrintModal() {
                 'Please deposit into company FNB account using invoice number as reference.'}
             </p>
           </div>
+
+          {/* Letterhead footer — classic appends it to the PDF's generated-by
+              line (shown only when set, as the PDF draws it), modern replaces
+              the generated-by text with it. */}
+          {template === 'modern' || letterhead ? (
+            <div className="pt-4 border-t border-[#EDEDED] text-[10px] text-[#6B6B6B]">
+              {template === 'modern'
+                ? letterhead || PDF_DEFAULT_FOOTER
+                : `${PDF_DEFAULT_FOOTER} · ${letterhead}`}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

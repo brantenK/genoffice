@@ -28,7 +28,13 @@ import {
 } from '../shared/accounting'
 import { applyBankStatementImport, applyReconciliation, deriveLedger } from '../shared/settlement'
 import type { BankStatementImportResult, ReconciliationCoreResult } from '../shared/settlement'
-import { DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS } from '../shared/chart'
+import {
+  DEFAULT_BOOK_SETTINGS,
+  DEFAULT_INVOICE_ACCENT,
+  EMPTY_ACCOUNTS,
+  LETTERHEAD_FOOTER_MAX,
+  isValidInvoiceAccent,
+} from '../shared/chart'
 import { appendAudit, createAuditEntry } from '../shared/audit'
 import { isDateLocked } from '../shared/closing'
 import { MAX_AUDIT_ENTRIES } from '../shared/audit'
@@ -168,6 +174,27 @@ export function normalizeLedger(data: BooksDataEnvelope): BooksDataEnvelope {
   return recomputeLedger({ ...data, journalEntries })
 }
 
+/**
+ * Print & letterhead defaults (additive and optional, like the invoice
+ * currency fields — no schema-version bump): the template defaults to
+ * classic, a malformed accent is repaired to the default teal, and the
+ * footer is a trimmed string capped at the shared maximum. Applied to every
+ * envelope the migration emits so a fresh ledger carries the same defaults.
+ */
+function sanitizePrintSettings(settings: CompanySettings): CompanySettings {
+  settings.printTemplate = settings.printTemplate === 'modern' ? 'modern' : 'classic'
+  settings.invoiceAccent = isValidInvoiceAccent(settings.invoiceAccent)
+    ? settings.invoiceAccent
+    : DEFAULT_INVOICE_ACCENT
+  const rawFooter = settings.letterheadFooter
+  if (typeof rawFooter === 'string' && rawFooter.trim()) {
+    settings.letterheadFooter = rawFooter.trim().slice(0, LETTERHEAD_FOOTER_MAX)
+  } else {
+    delete settings.letterheadFooter
+  }
+  return settings
+}
+
 export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
   const now = new Date().toISOString()
   if (!raw || typeof raw !== 'object') {
@@ -175,7 +202,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
       version: CURRENT_BOOKS_SCHEMA_VERSION,
       revision: 0,
       updatedAt: now,
-      settings: { ...DEFAULT_BOOK_SETTINGS },
+      settings: sanitizePrintSettings({ ...DEFAULT_BOOK_SETTINGS }),
       accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
       parties: [],
       invoices: [],
@@ -216,8 +243,11 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
 
   const settings: CompanySettings =
     r.settings && typeof r.settings === 'object'
-      ? { ...DEFAULT_BOOK_SETTINGS, ...(r.settings as Partial<CompanySettings>) }
-      : { ...DEFAULT_BOOK_SETTINGS }
+      ? sanitizePrintSettings({
+          ...DEFAULT_BOOK_SETTINGS,
+          ...(r.settings as Partial<CompanySettings>),
+        })
+      : sanitizePrintSettings({ ...DEFAULT_BOOK_SETTINGS })
 
   const existingAccounts: Account[] = Array.isArray(r.accounts) ? (r.accounts as Account[]) : []
   const accountsMap = new Map<string, Account>()

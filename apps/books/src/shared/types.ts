@@ -176,7 +176,16 @@ export interface CompanySettings {
   /** Last closed financial-period end date (YYYY-MM-DD). Dates at or before
    * this are locked: no new or edited invoices may post into them. */
   closedThrough?: string
+  /** Invoice print template: the classic layout or the accent-banded modern one. */
+  printTemplate?: PrintTemplate
+  /** Letterhead footer text printed on every issued invoice / credit note. */
+  letterheadFooter?: string
+  /** Invoice PDF accent colour as a #RRGGBB literal. */
+  invoiceAccent?: string
 }
+
+/** The invoice print templates the PDF builder and the print preview support. */
+export type PrintTemplate = 'classic' | 'modern'
 
 /** A recorded payment's exact coverage of a bank-statement line. */
 export interface BankPaymentLink {

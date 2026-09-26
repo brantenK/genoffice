@@ -24,6 +24,34 @@ export const DEFAULT_BOOK_SETTINGS: CompanySettings = {
 export const DEFAULT_PAYMENT_TERMS_DAYS = 30
 
 /**
+ * The default invoice print accent (#RRGGBB) — the module's teal, the colour
+ * the classic PDF template has always used for its "Amount Due" emphasis.
+ */
+export const DEFAULT_INVOICE_ACCENT = '#0F766E'
+
+/**
+ * The six preset accents the settings UI offers (the module's palette, the
+ * green and blue values a11y-darkened). The picker is swatches-only so the
+ * accent can never be an arbitrary, off-palette colour.
+ */
+export const INVOICE_ACCENT_SWATCHES: { label: string; value: string }[] = [
+  { label: 'Teal', value: '#0F766E' },
+  { label: 'Blue', value: '#007BE0' },
+  { label: 'Green', value: '#1B7A46' },
+  { label: 'Red', value: '#C22626' },
+  { label: 'Amber', value: '#B45309' },
+  { label: 'Dark', value: '#1E293B' },
+]
+
+/** Hard cap for the letterhead footer text, enforced by migration and UI. */
+export const LETTERHEAD_FOOTER_MAX = 200
+
+/** True for a literal #RRGGBB accent colour (the only accepted shape). */
+export function isValidInvoiceAccent(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value)
+}
+
+/**
  * Ledger name for the bank account when the chart of accounts has no banking
  * account to resolve (see CORE_ACCOUNTS 'acc-bank'). The neutral name is
  * used instead of naming the founder's bank.
