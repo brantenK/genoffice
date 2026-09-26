@@ -10,6 +10,8 @@ import type {
   JournalEntry,
   Party,
   PaymentAllocation,
+  Quotation,
+  QuotationStatus,
   ReportType,
 } from '../../shared/types'
 import { EMPTY_ACCOUNTS, DEFAULT_BOOK_SETTINGS } from '../../shared/chart'
@@ -33,6 +35,7 @@ import {
   computeAccountBalances,
   nextInvoiceNumber,
   nextJournalNumber,
+  nextQuoteNumber,
   recomputePartyBalances,
 } from '../../shared/accounting'
 import { invoiceExchangeRate, toBaseAmount } from '../../shared/accounting'
@@ -61,6 +64,7 @@ export const emptyBooksData: BooksData = {
   accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
   parties: [],
   invoices: [],
+  quotes: [],
   journalEntries: [],
   bankTransactions: [],
 }
@@ -112,6 +116,24 @@ interface BooksState {
   saveInvoice: (invoice: Partial<Invoice>) => Promise<void>
   markInvoicePaid: (invoiceId: string) => Promise<void>
   deleteInvoice: (invoiceId: string) => Promise<void>
+  /**
+   * Saves a quotation. Off-ledger: quotations never touch journals, balances
+   * or party outstanding — only conversion into an invoice posts.
+   */
+  saveQuote: (quote: Partial<Quotation>) => Promise<void>
+  /** Moves a quotation through Draft → Sent → Accepted/Lost. */
+  setQuoteStatus: (
+    quoteId: string,
+    status: Exclude<QuotationStatus, 'Converted' | 'Expired'>,
+  ) => Promise<void>
+  /**
+   * Converts an accepted/sent quotation into a posted sales invoice. Returns
+   * the invoice so the UI can navigate to it.
+   */
+  convertQuoteToInvoice: (
+    quoteId: string,
+  ) => Promise<{ ok: boolean; invoice?: Invoice; error?: string }>
+  deleteQuote: (quoteId: string) => Promise<void>
   addParty: (party: Omit<Party, 'id' | 'outstandingBalance'>) => Promise<void>
   addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'posted'>) => Promise<boolean>
   importBankStatementCsv: (csvContent: string) => Promise<BankStatementImportResult>
@@ -312,6 +334,7 @@ export function computeDataHash(data: BooksData): string {
       accounts: data.accounts,
       parties: data.parties,
       invoices: data.invoices,
+      quotes: data.quotes,
       journalEntries: data.journalEntries,
       bankTransactions: data.bankTransactions,
       payments: data.payments,
@@ -435,6 +458,272 @@ function unreadableStore(message: string): void {
 
 export function setUnreadableForTesting(): void {
   unreadableStore('books-data.json could not be read')
+}
+
+/**
+ * The ONE invoice posting path, as a pure ledger transformation: it takes the
+ * ledger the save applies to and returns the posted ledger (new invoice,
+ * journals, accounts, parties, payments, audit) or the reason the save is
+ * refused. `saveInvoice` persists what this returns, and quotation conversion
+ * reuses it — so a quote's invoice is journaled, FX-converted, audit-logged
+ * and numbered by exactly the machinery every other invoice rides.
+ */
+function invoiceSaveMutation(
+  data: BooksData,
+  partial: Partial<Invoice>,
+): { ok: true; ledger: BooksData; invoice: Invoice } | { ok: false; error: string } {
+  const now = new Date().toISOString()
+  const oldInvoice = partial.id ? data.invoices.find((i) => i.id === partial.id) : undefined
+  const isEdit = !!oldInvoice
+
+  // A multi-invoice payment has one balanced journal. Editing only one of
+  // its invoices would require splitting/re-posting that payment journal;
+  // block the edit until that dedicated allocation editor exists rather than
+  // silently deleting the other invoice's settlement from the ledger.
+  if (
+    oldInvoice &&
+    (data.payments || []).some(
+      (payment) =>
+        payment.allocations.length > 1 &&
+        payment.allocations.some((allocation) => allocation.invoiceId === oldInvoice.id),
+    )
+  ) {
+    const message = `Cannot edit ${oldInvoice.invoiceNumber}: it is settled by a payment covering several invoices.`
+    console.warn(
+      `[books-store] Rejected edit of ${oldInvoice.invoiceNumber}: multi-invoice payment`,
+    )
+    return { ok: false, error: message }
+  }
+
+  const rawItems = partial.items || oldInvoice?.items || []
+  const items = rawItems.map((it, idx) => {
+    let lineAmt = 0
+    if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
+      lineAmt = round2(Number(it.qty) * Number(it.rate))
+    } else if (it.amount != null && !isNaN(Number(it.amount))) {
+      lineAmt = round2(Number(it.amount))
+    }
+    return {
+      ...it,
+      id: it.id || `item-${Date.now()}-${idx}`,
+      qty: Number(it.qty) || 0,
+      rate: Number(it.rate) || 0,
+      taxRate: it.taxRate !== undefined ? Number(it.taxRate) : 15,
+      amount: lineAmt,
+    }
+  })
+
+  const totals = calculateInvoiceTotals(items, {
+    taxInclusive: data.settings.taxInclusive,
+    discountTotal: partial.discountTotal !== undefined ? Number(partial.discountTotal) : 0,
+    roundOff: partial.roundOff !== undefined ? Number(partial.roundOff) : 0,
+  })
+  let status: InvoiceStatus = partial.status || oldInvoice?.status || 'Unpaid'
+
+  let outstandingAmount: number
+  if (!isEdit) {
+    outstandingAmount = status === 'Paid' ? 0 : totals.grandTotal
+  } else {
+    // I5: a paid invoice edited to a larger amount is no longer fully
+    // paid — the plan keeps the already-received portion paid and turns
+    // the delta back into outstanding, instead of blindly re-settling the
+    // whole new total.
+    const wasPostedEdit = oldInvoice.status !== 'Draft' && oldInvoice.status !== 'Cancelled'
+    if (wasPostedEdit) {
+      const plan = repostPlanForPartialSettlement(oldInvoice, {
+        ...oldInvoice,
+        grandTotal: totals.grandTotal,
+        status,
+      })
+      if (partial.outstandingAmount !== undefined) {
+        outstandingAmount = round2(partial.outstandingAmount)
+      } else {
+        outstandingAmount = plan.newOutstanding
+        status = plan.status
+      }
+    } else if (status === 'Paid') {
+      outstandingAmount = 0
+    } else if (oldInvoice.status === 'Draft' && status !== 'Draft') {
+      outstandingAmount = totals.grandTotal
+    } else if (partial.outstandingAmount !== undefined) {
+      outstandingAmount = round2(partial.outstandingAmount)
+    } else if (oldInvoice.outstandingAmount === oldInvoice.grandTotal) {
+      outstandingAmount = totals.grandTotal
+    } else {
+      const paidSoFar = round2(oldInvoice.grandTotal - oldInvoice.outstandingAmount)
+      outstandingAmount = Math.max(0, round2(totals.grandTotal - paidSoFar))
+    }
+  }
+
+  const type = partial.type || oldInvoice?.type || 'Sales'
+
+  const targetInvoice: Invoice = {
+    id: partial.id || `inv-${Date.now()}`,
+    invoiceNumber:
+      partial.invoiceNumber ||
+      oldInvoice?.invoiceNumber ||
+      nextInvoiceNumber(data.invoices, type, partial.date),
+    type,
+    partyId: partial.partyId || oldInvoice?.partyId || '',
+    partyName:
+      partial.partyName || oldInvoice?.partyName || (type === 'Sales' ? 'Customer' : 'Supplier'),
+    date: partial.date || oldInvoice?.date || now.split('T')[0],
+    dueDate:
+      partial.dueDate ||
+      oldInvoice?.dueDate ||
+      new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    items,
+    subtotal: totals.subtotal,
+    taxTotal: totals.taxTotal,
+    grandTotal: totals.grandTotal,
+    ...(partial.discountTotal !== undefined
+      ? { discountTotal: Number(partial.discountTotal) }
+      : {}),
+    ...(partial.roundOff !== undefined ? { roundOff: Number(partial.roundOff) } : {}),
+    outstandingAmount,
+    status,
+    notes:
+      partial.notes !== undefined
+        ? partial.notes
+        : oldInvoice?.notes || 'Payment due within 30 days.',
+    tenderReference:
+      partial.tenderReference !== undefined ? partial.tenderReference : oldInvoice?.tenderReference,
+    crmDealId: partial.crmDealId !== undefined ? partial.crmDealId : oldInvoice?.crmDealId,
+    // Multi-currency: the invoice's denomination rides with the payload.
+    // Without this passthrough the invoice form's currency/rate would be
+    // dropped here and the ledger would post every invoice at rate 1.
+    currency: partial.currency !== undefined ? partial.currency : oldInvoice?.currency,
+    exchangeRate:
+      partial.exchangeRate !== undefined ? Number(partial.exchangeRate) : oldInvoice?.exchangeRate,
+    createdAt: oldInvoice ? oldInvoice.createdAt : now,
+    updatedAt: now,
+  }
+
+  // Determine if this save is a posting event: every non-draft invoice
+  // must be reflected in the ledger. Editing a previously posted invoice
+  // reverses its old entries and re-posts with the new line items, so the
+  // ledger always agrees with the invoice (never a stale posting).
+  const isPosting = targetInvoice.status !== 'Draft'
+  const wasPosted = oldInvoice && oldInvoice.status !== 'Draft' && oldInvoice.status !== 'Cancelled'
+
+  // Closed-period lock: nothing new may post into a locked period (period
+  // close moved income/expense to retained earnings). Editing an invoice
+  // whose OLD date is locked also fires: the reversal removes a posting
+  // that the close already swept, which would un-close the period.
+  const lockedTargetDate = isPosting && isDateLocked(data, targetInvoice.date)
+  const lockedOldDate =
+    isPosting && wasPosted && oldInvoice ? isDateLocked(data, oldInvoice.date) : false
+  if (lockedTargetDate || lockedOldDate) {
+    const message = `Cannot post ${targetInvoice.invoiceNumber} dated ${targetInvoice.date}: the period is closed through ${data.settings.closedThrough}.`
+    console.warn(`[books-store] Rejected posting into closed period: ${targetInvoice.date}`)
+    return { ok: false, error: message }
+  }
+
+  // Ledger-first: posting only appends journal entries; account balances
+  // are always recomputed from the journals afterwards.
+  const nextJournals = [...data.journalEntries]
+  let nextPayments = data.payments || []
+
+  // Resolve or auto-create party
+  const partiesPool = [...data.parties]
+  let resolvedParty =
+    partiesPool.find((p) => p.id === targetInvoice.partyId) ||
+    partiesPool.find((p) => p.name.toLowerCase() === targetInvoice.partyName.toLowerCase())
+
+  if (!resolvedParty && targetInvoice.partyName) {
+    const newPartyId = targetInvoice.partyId || `party-${Date.now()}`
+    resolvedParty = {
+      id: newPartyId,
+      name: targetInvoice.partyName,
+      type: targetInvoice.type === 'Sales' ? 'Customer' : 'Supplier',
+      outstandingBalance: 0,
+    }
+    partiesPool.push(resolvedParty)
+    targetInvoice.partyId = newPartyId
+  } else if (resolvedParty && !targetInvoice.partyId) {
+    targetInvoice.partyId = resolvedParty.id
+  }
+
+  if (isPosting) {
+    // Editing a previously posted invoice: reverse its old entries first,
+    // then re-post with the new line items.
+    if (wasPosted) {
+      const oldNumber = oldInvoice.invoiceNumber
+      nextJournals.splice(
+        0,
+        nextJournals.length,
+        ...reversalJournalRemoval(oldNumber, nextJournals),
+      )
+
+      // C1: the payment journals die with the reversed posting, so the
+      // Payment records referencing this invoice must die with them —
+      // otherwise deletePayment later reverses a journal that no longer
+      // exists and the invoice/ledger/party state silently diverges.
+      nextPayments = dropInvoiceFromPayments(data.payments || [], oldInvoice.id, oldNumber)
+
+      // The old settlement journal is removed with the old posting, so the
+      // already-paid portion must be re-posted as a settlement — otherwise
+      // editing a partially settled invoice would wipe the paid amount from
+      // the ledger. This covers BOTH the Unpaid and the Paid-edit case: a
+      // paid invoice edited to a larger amount is no longer fully paid, and
+      // only the amount actually received may hit Bank (I5).
+      const plan = repostPlanForPartialSettlement(oldInvoice, targetInvoice)
+      if (plan.paidAmount > 0) {
+        nextJournals.unshift(
+          createSettlementJournal(
+            targetInvoice,
+            data.accounts,
+            plan.paidAmount,
+            resolvedParty,
+            nextJournalNumber(nextJournals, targetInvoice.date),
+          ),
+        )
+      }
+    }
+
+    const postingJournal =
+      targetInvoice.type === 'Sales'
+        ? createSalesInvoiceJournal(targetInvoice, data.accounts, resolvedParty)
+        : createPurchaseBillJournal(targetInvoice, data.accounts, resolvedParty)
+    nextJournals.unshift(postingJournal)
+
+    // Immediate settlement only for invoices created (not edited) as 'Paid'
+    // — edited invoices settle exactly the previously-paid portion above.
+    if (targetInvoice.status === 'Paid' && !wasPosted) {
+      const settlementJournal = createSettlementJournal(
+        targetInvoice,
+        data.accounts,
+        targetInvoice.grandTotal,
+        resolvedParty,
+      )
+      nextJournals.unshift(settlementJournal)
+    }
+  }
+
+  const nextInvoices = oldInvoice
+    ? data.invoices.map((inv) => (inv.id === targetInvoice.id ? targetInvoice : inv))
+    : [targetInvoice, ...data.invoices]
+
+  // Ledger-first: derive balances from journals, then enforce the party
+  // balance invariant from open invoices.
+  const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
+  const nextParties = recomputePartyBalances(nextInvoices, partiesPool)
+
+  const ledger = appendAuditEntry(
+    {
+      ...data,
+      invoices: nextInvoices,
+      parties: nextParties,
+      accounts: nextAccounts,
+      journalEntries: nextJournals,
+      payments: nextPayments,
+    },
+    'invoice.save',
+    `Saved invoice ${targetInvoice.invoiceNumber} (${targetInvoice.status})`,
+    { invoiceNumber: targetInvoice.invoiceNumber, amount: round2(targetInvoice.grandTotal) },
+  )
+
+  return { ok: true, ledger, invoice: targetInvoice }
 }
 
 export const useBooksStore = create<BooksState>((set, get) => ({
@@ -643,6 +932,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const parties = Array.isArray(incomingData.parties)
       ? recomputePartyBalances(invoices, incomingData.parties)
       : []
+    const quotes = Array.isArray(incomingData.quotes) ? incomingData.quotes : []
     const journalEntries = Array.isArray(incomingData.journalEntries)
       ? incomingData.journalEntries
       : []
@@ -659,6 +949,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       accounts: incomingData.accounts,
       parties,
       invoices,
+      quotes,
       journalEntries,
       bankTransactions,
       payments,
@@ -715,269 +1006,13 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   },
 
   saveInvoice: async (partial) => {
-    const { data, persist } = get()
-    const now = new Date().toISOString()
-    const oldInvoice = partial.id ? data.invoices.find((i) => i.id === partial.id) : undefined
-    const isEdit = !!oldInvoice
-
-    // A multi-invoice payment has one balanced journal. Editing only one of
-    // its invoices would require splitting/re-posting that payment journal;
-    // block the edit until that dedicated allocation editor exists rather than
-    // silently deleting the other invoice's settlement from the ledger.
-    if (
-      oldInvoice &&
-      (data.payments || []).some(
-        (payment) =>
-          payment.allocations.length > 1 &&
-          payment.allocations.some((allocation) => allocation.invoiceId === oldInvoice.id),
-      )
-    ) {
-      const message = `Cannot edit ${oldInvoice.invoiceNumber}: it is settled by a payment covering several invoices.`
-      console.warn(
-        `[books-store] Rejected edit of ${oldInvoice.invoiceNumber}: multi-invoice payment`,
-      )
-      failed('invoice.save', message)
+    const posted = invoiceSaveMutation(get().data, partial)
+    if (!posted.ok) {
+      failed('invoice.save', posted.error)
       return
     }
-
-    const rawItems = partial.items || oldInvoice?.items || []
-    const items = rawItems.map((it, idx) => {
-      let lineAmt = 0
-      if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
-        lineAmt = round2(Number(it.qty) * Number(it.rate))
-      } else if (it.amount != null && !isNaN(Number(it.amount))) {
-        lineAmt = round2(Number(it.amount))
-      }
-      return {
-        ...it,
-        id: it.id || `item-${Date.now()}-${idx}`,
-        qty: Number(it.qty) || 0,
-        rate: Number(it.rate) || 0,
-        taxRate: it.taxRate !== undefined ? Number(it.taxRate) : 15,
-        amount: lineAmt,
-      }
-    })
-
-    const totals = calculateInvoiceTotals(items, {
-      taxInclusive: data.settings.taxInclusive,
-      discountTotal: partial.discountTotal !== undefined ? Number(partial.discountTotal) : 0,
-      roundOff: partial.roundOff !== undefined ? Number(partial.roundOff) : 0,
-    })
-    let status: InvoiceStatus = partial.status || oldInvoice?.status || 'Unpaid'
-
-    let outstandingAmount: number
-    if (!isEdit) {
-      outstandingAmount = status === 'Paid' ? 0 : totals.grandTotal
-    } else {
-      // I5: a paid invoice edited to a larger amount is no longer fully
-      // paid — the plan keeps the already-received portion paid and turns
-      // the delta back into outstanding, instead of blindly re-settling the
-      // whole new total.
-      const wasPostedEdit = oldInvoice.status !== 'Draft' && oldInvoice.status !== 'Cancelled'
-      if (wasPostedEdit) {
-        const plan = repostPlanForPartialSettlement(oldInvoice, {
-          ...oldInvoice,
-          grandTotal: totals.grandTotal,
-          status,
-        })
-        if (partial.outstandingAmount !== undefined) {
-          outstandingAmount = round2(partial.outstandingAmount)
-        } else {
-          outstandingAmount = plan.newOutstanding
-          status = plan.status
-        }
-      } else if (status === 'Paid') {
-        outstandingAmount = 0
-      } else if (oldInvoice.status === 'Draft' && status !== 'Draft') {
-        outstandingAmount = totals.grandTotal
-      } else if (partial.outstandingAmount !== undefined) {
-        outstandingAmount = round2(partial.outstandingAmount)
-      } else if (oldInvoice.outstandingAmount === oldInvoice.grandTotal) {
-        outstandingAmount = totals.grandTotal
-      } else {
-        const paidSoFar = round2(oldInvoice.grandTotal - oldInvoice.outstandingAmount)
-        outstandingAmount = Math.max(0, round2(totals.grandTotal - paidSoFar))
-      }
-    }
-
-    const type = partial.type || oldInvoice?.type || 'Sales'
-
-    const targetInvoice: Invoice = {
-      id: partial.id || `inv-${Date.now()}`,
-      invoiceNumber:
-        partial.invoiceNumber ||
-        oldInvoice?.invoiceNumber ||
-        nextInvoiceNumber(data.invoices, type, partial.date),
-      type,
-      partyId: partial.partyId || oldInvoice?.partyId || '',
-      partyName:
-        partial.partyName || oldInvoice?.partyName || (type === 'Sales' ? 'Customer' : 'Supplier'),
-      date: partial.date || oldInvoice?.date || now.split('T')[0],
-      dueDate:
-        partial.dueDate ||
-        oldInvoice?.dueDate ||
-        new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-      items,
-      subtotal: totals.subtotal,
-      taxTotal: totals.taxTotal,
-      grandTotal: totals.grandTotal,
-      ...(partial.discountTotal !== undefined
-        ? { discountTotal: Number(partial.discountTotal) }
-        : {}),
-      ...(partial.roundOff !== undefined ? { roundOff: Number(partial.roundOff) } : {}),
-      outstandingAmount,
-      status,
-      notes:
-        partial.notes !== undefined
-          ? partial.notes
-          : oldInvoice?.notes || 'Payment due within 30 days.',
-      tenderReference:
-        partial.tenderReference !== undefined
-          ? partial.tenderReference
-          : oldInvoice?.tenderReference,
-      crmDealId: partial.crmDealId !== undefined ? partial.crmDealId : oldInvoice?.crmDealId,
-      // Multi-currency: the invoice's denomination rides with the payload.
-      // Without this passthrough the invoice form's currency/rate would be
-      // dropped here and the ledger would post every invoice at rate 1.
-      currency: partial.currency !== undefined ? partial.currency : oldInvoice?.currency,
-      exchangeRate:
-        partial.exchangeRate !== undefined
-          ? Number(partial.exchangeRate)
-          : oldInvoice?.exchangeRate,
-      createdAt: oldInvoice ? oldInvoice.createdAt : now,
-      updatedAt: now,
-    }
-
-    // Determine if this save is a posting event: every non-draft invoice
-    // must be reflected in the ledger. Editing a previously posted invoice
-    // reverses its old entries and re-posts with the new line items, so the
-    // ledger always agrees with the invoice (never a stale posting).
-    const isPosting = targetInvoice.status !== 'Draft'
-    const wasPosted =
-      oldInvoice && oldInvoice.status !== 'Draft' && oldInvoice.status !== 'Cancelled'
-
-    // Closed-period lock: nothing new may post into a locked period (period
-    // close moved income/expense to retained earnings). Editing an invoice
-    // whose OLD date is locked also fires: the reversal removes a posting
-    // that the close already swept, which would un-close the period.
-    const lockedTargetDate = isPosting && isDateLocked(data, targetInvoice.date)
-    const lockedOldDate =
-      isPosting && wasPosted && oldInvoice ? isDateLocked(data, oldInvoice.date) : false
-    if (lockedTargetDate || lockedOldDate) {
-      const message = `Cannot post ${targetInvoice.invoiceNumber} dated ${targetInvoice.date}: the period is closed through ${data.settings.closedThrough}.`
-      console.warn(`[books-store] Rejected posting into closed period: ${targetInvoice.date}`)
-      failed('invoice.save', message)
-      return
-    }
-
-    // Ledger-first: posting only appends journal entries; account balances
-    // are always recomputed from the journals afterwards.
-    const nextJournals = [...data.journalEntries]
-    let nextPayments = data.payments || []
-
-    // Resolve or auto-create party
-    const partiesPool = [...data.parties]
-    let resolvedParty =
-      partiesPool.find((p) => p.id === targetInvoice.partyId) ||
-      partiesPool.find((p) => p.name.toLowerCase() === targetInvoice.partyName.toLowerCase())
-
-    if (!resolvedParty && targetInvoice.partyName) {
-      const newPartyId = targetInvoice.partyId || `party-${Date.now()}`
-      resolvedParty = {
-        id: newPartyId,
-        name: targetInvoice.partyName,
-        type: targetInvoice.type === 'Sales' ? 'Customer' : 'Supplier',
-        outstandingBalance: 0,
-      }
-      partiesPool.push(resolvedParty)
-      targetInvoice.partyId = newPartyId
-    } else if (resolvedParty && !targetInvoice.partyId) {
-      targetInvoice.partyId = resolvedParty.id
-    }
-
-    if (isPosting) {
-      // Editing a previously posted invoice: reverse its old entries first,
-      // then re-post with the new line items.
-      if (wasPosted) {
-        const oldNumber = oldInvoice.invoiceNumber
-        nextJournals.splice(
-          0,
-          nextJournals.length,
-          ...reversalJournalRemoval(oldNumber, nextJournals),
-        )
-
-        // C1: the payment journals die with the reversed posting, so the
-        // Payment records referencing this invoice must die with them —
-        // otherwise deletePayment later reverses a journal that no longer
-        // exists and the invoice/ledger/party state silently diverges.
-        nextPayments = dropInvoiceFromPayments(data.payments || [], oldInvoice.id, oldNumber)
-
-        // The old settlement journal is removed with the old posting, so the
-        // already-paid portion must be re-posted as a settlement — otherwise
-        // editing a partially settled invoice would wipe the paid amount from
-        // the ledger. This covers BOTH the Unpaid and the Paid-edit case: a
-        // paid invoice edited to a larger amount is no longer fully paid, and
-        // only the amount actually received may hit Bank (I5).
-        const plan = repostPlanForPartialSettlement(oldInvoice, targetInvoice)
-        if (plan.paidAmount > 0) {
-          nextJournals.unshift(
-            createSettlementJournal(
-              targetInvoice,
-              data.accounts,
-              plan.paidAmount,
-              resolvedParty,
-              nextJournalNumber(nextJournals, targetInvoice.date),
-            ),
-          )
-        }
-      }
-
-      const postingJournal =
-        targetInvoice.type === 'Sales'
-          ? createSalesInvoiceJournal(targetInvoice, data.accounts, resolvedParty)
-          : createPurchaseBillJournal(targetInvoice, data.accounts, resolvedParty)
-      nextJournals.unshift(postingJournal)
-
-      // Immediate settlement only for invoices created (not edited) as 'Paid'
-      // — edited invoices settle exactly the previously-paid portion above.
-      if (targetInvoice.status === 'Paid' && !wasPosted) {
-        const settlementJournal = createSettlementJournal(
-          targetInvoice,
-          data.accounts,
-          targetInvoice.grandTotal,
-          resolvedParty,
-        )
-        nextJournals.unshift(settlementJournal)
-      }
-    }
-
-    const nextInvoices = oldInvoice
-      ? data.invoices.map((inv) => (inv.id === targetInvoice.id ? targetInvoice : inv))
-      : [targetInvoice, ...data.invoices]
-
-    // Ledger-first: derive balances from journals, then enforce the party
-    // balance invariant from open invoices.
-    const nextAccounts = computeAccountBalances(data.accounts, nextJournals)
-    const nextParties = recomputePartyBalances(nextInvoices, partiesPool)
-
-    set({
-      data: appendAuditEntry(
-        {
-          ...data,
-          invoices: nextInvoices,
-          parties: nextParties,
-          accounts: nextAccounts,
-          journalEntries: nextJournals,
-          payments: nextPayments,
-        },
-        'invoice.save',
-        `Saved invoice ${targetInvoice.invoiceNumber} (${targetInvoice.status})`,
-        { invoiceNumber: targetInvoice.invoiceNumber, amount: round2(targetInvoice.grandTotal) },
-      ),
-      activeInvoiceId: null,
-    })
-
-    await persist()
+    set({ data: posted.ledger, activeInvoiceId: null })
+    await get().persist()
   },
 
   markInvoicePaid: async (invoiceId) => {
@@ -1089,6 +1124,207 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     // one. (The reason only decides anything when the write really is empty,
     // and then the deleted record was the last record.)
     await persist({ emptyLedger: 'user-deleted-last-record' })
+  },
+
+  saveQuote: async (partial) => {
+    const { data, persist } = get()
+    const now = new Date().toISOString()
+    const quotes = data.quotes || []
+    const oldQuote = partial.id ? quotes.find((q) => q.id === partial.id) : undefined
+
+    // A converted quote is the record of the invoice that was posted from it;
+    // editing it would make the quotation disagree with its own invoice.
+    if (oldQuote?.status === 'Converted') {
+      const message = `Quotation ${oldQuote.quoteNumber} was already converted to an invoice and can no longer be edited.`
+      console.warn(`[books-store] Rejected edit of converted ${oldQuote.quoteNumber}`)
+      failed('quote.save', message)
+      return
+    }
+
+    // The same line normalization the invoice posting path runs, so a
+    // converted quote's lines arrive at the ledger in exactly the shape a
+    // hand-entered invoice's would.
+    const items = (partial.items || oldQuote?.items || []).map((it, idx) => {
+      let lineAmt = 0
+      if (it.qty != null && it.rate != null && !isNaN(Number(it.qty)) && !isNaN(Number(it.rate))) {
+        lineAmt = round2(Number(it.qty) * Number(it.rate))
+      } else if (it.amount != null && !isNaN(Number(it.amount))) {
+        lineAmt = round2(Number(it.amount))
+      }
+      return {
+        ...it,
+        id: it.id || `item-${Date.now()}-${idx}`,
+        qty: Number(it.qty) || 0,
+        rate: Number(it.rate) || 0,
+        taxRate: it.taxRate !== undefined ? Number(it.taxRate) : 15,
+        amount: lineAmt,
+      }
+    })
+
+    // Off-ledger: the totals are computed with the invoice totals engine but
+    // nothing here touches journals, balances or party outstanding.
+    const totals = calculateInvoiceTotals(items, {
+      taxInclusive: data.settings.taxInclusive,
+      discountTotal: partial.discountTotal !== undefined ? Number(partial.discountTotal) : 0,
+    })
+
+    const targetQuote: Quotation = {
+      id: partial.id || `quote-${Date.now()}`,
+      quoteNumber:
+        partial.quoteNumber || oldQuote?.quoteNumber || nextQuoteNumber(quotes, partial.date),
+      partyId: partial.partyId || oldQuote?.partyId || '',
+      partyName: partial.partyName || oldQuote?.partyName || 'Customer',
+      date: partial.date || oldQuote?.date || now.split('T')[0],
+      validUntil:
+        partial.validUntil ||
+        oldQuote?.validUntil ||
+        new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      items,
+      subtotal: totals.subtotal,
+      taxTotal: totals.taxTotal,
+      grandTotal: totals.grandTotal,
+      ...(partial.discountTotal !== undefined
+        ? { discountTotal: Number(partial.discountTotal) }
+        : {}),
+      notes: partial.notes !== undefined ? partial.notes : oldQuote?.notes,
+      currency: partial.currency !== undefined ? partial.currency : oldQuote?.currency,
+      exchangeRate:
+        partial.exchangeRate !== undefined ? Number(partial.exchangeRate) : oldQuote?.exchangeRate,
+      status: partial.status || oldQuote?.status || 'Draft',
+      convertedInvoiceId: oldQuote?.convertedInvoiceId,
+      createdAt: oldQuote ? oldQuote.createdAt : now,
+      updatedAt: now,
+    }
+
+    const nextQuotes = oldQuote
+      ? quotes.map((q) => (q.id === targetQuote.id ? targetQuote : q))
+      : [targetQuote, ...quotes]
+
+    set({
+      data: appendAuditEntry(
+        { ...data, quotes: nextQuotes },
+        'quote.save',
+        `Saved quotation ${targetQuote.quoteNumber} (${targetQuote.status}) for ${targetQuote.partyName}`,
+        { amount: round2(targetQuote.grandTotal) },
+      ),
+    })
+
+    await persist()
+  },
+
+  setQuoteStatus: async (quoteId, status) => {
+    const { data, persist } = get()
+    const quote = (data.quotes || []).find((q) => q.id === quoteId)
+    if (!quote) return
+
+    // Converted is a terminal state reached only through conversion, and
+    // Expired is derived for display — neither is ever written here.
+    if (quote.status === 'Converted') {
+      const message = `Quotation ${quote.quoteNumber} was already converted and its status can no longer change.`
+      console.warn(`[books-store] Rejected status change of converted ${quote.quoteNumber}`)
+      failed('quote.status', message)
+      return
+    }
+
+    const nextQuotes = (data.quotes || []).map((q) =>
+      q.id === quoteId ? { ...q, status, updatedAt: new Date().toISOString() } : q,
+    )
+    set({
+      data: appendAuditEntry(
+        { ...data, quotes: nextQuotes },
+        'quote.status',
+        `Quotation ${quote.quoteNumber} marked ${status}`,
+      ),
+    })
+    await persist()
+  },
+
+  convertQuoteToInvoice: async (quoteId) => {
+    const { data, persist } = get()
+    const quote = (data.quotes || []).find((q) => q.id === quoteId)
+    if (!quote) {
+      return { ok: false, error: 'Quotation not found' }
+    }
+    if (quote.status === 'Converted') {
+      const message = `Quotation ${quote.quoteNumber} was already converted to an invoice — delete that invoice if you need to quote again.`
+      console.warn(`[books-store] Rejected double conversion of ${quote.quoteNumber}`)
+      failed('quote.convert', message)
+      return { ok: false, error: message }
+    }
+
+    // The invoice is built from the quote's items, discount and notes, dated
+    // today, and numbered/posted by the store's one invoice posting path —
+    // its due date rides the standard invoice default.
+    const invoicePayload: Partial<Invoice> = {
+      type: 'Sales',
+      partyId: quote.partyId,
+      partyName: quote.partyName,
+      date: new Date().toISOString().split('T')[0],
+      notes: quote.notes,
+      items: quote.items,
+      status: 'Unpaid',
+      currency: quote.currency,
+      exchangeRate: quote.exchangeRate,
+      ...(quote.discountTotal !== undefined ? { discountTotal: quote.discountTotal } : {}),
+    }
+    const posted = invoiceSaveMutation(data, invoicePayload)
+    if (!posted.ok) {
+      const message = `Could not convert ${quote.quoteNumber} to an invoice: ${posted.error}`
+      console.warn(`[books-store] Conversion posting refused: ${posted.error}`)
+      failed('quote.convert', message)
+      return { ok: false, error: message }
+    }
+
+    // The quote's conversion rides the SAME write as the posting: one persist
+    // carries the invoice, its journals and the converted quote, so the ledger
+    // and the quote list can never disagree about whether it happened.
+    const nextQuotes = (posted.ledger.quotes || []).map((q) =>
+      q.id === quote.id
+        ? {
+            ...q,
+            status: 'Converted' as const,
+            convertedInvoiceId: posted.invoice.id,
+            updatedAt: new Date().toISOString(),
+          }
+        : q,
+    )
+    set({
+      data: appendAuditEntry(
+        { ...posted.ledger, quotes: nextQuotes },
+        'quote.convert',
+        `Converted quotation ${quote.quoteNumber} into invoice ${posted.invoice.invoiceNumber}`,
+        { invoiceNumber: posted.invoice.invoiceNumber, amount: round2(posted.invoice.grandTotal) },
+      ),
+      activeInvoiceId: null,
+    })
+
+    const saved = await persist()
+    if (!saved.ok) return { ok: false, error: saved.error }
+    return { ok: true, invoice: posted.invoice }
+  },
+
+  deleteQuote: async (quoteId) => {
+    const { data, persist } = get()
+    const quote = (data.quotes || []).find((q) => q.id === quoteId)
+    if (!quote) return
+
+    // A converted quote is referenced by its invoice; deleting it would leave
+    // the invoice pointing at a quotation that no longer exists.
+    if (quote.status === 'Converted') {
+      const message = `Quotation ${quote.quoteNumber} cannot be deleted: it was converted into an invoice that references it. Delete that invoice first, or keep the quotation as its record.`
+      console.warn(`[books-store] Rejected delete of converted ${quote.quoteNumber}`)
+      failed('quote.delete', message)
+      return
+    }
+
+    set({
+      data: appendAuditEntry(
+        { ...data, quotes: (data.quotes || []).filter((q) => q.id !== quoteId) },
+        'quote.delete',
+        `Deleted quotation ${quote.quoteNumber}`,
+      ),
+    })
+    await persist()
   },
 
   saveCreditNote: async (input) => {

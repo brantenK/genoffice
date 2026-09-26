@@ -45,6 +45,7 @@ import type {
   Party,
   Payment,
   PaymentAllocation,
+  Quotation,
 } from '../shared/types'
 
 export { computeSettlementSuggestions } from '../shared/settlement'
@@ -178,6 +179,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
       accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
       parties: [],
       invoices: [],
+      quotes: [],
       journalEntries: [],
       bankTransactions: [],
       payments: [],
@@ -268,6 +270,12 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
   // are additive and optional, so no schema-version bump is needed (a version-1
   // file simply gains the two fields on its next write). A present valid value
   // is never overwritten.
+  // Quotations: off-ledger commercial documents, so they are normalized like
+  // the invoice rows (id filter, repaired totals, currency/rate stamp) but
+  // never touch balances or journals. Additive and optional — the migration
+  // stamps `quotes: []` when absent and no schema-version bump is needed, for
+  // the same reason the invoice currency fields did not bump it: an older
+  // build reading this file ignores the field, a newer one finds it.
   const baseCurrency = (typeof settings.currency === 'string' && settings.currency.trim()) || 'ZAR'
   const rawInvoices = Array.isArray(r.invoices) ? (r.invoices as Invoice[]) : []
   const invoices: Invoice[] = rawInvoices
@@ -287,6 +295,24 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
         Number.isFinite(inv.exchangeRate) &&
         inv.exchangeRate > 0
           ? inv.exchangeRate
+          : 1,
+    }))
+
+  const rawQuotes = Array.isArray(r.quotes) ? (r.quotes as Quotation[]) : []
+  const quotes: Quotation[] = rawQuotes
+    .filter((q) => q && typeof q.id === 'string')
+    .map((q) => ({
+      // Spread first so unknown extension fields survive, then overlay the
+      // normalized known fields — the same treatment the invoice rows get.
+      ...q,
+      subtotal: round2(q.subtotal),
+      taxTotal: round2(q.taxTotal),
+      grandTotal: round2(q.grandTotal),
+      currency:
+        typeof q.currency === 'string' && q.currency.trim() ? q.currency.trim() : baseCurrency,
+      exchangeRate:
+        typeof q.exchangeRate === 'number' && Number.isFinite(q.exchangeRate) && q.exchangeRate > 0
+          ? q.exchangeRate
           : 1,
     }))
 
@@ -440,6 +466,7 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
     accounts,
     parties,
     invoices,
+    quotes,
     journalEntries,
     bankTransactions,
     payments,
@@ -460,6 +487,7 @@ export function createEmptyBooksEnvelope(): BooksDataEnvelope {
     accounts: EMPTY_ACCOUNTS.map((a) => ({ ...a })),
     parties: [],
     invoices: [],
+    quotes: [],
     journalEntries: [],
     bankTransactions: [],
     payments: [],

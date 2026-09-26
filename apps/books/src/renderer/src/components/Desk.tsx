@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   LayoutDashboard,
   Receipt,
+  FileText,
   ShoppingBag,
   Users,
   FolderTree,
@@ -29,6 +30,7 @@ import { SettingsView } from './SettingsView'
 import { AuditLogView } from './AuditLogView'
 import { InvoiceList } from './InvoiceList'
 import { InvoiceForm } from './InvoiceForm'
+import { QuotesView } from './QuotesView'
 import { PartyList } from './PartyList'
 import { ChartOfAccounts } from './ChartOfAccounts'
 import { JournalEntryList } from './JournalEntryList'
@@ -163,6 +165,7 @@ export function Desk() {
     { id: 'banking', label: 'Banking & Statements', icon: Landmark, section: 'Banking' },
     { id: 'payments', label: 'Payments', icon: Wallet, section: 'Banking' },
     { id: 'invoices', label: 'Sales Invoices', icon: Receipt, section: 'Sales' },
+    { id: 'quotations', label: 'Quotations', icon: FileText, section: 'Sales' },
     { id: 'parties', label: 'Customers & Parties', icon: Users, section: 'Sales' },
     { id: 'purchases', label: 'Purchase Bills', icon: ShoppingBag, section: 'Purchases' },
     { id: 'accounts', label: 'Chart of Accounts', icon: FolderTree, section: 'Accounting' },
@@ -321,6 +324,7 @@ export function Desk() {
             {activeTab === 'banking' && <BankingView />}
             {activeTab === 'payments' && <PaymentsView />}
             {activeTab === 'invoices' && <InvoiceList type="Sales" />}
+            {activeTab === 'quotations' && <QuotesView />}
             {activeTab === 'purchases' && <InvoiceList type="Purchase" />}
             {activeTab === 'parties' && <PartyList />}
             {activeTab === 'accounts' && <ChartOfAccounts />}

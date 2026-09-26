@@ -27,6 +27,7 @@ type BooksData = {
   revision: number
   settings: { closedThrough: string }
   invoices: Array<Record<string, any>>
+  quotes?: Array<Record<string, any>>
   parties: Array<{ name: string; outstandingBalance: number }>
   journalEntries: Array<Record<string, any>>
   payments: Array<Record<string, any>>
@@ -481,6 +482,94 @@ test.describe('Zano Books flows: the other half of the product', () => {
       await books.screenshot({ path: screenshotPath('books-multicurrency-paid') })
     } finally {
       await closeAndSaveVideo(launched, 'books-multicurrency')
+    }
+  })
+
+  test('a quotation is off-ledger until it converts into a posted invoice', async () => {
+    test.setTimeout(240_000)
+    const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-quotes' })
+    const { userDataDir } = launched
+    try {
+      const books = await openBooks(launched)
+      await setupWizard(books, 'Quote Craft (Pty) Ltd')
+      await addParty(books, CUSTOMER, 'Customer')
+
+      await goto(books, 'Quotations')
+      await books
+        .locator('main')
+        .getByRole('button', { name: /New Quotation/i })
+        .click()
+      await books
+        .locator('label', { hasText: 'Customer' })
+        .locator('..')
+        .locator('select')
+        .selectOption({ label: CUSTOMER })
+
+      // Two lines: 1 000 + 2 000 (the fresh profile prices VAT-inclusively).
+      const firstRow = books.locator('tbody tr').first()
+      await firstRow.locator('input').nth(0).fill('Survey works')
+      await firstRow.locator('input').nth(1).fill('1')
+      await firstRow.locator('input').nth(2).fill('1000')
+      await books.getByRole('button', { name: 'Add Row' }).click()
+      const secondRow = books.locator('tbody tr').nth(1)
+      await secondRow.locator('input').nth(0).fill('Design package')
+      await secondRow.locator('input').nth(1).fill('1')
+      await secondRow.locator('input').nth(2).fill('2000')
+
+      await books.screenshot({ path: screenshotPath('books-quote-form') })
+      await books.getByRole('button', { name: 'Save Quotation' }).click()
+
+      await expect(books.locator('text=QTN-2026-001').first()).toBeVisible({ timeout: 15_000 })
+      await books.screenshot({ path: screenshotPath('books-quote-list') })
+
+      // On disk: the quote is stored and computed, but the ledger untouched.
+      await expect
+        .poll(() => booksData(userDataDir).quotes?.length ?? 0, { timeout: 15_000 })
+        .toBe(1)
+      let data = booksData(userDataDir)
+      const quote = data.quotes![0]
+      expect(quote.quoteNumber).toBe('QTN-2026-001')
+      expect(quote.status).toBe('Draft')
+      expect(quote.subtotal).toBeCloseTo(2608.7, 2)
+      expect(quote.taxTotal).toBeCloseTo(391.3, 2)
+      expect(quote.grandTotal).toBe(3000)
+      expect(data.journalEntries).toHaveLength(1) // the opening entry only
+      expect(data.parties.find((p: any) => p.name === CUSTOMER)!.outstandingBalance).toBe(0)
+
+      // Mark Sent, then convert.
+      await books.getByRole('button', { name: 'Mark quotation QTN-2026-001 as sent' }).click()
+      const convertButton = books.getByRole('button', {
+        name: 'Convert quotation QTN-2026-001 to an invoice',
+      })
+      await expect(convertButton).toBeVisible({ timeout: 15_000 })
+      await convertButton.click()
+
+      // The conversion landed: quote Converted, invoice posted, one save.
+      await expect
+        .poll(() => booksData(userDataDir).quotes?.[0]?.status, { timeout: 20_000 })
+        .toBe('Converted')
+
+      data = booksData(userDataDir)
+      const invoice = data.invoices.find((i: any) => i.invoiceNumber === 'INV-2026-001')!
+      expect(invoice).toBeDefined()
+      expect(invoice.grandTotal).toBe(3000)
+      expect(invoice.outstandingAmount).toBe(3000)
+      expect(data.quotes![0].convertedInvoiceId).toBe(invoice.id)
+      expect(data.parties.find((p: any) => p.name === CUSTOMER)!.outstandingBalance).toBe(3000)
+      const posting = data.journalEntries.find((j: any) => j.remarks.includes('INV-2026-001'))!
+      expect(posting).toBeDefined()
+      expect(Math.round(posting.totalDebit * 100)).toBe(Math.round(posting.totalCredit * 100))
+      for (const j of data.journalEntries) {
+        expect(Math.round(j.totalDebit * 100)).toBe(Math.round(j.totalCredit * 100))
+      }
+
+      // Conversion opens the new invoice; the list shows the Converted badge.
+      await expect(books.locator('text=INV-2026-001').first()).toBeVisible({ timeout: 15_000 })
+      await goto(books, 'Quotations')
+      await expect(books.locator('text=Converted').first()).toBeVisible({ timeout: 15_000 })
+      await books.screenshot({ path: screenshotPath('books-quote-converted') })
+    } finally {
+      await closeAndSaveVideo(launched, 'books-quotes')
     }
   })
 

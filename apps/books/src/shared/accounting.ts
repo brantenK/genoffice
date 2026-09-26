@@ -8,6 +8,7 @@ import type {
   JournalEntry,
   JournalEntryItem,
   Party,
+  Quotation,
 } from './types'
 
 /**
@@ -1507,6 +1508,25 @@ export function nextInvoiceNumber(
     }
   }
   return `${seriesPrefix}-${year}-${String(maxSeq + 1).padStart(3, '0')}`
+}
+
+/**
+ * Issues the next quotation number (QTN-YYYY-NNN) from the highest existing
+ * sequence for the year, so deleting a quote never reuses its number — the
+ * same max-sequence rule `nextInvoiceNumber` applies to invoices.
+ */
+export function nextQuoteNumber(quotes: Quotation[], date?: string): string {
+  const year = date
+    ? new Date(date).getFullYear() || new Date().getFullYear()
+    : new Date().getFullYear()
+  let maxSeq = 0
+  for (const quote of quotes || []) {
+    const m = String(quote?.quoteNumber || '').match(/^QTN-(\d{4})-(\d+)$/)
+    if (m && Number(m[1]) === year) {
+      maxSeq = Math.max(maxSeq, Number(m[2]))
+    }
+  }
+  return `QTN-${year}-${String(maxSeq + 1).padStart(3, '0')}`
 }
 
 /**

@@ -99,6 +99,45 @@ export interface Invoice {
   updatedAt: string
 }
 
+/**
+ * A quotation is a commercial document, not an accounting event: nothing in a
+ * quotation posts to the ledger. Posting happens only through conversion into
+ * a sales invoice (`convertedInvoiceId`), which rides the ordinary invoice
+ * posting path.
+ */
+export type QuotationStatus = 'Draft' | 'Sent' | 'Accepted' | 'Lost' | 'Expired' | 'Converted'
+
+export interface Quotation {
+  id: string
+  quoteNumber: string
+  partyId: string
+  partyName: string
+  date: string
+  /** The last date the offer holds (YYYY-MM-DD); an expired offer is a display state only. */
+  validUntil: string
+  /** The SAME line machinery as invoices: per-line account, qty, rate, VAT %, discount %. */
+  items: InvoiceItem[]
+  subtotal: number
+  taxTotal: number
+  grandTotal: number
+  /** Invoice-level discount (VAT-exclusive), applied before tax. */
+  discountTotal?: number
+  notes?: string
+  /**
+   * Currency the quotation is denominated in (ISO code, e.g. 'EUR'). Absent or
+   * blank means the company's base currency (`settings.currency`) — the same
+   * semantics as an invoice's, and the totals are in that currency.
+   */
+  currency?: string
+  /** How many base-currency units one unit of `currency` buys; absent or unusable means 1. */
+  exchangeRate?: number
+  status: QuotationStatus
+  /** Set when this quotation converted into a sales invoice. */
+  convertedInvoiceId?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface JournalEntryItem {
   id: string
   accountId: string
@@ -212,6 +251,8 @@ export interface BooksData {
   parties: Party[]
   invoices: Invoice[]
   journalEntries: JournalEntry[]
+  /** Off-ledger quotations. Additive and optional so existing ledgers read unchanged. */
+  quotes?: Quotation[]
   bankTransactions?: BankTransaction[]
   payments?: Payment[]
   auditLog?: AuditEntry[]
@@ -231,6 +272,8 @@ export interface BooksDataEnvelope {
   parties: Party[]
   invoices: Invoice[]
   journalEntries: JournalEntry[]
+  /** Off-ledger quotations. Additive and optional so existing ledgers read unchanged. */
+  quotes?: Quotation[]
   bankTransactions?: BankTransaction[]
   payments?: Payment[]
   auditLog?: AuditEntry[]
@@ -241,6 +284,7 @@ export type BooksNavigationTab =
   | 'banking'
   | 'payments'
   | 'invoices'
+  | 'quotations'
   | 'purchases'
   | 'parties'
   | 'accounts'

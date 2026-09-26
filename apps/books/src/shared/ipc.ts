@@ -5,6 +5,7 @@ import type {
   Invoice,
   InvoiceStatus,
   Payment,
+  QuotationStatus,
   SettlementSuggestion,
 } from './types'
 
@@ -228,6 +229,14 @@ const INVOICE_STATUSES = [
   'Overdue',
   'Cancelled',
 ] as const satisfies readonly InvoiceStatus[]
+const QUOTATION_STATUSES = [
+  'Draft',
+  'Sent',
+  'Accepted',
+  'Lost',
+  'Expired',
+  'Converted',
+] as const satisfies readonly QuotationStatus[]
 const INVOICE_TYPES = ['Sales', 'Purchase'] as const satisfies readonly Invoice['type'][]
 const PAYMENT_TYPES = ['received', 'paid', 'refund'] as const satisfies readonly Payment['type'][]
 const SETTINGS_TEXT_FIELDS = [
@@ -359,6 +368,24 @@ function invoicePayloadError(raw: unknown): string | null {
   for (const item of (raw as { items: unknown[] }).items) {
     const problem = invoiceItemError(item)
     if (problem) return problem
+  }
+  return null
+}
+
+function quotationError(raw: unknown): string | null {
+  if (!isRecord(raw)) return 'Every quotation must be an object'
+  if (!isNonEmptyString(raw.id)) return 'Every quotation must carry a non-empty id'
+  const id = raw.id
+  if (!isNonEmptyString(raw.quoteNumber)) {
+    return `Quotation ${id} quoteNumber must be a non-empty string`
+  }
+  const status = raw.status
+  if (typeof status !== 'string' || !QUOTATION_STATUSES.includes(status as QuotationStatus)) {
+    return `Quotation ${id} status is not a known quotation status`
+  }
+  if (!Array.isArray(raw.items)) return `Quotation ${id} items must be an array`
+  for (const field of ['subtotal', 'taxTotal', 'grandTotal'] as const) {
+    if (!isFiniteNumber(raw[field])) return `Quotation ${id} ${field} must be a finite number`
   }
   return null
 }
@@ -504,6 +531,17 @@ export function validateBooksData(raw: unknown): ValidationResult<BooksData> {
     for (const entry of auditLog) {
       const entryProblem = auditEntryError(entry)
       if (entryProblem) return invalid(entryProblem)
+    }
+  }
+
+  // Quotations are additive and optional: a ledger from before quotations (or
+  // written by another module) may not carry them at all.
+  const quotes = raw.quotes
+  if (quotes !== undefined && quotes !== null) {
+    if (!Array.isArray(quotes)) return invalid('Ledger quotes must be an array')
+    for (const quote of quotes) {
+      const quoteProblem = quotationError(quote)
+      if (quoteProblem) return invalid(quoteProblem)
     }
   }
 
