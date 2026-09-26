@@ -80,6 +80,21 @@ export interface Invoice {
   discountTotal?: number
   /** Round-off adjustment so grandTotal lands on a round number. */
   roundOff?: number
+  /**
+   * Currency the invoice is denominated in (ISO code, e.g. 'EUR'). Absent or
+   * blank means the company's base currency (`settings.currency`).
+   */
+  currency?: string
+  /**
+   * How many base-currency units one unit of `currency` buys (1 EUR at rate 20
+   * = 20 base units). Absent, non-finite or <= 0 means 1. The invoice's OWN
+   * totals (subtotal / taxTotal / grandTotal / outstandingAmount and its line
+   * amount / rate) stay in `currency` — that is what the printed document
+   * shows — while everything money-touching in the LEDGER (journal legs, tax
+   * register, party and account balances, payments) is in the base currency
+   * converted at this rate.
+   */
+  exchangeRate?: number
   createdAt: string
   updatedAt: string
 }

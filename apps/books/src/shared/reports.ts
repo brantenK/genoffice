@@ -1,4 +1,10 @@
-import { invoiceTaxBreakdown, postedInvoiceAmounts, round2 } from './accounting'
+import {
+  invoiceExchangeRate,
+  invoiceTaxBreakdown,
+  postedInvoiceAmounts,
+  round2,
+  toBaseAmount,
+} from './accounting'
 import type { Invoice, Party } from './types'
 
 /**
@@ -53,6 +59,12 @@ export function daysBetween(fromIso: string, toIso: string): number {
  * overpayments) are collected in `credit` rather than dropped, so `total` is
  * the net balance and reconciles with the party's derived outstandingBalance.
  * One row per party, sorted by total descending.
+ *
+ * Multi-currency: `outstandingAmount` is stored in the invoice's OWN currency,
+ * but the aging report must reconcile with the AR/AP control account, whose
+ * balance is journal-derived in the ledger's BASE currency — so every bucket
+ * holds the outstanding converted at the invoice's exchange rate
+ * (`outstanding × rate`). A rate-1 ledger buckets exactly as before.
  */
 export function agingBuckets(
   invoices: Invoice[],
@@ -73,7 +85,9 @@ export function agingBuckets(
 
   const rows = new Map<string, AgingRow>()
   for (const inv of open) {
-    const amount = round2(inv.outstandingAmount)
+    // Base currency: `outstandingAmount` is in the invoice's own currency, the
+    // AR/AP control account the report must reconcile with is in base.
+    const amount = toBaseAmount(inv.outstandingAmount, invoiceExchangeRate(inv))
     const partyId = inv.partyId || `party-${inv.partyName || inv.invoiceNumber}`
 
     let row = rows.get(partyId)
@@ -122,7 +136,9 @@ export function agingBuckets(
  * lines of such a row are read as VAT-exclusive, exactly as the journal reads
  * them. Credit notes are netted (their reversal journals debit VAT output /
  * credit VAT input), otherwise SARS output VAT is overstated. The last row
- * (taxRate null) sums everything.
+ * (taxRate null) sums everything. All figures are in the ledger's BASE
+ * currency: a foreign-currency invoice's VAT is computed on its base-currency
+ * value (SA practice), the same conversion the posting applied.
  */
 export function taxRegister(invoices: Invoice[]): TaxRegisterRow[] {
   const posted = (invoices || []).filter(
@@ -140,10 +156,18 @@ export function taxRegister(invoices: Invoice[]): TaxRegisterRow[] {
 
   for (const inv of posted) {
     const sign = inv.creditNote ? -1 : 1
+    // `postedInvoiceAmounts` returns BASE-currency figures (the register
+    // reports what the ledger posted); the invoice-level discount is in the
+    // invoice's own currency and is converted at the same rate so the taxable
+    // base (subtotal − discount) stays all-base.
+    const rate = invoiceExchangeRate(inv)
     const amounts = postedInvoiceAmounts(inv)
     const breakdown = invoiceTaxBreakdown({
       items: inv.items,
-      discountTotal: inv.discountTotal,
+      discountTotal:
+        inv.discountTotal !== undefined && inv.discountTotal !== null
+          ? toBaseAmount(inv.discountTotal, rate)
+          : undefined,
       subtotal: amounts.subtotal,
       taxTotal: amounts.taxTotal,
     })

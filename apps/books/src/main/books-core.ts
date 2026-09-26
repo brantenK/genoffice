@@ -260,6 +260,15 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
       outstandingBalance: round2(p.outstandingBalance),
     }))
 
+  // Multi-currency (Stage A): stamp each invoice's denomination. An invoice
+  // without a usable `currency` is denominated in the company base currency,
+  // and one without a usable `exchangeRate` settles at 1 — exactly what every
+  // ledger written before this build holds, so those ledgers read unchanged.
+  // Field-level normalization like the id/amount sanitation above; the fields
+  // are additive and optional, so no schema-version bump is needed (a version-1
+  // file simply gains the two fields on its next write). A present valid value
+  // is never overwritten.
+  const baseCurrency = (typeof settings.currency === 'string' && settings.currency.trim()) || 'ZAR'
   const rawInvoices = Array.isArray(r.invoices) ? (r.invoices as Invoice[]) : []
   const invoices: Invoice[] = rawInvoices
     .filter((inv) => inv && typeof inv.id === 'string')
@@ -269,6 +278,16 @@ export function migrateAndValidateBooks(raw: unknown): BooksDataEnvelope {
       taxTotal: round2(inv.taxTotal),
       grandTotal: round2(inv.grandTotal),
       outstandingAmount: round2(inv.outstandingAmount),
+      currency:
+        typeof inv.currency === 'string' && inv.currency.trim()
+          ? inv.currency.trim()
+          : baseCurrency,
+      exchangeRate:
+        typeof inv.exchangeRate === 'number' &&
+        Number.isFinite(inv.exchangeRate) &&
+        inv.exchangeRate > 0
+          ? inv.exchangeRate
+          : 1,
     }))
 
   const rawJournals = Array.isArray(r.journalEntries) ? (r.journalEntries as JournalEntry[]) : []

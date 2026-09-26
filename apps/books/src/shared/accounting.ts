@@ -248,10 +248,32 @@ export function hasPostedTotals(invoice: Pick<Invoice, 'subtotal' | 'taxTotal'>)
 }
 
 export interface PostedInvoiceAmounts {
-  /** VAT-exclusive base the posting carries. */
+  /** VAT-exclusive base the posting carries, in the ledger's base currency. */
   subtotal: number
-  /** VAT the posting carries. */
+  /** VAT the posting carries, in the ledger's base currency. */
   taxTotal: number
+}
+
+/**
+ * The rate that converts an invoice's own currency into the ledger's base
+ * currency: how many base-currency units one unit of `invoice.currency` buys
+ * (1 EUR at rate 20 = 20 base units). An absent, non-finite or non-positive
+ * stored rate settles the invoice at 1 — the pre-multi-currency behaviour, so
+ * every existing ledger is unchanged.
+ */
+export function invoiceExchangeRate(invoice: Pick<Invoice, 'exchangeRate'>): number {
+  const rate = Number(invoice.exchangeRate)
+  return Number.isFinite(rate) && rate > 0 ? rate : 1
+}
+
+/** An invoice-currency amount converted into the ledger's base currency. */
+export function toBaseAmount(amount: number, rate: number): number {
+  return round2((Number(amount) || 0) * rate)
+}
+
+/** A base-currency amount expressed back in the invoice's own currency. */
+export function fromBaseAmount(amount: number, rate: number): number {
+  return round2((Number(amount) || 0) / rate)
 }
 
 /**
@@ -268,17 +290,24 @@ export interface PostedInvoiceAmounts {
  * An invoice carries no `taxInclusive` flag (that is a company setting), so a
  * row without posted totals is read as VAT-exclusive by the journal and the
  * register alike — one rule, never two.
+ *
+ * THE conversion point for multi-currency: the returned amounts are in the
+ * LEDGER'S BASE CURRENCY — the invoice's own figures multiplied by
+ * `invoiceExchangeRate(invoice)` and rounded — because everything that
+ * consumes them (the journal builders, the tax register) posts and reports in
+ * base. The invoice's own totals are never written back here.
  */
 export function postedInvoiceAmounts(
   invoice: Pick<
     Invoice,
-    'items' | 'subtotal' | 'taxTotal' | 'grandTotal' | 'discountTotal' | 'roundOff'
+    'items' | 'subtotal' | 'taxTotal' | 'grandTotal' | 'discountTotal' | 'roundOff' | 'exchangeRate'
   >,
 ): PostedInvoiceAmounts {
   const storedSubtotal = round2(Number(invoice.subtotal) || 0)
   const storedTax = round2(Number(invoice.taxTotal) || 0)
   if (hasPostedTotals(invoice)) {
-    return { subtotal: storedSubtotal, taxTotal: storedTax }
+    const rate = invoiceExchangeRate(invoice)
+    return { subtotal: toBaseAmount(storedSubtotal, rate), taxTotal: toBaseAmount(storedTax, rate) }
   }
 
   const lines = Array.isArray(invoice.items) ? invoice.items : []
@@ -293,7 +322,8 @@ export function postedInvoiceAmounts(
     grandTotal === 0
       ? calculateInvoiceTotals(lines.map(postedLine), { discountTotal }).subtotal
       : round2(grandTotal + discountTotal - taxTotal - roundOff)
-  return { subtotal, taxTotal }
+  const rate = invoiceExchangeRate(invoice)
+  return { subtotal: toBaseAmount(subtotal, rate), taxTotal: toBaseAmount(taxTotal, rate) }
 }
 
 /** The item lines a journal groups by account, with NaN arrays read as empty. */
@@ -326,11 +356,14 @@ function vatRemark(rates: number[], suffix: string): string {
  * Group invoice lines by their posting account, on the same post-discount
  * `journalLineAmount` basis the totals engine and the tax register use. A line
  * whose effective amount rounds to zero is dropped so it never produces a 0.00
- * journal leg.
+ * journal leg. Each line amount is converted into the ledger's base currency
+ * at `rate` (`round2` after the multiplication) — the same rate every other
+ * leg of the entry posts at.
  */
 function groupLines(
   lines: InvoiceItem[],
   accounts: Account[],
+  rate: number,
   opts: {
     defaultAccountId: string
     defaultAccountType: Account['accountType']
@@ -340,7 +373,7 @@ function groupLines(
   const groups = new Map<string, { accountId: string; accountName: string; amount: number }>()
 
   for (const it of lines) {
-    const lineAmt = journalLineAmount(it)
+    const lineAmt = toBaseAmount(journalLineAmount(it), rate)
     if (lineAmt === 0) continue
     const accId = it.accountId || opts.defaultAccountId
     const matched = accounts.find((a) => a.id === accId)
@@ -458,12 +491,16 @@ function absorbRoundingDifference(
 /**
  * Creates a balanced JournalEntry for a Sales Invoice.
  *
+ * Every leg is in the LEDGER'S BASE CURRENCY: the invoice's own figures are
+ * converted at its exchange rate (rate 1 for the single-currency ledgers this
+ * module has always had).
+ *
  * The entry is ANCHORED ON THE STORED `grandTotal` (never on `subtotal`): the
- * Receivable leg is always exactly that amount, so the party balance, the AR
- * control account and the invoice can never disagree. The posted VAT and the
- * VAT-exclusive base the income legs start from come from `postedInvoiceAmounts`
- * — the same rule the tax register reads — and the discount / round-off /
- * residual legs are recomputed so that
+ * Receivable leg is always exactly that amount in base currency, so the party
+ * balance, the AR control account and the invoice can never disagree. The
+ * posted VAT and the VAT-exclusive base the income legs start from come from
+ * `postedInvoiceAmounts` — the same rule the tax register reads — and the
+ * discount / round-off / residual legs are recomputed so that
  * - Debit: Accounts Receivable (acc-ar) for invoice.grandTotal
  * - Credit: Income account(s) (item.accountId or acc-sales) for the posted
  *   subtotal; a negative subtotal (a rebate invoice) posts on the debit side
@@ -489,9 +526,13 @@ export function createSalesInvoiceJournal(
   party?: Party,
   jeNumber?: string,
 ): JournalEntry {
-  const roundOff = round2(Number(invoice.roundOff) || 0)
-  const discountTotal = round2(Number(invoice.discountTotal) || 0)
-  const grandTotal = round2(Number(invoice.grandTotal) || 0)
+  // Multi-currency: every leg of the posting is in the ledger's base currency.
+  // The invoice's own totals are in its own currency; each is converted at the
+  // invoice's exchange rate and rounded once, AFTER the multiplication.
+  const rate = invoiceExchangeRate(invoice)
+  const roundOff = toBaseAmount(Number(invoice.roundOff) || 0, rate)
+  const discountTotal = toBaseAmount(Number(invoice.discountTotal) || 0, rate)
+  const grandTotal = toBaseAmount(Number(invoice.grandTotal) || 0, rate)
   // The entry is anchored on grandTotal: the Receivable leg is always exactly
   // that amount. The VAT and the base the income legs start from come from the
   // one shared rule `taxRegister` reads too (`postedInvoiceAmounts`), so the
@@ -526,7 +567,7 @@ export function createSalesInvoiceJournal(
     },
   ]
 
-  const incomeGroups = groupLines(lines, accounts, {
+  const incomeGroups = groupLines(lines, accounts, rate, {
     defaultAccountId: 'acc-sales',
     defaultAccountType: 'Direct Income',
     defaultName: 'Tender & Commercial Contracting Sales',
@@ -678,9 +719,10 @@ export function createSalesInvoiceJournal(
 
 /**
  * Creates a balanced JournalEntry for a Purchase Bill. The mirror of
- * `createSalesInvoiceJournal`, anchored on the stored `grandTotal` — the
- * Payable leg is always exactly that amount — with the expense legs starting
- * from the posted VAT-exclusive subtotal `postedInvoiceAmounts` returns:
+ * `createSalesInvoiceJournal` — every leg in the ledger's base currency —
+ * anchored on the stored `grandTotal` — the Payable leg is always exactly that
+ * amount in base currency — with the expense legs starting from the posted
+ * VAT-exclusive subtotal `postedInvoiceAmounts` returns:
  * - Debit: Expense Account(s) (item.accountId or acc-materials) for the posted
  *   subtotal; a negative subtotal posts on the credit side instead of being dropped
  * - Credit: invoice-level discount (bill.discountTotal) on the first expense
@@ -698,9 +740,12 @@ export function createPurchaseBillJournal(
   party?: Party,
   jeNumber?: string,
 ): JournalEntry {
-  const roundOff = round2(Number(bill.roundOff) || 0)
-  const discountTotal = round2(Number(bill.discountTotal) || 0)
-  const grandTotal = round2(Number(bill.grandTotal) || 0)
+  // Multi-currency: every leg of the posting is in the ledger's base currency,
+  // converted from the bill's own currency at its exchange rate.
+  const rate = invoiceExchangeRate(bill)
+  const roundOff = toBaseAmount(Number(bill.roundOff) || 0, rate)
+  const discountTotal = toBaseAmount(Number(bill.discountTotal) || 0, rate)
+  const grandTotal = toBaseAmount(Number(bill.grandTotal) || 0, rate)
   // The entry is anchored on grandTotal: the Payable leg is always exactly
   // that amount. The VAT and the base the expense legs start from come from the
   // one shared rule `taxRegister` reads too (`postedInvoiceAmounts`), so the
@@ -717,7 +762,7 @@ export function createPurchaseBillJournal(
   const items: JournalEntryItem[] = []
 
   // Group line items by expense account if available
-  const expenseGroups = groupLines(lines, accounts, {
+  const expenseGroups = groupLines(lines, accounts, rate, {
     defaultAccountId: 'acc-materials',
     defaultAccountType: 'Direct Expense',
     defaultName: 'Direct Project Materials & Subcontractors',
@@ -1045,7 +1090,8 @@ export function createSettlementJournal(
 
 /**
  * Recomputes and guarantees that every party's outstandingBalance strictly equals
- * the sum of open invoice outstanding amounts.
+ * the sum of open invoice outstanding amounts, in the ledger's base currency
+ * (each invoice's outstanding converted at its exchange rate).
  */
 export function recomputePartyBalances(invoices: Invoice[], parties: Party[]): Party[] {
   if (!Array.isArray(parties)) return []
@@ -1060,7 +1106,10 @@ export function recomputePartyBalances(invoices: Invoice[], parties: Party[]): P
 
     const openTotal = partyInvoices.reduce((sum, inv) => {
       const amt = inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal
-      return round2(sum + (Number(amt) || 0))
+      // Party balances are ledger amounts, so they are always in the base
+      // currency: an invoice denominated in another currency contributes its
+      // outstanding converted at its exchange rate.
+      return round2(sum + toBaseAmount(amt, invoiceExchangeRate(inv)))
     }, 0)
 
     return {

@@ -22,6 +22,9 @@ import {
   createSettlementJournal,
   computeAccountBalances,
   recomputePartyBalances,
+  invoiceExchangeRate,
+  toBaseAmount,
+  fromBaseAmount,
 } from './accounting'
 import { appendAudit, createAuditEntry } from './audit'
 import { paymentCoverage, planImportCoverage } from './payments'
@@ -272,8 +275,11 @@ export function computeSettlementSuggestions(booksData: BooksData): SettlementSu
     const candidates = openInvoices.filter((i) => i.type === targetType)
 
     for (const inv of candidates) {
-      const currentOutstanding = round2(
-        inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal,
+      // Suggestion amounts are base currency (statement lines and payments
+      // are), so the invoice's own outstanding figure is converted at its rate.
+      const currentOutstanding = toBaseAmount(
+        round2(inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal),
+        invoiceExchangeRate(inv),
       )
       const amountMatches = Math.abs(currentOutstanding - targetAmount) < 0.01
 
@@ -432,11 +438,16 @@ export function applyReconciliation(
   // an unapplied receipt that extends that credit — the only route that
   // clears the line's Suspense balance.
   const invoicesAll = booksData.invoices || []
+  // The whole settlement maths runs in the ledger's base currency (statement
+  // cash and payments are base), so each target's outstanding is converted at
+  // its exchange rate; the written-back figure below goes back to the
+  // invoice's own currency.
   const targets = requested.map((id) => {
     const inv = invoicesAll.find((i) => i.id === id)
     if (!inv) return { inv: undefined as Invoice | undefined, id, outstanding: 0 }
-    const outstanding = round2(
-      inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal,
+    const outstanding = toBaseAmount(
+      round2(inv.outstandingAmount !== undefined ? inv.outstandingAmount : inv.grandTotal),
+      invoiceExchangeRate(inv),
     )
     return { inv, id, outstanding }
   })
@@ -478,6 +489,8 @@ export function applyReconciliation(
   //    own balance, and anything beyond that is an unapplied receipt riding on
   //    the last invoice as a negative outstanding — how this product carries a
   //    party credit (see the aging report's credit column).
+  // All figures here are base currency; the invoice write-back below converts
+  // each remainder back into the invoice's own currency (base ÷ rate).
   const txAmt = round2(Math.abs(tx.amount))
   const alreadyPosted = round2(Math.min(paymentCoverage(tx), txAmt))
   const lineAmount = round2(txAmt - alreadyPosted)
@@ -507,7 +520,10 @@ export function applyReconciliation(
       a.invoice.id,
       {
         ...a.invoice,
-        outstandingAmount: a.remainingOutstanding,
+        // Write the remainder back in the invoice's OWN currency: the base
+        // remainder ÷ its exchange rate. A negative remainder (a party credit
+        // riding on this invoice) stays negative in the invoice's currency.
+        outstandingAmount: fromBaseAmount(a.remainingOutstanding, invoiceExchangeRate(a.invoice)),
         status: a.status,
         updatedAt: nowIso,
       } as Invoice,

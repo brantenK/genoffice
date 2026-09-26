@@ -11,7 +11,13 @@ import type {
   JournalEntryItem,
   Party,
 } from './types'
-import { journalLineAmount, postedInvoiceAmounts, round2 } from './accounting'
+import {
+  journalLineAmount,
+  postedInvoiceAmounts,
+  round2,
+  toBaseAmount,
+  invoiceExchangeRate,
+} from './accounting'
 
 /**
  * Creates a balanced JournalEntry that REVERSES a previously posted sales
@@ -27,6 +33,11 @@ import { journalLineAmount, postedInvoiceAmounts, round2 } from './accounting'
  * original booked them to, so per account the credit note cancels the invoice
  * it reverses. The last group still absorbs any leftover rounding difference,
  * so the entry always balances.
+ *
+ * Every leg is in the LEDGER'S BASE CURRENCY, converted from the credit
+ * note's own currency at its exchange rate — the same conversion the original
+ * posting applied — so an invoice and its credit note (same currency and
+ * rate) still net every account to zero.
  */
 export function createCreditNoteJournal(
   invoice: Invoice,
@@ -34,11 +45,16 @@ export function createCreditNoteJournal(
   party?: Party,
   entryNumber?: string,
 ): JournalEntry {
-  const grandTotal = round2(invoice.grandTotal || invoice.subtotal + invoice.taxTotal)
+  const rate = invoiceExchangeRate(invoice)
+  const grandTotal = toBaseAmount(
+    round2(invoice.grandTotal || invoice.subtotal + invoice.taxTotal),
+    rate,
+  )
   // The reversal must carry back exactly the VAT and the VAT-exclusive base the
-  // original posting carried, so both read the same shared rule.
+  // original posting carried, so both read the same shared rule (both in base
+  // currency).
   const { subtotal: postedSubtotal, taxTotal } = postedInvoiceAmounts(invoice)
-  const discountTotal = round2(Number(invoice.discountTotal) || 0)
+  const discountTotal = toBaseAmount(Number(invoice.discountTotal) || 0, rate)
   const isSales = invoice.type === 'Sales'
 
   const dateStr = invoice.date || new Date().toISOString().split('T')[0]
@@ -83,13 +99,14 @@ export function createCreditNoteJournal(
   }
 
   // Group line items by income/expense account on the same post-discount
-  // `journalLineAmount` basis as the original posting, so per account the
-  // reversal cancels the invoice it credits.
+  // `journalLineAmount` basis as the original posting, converted into the
+  // ledger's base currency at the same rate, so per account the reversal
+  // cancels the invoice it credits.
   const groups = new Map<string, { accountId: string; accountName: string; amount: number }>()
 
   if (Array.isArray(invoice.items) && invoice.items.length > 0) {
     for (const it of invoice.items) {
-      const lineAmt = journalLineAmount(it)
+      const lineAmt = toBaseAmount(journalLineAmount(it), rate)
       const accId = it.accountId || (isSales ? 'acc-sales' : 'acc-materials')
       const matched = accounts.find((a) => a.id === accId)
       const accName =
@@ -116,7 +133,7 @@ export function createCreditNoteJournal(
   // absorbed by the last group. A negative subtotal posts no discount leg on
   // the invoice either, so the mirror must not carry one back.
   const bookedDiscount = round2(postedSubtotal >= 0 ? Math.min(discountTotal, postedSubtotal) : 0)
-  const roundOff = round2(Number(invoice.roundOff) || 0)
+  const roundOff = toBaseAmount(Number(invoice.roundOff) || 0, rate)
   const groupTotal = round2(grandTotal - taxTotal + bookedDiscount - roundOff)
 
   if (groups.size === 0) {

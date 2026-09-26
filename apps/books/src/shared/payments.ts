@@ -11,7 +11,7 @@ import type {
   Payment,
   PaymentAllocation,
 } from './types'
-import { round2 } from './accounting'
+import { round2, invoiceExchangeRate, toBaseAmount, fromBaseAmount } from './accounting'
 import { mentionsReference } from './credit-notes'
 
 /**
@@ -127,11 +127,19 @@ export function applyPayment(data: BooksData, input: ApplyPaymentInput): ApplyPa
     if (status === 'draft' || status === 'cancelled') {
       return { ok: false, error: `Invoice ${invoice.invoiceNumber} is ${invoice.status}` }
     }
+    // PAYMENT BOUNDARY (multi-currency): a payment is recorded in the ledger's
+    // base currency, so the allocation is validated against the invoice's
+    // outstanding CONVERTED TO BASE (outstanding × rate), never against the
+    // invoice's own figure. The write-back below runs the other way: the base
+    // remainder is divided by the rate and stored on the invoice in its OWN
+    // currency — what the printed document reads.
+    const rate = invoiceExchangeRate(invoice)
     const outstanding = round2(
       invoice.outstandingAmount !== undefined && invoice.outstandingAmount !== null
         ? invoice.outstandingAmount
         : invoice.grandTotal,
     )
+    const outstandingBase = toBaseAmount(outstanding, rate)
 
     // Direction sanity per payment type.
     if (type === 'refund') {
@@ -144,13 +152,13 @@ export function applyPayment(data: BooksData, input: ApplyPaymentInput): ApplyPa
           error: `Refunds can only be allocated against sales credit notes (${invoice.invoiceNumber})`,
         }
       }
-      if (outstanding >= 0) {
+      if (outstandingBase >= 0) {
         return {
           ok: false,
           error: `Credit note ${invoice.invoiceNumber} has no outstanding credit balance`,
         }
       }
-    } else if (outstanding <= 0) {
+    } else if (outstandingBase <= 0) {
       return {
         ok: false,
         error: `Invoice ${invoice.invoiceNumber} has no outstanding amount`,
@@ -164,7 +172,7 @@ export function applyPayment(data: BooksData, input: ApplyPaymentInput): ApplyPa
         error: `Allocation amount for ${invoice.invoiceNumber} must be greater than 0`,
       }
     }
-    const maxAlloc = type === 'refund' ? -outstanding : outstanding
+    const maxAlloc = type === 'refund' ? -outstandingBase : outstandingBase
     if (amount > maxAlloc) {
       return {
         ok: false,
@@ -218,17 +226,28 @@ export function applyPayment(data: BooksData, input: ApplyPaymentInput): ApplyPa
   const updatedInvoices = invoices.map((inv) => {
     const hit = resolved.find((r) => r.invoice.id === inv.id)
     if (!hit) return inv
+    // The write-back half of the payment boundary: the allocation is base
+    // currency, the ledger reduces the invoice's outstanding IN BASE, and the
+    // remainder is written back on the invoice in its own currency (base
+    // remainder ÷ rate, rounded). Status is judged on the base remainder — the
+    // ledger's truth — so an EUR 100 invoice at rate 20 is Paid exactly when a
+    // 2 000 ZAR payment lands. Because the remainder is re-rounded in the
+    // invoice's currency, a payment that is not a whole multiple of the rate
+    // can strand sub-cent FX dust between the base residue (the journals) and
+    // the written-back figure; full settlement (remainder exactly 0) never
+    // carries dust.
+    const rate = invoiceExchangeRate(inv)
     const outstanding = round2(
       inv.outstandingAmount !== undefined && inv.outstandingAmount !== null
         ? inv.outstandingAmount
         : inv.grandTotal,
     )
     const signed = type === 'refund' ? -hit.allocation.amount : hit.allocation.amount
-    const nextOutstanding = round2(outstanding - signed)
+    const nextOutstandingBase = round2(toBaseAmount(outstanding, rate) - signed)
     return {
       ...inv,
-      outstandingAmount: nextOutstanding,
-      status: (nextOutstanding === 0 ? 'Paid' : 'Unpaid') as InvoiceStatus,
+      outstandingAmount: fromBaseAmount(nextOutstandingBase, rate),
+      status: (nextOutstandingBase === 0 ? 'Paid' : 'Unpaid') as InvoiceStatus,
       updatedAt: new Date().toISOString(),
     }
   })
