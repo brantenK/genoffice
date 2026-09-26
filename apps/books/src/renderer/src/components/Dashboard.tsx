@@ -54,7 +54,7 @@ export function Dashboard() {
     switch (displayInvoiceStatus(status, dueDate, asOf)) {
       case 'Paid':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#30A66D] border border-[#DAF0E1]">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#1B7A46] border border-[#DAF0E1]">
             <CheckCircle2 className="w-3 h-3" /> Paid
           </span>
         )
@@ -128,7 +128,7 @@ export function Dashboard() {
           <div className="text-2xl font-bold text-[#1E293B] tracking-tight">
             {formatMoney(netProfit)}
           </div>
-          <div className="flex items-center gap-1.5 mt-2 text-xs font-medium text-[#30A66D]">
+          <div className="flex items-center gap-1.5 mt-2 text-xs font-medium text-[#1B7A46]">
             <ArrowUpRight className="w-3.5 h-3.5" />
             <span>Operational Margin: {((netProfit / (totalIncome || 1)) * 100).toFixed(1)}%</span>
           </div>
@@ -138,7 +138,7 @@ export function Dashboard() {
         <div className="bg-white p-5 rounded-xl border border-[#EDEDED] shadow-xs">
           <div className="flex items-center justify-between text-xs font-medium text-[#6B6B6B] mb-2">
             <span>Total Revenue</span>
-            <Receipt className="w-4 h-4 text-[#007BE0]" />
+            <Receipt className="w-4 h-4 text-[#0062A8]" />
           </div>
           <div className="text-2xl font-bold text-[#1E293B] tracking-tight">
             {formatMoney(totalIncome)}
@@ -195,7 +195,7 @@ export function Dashboard() {
             </span>
             <button
               onClick={() => setActiveTab('invoices')}
-              className="text-[#007BE0] hover:underline font-medium"
+              className="text-[#0062A8] hover:underline font-medium"
             >
               View Invoices →
             </button>
@@ -210,7 +210,7 @@ export function Dashboard() {
                 Bills owed to suppliers & subcontractors
               </p>
             </div>
-            <span className="text-lg font-bold text-[#E03636]">{formatMoney(totalPayable)}</span>
+            <span className="text-lg font-bold text-[#C22626]">{formatMoney(totalPayable)}</span>
           </div>
           <div className="w-full bg-[#F3F3F3] h-2 rounded-full overflow-hidden">
             <div
@@ -224,7 +224,7 @@ export function Dashboard() {
             </span>
             <button
               onClick={() => setActiveTab('purchases')}
-              className="text-[#007BE0] hover:underline font-medium"
+              className="text-[#0062A8] hover:underline font-medium"
             >
               View Purchases →
             </button>
@@ -241,7 +241,7 @@ export function Dashboard() {
           </div>
           <button
             onClick={() => setActiveTab('invoices')}
-            className="text-xs font-semibold text-[#007BE0] hover:underline"
+            className="text-xs font-semibold text-[#0062A8] hover:underline"
           >
             View All ({invoices.length})
           </button>
@@ -269,7 +269,7 @@ export function Dashboard() {
                   </td>
                   <td className="px-6 py-3.5 text-xs text-[#6B6B6B]">
                     <span
-                      className={`px-2 py-0.5 rounded-md font-medium ${inv.type === 'Sales' ? 'bg-[#F0FDFA] text-[#0F766E]' : 'bg-[#FFF9F5] text-[#D45A08]'}`}
+                      className={`px-2 py-0.5 rounded-md font-medium ${inv.type === 'Sales' ? 'bg-[#F0FDFA] text-[#0F766E]' : 'bg-[#FFF9F5] text-[#9A4106]'}`}
                     >
                       {inv.type}
                     </span>
@@ -291,7 +291,7 @@ export function Dashboard() {
                   <td className="px-6 py-3.5 text-right">
                     <button
                       onClick={() => setPrintInvoice(inv)}
-                      className="text-xs font-semibold text-[#1E293B] hover:text-[#007BE0] hover:underline"
+                      className="text-xs font-semibold text-[#1E293B] hover:text-[#0062A8] hover:underline"
                     >
                       Print / PDF
                     </button>

@@ -114,7 +114,7 @@ export function PartyList() {
                   className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
                     party.type === 'Customer'
                       ? 'bg-[#F0FDFA] text-[#0F766E]'
-                      : 'bg-[#FFF9F5] text-[#D45A08]'
+                      : 'bg-[#FFF9F5] text-[#9A4106]'
                   }`}
                 >
                   {party.type}
@@ -158,7 +158,7 @@ export function PartyList() {
                   }
                   setActiveInvoiceId('new')
                 }}
-                className="text-xs font-semibold text-[#007BE0] hover:underline"
+                className="text-xs font-semibold text-[#0062A8] hover:underline"
               >
                 + New {party.type === 'Customer' ? 'Invoice' : 'Bill'}
               </button>

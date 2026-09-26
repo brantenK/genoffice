@@ -128,11 +128,13 @@ async function axeScan(page: Page): Promise<string[]> {
       impact: v.impact as string | null,
       nodes: v.nodes.length as number,
       first: String(v.nodes[0]?.target?.[0] ?? ''),
+      sample: String(v.nodes[0]?.html ?? '').slice(0, 160),
+      fg: v.nodes[0]?.any?.all?.[0]?.fgColor ?? '',
     }))
   })
   return result.map(
-    (v: { impact: string | null; id: string; nodes: number; first: string }) =>
-      `${v.impact ?? '?'} ${v.id} x${v.nodes} @ ${v.first}`,
+    (v: { impact: string | null; id: string; nodes: number; first: string; sample: string }) =>
+      `${v.impact ?? '?'} ${v.id} x${v.nodes} @ ${v.first} :: ${v.sample}`,
   )
 }
 
@@ -261,7 +263,10 @@ test.describe('Zano Books flows: the other half of the product', () => {
         await books.waitForTimeout(250)
         violations.push(...(await axeScan(books)))
       }
-      console.log('AXE FINDINGS:', JSON.stringify(violations, null, 1))
+      ;(await import('node:fs/promises')).writeFile(
+        'e2e/artifacts/axe-findings.json',
+        JSON.stringify(violations, null, 1),
+      )
       // Gate: zero CRITICAL violations (a control without a name is a real
       // barrier). Serious contrast findings against the badge palette are the
       // module's documented accessibility backlog and are printed above.

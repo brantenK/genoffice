@@ -205,7 +205,7 @@ export function BankingView() {
                 <span className="font-mono text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[#F1F5F9] text-[#475569] border border-[#E2E8F0]">
                   acc-bank
                 </span>
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]">
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]">
                   {settings.currency || 'ZAR'}
                 </span>
               </div>
@@ -232,7 +232,7 @@ export function BankingView() {
               </span>
 
               {suggestions.length > 0 && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0] animate-pulse">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0] animate-pulse">
                   <Sparkles className="w-3.5 h-3.5" />
                   {suggestions.length} Matches Found
                 </span>
@@ -332,7 +332,7 @@ export function BankingView() {
                         <span
                           className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
                             isHigh
-                              ? 'bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]'
+                              ? 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
                               : 'bg-[#FFFBEB] text-[#D97706] border border-[#FDE68A]'
                           }`}
                         >
@@ -436,7 +436,7 @@ export function BankingView() {
                       <div className="font-semibold text-sm text-[#475569]">
                         No bank transactions found
                       </div>
-                      <p className="text-xs text-[#94A3B8] max-w-sm">
+                      <p className="text-xs text-[#64748B] max-w-sm">
                         Import a bank statement CSV to see transactions and automated settlement
                         suggestions.
                         {DEV_SAMPLE_STATEMENT && ' In development you can also load a sample.'}
@@ -477,7 +477,7 @@ export function BankingView() {
                       </td>
                       <td className="py-3 px-4 text-center whitespace-nowrap">
                         {tx.reconciled ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]">
                             <CheckCircle2 className="w-3 h-3" /> Reconciled
                           </span>
                         ) : (

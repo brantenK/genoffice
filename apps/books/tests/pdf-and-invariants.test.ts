@@ -11,7 +11,8 @@ import {
   round2,
 } from '../src/shared/accounting'
 import { DEFAULT_BANK_ACCOUNT_NAME, DEFAULT_PAYMENT_TERMS_DAYS } from '../src/shared/chart'
-import { agingBuckets, buildInvoicePdf, daysBetween, taxRegister } from '../src/shared/reports'
+import { agingBuckets, daysBetween, taxRegister } from '../src/shared/reports'
+import { buildInvoicePdf } from '../src/shared/invoice-pdf'
 import { createCreditNoteJournal } from '../src/shared/credit-notes'
 import type {
   CompanySettings,

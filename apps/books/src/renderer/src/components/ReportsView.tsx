@@ -156,7 +156,7 @@ export function ReportsView() {
 
         <button
           onClick={handleExportToSheets}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#10B981] hover:bg-[#059669] shadow-xs transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#047857] hover:bg-[#065F46] shadow-xs transition-colors"
         >
           <FileSpreadsheet className="w-4 h-4" />
           Export to Zanostack Sheets

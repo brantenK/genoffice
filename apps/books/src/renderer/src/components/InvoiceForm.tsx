@@ -264,7 +264,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
           </span>
           <button
             onClick={addItem}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#007BE0] hover:underline"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0062A8] hover:underline"
           >
             <Plus className="w-3.5 h-3.5" />
             Add Row

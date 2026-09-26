@@ -49,7 +49,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
     switch (displayInvoiceStatus(status, dueDate, asOf)) {
       case 'Paid':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#30A66D] border border-[#DAF0E1]">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#1B7A46] border border-[#DAF0E1]">
             <CheckCircle2 className="w-3 h-3" /> Paid
           </span>
         )

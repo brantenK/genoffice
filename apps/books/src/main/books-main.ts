@@ -56,7 +56,7 @@ import {
 export * from '../shared/accounting'
 import { round2 } from '../shared/accounting'
 import { CORE_ACCOUNTS, DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS } from '../shared/chart'
-import { buildInvoicePdf } from '../shared/reports'
+import { buildInvoicePdf } from '../shared/invoice-pdf'
 
 // Re-exported for callers/tests that historically imported them from here.
 export { CORE_ACCOUNTS, DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS }

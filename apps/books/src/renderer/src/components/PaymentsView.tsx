@@ -243,7 +243,7 @@ export function PaymentsView() {
                       <div className="font-semibold text-sm text-[#475569]">
                         No payments recorded yet
                       </div>
-                      <p className="text-xs text-[#94A3B8] max-w-sm">
+                      <p className="text-xs text-[#64748B] max-w-sm">
                         Record money received from customers or paid to suppliers against their open
                         invoices. Every payment posts a balanced journal entry, so the ledger always
                         reflects reality.
@@ -260,7 +260,7 @@ export function PaymentsView() {
                     <td className="py-3 px-4 font-medium text-[#1E293B]">{payment.partyName}</td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       {payment.type === 'received' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]">
                           <ArrowDownLeft className="w-3 h-3" /> Received
                         </span>
                       ) : payment.type === 'refund' ? (

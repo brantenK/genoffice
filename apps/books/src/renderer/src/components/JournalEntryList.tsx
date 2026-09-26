@@ -152,7 +152,7 @@ export function JournalEntryList() {
                   {formatMoney(je.totalCredit)}
                 </td>
                 <td className="px-6 py-3.5 text-center">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#30A66D] border border-[#DAF0E1]">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3FCF5] text-[#1B7A46] border border-[#DAF0E1]">
                     <CheckCircle2 className="w-3 h-3" /> Posted
                   </span>
                 </td>
@@ -265,7 +265,7 @@ export function JournalEntryList() {
                 <button
                   type="button"
                   onClick={addRow}
-                  className="text-[#007BE0] hover:underline font-semibold"
+                  className="text-[#0062A8] hover:underline font-semibold"
                 >
                   + Add Row
                 </button>
