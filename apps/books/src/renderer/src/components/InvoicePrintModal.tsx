@@ -69,7 +69,7 @@ export function InvoicePrintModal() {
               ref={closeButtonRef}
               aria-label="Close print preview"
               title="Close (Esc)"
-              className="p-1.5 text-[#7C7C7C] hover:text-[#1E293B] rounded-lg"
+              className="p-1.5 text-[#6B6B6B] hover:text-[#1E293B] rounded-lg"
             >
               <X className="w-4 h-4" />
             </button>
@@ -84,8 +84,8 @@ export function InvoicePrintModal() {
               <h1 className="text-xl font-bold text-[#1E293B] tracking-tight">
                 {settings.companyName}
               </h1>
-              <p className="text-[#7C7C7C] mt-1">{settings.address}</p>
-              <p className="text-[#7C7C7C]">
+              <p className="text-[#6B6B6B] mt-1">{settings.address}</p>
+              <p className="text-[#6B6B6B]">
                 VAT Reg: {settings.taxNumber} · Email: {settings.email}
               </p>
             </div>
@@ -100,7 +100,7 @@ export function InvoicePrintModal() {
                 className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 ${
                   printInvoice.status === 'Paid'
                     ? 'bg-[#F3FCF5] text-[#30A66D]'
-                    : 'bg-[#FDFAED] text-[#DB7706]'
+                    : 'bg-[#FDFAED] text-[#B45309]'
                 }`}
               >
                 {printInvoice.status.toUpperCase()}
@@ -111,7 +111,7 @@ export function InvoicePrintModal() {
           {/* Bill To & Dates */}
           <div className="grid grid-cols-2 gap-8">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#7C7C7C]">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B6B6B]">
                 Billed To:
               </span>
               <p className="text-sm font-bold text-[#1E293B] mt-1">{printInvoice.partyName}</p>
@@ -123,11 +123,11 @@ export function InvoicePrintModal() {
             </div>
             <div className="text-right space-y-1">
               <div>
-                <span className="text-[#7C7C7C]">Invoice Date: </span>
+                <span className="text-[#6B6B6B]">Invoice Date: </span>
                 <span className="font-semibold text-[#1E293B]">{printInvoice.date}</span>
               </div>
               <div>
-                <span className="text-[#7C7C7C]">Payment Due: </span>
+                <span className="text-[#6B6B6B]">Payment Due: </span>
                 <span className="font-semibold text-[#1E293B]">{printInvoice.dueDate}</span>
               </div>
             </div>
@@ -149,7 +149,7 @@ export function InvoicePrintModal() {
               <tbody className="divide-y divide-[#EDEDED]">
                 {printInvoice.items.map((it, idx) => (
                   <tr key={it.id}>
-                    <td className="px-4 py-2.5 text-center text-[#7C7C7C]">{idx + 1}</td>
+                    <td className="px-4 py-2.5 text-center text-[#6B6B6B]">{idx + 1}</td>
                     <td className="px-4 py-2.5 font-medium text-[#1E293B]">{it.description}</td>
                     <td className="px-4 py-2.5 text-right font-mono">{it.qty}</td>
                     <td className="px-4 py-2.5 text-right font-mono">{formatMoney(it.rate)}</td>
@@ -166,13 +166,13 @@ export function InvoicePrintModal() {
           {/* Totals Summary */}
           <div className="flex justify-end">
             <div className="w-64 space-y-2 border-t border-[#EDEDED] pt-3">
-              <div className="flex justify-between text-[#7C7C7C]">
+              <div className="flex justify-between text-[#6B6B6B]">
                 <span>Subtotal (excl):</span>
                 <span className="font-mono text-[#1E293B]">
                   {formatMoney(printInvoice.subtotal)}
                 </span>
               </div>
-              <div className="flex justify-between text-[#7C7C7C]">
+              <div className="flex justify-between text-[#6B6B6B]">
                 <span>{vatLabel}:</span>
                 <span className="font-mono text-[#1E293B]">
                   {formatMoney(printInvoice.taxTotal)}
@@ -184,7 +184,7 @@ export function InvoicePrintModal() {
                   {formatMoney(printInvoice.grandTotal)}
                 </span>
               </div>
-              <div className="flex justify-between font-bold text-xs text-[#DB7706] pt-1">
+              <div className="flex justify-between font-bold text-xs text-[#B45309] pt-1">
                 <span>Balance Due:</span>
                 <span className="font-mono">{formatMoney(printInvoice.outstandingAmount)}</span>
               </div>
@@ -192,7 +192,7 @@ export function InvoicePrintModal() {
           </div>
 
           {/* Notes & Banking Details */}
-          <div className="pt-6 border-t border-[#EDEDED] text-[11px] text-[#7C7C7C] space-y-1">
+          <div className="pt-6 border-t border-[#EDEDED] text-[11px] text-[#6B6B6B] space-y-1">
             <span className="font-bold uppercase tracking-wider text-[#525252]">
               Payment Instructions:
             </span>

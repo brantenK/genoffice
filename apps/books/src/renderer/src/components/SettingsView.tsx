@@ -180,7 +180,7 @@ export function SettingsView() {
     <li key={b.name} className="flex items-center justify-between gap-3 px-4 py-2.5">
       <div className="min-w-0">
         <p className="text-xs font-semibold text-[#1E293B] truncate">{b.name}</p>
-        <p className="text-[11px] text-[#7C7C7C]">
+        <p className="text-[11px] text-[#6B6B6B]">
           {new Date(b.modifiedAt).toLocaleString()} · {formatSize(b.size)}
         </p>
       </div>
@@ -206,7 +206,7 @@ export function SettingsView() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">Company Settings</h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             Business details, tax defaults and accounting preferences for Zano Books
           </p>
         </div>
@@ -341,7 +341,7 @@ export function SettingsView() {
                 <span className="block text-xs font-bold text-[#525252]">
                   Prices are VAT-inclusive
                 </span>
-                <span className="block text-[11px] text-[#7C7C7C] mt-0.5">
+                <span className="block text-[11px] text-[#6B6B6B] mt-0.5">
                   Rates entered on invoices include VAT
                 </span>
               </span>
@@ -377,7 +377,7 @@ export function SettingsView() {
           <Lock className="w-4 h-4 text-[#0F766E]" />
           <h2 className="text-sm font-bold text-[#1E293B] tracking-tight">Financial Year Close</h2>
         </div>
-        <p className="text-xs text-[#7C7C7C] mb-5">
+        <p className="text-xs text-[#6B6B6B] mb-5">
           Closing a period moves all income and expenses into retained earnings and locks that
           period: no new or edited invoices can post into it afterwards.
         </p>
@@ -387,7 +387,7 @@ export function SettingsView() {
             Periods locked through <span className="font-mono">{data.settings.closedThrough}</span>.
           </div>
         ) : (
-          <div className="mb-4 px-4 py-3 rounded-lg bg-[#F8F8F8] border border-[#EDEDED] text-xs text-[#7C7C7C]">
+          <div className="mb-4 px-4 py-3 rounded-lg bg-[#F8F8F8] border border-[#EDEDED] text-xs text-[#6B6B6B]">
             No period has been closed yet.
           </div>
         )}
@@ -413,7 +413,7 @@ export function SettingsView() {
             {closing ? 'Closing…' : 'Close Period'}
           </button>
         </div>
-        <p className="mt-2 text-[11px] text-[#7C7C7C]">
+        <p className="mt-2 text-[11px] text-[#6B6B6B]">
           Requires all invoices on or before the close date to be paid or cancelled.
         </p>
 
@@ -435,7 +435,7 @@ export function SettingsView() {
           <DatabaseBackup className="w-4 h-4 text-[#0F766E]" />
           <h2 className="text-sm font-bold text-[#1E293B] tracking-tight">Backup & Restore</h2>
         </div>
-        <p className="text-xs text-[#7C7C7C] mb-5">
+        <p className="text-xs text-[#6B6B6B] mb-5">
           Back up your books data file and restore from an earlier backup at any time. Every restore
           first copies the current data aside as a “safety copy”, so a restore can itself be undone.
         </p>
@@ -470,7 +470,7 @@ export function SettingsView() {
         <div className="mt-6">
           <h3 className="text-xs font-bold text-[#525252] mb-2">Available backups</h3>
           {backupList.length === 0 ? (
-            <p className="text-xs text-[#7C7C7C]">No backups yet. Create one with “Backup now”.</p>
+            <p className="text-xs text-[#6B6B6B]">No backups yet. Create one with “Backup now”.</p>
           ) : (
             <ul className="divide-y divide-[#EDEDED] border border-[#EDEDED] rounded-lg">
               {backupList.map((b) => renderRestorePoint(b, false))}
@@ -480,12 +480,12 @@ export function SettingsView() {
 
         <div className="mt-6">
           <h3 className="text-xs font-bold text-[#525252] mb-2">Pre-restore safety copies</h3>
-          <p className="text-[11px] text-[#7C7C7C] mb-2">
+          <p className="text-[11px] text-[#6B6B6B] mb-2">
             A safety copy of your data is taken automatically each time a restore replaces it.
             Restoring one puts your books back the way they were before that restore.
           </p>
           {safetyCopyList.length === 0 ? (
-            <p className="text-xs text-[#7C7C7C]">
+            <p className="text-xs text-[#6B6B6B]">
               No safety copies yet. One is created the first time you restore a backup.
             </p>
           ) : (
@@ -511,7 +511,7 @@ export function SettingsView() {
         )}
 
         {backupList.length > 10 && (
-          <p className="mt-4 text-[11px] text-[#7C7C7C]">
+          <p className="mt-4 text-[11px] text-[#6B6B6B]">
             You have {backupList.length} backups. Oldest backups beyond the latest 10 are pruned
             automatically on the next backup.
           </p>

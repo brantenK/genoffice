@@ -151,7 +151,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setActiveInvoiceId(null)}
-            className="p-2 text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3] rounded-lg transition-colors"
+            className="p-2 text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3] rounded-lg transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -161,7 +161,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
                 ? `Edit ${existing.invoiceNumber}`
                 : `New ${type === 'Sales' ? 'Sales Invoice' : 'Purchase Bill'}`}
             </h1>
-            <p className="text-xs text-[#7C7C7C] mt-0.5">
+            <p className="text-xs text-[#6B6B6B] mt-0.5">
               {type === 'Sales'
                 ? 'Bill a client or won tender contract'
                 : 'Record an operational vendor expense'}
@@ -243,7 +243,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
 
           <div>
             <label className="block text-xs font-semibold text-[#525252] mb-1.5">
-              Tender / Contract Ref <span className="text-[#7C7C7C] font-normal">(Optional)</span>
+              Tender / Contract Ref <span className="text-[#6B6B6B] font-normal">(Optional)</span>
             </label>
             <input
               type="text"
@@ -272,7 +272,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
         </div>
 
         <table className="w-full text-left text-xs">
-          <thead className="bg-[#F8F8F8] font-semibold text-[#7C7C7C] border-b border-[#EDEDED]">
+          <thead className="bg-[#F8F8F8] font-semibold text-[#6B6B6B] border-b border-[#EDEDED]">
             <tr>
               <th className="px-6 py-2.5 w-1/3">Description</th>
               <th className="px-4 py-2.5">Account</th>
@@ -356,7 +356,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
                 <td className="px-4 py-2.5 text-center">
                   <button
                     onClick={() => removeItem(it.id)}
-                    className="text-[#7C7C7C] hover:text-[#E03636] p-1 rounded transition-colors"
+                    className="text-[#6B6B6B] hover:text-[#E03636] p-1 rounded transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -383,7 +383,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
 
         <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs flex flex-col justify-between">
           <div className="space-y-2.5 text-xs">
-            <div className="flex justify-between text-[#7C7C7C]">
+            <div className="flex justify-between text-[#6B6B6B]">
               <span>Subtotal</span>
               <span className="font-semibold text-[#1E293B]">
                 {data.settings.currencySymbol} {subtotal.toFixed(2)}
@@ -392,9 +392,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
 
             {/* Invoice-level discount (VAT-exclusive) */}
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[#7C7C7C]">Invoice discount (excl.)</span>
+              <span className="text-[#6B6B6B]">Invoice discount (excl.)</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[#7C7C7C]">{data.settings.currencySymbol}</span>
+                <span className="text-[#6B6B6B]">{data.settings.currencySymbol}</span>
                 <input
                   type="number"
                   min={0}
@@ -407,7 +407,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
               </div>
             </div>
 
-            <div className="flex justify-between text-[#7C7C7C]">
+            <div className="flex justify-between text-[#6B6B6B]">
               <span>VAT / Tax ({effectiveTaxRate}%)</span>
               <span className="font-semibold text-[#1E293B]">
                 {data.settings.currencySymbol} {taxTotal.toFixed(2)}
@@ -416,9 +416,9 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
 
             {/* Round-off adjustment so the grand total lands on a round number */}
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[#7C7C7C]">Round-off</span>
+              <span className="text-[#6B6B6B]">Round-off</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[#7C7C7C]">{data.settings.currencySymbol}</span>
+                <span className="text-[#6B6B6B]">{data.settings.currencySymbol}</span>
                 <input
                   type="number"
                   step="0.01"

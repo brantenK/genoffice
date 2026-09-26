@@ -108,7 +108,7 @@ export function JournalEntryList() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">Journal Entries</h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             Manual double-entry adjustment vouchers & opening balance entries
           </p>
         </div>
@@ -125,7 +125,7 @@ export function JournalEntryList() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-[#EDEDED] shadow-xs overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="bg-[#F8F8F8] text-xs font-semibold text-[#7C7C7C] border-b border-[#EDEDED]">
+          <thead className="bg-[#F8F8F8] text-xs font-semibold text-[#6B6B6B] border-b border-[#EDEDED]">
             <tr>
               <th className="px-6 py-3">Entry No</th>
               <th className="px-6 py-3">Date</th>
@@ -141,7 +141,7 @@ export function JournalEntryList() {
                 <td className="px-6 py-3.5 font-mono text-xs font-semibold text-[#1E293B]">
                   {je.entryNumber}
                 </td>
-                <td className="px-6 py-3.5 text-xs text-[#7C7C7C]">{je.date}</td>
+                <td className="px-6 py-3.5 text-xs text-[#6B6B6B]">{je.date}</td>
                 <td className="px-6 py-3.5 text-xs text-[#525252]">
                   {je.remarks || 'Standard posting'}
                 </td>
@@ -198,7 +198,7 @@ export function JournalEntryList() {
               {/* Rows */}
               <div className="border border-[#EDEDED] rounded-xl overflow-hidden">
                 <table className="w-full text-left">
-                  <thead className="bg-[#F8F8F8] text-[#7C7C7C] font-semibold border-b border-[#EDEDED]">
+                  <thead className="bg-[#F8F8F8] text-[#6B6B6B] font-semibold border-b border-[#EDEDED]">
                     <tr>
                       <th className="px-3 py-2">Account</th>
                       <th className="px-3 py-2 text-right w-28">Debit</th>
@@ -250,7 +250,7 @@ export function JournalEntryList() {
                           <button
                             type="button"
                             onClick={() => removeRow(it.id)}
-                            className="text-[#7C7C7C] hover:text-[#E03636]"
+                            className="text-[#6B6B6B] hover:text-[#E03636]"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

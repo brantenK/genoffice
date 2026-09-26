@@ -209,7 +209,7 @@ export function BankingView() {
                   {settings.currency || 'ZAR'}
                 </span>
               </div>
-              <p className="text-xs text-[#7C7C7C] mt-1">
+              <p className="text-xs text-[#6B6B6B] mt-1">
                 Designated operational liquid cash account · Sovereign double-entry ledger
               </p>
             </div>
@@ -217,7 +217,7 @@ export function BankingView() {
 
           <div className="flex items-baseline gap-6 border-t md:border-t-0 md:border-l border-[#EDEDED] pt-4 md:pt-0 md:pl-6">
             <div>
-              <div className="text-[11px] font-medium text-[#7C7C7C] uppercase tracking-wider">
+              <div className="text-[11px] font-medium text-[#6B6B6B] uppercase tracking-wider">
                 Current Ledger Balance
               </div>
               <div className="text-2xl font-bold text-[#1E293B] mt-0.5">
@@ -226,7 +226,7 @@ export function BankingView() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-[#FDFAED] text-[#DB7706] border border-[#FCE6D5]">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-[#FDFAED] text-[#B45309] border border-[#FCE6D5]">
                 <Clock className="w-3.5 h-3.5" />
                 {unreconciledCount} Unreconciled
               </span>
@@ -268,13 +268,13 @@ export function BankingView() {
               title="Development only: inject a sample FNB statement matching CRM won deals and Tenders milestones"
               className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-[#1E293B] bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-xs"
             >
-              <Zap className="w-3.5 h-3.5 text-[#DB7706]" />
+              <Zap className="w-3.5 h-3.5 text-[#B45309]" />
               <span>Load Sample FNB Statement (dev)</span>
             </button>
           )}
         </div>
 
-        <div className="text-xs text-[#7C7C7C]">
+        <div className="text-xs text-[#6B6B6B]">
           Supports CSV headers:{' '}
           <code className="font-mono bg-[#EDEDED] px-1 py-0.5 rounded text-[11px]">
             Date, Description, Reference, Amount
@@ -292,7 +292,7 @@ export function BankingView() {
                 Automated Settlement Suggestions ({suggestions.length})
               </h2>
             </div>
-            <span className="text-xs text-[#7C7C7C]">
+            <span className="text-xs text-[#6B6B6B]">
               Matches computed between bank deposits/withdrawals and open invoices
             </span>
           </div>
@@ -418,7 +418,7 @@ export function BankingView() {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="border-b border-[#EDEDED] bg-[#F8F8F8] text-[#7C7C7C] font-semibold">
+              <tr className="border-b border-[#EDEDED] bg-[#F8F8F8] text-[#6B6B6B] font-semibold">
                 <th className="py-3 px-4">Date</th>
                 <th className="py-3 px-4">Description</th>
                 <th className="py-3 px-4">Reference</th>
@@ -430,7 +430,7 @@ export function BankingView() {
             <tbody className="divide-y divide-[#EDEDED]">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-[#7C7C7C]">
+                  <td colSpan={6} className="py-12 text-center text-[#6B6B6B]">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <FileSpreadsheet className="w-8 h-8 text-[#CBD5E1]" />
                       <div className="font-semibold text-sm text-[#475569]">

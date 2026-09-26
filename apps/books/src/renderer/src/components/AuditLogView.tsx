@@ -33,7 +33,7 @@ export function AuditLogView() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">Audit Log</h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             Immutable trail of every ledger mutation for {settings.companyName}
           </p>
         </div>
@@ -43,14 +43,14 @@ export function AuditLogView() {
         <div className="bg-white rounded-xl border border-[#EDEDED] shadow-xs p-12 flex flex-col items-center text-center">
           <History className="w-8 h-8 text-[#94A3B8] mb-3" />
           <p className="text-sm font-semibold text-[#525252]">No activity recorded yet</p>
-          <p className="text-xs text-[#7C7C7C] mt-1 max-w-sm">
+          <p className="text-xs text-[#6B6B6B] mt-1 max-w-sm">
             Every mutation in the ledger will appear here.
           </p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-[#EDEDED] shadow-xs overflow-hidden">
           <table className="w-full text-left text-sm">
-            <thead className="bg-[#F8F8F8] text-xs font-semibold text-[#7C7C7C] border-b border-[#EDEDED]">
+            <thead className="bg-[#F8F8F8] text-xs font-semibold text-[#6B6B6B] border-b border-[#EDEDED]">
               <tr>
                 <th className="px-6 py-3">Timestamp</th>
                 <th className="px-6 py-3">Action</th>
@@ -64,7 +64,7 @@ export function AuditLogView() {
             <tbody className="divide-y divide-[#EDEDED]">
               {entries.map((entry) => (
                 <tr key={entry.id} className="hover:bg-[#FBFBFB]">
-                  <td className="px-6 py-3.5 font-mono text-xs text-[#7C7C7C] whitespace-nowrap">
+                  <td className="px-6 py-3.5 font-mono text-xs text-[#6B6B6B] whitespace-nowrap">
                     {formatTimestamp(entry.timestamp)}
                   </td>
                   <td className="px-6 py-3.5">

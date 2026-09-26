@@ -55,7 +55,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
         )
       case 'Unpaid':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FDFAED] text-[#DB7706] border border-[#FCE6D5]">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FDFAED] text-[#B45309] border border-[#FCE6D5]">
             <Clock className="w-3 h-3" /> Unpaid
           </span>
         )
@@ -67,13 +67,13 @@ export function InvoiceList({ type }: InvoiceListProps) {
         )
       case 'Cancelled':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3F3F3] text-[#7C7C7C] border border-[#E2E2E2] line-through">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3F3F3] text-[#6B6B6B] border border-[#E2E2E2] line-through">
             <XCircle className="w-3 h-3" /> Cancelled
           </span>
         )
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3F3F3] text-[#7C7C7C]">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F3F3F3] text-[#6B6B6B]">
             Draft
           </span>
         )
@@ -103,7 +103,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">{title}</h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             {filteredInvoices.length} {type.toLowerCase()} transactions recorded
           </p>
         </div>
@@ -112,7 +112,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
             onClick={exportTableToSheets}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium text-[#1E293B] bg-white border border-[#EDEDED] hover:bg-[#F8F8F8] shadow-xs transition-colors"
           >
-            <FileSpreadsheet className="w-4 h-4 text-[#7C7C7C]" />
+            <FileSpreadsheet className="w-4 h-4 text-[#6B6B6B]" />
             Export to Sheets
           </button>
           <button
@@ -135,7 +135,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                 statusFilter === st
                   ? 'bg-[#1E293B] text-white'
-                  : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+                  : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
               }`}
             >
               {st}
@@ -144,7 +144,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
         </div>
 
         <div className="relative w-72">
-          <Search className="w-4 h-4 text-[#7C7C7C] absolute left-3 top-2.5" />
+          <Search className="w-4 h-4 text-[#6B6B6B] absolute left-3 top-2.5" />
           <input
             type="text"
             placeholder={`Search ${title.toLowerCase()}...`}
@@ -158,7 +158,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
       {/* Invoices Table */}
       <div className="bg-white rounded-xl border border-[#EDEDED] shadow-xs overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="bg-[#F8F8F8] text-xs font-semibold text-[#7C7C7C] border-b border-[#EDEDED]">
+          <thead className="bg-[#F8F8F8] text-xs font-semibold text-[#6B6B6B] border-b border-[#EDEDED]">
             <tr>
               <th className="px-6 py-3">Number</th>
               <th className="px-6 py-3">{partyHeader}</th>
@@ -173,7 +173,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
           <tbody className="divide-y divide-[#EDEDED]">
             {filteredInvoices.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-sm text-[#7C7C7C]">
+                <td colSpan={8} className="px-6 py-12 text-center text-sm text-[#6B6B6B]">
                   No {title.toLowerCase()} found matching criteria.
                 </td>
               </tr>
@@ -189,17 +189,17 @@ export function InvoiceList({ type }: InvoiceListProps) {
                   <td className="px-6 py-3.5 text-[#1E293B] font-medium">
                     {inv.partyName}
                     {inv.tenderReference && (
-                      <span className="block text-xs text-[#7C7C7C] font-mono mt-0.5">
+                      <span className="block text-xs text-[#6B6B6B] font-mono mt-0.5">
                         Ref: {inv.tenderReference}
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-3.5 text-xs text-[#7C7C7C]">{inv.date}</td>
-                  <td className="px-6 py-3.5 text-xs text-[#7C7C7C]">{inv.dueDate}</td>
+                  <td className="px-6 py-3.5 text-xs text-[#6B6B6B]">{inv.date}</td>
+                  <td className="px-6 py-3.5 text-xs text-[#6B6B6B]">{inv.dueDate}</td>
                   <td className="px-6 py-3.5 text-right font-bold text-[#1E293B]">
                     {formatMoney(inv.grandTotal)}
                   </td>
-                  <td className="px-6 py-3.5 text-right font-medium text-[#DB7706]">
+                  <td className="px-6 py-3.5 text-right font-medium text-[#B45309]">
                     {formatMoney(inv.outstandingAmount)}
                   </td>
                   <td className="px-6 py-3.5">{getStatusBadge(inv.status, inv.dueDate)}</td>
@@ -209,7 +209,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
                         title="Print / Export PDF"
                         aria-label={`Print invoice ${inv.invoiceNumber}`}
                         onClick={() => setPrintInvoice(inv)}
-                        className="p-1.5 text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3] rounded-md transition-colors"
+                        className="p-1.5 text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3] rounded-md transition-colors"
                       >
                         <Printer className="w-4 h-4" />
                       </button>

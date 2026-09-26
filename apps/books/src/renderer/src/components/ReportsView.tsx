@@ -149,7 +149,7 @@ export function ReportsView() {
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#EDEDED]">
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">Financial Reports</h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             Standard GAAP compliant statements for {settings.companyName}
           </p>
         </div>
@@ -170,7 +170,7 @@ export function ReportsView() {
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
             report === 'profit-loss'
               ? 'bg-[#1E293B] text-white'
-              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
         >
           <TrendingUp className="w-3.5 h-3.5" />
@@ -182,7 +182,7 @@ export function ReportsView() {
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
             report === 'balance-sheet'
               ? 'bg-[#1E293B] text-white'
-              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
         >
           <Scale className="w-3.5 h-3.5" />
@@ -194,7 +194,7 @@ export function ReportsView() {
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
             report === 'trial-balance'
               ? 'bg-[#1E293B] text-white'
-              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
         >
           <CheckSquare className="w-3.5 h-3.5" />
@@ -206,7 +206,7 @@ export function ReportsView() {
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
             report === 'general-ledger'
               ? 'bg-[#1E293B] text-white'
-              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
         >
           <BookOpen className="w-3.5 h-3.5" />
@@ -218,7 +218,7 @@ export function ReportsView() {
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
             report === 'aging'
               ? 'bg-[#1E293B] text-white'
-              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
         >
           <Clock className="w-3.5 h-3.5" />
@@ -230,7 +230,7 @@ export function ReportsView() {
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
             report === 'tax-register'
               ? 'bg-[#1E293B] text-white'
-              : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+              : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
           }`}
         >
           <Receipt className="w-3.5 h-3.5" />
@@ -243,10 +243,10 @@ export function ReportsView() {
         <div className="bg-white rounded-xl border border-[#EDEDED] p-8 shadow-xs max-w-4xl">
           <div className="text-center pb-6 border-b border-[#EDEDED] mb-6">
             <h2 className="text-lg font-bold text-[#1E293B]">{settings.companyName}</h2>
-            <p className="text-xs text-[#7C7C7C] font-semibold mt-1 uppercase tracking-wider">
+            <p className="text-xs text-[#6B6B6B] font-semibold mt-1 uppercase tracking-wider">
               Statement of Profit and Loss
             </p>
-            <p className="text-xs text-[#7C7C7C] mt-0.5">Year-to-Date Financial Assessment</p>
+            <p className="text-xs text-[#6B6B6B] mt-0.5">Year-to-Date Financial Assessment</p>
           </div>
 
           {/* Income Section */}
@@ -300,10 +300,10 @@ export function ReportsView() {
         <div className="bg-white rounded-xl border border-[#EDEDED] p-8 shadow-xs max-w-4xl">
           <div className="text-center pb-6 border-b border-[#EDEDED] mb-6">
             <h2 className="text-lg font-bold text-[#1E293B]">{settings.companyName}</h2>
-            <p className="text-xs text-[#7C7C7C] font-semibold mt-1 uppercase tracking-wider">
+            <p className="text-xs text-[#6B6B6B] font-semibold mt-1 uppercase tracking-wider">
               Statement of Financial Position (Balance Sheet)
             </p>
-            <p className="text-xs text-[#7C7C7C] mt-0.5">As of Today</p>
+            <p className="text-xs text-[#6B6B6B] mt-0.5">As of Today</p>
           </div>
 
           {/* Assets */}
@@ -382,7 +382,7 @@ export function ReportsView() {
       {report === 'trial-balance' && (
         <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
+            <thead className="bg-[#F8F8F8] font-bold text-[#6B6B6B] border-b border-[#EDEDED]">
               <tr>
                 <th className="px-4 py-3">Account Title</th>
                 <th className="px-4 py-3">Classification</th>
@@ -398,7 +398,7 @@ export function ReportsView() {
                   return (
                     <tr key={acc.id} className="hover:bg-[#FBFBFB]">
                       <td className="px-4 py-2.5 font-medium text-[#1E293B]">{acc.name}</td>
-                      <td className="px-4 py-2.5 text-[#7C7C7C]">{acc.rootType}</td>
+                      <td className="px-4 py-2.5 text-[#6B6B6B]">{acc.rootType}</td>
                       <td className="px-4 py-2.5 text-right font-mono">
                         {isDebit ? formatMoney(acc.balance) : '-'}
                       </td>
@@ -417,7 +417,7 @@ export function ReportsView() {
       {report === 'general-ledger' && (
         <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
+            <thead className="bg-[#F8F8F8] font-bold text-[#6B6B6B] border-b border-[#EDEDED]">
               <tr>
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Entry No</th>
@@ -431,7 +431,7 @@ export function ReportsView() {
               {journalEntries.flatMap((je) =>
                 je.items.map((it) => (
                   <tr key={it.id} className="hover:bg-[#FBFBFB]">
-                    <td className="px-4 py-2.5 text-[#7C7C7C]">{je.date}</td>
+                    <td className="px-4 py-2.5 text-[#6B6B6B]">{je.date}</td>
                     <td className="px-4 py-2.5 font-mono text-[#1E293B]">{je.entryNumber}</td>
                     <td className="px-4 py-2.5 font-medium text-[#1E293B]">{it.accountName}</td>
                     <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
@@ -440,7 +440,7 @@ export function ReportsView() {
                     <td className="px-4 py-2.5 text-right font-mono text-[#1E293B]">
                       {it.credit > 0 ? formatMoney(it.credit) : '-'}
                     </td>
-                    <td className="px-4 py-2.5 text-[#7C7C7C]">{it.remark || je.remarks || '-'}</td>
+                    <td className="px-4 py-2.5 text-[#6B6B6B]">{it.remark || je.remarks || '-'}</td>
                   </tr>
                 )),
               )}
@@ -457,7 +457,7 @@ export function ReportsView() {
               <h2 className="text-lg font-bold text-[#1E293B]">
                 Accounts {agingScope === 'Sales' ? 'Receivable' : 'Payable'} Aging
               </h2>
-              <p className="text-xs text-[#7C7C7C] mt-0.5">
+              <p className="text-xs text-[#6B6B6B] mt-0.5">
                 As of {asOf} · credit notes and overpayments are shown in the Credit column and
                 deducted from Total
               </p>
@@ -468,7 +468,7 @@ export function ReportsView() {
                 className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
                   agingScope === 'Sales'
                     ? 'bg-[#1E293B] text-white'
-                    : 'text-[#7C7C7C] hover:text-[#1E293B]'
+                    : 'text-[#6B6B6B] hover:text-[#1E293B]'
                 }`}
               >
                 Sales (AR)
@@ -478,7 +478,7 @@ export function ReportsView() {
                 className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
                   agingScope === 'Purchase'
                     ? 'bg-[#1E293B] text-white'
-                    : 'text-[#7C7C7C] hover:text-[#1E293B]'
+                    : 'text-[#6B6B6B] hover:text-[#1E293B]'
                 }`}
               >
                 Purchase (AP)
@@ -486,7 +486,7 @@ export function ReportsView() {
             </div>
           </div>
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
+            <thead className="bg-[#F8F8F8] font-bold text-[#6B6B6B] border-b border-[#EDEDED]">
               <tr>
                 <th className="px-4 py-3">Party</th>
                 <th className="px-4 py-3 text-right">Current</th>
@@ -550,7 +550,7 @@ export function ReportsView() {
             </tfoot>
           </table>
           {agingRows.length === 0 && (
-            <p className="text-xs text-[#7C7C7C] mt-4">
+            <p className="text-xs text-[#6B6B6B] mt-4">
               No open {agingScope === 'Sales' ? 'sales invoices' : 'purchase bills'} in this aging
               view.
             </p>
@@ -563,12 +563,12 @@ export function ReportsView() {
         <div className="bg-white rounded-xl border border-[#EDEDED] p-6 shadow-xs max-w-4xl">
           <div className="mb-4">
             <h2 className="text-lg font-bold text-[#1E293B]">Tax Register (VAT)</h2>
-            <p className="text-xs text-[#7C7C7C] mt-0.5">
+            <p className="text-xs text-[#6B6B6B] mt-0.5">
               VAT Output = Sales VAT · VAT Input = Purchase VAT
             </p>
           </div>
           <table className="w-full text-left text-xs">
-            <thead className="bg-[#F8F8F8] font-bold text-[#7C7C7C] border-b border-[#EDEDED]">
+            <thead className="bg-[#F8F8F8] font-bold text-[#6B6B6B] border-b border-[#EDEDED]">
               <tr>
                 <th className="px-4 py-3">Rate</th>
                 <th className="px-4 py-3 text-right">Sales Taxable</th>

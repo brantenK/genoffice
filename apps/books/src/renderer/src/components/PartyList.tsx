@@ -57,7 +57,7 @@ export function PartyList() {
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">
             Customers & Suppliers
           </h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             Directory of commercial counterparties for {settings.companyName}
           </p>
         </div>
@@ -81,7 +81,7 @@ export function PartyList() {
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                 activeType === t
                   ? 'bg-[#1E293B] text-white'
-                  : 'text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
+                  : 'text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3]'
               }`}
             >
               {t === 'All' ? 'All Contacts' : `${t}s`}
@@ -90,7 +90,7 @@ export function PartyList() {
         </div>
 
         <div className="relative w-72">
-          <Search className="w-4 h-4 text-[#7C7C7C] absolute left-3 top-2.5" />
+          <Search className="w-4 h-4 text-[#6B6B6B] absolute left-3 top-2.5" />
           <input
             type="text"
             placeholder="Search by name, email..."
@@ -126,7 +126,7 @@ export function PartyList() {
 
               <h2 className="text-sm font-bold text-[#1E293B] mb-2">{party.name}</h2>
 
-              <div className="space-y-1.5 text-xs text-[#7C7C7C]">
+              <div className="space-y-1.5 text-xs text-[#6B6B6B]">
                 {party.taxId && (
                   <div className="flex items-center gap-2">
                     <Building className="w-3.5 h-3.5 text-[#94A3B8]" />

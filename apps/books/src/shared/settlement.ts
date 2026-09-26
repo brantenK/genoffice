@@ -348,6 +348,26 @@ export function computeSettlementSuggestions(booksData: BooksData): SettlementSu
           confidence: 'MEDIUM',
           reason: `Partial payment matching invoice ${inv.invoiceNumber}`,
         })
+      } else if (
+        targetAmount > currentOutstanding &&
+        currentOutstanding > 0 &&
+        (invNoMatch || tenderMatch)
+      ) {
+        // The line carries more cash than the invoice needs and names it: the
+        // reconciliation engine already books the excess as an unapplied
+        // receipt, so the UI must offer the match or the line is stranded as
+        // Unmatched with no action a user can take.
+        const excess = round2(targetAmount - currentOutstanding)
+        suggestions.push({
+          transactionId: tx.id,
+          invoiceId: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          partyName: inv.partyName,
+          invoiceType: inv.type,
+          amount: targetAmount,
+          confidence: 'MEDIUM',
+          reason: `Covers invoice ${inv.invoiceNumber}; the extra ${excess} becomes an unapplied receipt`,
+        })
       }
     }
   }

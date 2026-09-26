@@ -116,7 +116,7 @@ export function SetupWizard() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-[#1E293B] tracking-tight">Set up Zano Books</h1>
-            <p className="text-xs text-[#7C7C7C] mt-0.5">
+            <p className="text-xs text-[#6B6B6B] mt-0.5">
               Your data stays on this machine. Nothing is sent to the cloud.
             </p>
           </div>
@@ -241,7 +241,7 @@ export function SetupWizard() {
                       {field.label}
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#7C7C7C]">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#6B6B6B]">
                         {currencySymbol}
                       </span>
                       <input

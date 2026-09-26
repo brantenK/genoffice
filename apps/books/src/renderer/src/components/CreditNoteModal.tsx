@@ -86,13 +86,13 @@ export function CreditNoteModal({ original, onClose }: CreditNoteModalProps) {
           </h2>
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-lg text-[#7C7C7C] hover:bg-[#F3F3F3] hover:text-[#1E293B] text-lg leading-none"
+            className="w-7 h-7 rounded-lg text-[#6B6B6B] hover:bg-[#F3F3F3] hover:text-[#1E293B] text-lg leading-none"
           >
             ×
           </button>
         </div>
 
-        <div className="text-xs text-[#7C7C7C] mb-5">
+        <div className="text-xs text-[#6B6B6B] mb-5">
           Reverses <span className="font-semibold text-[#1E293B]">{original.invoiceNumber}</span>{' '}
           for <span className="font-semibold text-[#1E293B]">{original.partyName}</span> — the
           ledger posts a balanced reversal journal (Accounts Receivable credited, income and VAT
@@ -111,7 +111,7 @@ export function CreditNoteModal({ original, onClose }: CreditNoteModalProps) {
             <div>
               <label className="block font-semibold text-[#525252] mb-1">Amount (VAT incl.)</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7C7C7C]">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B6B6B]">
                   {settings.currencySymbol || 'R'}
                 </span>
                 <input
@@ -124,7 +124,7 @@ export function CreditNoteModal({ original, onClose }: CreditNoteModalProps) {
                   className="w-full pl-8 pr-3 py-2 bg-[#F8F8F8] border border-[#EDEDED] rounded-lg focus:outline-none focus:border-[#1E293B] font-semibold"
                 />
               </div>
-              <div className="text-[11px] text-[#7C7C7C] mt-1">
+              <div className="text-[11px] text-[#6B6B6B] mt-1">
                 Original total: {formatMoney(original.grandTotal)}
               </div>
             </div>
@@ -141,7 +141,7 @@ export function CreditNoteModal({ original, onClose }: CreditNoteModalProps) {
 
           <div>
             <label className="block font-semibold text-[#525252] mb-1">
-              Notes <span className="text-[#7C7C7C] font-normal">(optional)</span>
+              Notes <span className="text-[#6B6B6B] font-normal">(optional)</span>
             </label>
             <textarea
               value={notes}
@@ -153,7 +153,7 @@ export function CreditNoteModal({ original, onClose }: CreditNoteModalProps) {
           </div>
 
           <div className="flex items-center justify-between border-t border-[#EDEDED] pt-4">
-            <div className="text-sm font-semibold text-[#7C7C7C]">
+            <div className="text-sm font-semibold text-[#6B6B6B]">
               Credit amount:{' '}
               <span className="text-lg font-bold text-[#0F766E]">
                 {formatMoney(round2(Number(amount) || 0))}

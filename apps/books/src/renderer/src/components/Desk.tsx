@@ -86,7 +86,7 @@ function BooksReadError() {
             <h1 className="text-base font-bold text-[#1E293B]">
               Zano Books could not read your data
             </h1>
-            <p className="text-xs text-[#7C7C7C] mt-1 leading-relaxed">
+            <p className="text-xs text-[#6B6B6B] mt-1 leading-relaxed">
               Your books file is still on this machine and has not been overwritten. Opening the
               setup wizard here would replace it with an empty ledger, so it stays closed until the
               file can be read.
@@ -200,7 +200,7 @@ export function Desk() {
                   <div className="font-bold text-sm text-[#1E293B] leading-none truncate">
                     Zano Books
                   </div>
-                  <div className="text-[11px] text-[#7C7C7C] truncate mt-1">
+                  <div className="text-[11px] text-[#6B6B6B] truncate mt-1">
                     {data.settings.currency} · Double-Entry
                   </div>
                 </div>
@@ -208,7 +208,9 @@ export function Desk() {
             </div>
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-1 text-[#7C7C7C] hover:text-[#1E293B] hover:bg-[#EDEDED] rounded transition-colors"
+              aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              className="p-1 text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#EDEDED] rounded transition-colors"
             >
               {sidebarOpen ? (
                 <ChevronLeft className="w-4 h-4" />
@@ -247,7 +249,7 @@ export function Desk() {
               return (
                 <React.Fragment key={item.id}>
                   {showSection && (
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#999999] px-3 pt-3 pb-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#666666] px-3 pt-3 pb-1">
                       {item.section}
                     </div>
                   )}
@@ -264,7 +266,7 @@ export function Desk() {
                     }`}
                   >
                     <Icon
-                      className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#0F766E]' : 'text-[#7C7C7C]'}`}
+                      className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-[#0F766E]' : 'text-[#6B6B6B]'}`}
                     />
                     {sidebarOpen && <span className="truncate">{item.label}</span>}
                   </button>
@@ -278,7 +280,7 @@ export function Desk() {
         <div className="p-3 border-t border-[#EDEDED] space-y-1 text-xs">
           {sidebarOpen ? (
             <>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[#999999] px-2 mb-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#666666] px-2 mb-1">
                 Zanostack Bridges
               </div>
               <button
@@ -301,7 +303,7 @@ export function Desk() {
               </div>
             </>
           ) : (
-            <div className="flex flex-col items-center gap-2 text-[#7C7C7C]">
+            <div className="flex flex-col items-center gap-2 text-[#6B6B6B]">
               <HelpCircle className="w-4 h-4" />
             </div>
           )}

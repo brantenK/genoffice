@@ -195,7 +195,7 @@ export function PaymentsView() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1E293B] tracking-tight">Payments</h1>
-          <p className="text-sm text-[#7C7C7C] mt-0.5">
+          <p className="text-sm text-[#6B6B6B] mt-0.5">
             Money received from customers and paid to suppliers — posted straight into the ledger
             for {settings.companyName}
           </p>
@@ -216,7 +216,7 @@ export function PaymentsView() {
       {/* Payments table */}
       <div className="bg-white border border-[#EDEDED] rounded-xl overflow-hidden shadow-xs">
         <div className="p-4 border-b border-[#EDEDED] bg-[#FAFAFA] flex items-center justify-between">
-          <div className="text-xs text-[#7C7C7C]">
+          <div className="text-xs text-[#6B6B6B]">
             {payments.length} payment{payments.length === 1 ? '' : 's'} recorded
           </div>
         </div>
@@ -224,7 +224,7 @@ export function PaymentsView() {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="border-b border-[#EDEDED] bg-[#F8F8F8] text-[#7C7C7C] font-semibold">
+              <tr className="border-b border-[#EDEDED] bg-[#F8F8F8] text-[#6B6B6B] font-semibold">
                 <th className="py-3 px-4">Date</th>
                 <th className="py-3 px-4">Party</th>
                 <th className="py-3 px-4">Type</th>
@@ -237,7 +237,7 @@ export function PaymentsView() {
             <tbody className="divide-y divide-[#EDEDED]">
               {payments.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-[#7C7C7C]">
+                  <td colSpan={7} className="py-12 text-center text-[#6B6B6B]">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Banknote className="w-8 h-8 text-[#CBD5E1]" />
                       <div className="font-semibold text-sm text-[#475569]">
@@ -322,12 +322,12 @@ export function PaymentsView() {
               </h2>
               <button
                 onClick={() => setShowModal(false)}
-                className="w-7 h-7 rounded-lg text-[#7C7C7C] hover:bg-[#F3F3F3] hover:text-[#1E293B] text-lg leading-none"
+                className="w-7 h-7 rounded-lg text-[#6B6B6B] hover:bg-[#F3F3F3] hover:text-[#1E293B] text-lg leading-none"
               >
                 ×
               </button>
             </div>
-            <p className="text-xs text-[#7C7C7C] mb-4">
+            <p className="text-xs text-[#6B6B6B] mb-4">
               {mode === 'refund'
                 ? "Pay back a customer's credit balance against their open credit notes. Posts a balanced journal entry (Bank credited, Accounts Receivable debited)."
                 : "Allocate money against the party's open invoices. The payment posts a balanced journal entry (Bank vs Accounts Receivable/Payable)."}
@@ -439,7 +439,7 @@ export function PaymentsView() {
                         >
                           <div>
                             <div className="font-semibold text-[#1E293B]">{inv.invoiceNumber}</div>
-                            <div className="text-[11px] text-[#7C7C7C]">
+                            <div className="text-[11px] text-[#6B6B6B]">
                               {mode === 'refund'
                                 ? 'Credit note'
                                 : inv.type === 'Sales'
@@ -451,7 +451,7 @@ export function PaymentsView() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[#7C7C7C]">{settings.currencySymbol || 'R'}</span>
+                            <span className="text-[#6B6B6B]">{settings.currencySymbol || 'R'}</span>
                             <input
                               type="number"
                               min={0}
@@ -469,7 +469,7 @@ export function PaymentsView() {
               </div>
 
               <div className="flex items-center justify-between border-t border-[#EDEDED] pt-4">
-                <div className="text-sm font-semibold text-[#7C7C7C]">
+                <div className="text-sm font-semibold text-[#6B6B6B]">
                   Total {mode === 'refund' ? 'refund' : 'payment'}:{' '}
                   <span className="text-lg font-bold text-[#1E293B]">{formatMoney(total)}</span>
                 </div>

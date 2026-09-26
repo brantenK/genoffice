@@ -454,3 +454,48 @@ describe('over-amount lines', () => {
     expect(after.invoices[0]).toMatchObject({ status: 'Paid', outstandingAmount: 0 })
   })
 })
+
+describe('suggestions: an over-amount line naming its invoice is offered', () => {
+  it('offers the reconcile with the unapplied-receipt reason (the UI route to the engine)', () => {
+    const data = emptyLedger()
+    data.parties = [
+      { id: 'party-over', name: 'Overpay Client', type: 'Customer', outstandingBalance: 0 },
+    ]
+    data.invoices = [
+      {
+        id: 'inv-over',
+        invoiceNumber: 'INV-2026-010',
+        type: 'Sales',
+        partyId: 'party-over',
+        partyName: 'Overpay Client',
+        date: '2026-09-01',
+        dueDate: '2026-10-01',
+        items: [
+          { id: 'it-over', description: 'Works', qty: 1, rate: 1000, taxRate: 0, amount: 1000 },
+        ],
+        subtotal: 1000,
+        taxTotal: 0,
+        grandTotal: 1000,
+        outstandingAmount: 1000,
+        status: 'Unpaid',
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      },
+    ]
+    data.bankTransactions = [
+      {
+        id: 'tx-over-sug',
+        accountId: 'acc-bank',
+        date: '2026-09-26',
+        description: 'EFT Overpay Client INV-2026-010',
+        reference: '',
+        amount: 1500,
+        reconciled: false,
+      },
+    ]
+    const suggestions = computeSettlementSuggestions(data)
+    const match = suggestions.find((s) => s.invoiceNumber === 'INV-2026-010')
+    expect(match).toBeDefined()
+    expect(match!.reason).toMatch(/unapplied receipt/)
+  })
+})
