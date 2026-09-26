@@ -82,6 +82,7 @@ async function postInvoice(
   description: string,
   qty: string,
   rate: string,
+  opts: { currency?: string; exchangeRate?: string; taxRate?: string } = {},
 ) {
   await books
     .locator('main')
@@ -92,10 +93,29 @@ async function postInvoice(
     .locator('..')
     .locator('select')
     .selectOption({ label: party })
+  if (opts.currency) {
+    await books
+      .locator('label', { hasText: 'Currency' })
+      .locator('..')
+      .locator('select')
+      .selectOption(opts.currency)
+  }
+  // The rate input only exists once a non-base currency is selected.
+  if (opts.exchangeRate) {
+    await books
+      .locator('label', { hasText: 'Exchange Rate' })
+      .locator('..')
+      .locator('input')
+      .fill(opts.exchangeRate)
+  }
   const row = books.locator('tbody tr').first()
   await row.locator('input').nth(0).fill(description)
   await row.locator('input').nth(1).fill(qty)
   await row.locator('input').nth(2).fill(rate)
+  if (opts.taxRate) {
+    // The row's second select is the VAT % (the first is the income account).
+    await row.locator('select').nth(1).selectOption(opts.taxRate)
+  }
   await books.getByRole('button', { name: 'Submit & Post' }).click()
 }
 
@@ -377,6 +397,90 @@ test.describe('Zano Books flows: the other half of the product', () => {
       await books.screenshot({ path: screenshotPath('books-flows-closed') })
     } finally {
       await closeAndSaveVideo(launched, 'books-flows-2')
+    }
+  })
+
+  test('an EUR invoice at rate 20 posts ×20 in base and a ZAR payment settles it', async () => {
+    test.setTimeout(240_000)
+    const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-multicurrency' })
+    const { userDataDir } = launched
+    try {
+      const books = await openBooks(launched)
+      await setupWizard(books, 'FX Trading (Pty) Ltd')
+      await addParty(books, CUSTOMER, 'Customer')
+      await goto(books, 'Sales Invoices')
+
+      // EUR 1 000, zero-rated, at 20 ZAR/EUR → 20 000 base receivable.
+      await postInvoice(books, CUSTOMER, 'Consulting', '1', '1000', {
+        currency: 'EUR',
+        exchangeRate: '20',
+        taxRate: '0',
+      })
+      await waitForInvoice(books, 'INV-2026-001')
+      await books.screenshot({ path: screenshotPath('books-multicurrency-invoice') })
+
+      // On disk: the invoice keeps its own currency; the ledger posted base.
+      let data = booksData(userDataDir)
+      const invoice = data.invoices.find((i) => i.invoiceNumber === 'INV-2026-001')!
+      expect(invoice.currency).toBe('EUR')
+      expect(invoice.exchangeRate).toBe(20)
+      expect(invoice.grandTotal).toBe(1000)
+      expect(invoice.outstandingAmount).toBe(1000)
+      // AR control = grandTotal × rate (the profile's only invoice).
+      expect(account(data, 'acc-ar')).toBe(20000)
+
+      // The posting is ×20 and balanced: AR Dr 20 000, income Cr 20 000.
+      const journal = data.journalEntries.find((j: any) => j.remarks.includes('INV-2026-001'))!
+      expect(journal).toBeDefined()
+      expect(Math.round(journal.totalDebit * 100)).toBe(Math.round(journal.totalCredit * 100))
+      expect(journal.totalDebit).toBe(20000)
+      expect(journal.items.some((i: any) => i.accountId === 'acc-ar' && i.debit === 20000)).toBe(
+        true,
+      )
+      expect(
+        journal.items.some((i: any) => i.accountId === 'acc-sales' && i.credit === 20000),
+      ).toBe(true)
+
+      // The list labels the foreign-currency figures with the ISO code.
+      await expect(books.getByRole('cell').filter({ hasText: 'EUR' }).first()).toBeVisible()
+
+      // The record-payment action settles in BASE: EUR 1 000 at 20 = 20 000 ZAR.
+      await books.getByRole('button', { name: 'Record payment for invoice INV-2026-001' }).click()
+      await expect
+        .poll(
+          () => {
+            const d = booksData(userDataDir)
+            const inv = d.invoices.find((i) => i.invoiceNumber === 'INV-2026-001')!
+            const party = d.parties.find((p: any) => p.name === CUSTOMER)!
+            return `${inv.status}:${inv.outstandingAmount}:${account(d, 'acc-ar')}:${party.outstandingBalance}`
+          },
+          { timeout: 20_000 },
+        )
+        .toBe('Paid:0:0:0')
+
+      data = booksData(userDataDir)
+      const payment = data.payments.find(
+        (p: any) => p.reference && String(p.reference).includes('Marked paid: INV-2026-001'),
+      )!
+      expect(payment).toBeDefined()
+      expect(payment.total).toBe(20000)
+      expect(account(data, 'acc-bank')).toBe(30000) // 10 000 opening + 20 000 receipt
+      // The settled invoice keeps its denomination and the AR control nets to zero.
+      const settled = data.invoices.find((i) => i.invoiceNumber === 'INV-2026-001')!
+      expect(settled.currency).toBe('EUR')
+      expect(settled.exchangeRate).toBe(20)
+      expect(settled.outstandingAmount).toBe(0)
+      const paymentJournal = data.journalEntries.find((j: any) => j.remarks.includes(payment.id))!
+      expect(paymentJournal).toBeDefined()
+      expect(Math.round(paymentJournal.totalDebit * 100)).toBe(
+        Math.round(paymentJournal.totalCredit * 100),
+      )
+      for (const j of data.journalEntries) {
+        expect(Math.round(j.totalDebit * 100)).toBe(Math.round(j.totalCredit * 100))
+      }
+      await books.screenshot({ path: screenshotPath('books-multicurrency-paid') })
+    } finally {
+      await closeAndSaveVideo(launched, 'books-multicurrency')
     }
   })
 

@@ -15,6 +15,8 @@ import {
 import { useBooksStore } from '../store'
 import { CreditNoteModal } from './CreditNoteModal'
 import { displayInvoiceStatus, invoiceMatchesStatusFilter } from './invoice-status'
+import { currencyTag } from './currencies'
+import { invoiceExchangeRate, toBaseAmount } from '../../../shared/accounting'
 import type { Invoice, InvoiceStatus, InvoiceType } from '../../../shared/types'
 
 interface InvoiceListProps {
@@ -22,7 +24,7 @@ interface InvoiceListProps {
 }
 
 export function InvoiceList({ type }: InvoiceListProps) {
-  const { data, setActiveInvoiceId, setPrintInvoice, markInvoicePaid, deleteInvoice } =
+  const { data, setActiveInvoiceId, setPrintInvoice, recordPayment, deleteInvoice } =
     useBooksStore()
 
   const [statusFilter, setStatusFilter] = useState<'All' | InvoiceStatus>('All')
@@ -31,6 +33,36 @@ export function InvoiceList({ type }: InvoiceListProps) {
 
   const asOf = new Date().toISOString().split('T')[0]
   const invoices = data.invoices.filter((i) => i.type === type)
+
+  // Mark-paid is a convenience settlement: the payment is BASE currency, while
+  // a foreign invoice's outstanding is in its own currency — so the row's
+  // record-payment action converts the outstanding at the invoice's rate
+  // before recording it (the store's markInvoicePaid posts the raw figure,
+  // which would under-settle a foreign invoice). Rejections surface through
+  // the store's error banner (recordPayment calls failed() itself).
+  const settleFromList = async (inv: Invoice) => {
+    const amount = toBaseAmount(
+      inv.outstandingAmount > 0 ? inv.outstandingAmount : inv.grandTotal,
+      invoiceExchangeRate(inv),
+    )
+    if (amount <= 0) return
+    const result = await recordPayment({
+      partyId: inv.partyId,
+      date: asOf,
+      method: 'Manual settlement',
+      reference: `Marked paid: ${inv.invoiceNumber}`,
+      allocations: [
+        {
+          invoiceId: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          amount,
+        },
+      ],
+    })
+    if (!result.ok) {
+      console.warn(`[books] Could not mark ${inv.invoiceNumber} as paid: ${result.error}`)
+    }
+  }
 
   const filteredInvoices = invoices.filter((inv) => {
     const matchesStatus = invoiceMatchesStatusFilter(inv, statusFilter, asOf)
@@ -198,9 +230,19 @@ export function InvoiceList({ type }: InvoiceListProps) {
                   <td className="px-6 py-3.5 text-xs text-[#6B6B6B]">{inv.dueDate}</td>
                   <td className="px-6 py-3.5 text-right font-bold text-[#1E293B]">
                     {formatMoney(inv.grandTotal)}
+                    {currencyTag(inv, data.settings.currency) && (
+                      <span className="ml-1.5 text-[11px] font-semibold text-[#6B6B6B]">
+                        {currencyTag(inv, data.settings.currency)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-3.5 text-right font-medium text-[#B45309]">
                     {formatMoney(inv.outstandingAmount)}
+                    {currencyTag(inv, data.settings.currency) && (
+                      <span className="ml-1.5 text-[11px] font-semibold text-[#6B6B6B]">
+                        {currencyTag(inv, data.settings.currency)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-3.5">{getStatusBadge(inv.status, inv.dueDate)}</td>
                   <td className="px-6 py-3.5 text-right">
@@ -218,7 +260,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
                         <button
                           title="Record Payment (Mark Paid)"
                           aria-label={`Record payment for invoice ${inv.invoiceNumber}`}
-                          onClick={() => markInvoicePaid(inv.id)}
+                          onClick={() => settleFromList(inv)}
                           className="p-1.5 text-[#30A66D] hover:bg-[#F3FCF5] rounded-md transition-colors"
                         >
                           <Check className="w-4 h-4" />

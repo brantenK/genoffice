@@ -15,6 +15,8 @@ import {
 import { useBooksStore } from '../store'
 import { DEFAULT_BANK_ACCOUNT_NAME } from '../../../shared/chart'
 import { displayInvoiceStatus } from './invoice-status'
+import { currencyTag } from './currencies'
+import { invoiceExchangeRate, toBaseAmount } from '../../../shared/accounting'
 import type { InvoiceStatus } from '../../../shared/types'
 
 export function Dashboard() {
@@ -23,10 +25,18 @@ export function Dashboard() {
   const asOf = new Date().toISOString().split('T')[0]
 
   const salesInvoices = invoices.filter((i) => i.type === 'Sales')
-  const totalReceivable = salesInvoices.reduce((acc, i) => acc + i.outstandingAmount, 0)
+  // Receivable/payable aggregates are ledger figures: an invoice denominated
+  // in another currency contributes its outstanding converted at its rate.
+  const totalReceivable = salesInvoices.reduce(
+    (acc, i) => acc + toBaseAmount(i.outstandingAmount, invoiceExchangeRate(i)),
+    0,
+  )
 
   const purchaseBills = invoices.filter((i) => i.type === 'Purchase')
-  const totalPayable = purchaseBills.reduce((acc, i) => acc + i.outstandingAmount, 0)
+  const totalPayable = purchaseBills.reduce(
+    (acc, i) => acc + toBaseAmount(i.outstandingAmount, invoiceExchangeRate(i)),
+    0,
+  )
 
   const incomeAccounts = accounts.filter((a) => !a.isGroup && a.rootType === 'Income')
   const totalIncome = incomeAccounts.reduce((acc, a) => acc + a.balance, 0)
@@ -286,6 +296,11 @@ export function Dashboard() {
                   <td className="px-6 py-3.5 text-xs text-[#6B6B6B]">{inv.dueDate}</td>
                   <td className="px-6 py-3.5 text-right font-bold text-[#1E293B]">
                     {formatMoney(inv.grandTotal)}
+                    {currencyTag(inv, settings.currency) && (
+                      <span className="ml-1.5 text-[11px] font-semibold text-[#6B6B6B]">
+                        {currencyTag(inv, settings.currency)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-3.5">{getStatusBadge(inv.status, inv.dueDate)}</td>
                   <td className="px-6 py-3.5 text-right">

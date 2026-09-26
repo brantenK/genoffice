@@ -35,6 +35,7 @@ import {
   nextJournalNumber,
   recomputePartyBalances,
 } from '../../shared/accounting'
+import { invoiceExchangeRate, toBaseAmount } from '../../shared/accounting'
 import { applyBankStatementImport, applyReconciliation } from '../../shared/settlement'
 import {
   applyPayment,
@@ -835,6 +836,14 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           ? partial.tenderReference
           : oldInvoice?.tenderReference,
       crmDealId: partial.crmDealId !== undefined ? partial.crmDealId : oldInvoice?.crmDealId,
+      // Multi-currency: the invoice's denomination rides with the payload.
+      // Without this passthrough the invoice form's currency/rate would be
+      // dropped here and the ledger would post every invoice at rate 1.
+      currency: partial.currency !== undefined ? partial.currency : oldInvoice?.currency,
+      exchangeRate:
+        partial.exchangeRate !== undefined
+          ? Number(partial.exchangeRate)
+          : oldInvoice?.exchangeRate,
       createdAt: oldInvoice ? oldInvoice.createdAt : now,
       updatedAt: now,
     }
@@ -975,8 +984,11 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     const { data } = get()
     const inv = data.invoices.find((i) => i.id === invoiceId)
     if (!inv || inv.status === 'Paid') return
+    // Payments are recorded in BASE currency: a foreign-currency invoice's
+    // outstanding is converted at its own rate before settling.
+    const rate = invoiceExchangeRate(inv)
     const settlementAmount = round2(
-      inv.outstandingAmount > 0 ? inv.outstandingAmount : inv.grandTotal,
+      inv.outstandingAmount > 0 ? toBaseAmount(inv.outstandingAmount, rate) : inv.grandTotal,
     )
     if (settlementAmount <= 0) return
 

@@ -3,7 +3,14 @@ import { Plus, Trash2, ArrowLeft, Save, Printer } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { DEFAULT_PAYMENT_TERMS_DAYS } from '../../../shared/chart'
 import type { InvoiceItem, InvoiceType } from '../../../shared/types'
-import { round2, calculateInvoiceTotals, effectiveLineAmount } from '../../../shared/accounting'
+import {
+  round2,
+  calculateInvoiceTotals,
+  effectiveLineAmount,
+  invoiceExchangeRate,
+  toBaseAmount,
+} from '../../../shared/accounting'
+import { EXTRA_CURRENCIES } from './currencies'
 
 interface InvoiceFormProps {
   type: InvoiceType
@@ -44,6 +51,28 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
   const [roundOff, setRoundOff] = useState(
     existing?.roundOff !== undefined ? String(existing.roundOff) : '',
   )
+
+  // Currency & exchange rate: the invoice is denominated in its own currency
+  // while the ledger posts in the company's base currency. The rate means
+  // "base units per invoice-currency unit" (1 EUR at 20 = 20 ZAR). A posted
+  // invoice's rate is fixed at creation — editing it would silently change
+  // what the ledger already posted — so the fields lock when an invoice is
+  // loaded for editing, and a new invoice is needed to change the rate.
+  const baseCurrency = data.settings.currency || 'ZAR'
+  const [currency, setCurrency] = useState(existing?.currency || baseCurrency)
+  const [exchangeRate, setExchangeRate] = useState(
+    existing?.exchangeRate !== undefined && existing.exchangeRate !== null
+      ? String(existing.exchangeRate)
+      : '',
+  )
+  const isBaseCurrency = currency.trim().toUpperCase() === baseCurrency.toUpperCase()
+  const effectiveExchangeRate = invoiceExchangeRate({ exchangeRate: Number(exchangeRate) })
+  const rateLocked = Boolean(existing) && existing!.status !== 'Draft'
+  // The form's own totals preview is in the invoice's currency: label it with
+  // the invoice's currency (the base symbol when no currency is in play).
+  const previewSymbol = isBaseCurrency
+    ? data.settings.currencySymbol
+    : currency.trim().toUpperCase()
 
   const effectiveTaxRate = data.settings.defaultTaxRate ?? 15
 
@@ -137,6 +166,8 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       notes,
       items,
       status,
+      currency: currency.trim() || baseCurrency,
+      exchangeRate: effectiveExchangeRate,
       ...(discountTotal.trim() && Number(discountTotal) !== 0
         ? { discountTotal: Number(discountTotal) }
         : {}),
@@ -253,6 +284,50 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
               className="w-full px-3 py-2 text-xs bg-[#F8F8F8] border border-[#EDEDED] rounded-lg focus:outline-none focus:border-[#1E293B]"
             />
           </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[#525252] mb-1.5">Currency</label>
+            <select
+              value={currency}
+              disabled={rateLocked}
+              title={rateLocked ? 'Rate is fixed once posted' : undefined}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="w-full px-3 py-2 text-xs bg-[#F8F8F8] border border-[#EDEDED] rounded-lg focus:outline-none focus:border-[#1E293B] disabled:text-[#6B6B6B]"
+            >
+              <option value={baseCurrency}>Base — {baseCurrency}</option>
+              {EXTRA_CURRENCIES.filter((code) => code !== baseCurrency).map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+              {!isBaseCurrency && !EXTRA_CURRENCIES.includes(currency.trim().toUpperCase()) && (
+                <option value={currency}>{currency.trim().toUpperCase()}</option>
+              )}
+            </select>
+          </div>
+
+          {!isBaseCurrency && (
+            <div>
+              <label className="block text-xs font-semibold text-[#525252] mb-1.5">
+                Exchange Rate
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                placeholder="1"
+                value={exchangeRate}
+                readOnly={rateLocked}
+                onChange={(e) => setExchangeRate(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-[#F8F8F8] border border-[#EDEDED] rounded-lg focus:outline-none focus:border-[#1E293B] read-only:text-[#6B6B6B]"
+              />
+              <p className="text-[11px] text-[#6B6B6B] mt-1">
+                {rateLocked
+                  ? `Rate is fixed once posted — create a new invoice to change it.`
+                  : `1 ${currency.trim().toUpperCase()} = ${effectiveExchangeRate} ${baseCurrency} posted to the ledger`}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -351,7 +426,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
                   />
                 </td>
                 <td className="px-6 py-2.5 text-right font-semibold text-[#1E293B]">
-                  {data.settings.currencySymbol} {effectiveLineAmount(it).toFixed(2)}
+                  {previewSymbol} {effectiveLineAmount(it).toFixed(2)}
                 </td>
                 <td className="px-4 py-2.5 text-center">
                   <button
@@ -386,7 +461,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
             <div className="flex justify-between text-[#6B6B6B]">
               <span>Subtotal</span>
               <span className="font-semibold text-[#1E293B]">
-                {data.settings.currencySymbol} {subtotal.toFixed(2)}
+                {previewSymbol} {subtotal.toFixed(2)}
               </span>
             </div>
 
@@ -394,7 +469,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
             <div className="flex items-center justify-between gap-3">
               <span className="text-[#6B6B6B]">Invoice discount (excl.)</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[#6B6B6B]">{data.settings.currencySymbol}</span>
+                <span className="text-[#6B6B6B]">{previewSymbol}</span>
                 <input
                   type="number"
                   min={0}
@@ -410,7 +485,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
             <div className="flex justify-between text-[#6B6B6B]">
               <span>VAT / Tax ({effectiveTaxRate}%)</span>
               <span className="font-semibold text-[#1E293B]">
-                {data.settings.currencySymbol} {taxTotal.toFixed(2)}
+                {previewSymbol} {taxTotal.toFixed(2)}
               </span>
             </div>
 
@@ -418,7 +493,7 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
             <div className="flex items-center justify-between gap-3">
               <span className="text-[#6B6B6B]">Round-off</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[#6B6B6B]">{data.settings.currencySymbol}</span>
+                <span className="text-[#6B6B6B]">{previewSymbol}</span>
                 <input
                   type="number"
                   step="0.01"
@@ -433,9 +508,22 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
             <div className="pt-3 border-t border-[#EDEDED] flex justify-between text-sm font-bold text-[#1E293B]">
               <span>Grand Total</span>
               <span className="text-base text-[#10B981]">
-                {data.settings.currencySymbol} {grandTotal.toFixed(2)}
+                {previewSymbol} {grandTotal.toFixed(2)}
               </span>
             </div>
+
+            {/* A foreign-currency invoice posts to the ledger at its exchange
+                rate: show the base equivalent the AR/AP control will carry. */}
+            {!isBaseCurrency && (
+              <div className="flex justify-between text-[#6B6B6B]">
+                <span>Base equivalent</span>
+                <span className="font-semibold text-[#1E293B]">
+                  ≈ {data.settings.currencySymbol}{' '}
+                  {toBaseAmount(grandTotal, effectiveExchangeRate).toFixed(2)} at 1{' '}
+                  {currency.trim().toUpperCase()} = {effectiveExchangeRate} {baseCurrency}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>

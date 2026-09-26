@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import { X, Printer, FileDown } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { effectiveLineAmount, round2 } from '../../../shared/accounting'
+import { isBaseCurrency } from './currencies'
 
 export function InvoicePrintModal() {
   const { printInvoice, setPrintInvoice, data } = useBooksStore()
@@ -23,8 +24,15 @@ export function InvoicePrintModal() {
 
   if (!printInvoice) return null
 
+  // The document prints in the INVOICE'S currency (its totals are its own
+  // figures): a foreign-currency invoice is labelled with its ISO code, a
+  // base-currency one keeps the company's symbol.
+  const invoiceCurrencyLabel = isBaseCurrency(printInvoice, settings.currency)
+    ? settings.currencySymbol
+    : printInvoice.currency!.trim().toUpperCase()
+
   const formatMoney = (val: number) => {
-    return `${settings.currencySymbol} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return `${invoiceCurrencyLabel} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
   const handleOpenPdf = async () => {

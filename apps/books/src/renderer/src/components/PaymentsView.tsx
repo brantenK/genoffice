@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Banknote, Plus, Trash2, ArrowDownLeft, ArrowUpRight, CheckCircle2 } from 'lucide-react'
 import { useBooksStore } from '../store'
-import { round2 } from '../../../shared/accounting'
+import { invoiceExchangeRate, round2, toBaseAmount } from '../../../shared/accounting'
 import type { Payment } from '../../../shared/types'
 
 const PAYMENT_METHODS = ['Bank Transfer', 'Cash', 'Card', 'Other']
@@ -87,7 +87,10 @@ export function PaymentsView() {
           ? Boolean(inv.creditNote) && inv.type === 'Sales' && outstanding < 0
           : outstanding > 0
       if (isTarget) {
-        next[inv.id] = round2(Math.abs(outstanding)).toFixed(2)
+        // Allocations are recorded in BASE currency; a foreign-currency
+        // invoice's own outstanding converts at its posted rate.
+        const baseOutstanding = toBaseAmount(Math.abs(outstanding), invoiceExchangeRate(inv))
+        next[inv.id] = baseOutstanding.toFixed(2)
       }
     }
     setAmounts(next)
@@ -104,12 +107,13 @@ export function PaymentsView() {
           continue
         }
         const outstanding = round2(inv.outstandingAmount ?? inv.grandTotal)
+        const baseOutstanding = toBaseAmount(Math.abs(outstanding), invoiceExchangeRate(inv))
         const isTarget =
           nextMode === 'refund'
             ? Boolean(inv.creditNote) && inv.type === 'Sales' && outstanding < 0
             : outstanding > 0
         if (isTarget) {
-          next[inv.id] = round2(Math.abs(outstanding)).toFixed(2)
+          next[inv.id] = baseOutstanding.toFixed(2)
         }
       }
       setAmounts(next)
