@@ -5,6 +5,7 @@ import {
   createPaymentJournal,
   findMatchingUnreconciledTransaction,
   linkPaymentToBankTransaction,
+  planImportCoverage,
 } from '../src/shared/payments'
 import { migrateAndValidateBooks } from '../src/main/books-main'
 import { useBooksStore } from '../src/renderer/src/store'
@@ -371,6 +372,37 @@ describe('payment ↔ bank-transaction linking (phase-3 unification)', () => {
     amount: 145000,
     reconciled: false,
     ...overrides,
+  })
+
+  it('a line naming a DIFFERENT invoice is not an earlier payment of the same party', () => {
+    // A customer's second payment arrives on the statement with their next
+    // invoice's number on the remittance. The party name matches, but the
+    // named invoice is not the one this payment settles, so the line must
+    // stay uncovered cash (its own money for INV-2026-002) instead of being
+    // swallowed as a duplicate of the INV-2026-001 receipt.
+    const data = seed()
+    data.invoices.push({
+      ...JSON.parse(JSON.stringify(data.invoices[0])),
+      id: 'inv-2',
+      invoiceNumber: 'INV-2026-002',
+      status: 'Unpaid',
+    })
+    data.payments = [mkPayment()]
+    const tx = mkTx({
+      id: 'tx-second',
+      description: 'EFT Payment City of Ekurhuleni Water Dept INV-2026-002',
+      amount: 120000,
+    })
+    const coverage = planImportCoverage(data, [tx])
+    expect(coverage.get('tx-second')!.coveredAmount).toBe(0)
+    expect(coverage.get('tx-second')!.paymentLinks).toHaveLength(0)
+    expect(findMatchingUnreconciledTransaction(data, mkPayment())).toBeNull()
+
+    // The line naming the payment's OWN invoice is still matched.
+    const own = planImportCoverage(data, [
+      mkTx({ id: 'tx-own', description: 'EFT Payment City of Ekurhuleni Water Dept INV-2026-001' }),
+    ])
+    expect(own.get('tx-own')!.coveredAmount).toBe(145000)
   })
 
   it('linkPaymentToBankTransaction matches by invoice number in the transaction text', () => {

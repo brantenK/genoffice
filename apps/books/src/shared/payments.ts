@@ -12,6 +12,7 @@ import type {
   PaymentAllocation,
 } from './types'
 import { round2 } from './accounting'
+import { mentionsReference } from './credit-notes'
 
 /**
  * Payments engine (pure — no electron/react imports).
@@ -288,9 +289,34 @@ export function matchedInvoiceAllocation(
 }
 
 /** Text-only matching, shared by exact and partial coverage flows. */
-export function paymentTextMatchesTransaction(payment: Payment, tx: BankTransaction): boolean {
+/**
+ * True when a statement line is plausibly this payment's cash: the direction
+ * matches and the text carries the party (or one of the invoiced numbers).
+ *
+ * `conflictingNumbers` vetoes the match: when the remittance advice names a
+ * DIFFERENT invoice — one this payment does not allocate — the line is not
+ * this payment's cash even though the party matches. Without that veto a
+ * customer's second payment (their next invoice's number on the line) is
+ * swallowed as a duplicate of their first, the bank never moves, and the
+ * invoice never gets its money.
+ */
+export function paymentTextMatchesTransaction(
+  payment: Payment,
+  tx: BankTransaction,
+  conflictingNumbers?: string[],
+): boolean {
   if (!payment || !tx || !paymentDirectionMatchesTx(payment, tx)) return false
   const haystack = `${tx.description || ''} ${tx.reference || ''}`.toLowerCase()
+  const own = new Set(
+    (payment.allocations || []).map((a) => (a.invoiceNumber || '').toLowerCase()).filter(Boolean),
+  )
+  for (const number of conflictingNumbers || []) {
+    const num = String(number || '')
+      .toLowerCase()
+      .trim()
+    if (!num || own.has(num)) continue
+    if (mentionsReference(haystack, num)) return false
+  }
   const fullName = (payment.partyName || '').toLowerCase()
   const matchesParty =
     (fullName.length >= 6 && haystack.includes(fullName)) ||
@@ -300,6 +326,17 @@ export function paymentTextMatchesTransaction(payment: Payment, tx: BankTransact
     return num.length > 0 && haystack.includes(num)
   })
   return matchesParty || matchesInvoice
+}
+
+/**
+ * Every invoice number in the ledger except the ones this payment already
+ * settles — the veto list for `paymentTextMatchesTransaction`.
+ */
+function conflictingInvoiceNumbers(data: BooksData, payment: Payment): string[] {
+  const own = new Set((payment.allocations || []).map((a) => a.invoiceNumber).filter(Boolean))
+  return (Array.isArray(data.invoices) ? data.invoices : [])
+    .map((inv) => inv.invoiceNumber)
+    .filter((num): num is string => Boolean(num) && !own.has(num as string))
 }
 
 /** Exact-match predicate retained for callers/tests that require equal totals. */
@@ -356,7 +393,11 @@ export function planImportCoverage(
     let matchedInvoiceId: string | undefined
     for (const payment of payments) {
       const available = round2(remaining.get(payment.id) || 0)
-      if (available <= 0 || !paymentTextMatchesTransaction(payment, tx) || remainingTx <= 0)
+      if (
+        available <= 0 ||
+        !paymentTextMatchesTransaction(payment, tx, conflictingInvoiceNumbers(data, payment)) ||
+        remainingTx <= 0
+      )
         continue
       const covered = round2(Math.min(available, remainingTx))
       const allocation = matchedInvoiceAllocation(payment, tx)
@@ -383,7 +424,11 @@ export function findMatchingUnreconciledTransaction(
 ): BankTransaction | null {
   const bankTx = Array.isArray(data.bankTransactions) ? data.bankTransactions : []
   for (const tx of bankTx) {
-    if (tx.reconciled || !paymentTextMatchesTransaction(payment, tx)) continue
+    if (
+      tx.reconciled ||
+      !paymentTextMatchesTransaction(payment, tx, conflictingInvoiceNumbers(data, payment))
+    )
+      continue
     if (round2(Math.abs(tx.amount) - paymentCoverage(tx)) > 0) return tx
   }
   return null

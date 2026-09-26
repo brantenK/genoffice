@@ -694,9 +694,19 @@ function readStoredForWrite(filePath: string): BooksDataEnvelope | null | typeof
   return read.data
 }
 
-/** Counts the records a shrink guard protects: the ledger-of-record kinds. */
+/**
+ * Counts the records a shrink guard protects: the ledger-of-record kinds,
+ * minus the opening journal `normalizeLedger` synthesizes. The sentinel is not
+ * a record anybody entered, and both sides of the guard must agree on that —
+ * otherwise a fresh ledger (one opening entry, nothing else) looks populated
+ * and the user's very next action, like adding their first party, is refused
+ * as "emptying the books".
+ */
 export function ledgerRecordCount(data: BooksDataEnvelope): number {
-  return (data.invoices?.length || 0) + (data.journalEntries?.length || 0)
+  const journals = (data.journalEntries || []).filter(
+    (entry) => !String(entry?.entryNumber || '').startsWith(OPENING_JOURNAL_PREFIX),
+  ).length
+  return (data.invoices?.length || 0) + journals
 }
 
 /** One record of the two ledger-of-record kinds, as sent by a caller. */

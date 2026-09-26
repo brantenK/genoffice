@@ -560,3 +560,55 @@ describe('empty ledger: refusing to be emptied is decided by the caller', () => 
     expect(validateSaveIntent('user-deleted-last-record').ok).toBe(false)
   })
 })
+
+describe('empty ledger: a fresh setup ledger is not "populated" for the shrink guard', () => {
+  let session: BooksE2ESession
+
+  beforeEach(async () => {
+    session = await bootBooksE2E()
+  })
+
+  afterEach(() => {
+    session?.dispose()
+  })
+
+  /**
+   * First-run setup writes an envelope whose only journal is the synthesized
+   * opening entry. The user's very next action — adding their first party —
+   * changes no ledger-of-record records at all, so the guard must not read
+   * that ledger as populated and refuse the save.
+   */
+  it('lets the first party be added without the shrink guard refusing the save', async () => {
+    const opened = session.modules.migrateAndValidateBooks({
+      version: 1,
+      settings: {
+        companyName: 'Fresh Co',
+        currency: 'ZAR',
+        currencySymbol: 'R',
+        financialYearStart: '2026-03-01',
+        defaultTaxRate: 15,
+        taxInclusive: false,
+      },
+      accounts: session.modules.EMPTY_ACCOUNTS,
+      parties: [],
+      invoices: [],
+      journalEntries: [],
+    })
+    expect(await session.saveData(opened)).toBe(true)
+    expect(session.modules.ledgerRecordCount(session.readStoredData())).toBe(0)
+
+    const withParty = {
+      ...session.readStoredData(),
+      parties: [
+        {
+          id: 'party-first',
+          name: 'First Client (Pty) Ltd',
+          type: 'Customer',
+          outstandingBalance: 0,
+        },
+      ],
+    }
+    expect(await session.saveData(withParty)).toBe(true)
+    expect(session.readStoredData().parties).toHaveLength(1)
+  })
+})
