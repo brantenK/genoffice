@@ -23,11 +23,29 @@ All suites below ran on a fresh build (`npx electron-vite build` in apps/books, 
 ## Final gate results (fresh build, 2026-09-28)
 
 - `npx tsc --noEmit` (apps/books): **0 errors**
-- `npx vitest run` (apps/books): **47 files / 625 tests, all green** (baseline was 36 files / 555)
+- `npx vitest run` (apps/books): **47 files / 630 tests, all green** (baseline was 36 files / 555)
 - `npx playwright test books-flows books-smoke`: **13/13 journeys**, Axe zero critical findings
 - `npx tsx tools/verify-suite-workflows.mjs`: **56 / 56** (file unedited)
 - Hygiene: `format:check`, `check:theme-colors`, `check:english-comments`, `check:brand` **PASS**;
   `npx eslint apps/books` **0 findings**
+
+## Final fresh-eyes review (post-fix pass)
+
+A separate read-only reviewer graded the whole branch (0bf4138..7bf22a5); verdict: money core
+solid for every engine-generated shape; two Important findings and four Minors raised. The
+Important findings were fixed in the same session (`7552cb6`):
+1. Delete-unwind replacement-import sizing for PARTIALLY covered statement lines (payment
+   first, remainder-sized import second) — Bank under-reported the dead payment's share; the
+   decision now measures surviving bank-funded money, not journal existence.
+2. Editing a partially paid FX invoice carried the own-currency paid amount into a
+   base-currency settlement leg (×rate mis-statement; rate 20 RED 29500 vs 20000) — the carry
+   now converts at the old invoice's stored rate.
+Also: negative-grand-total edits get a clear refusal; the suspense-settled-edit refusal
+message now states that every posted edit re-posts the settled cash. Each fix is
+teeth-proven (`tests/final-review-regressions.test.ts`, 5 tests). Deferred Minors: the CN
+absorb-mirror ±discountTotal for hand-written hostile negative-subtotal totals (engine data
+unaffected, fuzz carve-out documented) and duplicate `je-reclass-<txid>` ids between split
+siblings (benign — ownership is object-identity; any future id-keyed lookup must be aware).
 
 ## Defects found and fixed (each with a teeth-proven regression test)
 
