@@ -103,7 +103,10 @@ describe('resolveAiSettings', () => {
         defaults,
       )
       expect(resolved.providers.anthropic).toEqual(defaults.providers.anthropic)
-      expect(activeProvider(resolved)).toBe('genspark')
+      // fork policy (BYOK-first, no Genspark provider): the stored provider is
+      // honoured once its entry falls back to defaults — upstream's spec expects
+      // its cloud provider here instead
+      expect(activeProvider(resolved)).toBe('anthropic')
     }
   })
 

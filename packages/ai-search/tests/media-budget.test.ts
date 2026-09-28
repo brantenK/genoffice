@@ -37,6 +37,10 @@ function writeSettings(mediaProvider: string): string {
     path,
     JSON.stringify({
       provider: mediaProvider,
+      // the fork's BYOK default is gskToolsEnabled: false; upstream's test assumes
+      // cloud tools default ON (the 2026-09-22 media-tools fixture sets the same
+      // flag explicitly, per fork/COMPLIANCE.md)
+      gskToolsEnabled: true,
       providers: { [mediaProvider]: { apiKey: 'k', model: 'test-model' } },
       media: {
         provider: mediaProvider,

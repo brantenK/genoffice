@@ -106,4 +106,27 @@ export const vi = {
   aiScopeRangeTip:
     'AI sẽ hiểu "cột này / các hàng này / phần đã chọn" là dải ô này và vùng này sẽ được cố định cho lượt chạy sau khi bạn gửi',
   aiScopeClearTitle: 'Bỏ phạm vi dải ô và áp dụng cho toàn bộ trang tính',
+  aiWorkedStepsWaiting: 'Đã chạy {n} bước công cụ · đang chờ mô hình',
+  aiToolUpdateTaskPlan: 'Cập nhật danh sách công việc',
+  aiRunRequesting: 'Đang chờ mô hình',
+  aiRunThinking: 'Mô hình đang suy nghĩ',
+  aiRunResponding: 'Mô hình đang trả lời',
+  aiRunToolInput: 'Mô hình đang chuẩn bị đầu vào cho công cụ',
+  aiRunToolRunning: 'Đang chạy công cụ',
+  aiRunToolRunningNamed: 'Đang chạy {name}',
+  aiRunApplying: 'Đang áp dụng thay đổi vào bảng tính',
+  aiRunVerifying: 'Đang kiểm tra kết quả công thức',
+  aiRunElapsed: 'Lượt {seconds}s',
+  aiRunLastActivity: 'Hoạt động cuối cùng {seconds}s trước',
+  aiRunWarningConnectionActive:
+    'Kết nối vẫn hoạt động, nhưng mô hình chưa tạo kết quả mới gần đây.',
+  aiRunWarningNoActivity:
+    'Không có hoạt động nào của nhà cung cấp trong hơn 30 giây. Hãy kiểm tra kết nối, hoặc dừng và thử lại.',
+  aiTaskPlanAria: 'Danh sách công việc',
+  aiTaskPlanTitle: 'Danh sách công việc',
+  aiTaskPending: 'Đang chờ',
+  aiTaskInProgress: 'Đang thực hiện',
+  aiTaskCompleted: 'Hoàn thành',
+  aiTruncated:
+    'Phản hồi dừng ở giới hạn đầu ra của mô hình. Gửi "tiếp tục" để hoàn tất phần còn lại.',
 } satisfies Record<keyof typeof zh, string>
