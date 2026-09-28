@@ -8,7 +8,11 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { AiPanel, ZanoMark } from './ai/AiPanel'
 import { AiAskPopover, type AskAnchorRect } from './AiAskPopover'
-import { loadSavedAnnots } from './annotation-catalog'
+import {
+  createSavedAnnotCountsLoader,
+  loadSavedAnnots,
+  type SavedAnnotCounts,
+} from './annotation-catalog'
 import {
   OcrTextLayer,
   buildOcrPageData,
@@ -54,7 +58,7 @@ import { CropDialog, CutoutDialog, cropImagePng } from './ImageDialogs'
 import { cropRect, flipPixels, multiplyAlpha } from './image-bake'
 import type { CropFractions, ImageBakeOp } from './image-bake'
 import { removeBackground, type PixelImage } from './cutout'
-import { navAction } from './keyNav'
+import { navAction, shouldHandleDocumentUndo } from './keyNav'
 import { rowOfVisIdx, spreadRows, stepPage } from './spread'
 import {
   captureViewState,
@@ -109,7 +113,8 @@ import type { CharStyle } from './color-runs'
 import { platformShortcuts } from '@genoffice/i18n'
 import {
   Dropdown,
-  RibbonCollapseButton,
+  aiPanelInitiallyOpen,
+  rememberAiPanelOpen,
   useDismissablePopover,
   useRibbonCollapse,
 } from '@genoffice/ui'
@@ -289,7 +294,10 @@ type RibbonTab = (typeof RIBBON_TABS)[number]['id'] | 'fillForm'
 
 export default function App() {
   const { lang, t } = useI18n()
-  const collapse = useRibbonCollapse('genoffice-pdf-ribbon-collapsed')
+  const collapse = useRibbonCollapse('genoffice-pdf-ribbon-collapsed', {
+    collapse: t('ribbonCollapse'),
+    expand: t('ribbonExpand'),
+  })
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
   const [filePath, setFilePath] = useState('')
   const [status, setStatus] = useState<'loading' | 'error' | 'empty' | 'password' | 'ready'>(
@@ -344,10 +352,10 @@ export default function App() {
   }
   // Persisted so a closed AI panel stays closed on next launch (docs/slides parity)
   const [aiCollapsed, setAiCollapsed] = useState(
-    () => localStorage.getItem('genoffice-pdf-show-ai') === '0',
+    () => !aiPanelInitiallyOpen('genoffice-pdf-show-ai'),
   )
   useEffect(() => {
-    localStorage.setItem('genoffice-pdf-show-ai', aiCollapsed ? '0' : '1')
+    rememberAiPanelOpen('genoffice-pdf-show-ai', !aiCollapsed)
   }, [aiCollapsed])
   /** One-shot prompt pushed by the ribbon AI buttons; the panel auto-runs it (docs preset pattern) */
   const [aiPreset, setAiPreset] = useState<{ text: string; nonce: number } | null>(null)
@@ -392,6 +400,7 @@ export default function App() {
   const [drawTool, setDrawTool] = useState<DrawTool | null>(null)
   const [redactions, setRedactions] = useState<LocalRedaction[]>([])
   const redactionApplyConfirmedRef = useRef(false)
+  const redactionRequestInFlightRef = useRef(false)
   const [redactionCopyInFlight, setRedactionCopyInFlight] = useState(false)
   const [textEdits, setTextEdits] = useState<LocalTextEdit[]>([])
   const [textInserts, setTextInserts] = useState<LocalTextInsert[]>([])
@@ -758,30 +767,41 @@ export default function App() {
   } | null>(null)
   /** Ask-AI popover opened from the markup bar; the anchor rect is captured at open */
   const [askPop, setAskPop] = useState<{ rect: AskAnchorRect; excerpt: string } | null>(null)
-  /** Whole-document saved-annotation counts per original page for the AI context
-      (scanned once per doc; kept per-page so deleted pages can be excluded) */
-  const [aiAnnotCounts, setAiAnnotCounts] = useState<{
-    threads: number[]
-    markups: number[]
+  /** Whole-document saved-annotation counts per original page for the AI context.
+      The scan starts on first AI use, not when the document opens. */
+  const [aiAnnotCounts, setAiAnnotCounts] = useState<SavedAnnotCounts | null>(null)
+  const aiAnnotCountsLoaderRef = useRef<{
+    doc: PDFDocumentProxy
+    controller: AbortController
+    load: () => Promise<SavedAnnotCounts>
   } | null>(null)
   useEffect(() => {
     setAiAnnotCounts(null)
-    if (!doc) return
-    let stale = false
-    void (async () => {
-      const threads: number[] = []
-      const markupCounts: number[] = []
-      for (let i = 0; i < doc.numPages && !stale; i++) {
-        const a = await loadSavedAnnots(doc, i)
-        threads.push(a.notes.filter((n) => n.inReplyTo === null).length)
-        markupCounts.push(a.markups.length)
-      }
-      if (!stale) setAiAnnotCounts({ threads, markups: markupCounts })
-    })()
+    aiAnnotCountsLoaderRef.current?.controller.abort()
+    aiAnnotCountsLoaderRef.current = null
     return () => {
-      stale = true
+      aiAnnotCountsLoaderRef.current?.controller.abort()
+      aiAnnotCountsLoaderRef.current = null
     }
   }, [doc])
+  const startAiAnnotCountScan = useCallback(() => {
+    if (!doc || aiAnnotCountsLoaderRef.current?.doc === doc) return
+    const controller = new AbortController()
+    const entry = {
+      doc,
+      controller,
+      load: createSavedAnnotCountsLoader(doc, loadSavedAnnots, controller.signal),
+    }
+    aiAnnotCountsLoaderRef.current = entry
+    void entry.load().then((counts) => {
+      if (aiAnnotCountsLoaderRef.current === entry) setAiAnnotCounts(counts)
+    })
+  }, [doc])
+  // the first AI turn should already know whether the file carries review
+  // feedback, so an open panel starts the scan before the user sends anything
+  useEffect(() => {
+    if (!aiCollapsed) startAiAnnotCountScan()
+  }, [aiCollapsed, startAiAnnotCountScan])
   const [selected, setSelected] = useState<AnnotSelection | null>(null)
   /** Transparency presets fold-out inside the image selection popup */
   const [opacityMenu, setOpacityMenu] = useState(false)
@@ -910,12 +930,13 @@ export default function App() {
     scrollRef,
     rows.length,
     '800px 0px',
+    status === 'ready',
   )
   const { visible: visibleThumbs, setItemRef: setThumbRef } = useVisibleSet(
     thumbsRef,
     pageCount,
     '400px 0px',
-    sidebar === 'thumbs',
+    status === 'ready' && sidebar === 'thumbs',
   )
 
   // Keep the current page's thumbnail in view as the main viewport drives currentPage
@@ -3405,6 +3426,7 @@ export default function App() {
   const queuedSavesRef = useRef<{ autosave: boolean; resolve: (ok: boolean) => void }[]>([])
 
   const save = (autosave = false): Promise<boolean> => {
+    if (redactionRequestInFlightRef.current) return Promise.resolve(false)
     // A save is already writing: queue behind it instead of reporting failure — the
     // close prompt's "Save" and ⌘S regularly collide with the blur-triggered autosave
     // (the prompt itself blurs the window). The ref is set synchronously, so this also
@@ -3610,19 +3632,43 @@ export default function App() {
     if (result.skippedImageEdits && result.skippedImageEdits.length > 0) {
       noticeSkippedImages(result.skippedImageEdits)
     }
+    if (applyingRedactions) {
+      // The main process has committed this path and its read grant. Reload the
+      // sanitized bytes, clearing undo/search state that could expose old content.
+      const scrollTop = scrollRef.current?.scrollTop ?? 0
+      setFilePath(targetPath)
+      setStatus('loading')
+      try {
+        await loadDoc(targetPath, doc)
+        // loadDoc leaves the text index and hits alone; both still hold the removed text
+        searchIndexRef.current = null
+        setSearchMatches([])
+        setSearchCur(0)
+        setStatus('ready')
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop = scrollTop
+        })
+      } catch (err) {
+        // The write succeeded. Never resume editing a stale, unredacted canvas.
+        setStatus('error')
+        opFailed(err instanceof Error ? err.message : String(err))
+      }
+      redactionApplyConfirmedRef.current = false
+      setSaveState('idle')
+      return true
+    }
     // Back to idle, not 'saved': only the copy was written — this tab's edits are
     // still pending, so a saved-confirmation next to the unsaved badge would lie
     setSaveState('idle')
-    if (applyingRedactions) {
-      redactionApplyConfirmedRef.current = false
-      setRedactions([])
-    }
     return true
   }
 
   const requestRedactionSaveAs = () => {
-    if (redactions.length === 0) return
+    if (redactions.length === 0 || redactionRequestInFlightRef.current) return
     const otherPending =
+      saveInFlightRef.current !== null ||
+      textDraft !== null ||
+      noteDraft !== null ||
       markups.length > 0 ||
       annotDeletes.length > 0 ||
       noteEdits.length > 0 ||
@@ -3642,11 +3688,13 @@ export default function App() {
     }
     if (!window.confirm(t('redactConfirm'))) return
     redactionApplyConfirmedRef.current = true
+    redactionRequestInFlightRef.current = true
     setRedactionCopyInFlight(true)
     void window.pdfApi
       .requestRedactionCopy(filePath)
-      .catch(() => undefined)
+      .catch((err: unknown) => opFailed(err instanceof Error ? err.message : String(err)))
       .finally(() => {
+        redactionRequestInFlightRef.current = false
         redactionApplyConfirmedRef.current = false
         setRedactionCopyInFlight(false)
       })
@@ -3669,7 +3717,8 @@ export default function App() {
       saveInFlightRef.current === null &&
       filePath !== '' &&
       !readOnly &&
-      !saveAsFlowRef.current,
+      !saveAsFlowRef.current &&
+      !redactionRequestInFlightRef.current,
     () => void save(true),
   )
 
@@ -5255,6 +5304,7 @@ export default function App() {
     // scan still running: "unknown" must not read as "none" — a run started right
     // after open would otherwise never hear the file carries review feedback
     if (!aiAnnotCounts) {
+      startAiAnnotCountScan()
       return 'Whether the file contains notes/markups has not been determined yet; use read_annotations to check when the user asks about review feedback.'
     }
     let savedThreads = 0
@@ -5638,7 +5688,12 @@ export default function App() {
   // Shell menu Save As → write pending edits to the picked path only; the original file is never mutated
   useEffect(() => {
     return window.pdfApi.onSaveAsRequest((targetPath) => {
-      void saveAsTo(targetPath).then((ok) => window.pdfApi.sendSaveAsResult(ok))
+      void saveAsTo(targetPath)
+        .catch((err: unknown) => {
+          opFailed(err instanceof Error ? err.message : String(err))
+          return false
+        })
+        .then((ok) => window.pdfApi.sendSaveAsResult(ok))
     })
   })
 
@@ -5650,6 +5705,7 @@ export default function App() {
   // Shortcuts: ⌘S/⌘F/⌘P/⌘±/⌘0 + page navigation (only ⌘ combos kept while an input control is focused)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (redactionRequestInFlightRef.current) return
       const target = e.target as HTMLElement | null
       const inEditable =
         !!target &&
@@ -5657,6 +5713,7 @@ export default function App() {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
           target.isContentEditable)
+      if (!shouldHandleDocumentUndo(e.target, e.key, e.metaKey || e.ctrlKey)) return
       if (e.metaKey || e.ctrlKey) {
         const k = e.key.toLowerCase()
         if (k === 's') {
@@ -5686,6 +5743,8 @@ export default function App() {
         return
       }
       if (e.key === 'Escape') {
+        // Modal dialogs own Escape; the states behind them must not react too
+        if (signDlg || stampDlg || propsDlg) return
         if (askPop) setAskPop(null)
         else if (textDraft) setTextDraft(null)
         else if (pendingTextInsert) setPendingTextInsert(null)
@@ -6116,7 +6175,7 @@ export default function App() {
   )
 
   return (
-    <div className="app">
+    <div className="app" inert={redactionCopyInFlight} aria-busy={redactionCopyInFlight}>
       <div className={`ribbon ${collapse.rootClass}`} ref={collapse.rootRef}>
         <div className="ribbon-tabs" onDoubleClick={collapse.onTabsDoubleClick}>
           <button
@@ -6150,7 +6209,8 @@ export default function App() {
           {RIBBON_TABS.map(({ id, labelKey }) => (
             <button
               key={id}
-              className={`ribbon-tab${ribbonTab === id ? ' active' : ''}`}
+              className={`ribbon-tab ${collapse.tabClass(ribbonTab === id)}`}
+              data-tip={collapse.tabTip(ribbonTab === id)}
               onClick={() => {
                 collapse.onTabPress(ribbonTab === id)
                 setRibbonTab(id)
@@ -6161,7 +6221,8 @@ export default function App() {
           ))}
           {!readOnly && (
             <button
-              className={`ribbon-tab ribbon-tab-context${ribbonTab === 'fillForm' ? ' active' : ''}`}
+              className={`ribbon-tab ribbon-tab-context ${collapse.tabClass(ribbonTab === 'fillForm')}`}
+              data-tip={collapse.tabTip(ribbonTab === 'fillForm')}
               onClick={() => {
                 collapse.onTabPress(ribbonTab === 'fillForm')
                 setRibbonTab('fillForm')
@@ -6832,10 +6893,6 @@ export default function App() {
             </>
           )}
         </div>
-        <RibbonCollapseButton
-          state={collapse}
-          labels={{ collapse: t('ribbonCollapse'), pin: t('ribbonPin') }}
-        />
       </div>
       <input
         ref={imageFileRef}

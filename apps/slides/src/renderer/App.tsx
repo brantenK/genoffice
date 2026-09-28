@@ -38,6 +38,7 @@ import { ZOOM_MAX, ZOOM_MIN, clampZoom, nextPreset, notchStep, prevPreset } from
 import type { DrawRect } from './draw-shape'
 import { paragraphsBlank } from './textbox-insert'
 import { SlideThumb } from './SlideThumb'
+import { useVisibleThumbs } from './use-visible-thumbs'
 import { MasterView } from './MasterView'
 import {
   TextEditOverlay,
@@ -99,6 +100,8 @@ import {
   useAutoSavePref,
   type AiScopeQuoteData,
   type WordArtPreset,
+  aiPanelInitiallyOpen,
+  rememberAiPanelOpen,
 } from '@genoffice/ui'
 import type { ChartPresetDef, IconDef, SmartArtDef } from './insert-presets'
 import { ZanoMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
@@ -108,7 +111,7 @@ import { t, useI18n } from './i18n/locale'
 import { AiPanel } from './ai/AiPanel'
 import { ChartDataDialog } from './components/ChartDataDialog'
 import type { BrushFormat } from './format-brush'
-import { isTextUndoTarget, shouldRouteUndoToDeck } from './undo-routing'
+import { isTextUndoTarget, shouldRouteHistoryToDeck } from './undo-routing'
 import type {
   ActionCtx,
   CropTargetState,
@@ -143,7 +146,7 @@ import * as arrangeActions from './arrange-actions'
 import * as tableActions from './table-actions'
 import * as styleActions from './style-actions'
 import { handleGlobalKeydown, slideRailHasFocus } from './keyboard-actions'
-import { clickSelection, normalizeSelection } from '../shared/slide-selection'
+import { clickSelection, currentAfterHistory, normalizeSelection } from '../shared/slide-selection'
 import { useEscOverlay, useEscOverlayOpen } from './esc-overlay'
 import { buildCtxItems } from './context-menu-items'
 import { isMac, nextSelection } from './platform-modifiers'
@@ -329,6 +332,11 @@ function collectRtls(node: RenderNode, out: Set<boolean>) {
   else if (node.type === 'group') for (const child of node.children) collectRtls(child, out)
 }
 
+/** Same box a SlideThumb Stage would occupy, so an unmounted thumbnail keeps the list's scroll geometry */
+function thumbBox(slide: RenderSlide, width: number) {
+  return { width, height: (slide.heightPx * width) / slide.widthPx }
+}
+
 export function App() {
   const { lang } = useI18n()
   const [slides, setSlides] = useState<RenderSlide[]>([])
@@ -454,7 +462,7 @@ export function App() {
   useEffect(() => {
     window.slidesApi.setAutoSavePref?.(autoSave)
   }, [autoSave])
-  const [showAi, setShowAi] = useState(() => localStorage.getItem('ai-slides-show-ai') !== '0')
+  const [showAi, setShowAi] = useState(() => aiPanelInitiallyOpen('ai-slides-show-ai'))
   const [showFormat, setShowFormat] = useState(false)
   const [showBgFormat, setShowBgFormat] = useState(false)
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null)
@@ -1021,36 +1029,42 @@ export function App() {
     return !!sel && !sel.isCollapsed
   }
 
-  /** Apply the full slides set after undo/redo: page count may change (undoing a new page), clamp current */
-  const applyHistoryResult = useCallback((r: RenderSlide[] | null) => {
-    if (!r) return
-    setSlides(r)
-    setCurrent((c) => Math.min(c, r.length - 1))
-    setSelectedSlides([])
-    setSelectedIds([])
-    setEditing(null)
-    setPasteFloater(null) // The paste the floater refers to may have just been undone
-    notesDraftRef.current = null // Undo overrides the unsaved draft, avoiding writing an old draft back
-    setAnnotationsNonce((n) => n + 1) // Notes/comments aren't in RenderSlide; re-fetch
-    void window.slidesApi.isDirty().then(setDirty)
-  }, [])
+  /** Apply the full slides set after undo/redo, keeping the current slide when it still exists. */
+  const applyHistoryResult = useCallback(
+    (r: RenderSlide[] | null, current: number, partPath?: string) => {
+      if (!r) return
+      setSlides(r)
+      setCurrent(currentAfterHistory(r, current, partPath))
+      setSelectedSlides([])
+      setSelectedIds([])
+      setEditing(null)
+      setPasteFloater(null) // The paste the floater refers to may have just been undone
+      notesDraftRef.current = null // Undo overrides the unsaved draft, avoiding writing an old draft back
+      setAnnotationsNonce((n) => n + 1) // Notes/comments aren't in RenderSlide; re-fetch
+      void window.slidesApi.isDirty().then(setDirty)
+    },
+    [],
+  )
 
   const undo = useCallback(async () => {
     // Preserve native undo while typing. The cleared AI composer explicitly yields to deck undo.
     const target = document.activeElement as HTMLElement | null
-    if (editing || (isTextUndoTarget(target) && !shouldRouteUndoToDeck(target))) {
+    if (editing || (isTextUndoTarget(target) && !shouldRouteHistoryToDeck(target))) {
       document.execCommand('undo')
       return
     }
-    applyHistoryResult(await window.slidesApi.undo())
+    const { current, slide } = ctxRef.current
+    applyHistoryResult(await window.slidesApi.undo(), current, slide?.partPath)
   }, [editing, applyHistoryResult])
 
   const redo = useCallback(async () => {
-    if (editing || inTextField()) {
+    const target = document.activeElement as HTMLElement | null
+    if (editing || (isTextUndoTarget(target) && !shouldRouteHistoryToDeck(target))) {
       document.execCommand('redo')
       return
     }
-    applyHistoryResult(await window.slidesApi.redo())
+    const { current, slide } = ctxRef.current
+    applyHistoryResult(await window.slidesApi.redo(), current, slide?.partPath)
   }, [editing, applyHistoryResult])
 
   // Global shortcuts (keyboard-actions.ts): the handler reads the latest state via ctxRef, so attach once
@@ -1246,7 +1260,7 @@ export function App() {
 
   const toggleAi = useCallback(() => {
     setShowAi((v) => {
-      localStorage.setItem('ai-slides-show-ai', v ? '0' : '1')
+      rememberAiPanelOpen('ai-slides-show-ai', !v)
       return !v
     })
   }, [])
@@ -1261,7 +1275,7 @@ export function App() {
       scope?: AiScopeQuoteData,
     ) => {
       setShowAi(() => {
-        localStorage.setItem('ai-slides-show-ai', '1')
+        rememberAiPanelOpen('ai-slides-show-ai', true)
         return true
       })
       setAiPreset({
@@ -1401,7 +1415,7 @@ export function App() {
       })
       // The queue lives in the panel; annotating with it collapsed would look like nothing happened
       setShowAi(() => {
-        localStorage.setItem('ai-slides-show-ai', '1')
+        rememberAiPanelOpen('ai-slides-show-ai', true)
         return true
       })
     },
@@ -2187,6 +2201,18 @@ export function App() {
     () => groupSections(sections, slides.length),
     [sections, slides.length],
   )
+  const sorterViewRef = useRef<HTMLDivElement | null>(null)
+  const visibleThumbs = useVisibleThumbs(thumbsListRef, '.thumb', [
+    slides.length,
+    sectionGroups,
+    collapsedSecs,
+    showThumbs,
+    viewMode,
+  ])
+  const visibleSorterItems = useVisibleThumbs(sorterViewRef, '.sorter-item', [
+    slides.length,
+    viewMode,
+  ])
 
   /** Canvas right-click: select the hit element first (replace the selection if it isn't in it), clear selection on blank */
   const onCanvasContextMenu = useCallback(
@@ -3562,6 +3588,7 @@ export function App() {
                 className="sorter-view"
                 role="listbox"
                 tabIndex={0}
+                ref={sorterViewRef}
                 onContextMenu={(e) => onGapContextMenu(e, true)}
               >
                 {slides.map((s, i) => (
@@ -3580,7 +3607,11 @@ export function App() {
                     }}
                     onContextMenu={(e) => openThumbMenu(i, e)}
                   >
-                    <SlideThumb slide={s} images={images} width={208} />
+                    {visibleSorterItems.has(i) ? (
+                      <SlideThumb slide={s} images={images} width={208} />
+                    ) : (
+                      <div className="thumb-placeholder" style={thumbBox(s, 208)} />
+                    )}
                     <span className="sorter-num">{i + 1}</span>
                     {pasteFloater?.index === i && (
                       <PasteOptionsFloater
@@ -3648,7 +3679,11 @@ export function App() {
                               onClick={(e) => selectThumb(i, e)}
                               onContextMenu={(e) => openThumbMenu(i, e)}
                             >
-                              <SlideThumb slide={s} images={images} width={thumbW} />
+                              {visibleThumbs.has(i) ? (
+                                <SlideThumb slide={s} images={images} width={thumbW} />
+                              ) : (
+                                <div className="thumb-placeholder" style={thumbBox(s, thumbW)} />
+                              )}
                               <span className="thumb-num">{i + 1}</span>
                               {pasteFloater?.index === i && (
                                 <PasteOptionsFloater

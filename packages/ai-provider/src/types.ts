@@ -54,7 +54,16 @@ export interface AiProviderMeta {
 
 /** Image generation / media analysis backends (separate from the chat provider) */
 export type AiMediaProviderId =
-  'genspark' | 'openai' | 'gemini' | 'doubao' | 'glm' | 'xai' | 'qwen' | 'minimax' | 'custom'
+  | 'genspark'
+  | 'openai'
+  | 'gemini'
+  | 'doubao'
+  | 'glm'
+  | 'xai'
+  | 'qwen'
+  | 'minimax'
+  | 'deepseek'
+  | 'custom'
 
 /** wire shape of the image endpoint */
 export type AiImageProtocol = 'openai-images' | 'gemini' | 'dashscope' | 'minimax'
@@ -105,7 +114,7 @@ export interface AiMediaSettings {
 }
 
 /** web/image search backends; Parallel supports both a user key and free keyless search */
-export type AiSearchProviderId = 'genspark' | 'serper' | 'tavily' | 'parallel'
+export type AiSearchProviderId = 'genspark' | 'serper' | 'serply' | 'tavily' | 'parallel'
 
 export interface AiSearchProviderMeta {
   id: AiSearchProviderId

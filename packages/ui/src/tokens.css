@@ -54,6 +54,8 @@
   --danger-text: #be3737;
   --danger-bg: #faecec;
   --danger-border: #eec4c4;
+  /* Word's changed-line bar (Simple Markup): fixed red, tuned per theme */
+  --docs-revision-bar: #c00000;
   --success: #16864a;
   --success-bg: #e7f2ec;
   --success-border: #c4dfce;
@@ -141,6 +143,8 @@
   --danger: #e54848;
   --danger-text: #f5a3a3;
   --danger-bg: #3d2222;
+  /* Word's changed-line bar (Simple Markup): fixed red, tuned per theme */
+  --docs-revision-bar: #ff6b6b;
   --search-hit-bg: #745a1e;
   --search-hit-active-bg: #d4781f;
   --search-hit-active-ink: #1e1e1e;
@@ -183,6 +187,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
+    /* Zano dark: warm, green-hued neutrals — never pure black/gray */
     --surface: #141815;
     --surface-subtle: #1b201c;
     --chrome-bg: #141815;
@@ -209,6 +214,8 @@
     --danger: #e54848;
     --danger-text: #f5a3a3;
     --danger-bg: #3d2222;
+    /* Word's changed-line bar (Simple Markup): fixed red, tuned per theme */
+    --docs-revision-bar: #ff6b6b;
     --search-hit-bg: #745a1e;
     --search-hit-active-bg: #d4781f;
     --search-hit-active-ink: #1e1e1e;

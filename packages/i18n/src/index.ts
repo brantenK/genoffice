@@ -19,6 +19,7 @@ export type Lang =
   | 'he'
   | 'hi'
   | 'zh-TW'
+  | 'vi'
 
 export const LANGS: readonly Lang[] = [
   'zh',
@@ -41,6 +42,7 @@ export const LANGS: readonly Lang[] = [
   'he',
   'hi',
   'zh-TW',
+  'vi',
 ]
 
 export function isLang(value: unknown): value is Lang {
@@ -85,6 +87,7 @@ const HTML_LANGS: Record<Lang, string> = {
   he: 'he-IL',
   hi: 'hi-IN',
   'zh-TW': 'zh-TW',
+  vi: 'vi-VN',
 }
 
 /** BCP-47 tag for document.documentElement.lang (drives CSS :lang() and Chromium's per-language font fallback) */
@@ -194,5 +197,5 @@ export function onUiLangChange(listener: (lang: Lang) => void): () => void {
  */
 export function createI18n<D extends Record<string, string>>(dicts: LangDicts<D>) {
   return (lang: Lang, key: keyof D, params?: Params): string =>
-    platformShortcuts(format(dicts[lang][key], params))
+    format(platformShortcuts(dicts[lang][key]), params)
 }

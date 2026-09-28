@@ -58,7 +58,7 @@ async function bootstrap(): Promise<void> {
   if (mode !== 'audience') {
     applyTheme(theme)
     window.slidesApi?.onThemeChanged(applyTheme)
-    void window.slidesApi
+    await window.slidesApi
       ?.getAiPanelPrefs?.()
       .then(applyAiPanelPrefs)
       .catch(() => {})

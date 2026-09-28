@@ -5,7 +5,12 @@ import {
   type MarkdownSourceSnapshot,
 } from './markdown/roundtripSerializer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ImageViewer, useAutoSavePref } from '@genoffice/ui'
+import {
+  ImageViewer,
+  aiPanelInitiallyOpen,
+  rememberAiPanelOpen,
+  useAutoSavePref,
+} from '@genoffice/ui'
 import {
   pollUntilReady,
   runHeadlessRendererExport,
@@ -42,10 +47,10 @@ import { AiPanel, ZanoMark, type AiPreset, type MarkdownAiDeps } from './ai/AiPa
 import { EDIT_QUEUE_MAX, selectionForAnchor, type EditQueueItem } from './ai/edit-queue'
 import { addQueueAnchor, clearQueueAnchors, removeQueueAnchors } from './editor/aiQueueAnchors'
 import { DOCX_MAX_IMAGE_PX, exportDocxBytes } from './export/docxExport'
+import { decodeImageDataUrl, toDocxImage } from './export/exportImage'
 import { buildPrintHtml } from './export/printHtml'
 import { diagramSvgToPng, renderDiagram } from './editor/diagrams'
 import type { DiagramLanguage } from './editor/diagrams'
-import { resolveImageSrc } from './editor/localImage'
 import type { ExportFormat, SaveMode } from '../shared/ipc'
 import { uiOp } from './editor/ops'
 
@@ -104,15 +109,6 @@ function applyImageRewrites(
 }
 
 /** Measure a document image via the DOM (the editor already displays it) */
-function measureImage(displaySrc: string): Promise<{ width: number; height: number } | null> {
-  return new Promise((resolvePromise) => {
-    const img = new Image()
-    img.onload = () => resolvePromise({ width: img.naturalWidth, height: img.naturalHeight })
-    img.onerror = () => resolvePromise(null)
-    img.src = displaySrc
-  })
-}
-
 /** File name for an AI-generated untitled document: first heading, else first words */
 export function deriveAutoFileName(editor: Editor): string {
   const doc = editor.state.doc
@@ -127,7 +123,7 @@ export function deriveAutoFileName(editor: Editor): string {
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { lang, t } = useI18n()
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [filePath, setFilePath] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -141,7 +137,7 @@ export default function App() {
   const [fmOpen, setFmOpen] = useState(false)
   const [fmText, setFmText] = useState('')
   // Persisted so a closed AI panel stays closed on next launch (docs/slides parity)
-  const [aiOpen, setAiOpen] = useState(() => localStorage.getItem('mdapp.showAi') !== '0')
+  const [aiOpen, setAiOpen] = useState(() => aiPanelInitiallyOpen('mdapp.showAi'))
   const [aiPreset, setAiPreset] = useState<AiPreset | null>(null)
   const [editQueue, setEditQueue] = useState<EditQueueItem[]>([])
   const editQueueRef = useRef(editQueue)
@@ -278,6 +274,7 @@ export default function App() {
             .chain()
             .setMeta('addToHistory', false)
             .setContent(body, { contentType: 'markdown' })
+            .setTextSelection(1)
             .run()
           sourceMapRef.current = buildSourceMap(editor, editor.state.doc, body)
           originalSourceRef.current = roundTripEnabled
@@ -459,16 +456,8 @@ export default function App() {
         return result.ok && !('canceled' in result)
       }
       const loadImage = async (src: string) => {
-        const data = await window.markdownApi.readImage(src)
-        if (!data) return null
-        const dims = await measureImage(resolveImageSrc(src))
-        let width = dims?.width || 400
-        let height = dims?.height || 300
-        if (width > DOCX_MAX_IMAGE_PX) {
-          height = Math.round((height * DOCX_MAX_IMAGE_PX) / width)
-          width = DOCX_MAX_IMAGE_PX
-        }
-        return { base64: data.base64, mime: data.mime, widthPx: width, heightPx: height }
+        const data = decodeImageDataUrl(src) ?? (await window.markdownApi.readImage(src))
+        return data ? toDocxImage(data, DOCX_MAX_IMAGE_PX) : null
       }
       const rasterizeDiagram = async (source: string, language: DiagramLanguage) => {
         const result = await renderDiagram(language, source)
@@ -677,7 +666,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('mdapp.showAi', aiOpen ? '1' : '0')
+    rememberAiPanelOpen('mdapp.showAi', aiOpen)
   }, [aiOpen])
 
   // autosave: every 30s and on window blur, silently persist pending changes
@@ -954,6 +943,7 @@ export default function App() {
       {viewImage && (
         <ImageViewer
           src={viewImage}
+          lang={lang}
           labels={{
             zoomIn: t('zoomIn'),
             zoomOut: t('zoomOut'),

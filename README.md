@@ -266,10 +266,10 @@ document in a visible editor tab while you watch.
 Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter,
 Requesty, Opper and OpenCode Zen/Go, plus a custom slot for any OpenAI-compatible
 endpoint (base URL + key), including local model servers. Search and media have
-their own per-capability providers under **AI Media & Search**: Serper, Tavily or
-Parallel for web search, and OpenAI, Gemini, Doubao/Seedream, GLM, Grok, Qwen,
+their own per-capability providers under **AI Media & Search**: Serper, Serply,
+Tavily or Parallel for web search, and OpenAI, Gemini, Doubao/Seedream, GLM, Grok, Qwen,
 MiniMax or any OpenAI-compatible images endpoint for image generation and
-image/video analysis.
+image/video analysis, plus DeepSeek V4.1 Flash for image analysis.
 
 **TypeSafe Jev** reranks the home screen's file search. Under **AI Media & Search →
 Local file search**, switch on Jev search reranking and pick an endpoint:
@@ -278,10 +278,11 @@ TypeSafe's own API. The key is stored only on this device. It is off by
 default; when on, the excerpts of the top 20 local hits are sent for judgment
 and nothing else leaves the machine.
 
-**Parallel** works without an account: select it under Web search and leave the
-key blank to use its free Search MCP (rate-limited), or enter a
-[Parallel](https://platform.parallel.ai/) key for the Search API. Anonymous
-Parallel requests are only made once Parallel is the selected provider.
+**Parallel** works without an account: its free Search MCP (rate-limited) is the
+default web search whenever no Genspark login or search key is configured, and
+it runs ahead of the DuckDuckGo scrape. Select Parallel under Web search and
+enter a [Parallel](https://platform.parallel.ai/) key to use the Search API
+instead.
 
 The whole suite ships light, dark and system themes. Themes only change what
 is on screen: exports, prints and saved files always keep the document's own

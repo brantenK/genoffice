@@ -13,9 +13,9 @@ import { appLaunch } from '../resources'
 /**
  * What the cloud commands can do on this machine, decided from Zanostack's
  * own settings without a network call: a Genspark login with cloud tools on,
- * a BYOK key, or explicitly selected free Parallel search. Unkeyed fallbacks (DuckDuckGo)
- * do not count as configured. Agents check this once before planning work
- * that needs photos or web facts.
+ * a BYOK key, or explicitly selected free Parallel search. Unkeyed fallbacks in the
+ * default chain (free Parallel MCP, DuckDuckGo) do not count as configured. Agents
+ * check this once before planning work that needs photos or web facts.
  */
 export const capabilitiesCommand: CommandDef = {
   name: 'capabilities',
@@ -30,7 +30,8 @@ export const capabilitiesCommand: CommandDef = {
     const gskSearch = gsk && searchProvider === 'genspark'
     const customSearch = searchProvider !== 'genspark'
     const search = gskSearch || customSearch
-    const imageSearch = gskSearch || searchProvider === 'serper'
+    const keyedImageSearch = searchProvider === 'serper' || searchProvider === 'serply'
+    const imageSearch = gskSearch || keyedImageSearch
     const imageGeneration = imageGenerationAvailable(settings, hasGskAuth())
     const mediaAnalysis = mediaAnalysisAvailable(settings, hasGskAuth())
     const via = (byok: string | null | undefined) => (byok ? byok : gsk ? 'genspark' : null)
@@ -41,7 +42,7 @@ export const capabilitiesCommand: CommandDef = {
       },
       image_search: {
         available: imageSearch,
-        via: searchProvider === 'serper' ? 'serper' : gskSearch ? 'genspark' : null,
+        via: keyedImageSearch ? searchProvider : gskSearch ? 'genspark' : null,
       },
       image_generation: {
         available: imageGeneration,

@@ -2,8 +2,8 @@
  * ai:web-search / ai:image-search for the editors' main processes: reads
  * ai-settings.json live and turns the search provider choice into
  * SearchOptions — Genspark keeps the historic chain (gsk when signed in and
- * cloud tools are on, then env keys, then DuckDuckGo); a selected custom provider
- * runs first and skips gsk. Parallel uses its free MCP when no key is saved.
+ * cloud tools are on, then env keys, then free Parallel MCP, then DuckDuckGo); a
+ * selected custom provider runs first and skips gsk.
  */
 
 import {
@@ -20,6 +20,7 @@ export function searchOptionsFromSettings(settings: AiSettings): SearchOptions {
   if (provider === 'genspark') return { useGsk: cloudToolsEnabled(settings) }
   const key = settings.search!.providers?.[provider]?.apiKey?.trim() ?? ''
   if (provider === 'parallel') return { useGsk: false, parallelKey: key, prefer: 'parallel' }
+  if (provider === 'serply') return { useGsk: false, serplyKey: key, prefer: 'serply' }
   return provider === 'tavily'
     ? { useGsk: false, tavilyKey: key, prefer: 'tavily' }
     : { useGsk: false, serperKey: key }
@@ -44,6 +45,7 @@ export async function testSearchProvider(
   const options: SearchOptions = {
     useGsk: false,
     serperKey: provider === 'serper' ? apiKey : '',
+    serplyKey: provider === 'serply' ? apiKey : '',
     tavilyKey: provider === 'tavily' ? apiKey : '',
     parallelKey: provider === 'parallel' ? apiKey : '',
     prefer: provider,

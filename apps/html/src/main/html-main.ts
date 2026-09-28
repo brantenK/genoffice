@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   BrowserWindow,
@@ -50,6 +50,7 @@ import {
   copyImageIntoOwnedAssets,
   discardPendingOwnedAssets,
   extractHtmlImageSources,
+  isInDocDir,
   pendingOwnedAssetsForDocument,
   prepareAssetsForSaveAs,
   reconcileOwnedAssets,
@@ -138,6 +139,31 @@ const tDlg = createI18n({
     errParseFailed: 'Failed to parse file',
     errImageNoText: 'Image attachments have no text; the image is sent along with the user message',
     errNotImage: 'not a supported image type',
+  },
+  vi: {
+    dlgSaveTitle: 'Lưu tài liệu HTML',
+    filterHtml: 'Tài liệu HTML',
+    dlgPickImage: 'Chọn một hình ảnh',
+    filterImages: 'Hình ảnh',
+    untitledFile: 'Không có tiêu đề',
+    closeUnsavedMsg: 'Tài liệu này có những thay đổi chưa được lưu.',
+    closeUnsavedDetail: 'Bạn có muốn lưu các thay đổi trước khi đóng không?',
+    btnSave: 'Lưu',
+    btnDontSave: 'Không lưu',
+    btnCancel: 'Hủy',
+    dlgAddAttachment: 'Thêm tệp đính kèm',
+    filterSupported: 'Các tệp được hỗ trợ',
+    filterAll: 'Tất cả các tệp',
+    errUnsupportedExt: 'Tệp .{ext} không được hỗ trợ',
+    errNotFile: 'không phải là tệp',
+    errTooLarge: 'vượt quá giới hạn {mb}MB',
+    errImageTooLarge: 'hình ảnh vượt quá giới hạn 5MB',
+    errUnreadable: 'không thể đọc được',
+    errFileTooLarge: 'Tệp vượt quá giới hạn kích thước',
+    errParseFailed: 'Không thể phân tích tệp',
+    errImageNoText:
+      'Tệp đính kèm hình ảnh không có văn bản; hình ảnh được gửi cùng với tin nhắn của người dùng',
+    errNotImage: 'loại hình ảnh không được hỗ trợ',
   },
   ja: {
     dlgSaveTitle: 'HTML ドキュメントを保存',
@@ -1191,7 +1217,7 @@ function registerImageProtocol(): void {
     let inDocDir = false
     for (const doc of new Set([...openPathByWc.values(), ...savePathByWc.values()])) {
       const dir = resolve(dirname(doc))
-      if (target === dir || !target.startsWith(dir + sep)) continue
+      if (!isInDocDir(target, dir)) continue
       if (await resolveSafeRelativeImagePath(doc, relative(dir, target))) {
         inDocDir = true
         break
@@ -1686,10 +1712,12 @@ function registerHtmlIpc(): void {
         return { ok: false, error: 'single-file export cannot overwrite the open document' }
       }
       try {
-        const { html } = await inlineImagesForSingleFile(request.html, docPath)
+        const { html, skipped } = await inlineImagesForSingleFile(request.html, docPath)
         await writeFile(picked.filePath, html, 'utf8')
         if (!isHeadlessMode()) shell.showItemInFolder(picked.filePath)
-        return { ok: true, path: picked.filePath }
+        return skipped.length
+          ? { ok: true, path: picked.filePath, skipped }
+          : { ok: true, path: picked.filePath }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }

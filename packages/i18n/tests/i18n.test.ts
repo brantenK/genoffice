@@ -178,6 +178,15 @@ describe('macShortcutsToWin', () => {
   })
 })
 
+describe('shortcut rewrite order', () => {
+  it('rewrites the template before interpolation so values keep their glyphs', () => {
+    const template = 'Saved {name} (⌘S)'
+    const params = { name: 'Plan ⇧Final.xlsx' }
+    expect(format(macShortcutsToWin(template), params)).toBe('Saved Plan ⇧Final.xlsx (Ctrl+S)')
+    expect(macShortcutsToWin(format(template, params))).toBe('Saved Plan Shift+Final.xlsx (Ctrl+S)')
+  })
+})
+
 describe('createI18n', () => {
   const t = createI18n({
     zh: { hello: '你好 {name}', plain: '文件' },
@@ -200,6 +209,7 @@ describe('createI18n', () => {
     he: { hello: 'שלום {name}', plain: 'קבצים' },
     hi: { hello: 'नमस्ते {name}', plain: 'फ़ाइलें' },
     'zh-TW': { hello: '你好 {name}', plain: '檔案' },
+    vi: { hello: 'Xin chao {name}', plain: 'Tep' },
   })
 
   it('translates per language with interpolation', () => {

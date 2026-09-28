@@ -35,6 +35,14 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
       await app.evaluate(({ app: electronApp }, dir) => {
         electronApp.setPath('documents', dir)
       }, scratch)
+      const saveDir = join(scratch, 'GenOffice')
+      // the workbook has no file yet: Save answers the Save As picker (genoffice#1036)
+      await app.evaluate(
+        ({ dialog }, target) => {
+          dialog.showSaveDialog = async () => ({ canceled: false, filePath: target })
+        },
+        join(saveDir, 'pasted.xlsx'),
+      )
 
       await openAppFromHome(page, 'xlsx')
 
@@ -103,7 +111,6 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
         wc?.send('menu:action', 'save')
       })
 
-      const saveDir = join(scratch, 'Zanostack')
       await expect(async () => {
         const files = (await readdir(saveDir)).filter((f) => f.endsWith('.xlsx'))
         expect(files).toHaveLength(1)

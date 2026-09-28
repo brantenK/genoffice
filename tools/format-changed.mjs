@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const args = process.argv.slice(2)
@@ -78,18 +78,8 @@ if (changedFiles.length === 0) {
   process.exit(0)
 }
 
-const prettierExecutable = join(
-  repoRoot,
-  'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'prettier.cmd' : 'prettier',
-)
+const prettierEntry = join(repoRoot, 'node_modules', 'prettier', 'bin', 'prettier.cjs')
 const prettierMode = mode === '--write' ? '--write' : '--check'
-const env = {
-  ...process.env,
-  PATH: `${join(repoRoot, 'node_modules', '.bin')}${delimiter}${process.env.PATH}`,
-}
-
 // Windows caps a single command line at ~8191 characters, so a large
 // changed/untracked set (for example a generated fixture corpus) cannot be
 // passed to Prettier in one invocation. Spawn Prettier in bounded chunks and
@@ -98,12 +88,14 @@ const MAX_FILES_PER_SPAWN = 40
 let exitStatus = 0
 for (let index = 0; index < changedFiles.length; index += MAX_FILES_PER_SPAWN) {
   const chunk = changedFiles.slice(index, index + MAX_FILES_PER_SPAWN)
-  const result = spawnSync(prettierExecutable, [prettierMode, '--ignore-unknown', '--', ...chunk], {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-    env,
-  })
+  const result = spawnSync(
+    process.execPath,
+    [prettierEntry, prettierMode, '--ignore-unknown', '--', ...chunk],
+    {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    },
+  )
 
   if (result.error) {
     console.error(`Unable to run Prettier: ${result.error.message}`)

@@ -34,6 +34,7 @@ export type UiLanguage =
   | 'he'
   | 'hi'
   | 'zh-TW'
+  | 'vi'
 
 /** UI theme preference (as chosen by the user) */
 export type UiTheme = 'light' | 'dark' | 'system'
@@ -149,6 +150,17 @@ export interface FileSearchPage {
     pending: number
     scanning: boolean
   }
+}
+
+/**
+ * Default-app ownership of the Office document types. `others` lists the apps
+ * (display names) currently holding at least one type; `manualOnly` means the
+ * platform (Windows) only lets us open the system page.
+ */
+export interface DefaultAppStatus {
+  state: 'unsupported' | 'unknown' | 'default' | 'other'
+  others: string[]
+  manualOnly: boolean
 }
 
 export interface HomeApi {
@@ -296,6 +308,10 @@ export interface HomeApi {
    * `light` | `dark` (never `system`); callers apply it to `<html data-theme>`.
    */
   onThemeChanged(handler: (theme: EffectiveTheme) => void): () => void
+  /** who opens .docx/.xlsx/.pptx today (Settings → General "default app" row) */
+  getDefaultAppStatus(): Promise<DefaultAppStatus>
+  /** claim the Office types (mac/linux) or open the system Default Apps page (win); resolves to the refreshed status */
+  setDefaultApp(): Promise<DefaultAppStatus>
   /** open the Zanostack community page in the default browser */
   openGenTeam(): Promise<void>
   /** open the Genspark credit-usage page in the default browser */
@@ -531,6 +547,8 @@ export const HOME_CHANNELS = {
   getAiPanelPrefs: 'home:get-ai-panel-prefs',
   setAiPanelPrefs: 'home:set-ai-panel-prefs',
   getDefaultSaveDir: 'home:get-default-save-dir',
+  getDefaultAppStatus: 'home:get-default-app-status',
+  setDefaultApp: 'home:set-default-app',
   pickDefaultSaveDir: 'home:pick-default-save-dir',
   openGenTeam: 'home:open-genteam',
   openCreditUsage: 'home:open-credit-usage',

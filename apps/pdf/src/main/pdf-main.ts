@@ -30,6 +30,7 @@ import {
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
+import { buildExportImagePaths, hasValidExportPageNumbers } from './export-images'
 import type {
   ExportImagesRequest,
   ExportImagesResult,
@@ -124,6 +125,24 @@ const tDlg = createI18n({
     btnSave: 'Save',
     btnDontSave: "Don't Save",
     btnCancel: 'Cancel',
+  },
+  vi: {
+    dlgExportImages: 'Xuất hình ảnh vào thư mục',
+    dlgExtract: 'Trích xuất các trang dưới dạng PDF',
+    dlgInsert: 'Chọn một tệp PDF để nhập',
+    dlgSplit: 'Tách PDF vào thư mục',
+    dlgMerge: 'Chọn các tệp PDF để ghép',
+    dlgMergeSave: 'Lưu tệp PDF đã ghép dưới dạng',
+    dlgMergePages: 'Lưu các trang đã ghép dưới dạng',
+    dlgReplace: 'Chọn một tệp PDF thay thế',
+    dlgSplitPages: 'Lưu các trang đã tách dưới dạng',
+    dlgRedactCopy: 'Lưu bản sao đã che thông tin dưới dạng',
+    filterPdf: 'Tài liệu PDF',
+    closeUnsavedMsg: 'Tệp PDF này có những thay đổi chưa được lưu.',
+    closeUnsavedDetail: 'Bạn có muốn lưu các thay đổi trước khi đóng không?',
+    btnSave: 'Lưu',
+    btnDontSave: 'Không lưu',
+    btnCancel: 'Hủy',
   },
   ja: {
     dlgExportImages: '画像をフォルダに書き出す',
@@ -604,6 +623,14 @@ const closeSaveWaiters = new Map<number, (ok: boolean) => void>()
 const saveAsWaiters = new Map<number, (ok: boolean) => void>()
 /** Save As destination granted per view (main-process dialog pick); the save handler refuses any other non-source target */
 const saveAsTargetByWc = new Map<number, string>()
+/** Only a copy produced by this view may receive subsequent in-place redactions. */
+const redactionPathByWc = new Map<number, string>()
+const redactionFlows = new Set<number>()
+let pdfRedactionSavedHook: ((wc: WebContents, path: string) => void) | null = null
+
+export function setPdfRedactionSavedHook(hook: (wc: WebContents, path: string) => void): void {
+  pdfRedactionSavedHook = hook
+}
 
 export function pdfIsDirty(webContentsId: number): boolean {
   return dirtyByWc.has(webContentsId)
@@ -634,6 +661,7 @@ export function markPdfUntitledPath(path: string): void {
 export function pdfFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
+  if (redactionPathByWc.get(wcId) === oldPath) redactionPathByWc.set(wcId, newPath)
   const allowed = allowedByWc.get(wcId)
   if (allowed?.has(oldPath)) {
     // the shell moved the file: revoke the stale grant, then grant the new path
@@ -936,7 +964,14 @@ function registerPdfIpc(): void {
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
-      if (isSameRedactionCopyPath(path, target)) {
+      if (
+        isSameRedactionCopyPath(path, target) &&
+        !(
+          target === path &&
+          redactionPathByWc.get(e.sender.id) === path &&
+          saveAsTargetByWc.get(e.sender.id) === path
+        )
+      ) {
         return { ok: false, error: 'pdf: permanent redaction requires Save As copy' }
       }
       // A redaction is intentionally its own irreversible transaction. Persist normal
@@ -967,6 +1002,18 @@ function registerPdfIpc(): void {
         target,
         request,
       )
+      if (request.redactions !== undefined) {
+        // Commit document identity only after the atomic write succeeds. Revoke the
+        // source grant so stale renderer requests cannot write back to the original.
+        allowedByWc.set(e.sender.id, new Set([target]))
+        openPathByWc.set(e.sender.id, target)
+        redactionPathByWc.set(e.sender.id, target)
+        try {
+          pdfRedactionSavedHook?.(e.sender, target)
+        } catch (err) {
+          console.warn('[pdf] redaction saved hook failed:', err)
+        }
+      }
       return {
         ok: true,
         ...(skippedTextEdits.length > 0 ? { skippedTextEdits } : {}),
@@ -980,9 +1027,14 @@ function registerPdfIpc(): void {
 
   ipcMain.handle(PDF_CHANNELS.requestRedactionCopy, async (e, path: unknown): Promise<boolean> => {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) return false
+    if (redactionFlows.has(e.sender.id) || saveAsWaiters.has(e.sender.id)) return false
+    redactionFlows.add(e.sender.id)
     const base = basename(path).replace(/\.pdf$/i, '')
     setPdfSaveAsInFlight(e.sender, true)
     try {
+      if (redactionPathByWc.get(e.sender.id) === path) {
+        return await requestPdfSaveAs(e.sender, path)
+      }
       const parent = BrowserWindow.fromWebContents(e.sender)
       const options = {
         title: tm('dlgRedactCopy'),
@@ -996,6 +1048,7 @@ function registerPdfIpc(): void {
         return false
       return await requestPdfSaveAs(e.sender, picked.filePath)
     } finally {
+      redactionFlows.delete(e.sender.id)
       setPdfSaveAsInFlight(e.sender, false)
     }
   })
@@ -1454,6 +1507,8 @@ function registerPdfIpc(): void {
       const { images, pageNumbers, baseName } = request ?? {}
       if (!Array.isArray(images) || images.length === 0)
         return { ok: false, error: 'pdf: no images' }
+      if (!hasValidExportPageNumbers(pageNumbers, images.length))
+        return { ok: false, error: 'pdf: invalid page numbers' }
       const win =
         BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow() ?? undefined
       const picked = await showOpenDialogWithMemory(dialog, win, {
@@ -1463,13 +1518,12 @@ function registerPdfIpc(): void {
       const dir = picked.filePaths[0]
       if (picked.canceled || !dir) return { ok: true, canceled: true }
       try {
-        const safeBase = String(baseName || 'page').replace(/[/\\:*?"<>|]/g, '_')
+        const outputPaths = buildExportImagePaths(dir, baseName, pageNumbers)
         for (const [i, b64] of images.entries()) {
-          const no = pageNumbers?.[i] ?? i + 1
-          await writeFile(join(dir, `${safeBase}-p${no}.png`), Buffer.from(b64, 'base64'))
+          await writeFile(outputPaths[i]!, Buffer.from(b64, 'base64'))
         }
         // Reveal the exported images so success is never silent
-        shell.showItemInFolder(join(dir, `${safeBase}-p${pageNumbers?.[0] ?? 1}.png`))
+        shell.showItemInFolder(outputPaths[0]!)
         return { ok: true, savedDir: dir, count: images.length }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1546,6 +1600,8 @@ function grantAndTrack(wc: WebContents, openPath?: string | null): void {
   })
   wc.once('destroyed', () => {
     openPathByWc.delete(wcId)
+    redactionPathByWc.delete(wcId)
+    redactionFlows.delete(wcId)
     allowedByWc.delete(wcId)
     dirtyByWc.delete(wcId)
     saveAsTargetByWc.delete(wcId)

@@ -3,11 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { platformShortcuts } from '@genoffice/i18n'
 import {
   Dropdown,
-  RibbonCollapseButton,
   SHAPE_GALLERY_GROUPS,
   ShapePreview,
   useDismissablePopover,
   useRibbonCollapse,
+  aiPanelInitiallyOpen,
+  rememberAiPanelOpen,
 } from '@genoffice/ui'
 
 import {
@@ -38,7 +39,19 @@ import { NameManagerDialog, type DefinedNameAction, type DefinedNameRow } from '
 import { categoryOptionForPattern, numberFormatCategories } from './number-format'
 import { type SelectionFormat } from './selection-format'
 import { fontFamilyGroups, useSystemFontFamilies } from './system-fonts'
-import { isGridKeyTarget, shouldInterceptClearSelection } from './clear-selection-keyboard'
+import {
+  isFormulaBarKeyTarget,
+  isGridKeyTarget,
+  shouldInterceptClearSelection,
+} from './clear-selection-keyboard'
+import {
+  accountingStyle,
+  COMMA_STYLE,
+  PERCENT_STYLE,
+  RIBBON_CURRENCY_SYMBOL,
+} from './excel-format-shortcuts'
+import { isModalOpen, resolveGlobalShortcut } from './global-shortcuts'
+import { stepFontSize } from './font-size-ladder'
 
 import type { ChartSeriesVisualState } from '@genoffice/xlsx-gateway/domain/chart-visual'
 import type { ChangePlan } from '@genoffice/xlsx-gateway/domain/workbook.types'
@@ -60,6 +73,10 @@ import { ConsolidateDialog } from './ConsolidateDialog'
 import type { ConsolidateConfig } from './consolidate'
 import { HeaderFooterDialog, type HeaderFooterResult } from './HeaderFooterDialog'
 import type { HeaderFooterParts } from './edit-journal'
+import { useModalDialog } from './modal-dialog'
+import { STATUS_BAR_FUNCS, type StatusBarFunc } from './status-bar-stats'
+import { SHEET_ZOOM_MAX, SHEET_ZOOM_MIN, clampZoomPercent } from './zoom-range'
+import { ZoomDialog } from './ZoomDialog'
 
 // No File tab: file commands live in the macOS
 // application menu (File → Open/Save/Save As) and the toolbar icons.
@@ -122,8 +139,13 @@ const CHART_TEXT_LABELS: Record<ChartTextTarget, { heading: StringKey; command: 
 const IN_TAB = new URLSearchParams(window.location.search).get('mode') === 'tab'
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 
-/// Excel's grow/shrink font walks its size ladder, not ±1.
-const FONT_SIZE_LADDER = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 26, 28, 36, 48, 72]
+/// Univer's formula bar keeps its expanded state in React component state
+/// with no command behind it; the fold arrow is the only way in.
+function toggleFormulaBarExpand(): void {
+  document
+    .querySelector<HTMLElement>('[data-u-comp="formula-bar"] .univer-w-5.univer-cursor-pointer')
+    ?.click()
+}
 
 /// Review > Translate targets, shown in their native names (never localized).
 const TRANSLATE_LANGUAGES = [
@@ -140,15 +162,6 @@ const TRANSLATE_LANGUAGES = [
   'العربية',
 ] as const
 
-function stepFontSize(current: number, direction: 1 | -1): number {
-  if (direction === 1) {
-    return FONT_SIZE_LADDER.find((size) => size > current) ?? FONT_SIZE_LADDER.at(-1) ?? current
-  }
-  return (
-    [...FONT_SIZE_LADDER].reverse().find((size) => size < current) ?? FONT_SIZE_LADDER[0] ?? current
-  )
-}
-
 /// Glyph icons live in ribbon-icons.tsx, drawn to the shared icon standard
 /// (24×24 canvas, 1.5px strokes, round caps/joins); unmapped glyphs render
 /// as text (letterforms such as $, ?, θ, ƒx are typography, not icons).
@@ -161,9 +174,11 @@ function ToolSymbol({ symbol }: { readonly symbol: string }): React.JSX.Element 
 }
 
 interface ExcelShellProps {
+  readonly openingWorkbook: boolean
   readonly prompt: string
   readonly preview: ChangePlan | null
   readonly selectionFormat: SelectionFormat | null
+  readonly formatPainterActive: boolean
   /// True when the workbook has any cell content (the one-click AI action
   /// buttons are greyed out on an empty sheet).
   readonly sheetHasContent: boolean
@@ -211,8 +226,14 @@ interface ExcelShellProps {
   readonly onIsCellEditing: () => boolean
   /// Left side of the status bar (ready / streaming / AI progress messages).
   readonly statusMessage: string
+  readonly emptyCsvNotice: boolean
+  readonly onOpenWorkbook: () => void
+  readonly onDismissEmptyCsvNotice: () => void
   /// Zoom of the active sheet in percent, echoed by the status-bar slider.
   readonly zoomPercent: number
+  /// Aggregates ticked in the status bar's right-click menu (Excel parity).
+  readonly statusBarFuncs: readonly StatusBarFunc[]
+  readonly onToggleStatusBarFunc: (func: StatusBarFunc) => void
   /// True when the edit journal has unsaved changes (enables the QAT Save).
   readonly canSave: boolean
   readonly onSave: () => void
@@ -317,6 +338,7 @@ export function ExcelShell({
   prompt,
   preview,
   selectionFormat,
+  formatPainterActive,
   sheetHasContent,
   aiBusy,
   chat,
@@ -368,8 +390,14 @@ export function ExcelShell({
   onAiCitation,
   onCommand,
   onIsCellEditing,
+  openingWorkbook,
   statusMessage,
+  emptyCsvNotice,
+  onOpenWorkbook,
+  onDismissEmptyCsvNotice,
   zoomPercent,
+  statusBarFuncs,
+  onToggleStatusBarFunc,
   canSave,
   onSave,
   canSaveAs,
@@ -387,13 +415,16 @@ export function ExcelShell({
 }: ExcelShellProps): React.JSX.Element {
   const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<RibbonTab>('Home')
-  const collapse = useRibbonCollapse('ai-sheets-ribbon-collapsed')
+  const collapse = useRibbonCollapse('ai-sheets-ribbon-collapsed', {
+    collapse: t('appRibbonCollapse'),
+    expand: t('appRibbonExpand'),
+  })
   // Persisted so a closed AI panel stays closed on next launch (docs/slides parity)
-  const [isCopilotOpen, setIsCopilotOpen] = useState(
-    () => localStorage.getItem('ai-sheets-show-ai') !== '0',
+  const [isCopilotOpen, setIsCopilotOpen] = useState(() =>
+    aiPanelInitiallyOpen('ai-sheets-show-ai'),
   )
   useEffect(() => {
-    localStorage.setItem('ai-sheets-show-ai', isCopilotOpen ? '1' : '0')
+    rememberAiPanelOpen('ai-sheets-show-ai', isCopilotOpen)
   }, [isCopilotOpen])
   const [showFormatCells, setShowFormatCells] = useState(false)
   const [axisSizeTarget, setAxisSizeTarget] = useState<'row' | 'col' | null>(null)
@@ -413,87 +444,88 @@ export function ExcelShell({
   const [showGoalSeek, setShowGoalSeek] = useState(false)
   const [showConsolidateDialog, setShowConsolidateDialog] = useState(false)
   const [showGoTo, setShowGoTo] = useState(false)
+  const [showZoomDialog, setShowZoomDialog] = useState(false)
+  const [statsMenuAt, setStatsMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const openStatsMenu = (event: { clientX: number; clientY: number; preventDefault(): void }) => {
+    event.preventDefault()
+    setStatsMenuAt({ x: event.clientX, y: event.clientY })
+  }
+  useEffect(() => {
+    // Univer owns the footer that hosts the sheet tabs and the statistics;
+    // right-clicking anywhere in it outside the tab strip opens our menu.
+    const onContextMenu = (event: MouseEvent): void => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const footer = target.closest('#univer-container section[data-range-selector]')
+      if (!footer || footer.firstElementChild?.contains(target)) return
+      openStatsMenu(event)
+    }
+    document.addEventListener('contextmenu', onContextMenu)
+    return () => document.removeEventListener('contextmenu', onContextMenu)
+  }, [])
   const [showHeaderFooter, setShowHeaderFooter] = useState(false)
   const [showAllowEditRanges, setShowAllowEditRanges] = useState(false)
   /// Non-null while the Chart Design → Add Chart Element text prompt is open.
   const [chartTextTarget, setChartTextTarget] = useState<ChartTextTarget | null>(null)
   const onCommandRef = useRef(onCommand)
   const onIsCellEditingRef = useRef(onIsCellEditing)
+  const openingWorkbookRef = useRef(openingWorkbook)
   onCommandRef.current = onCommand
   onIsCellEditingRef.current = onIsCellEditing
+  openingWorkbookRef.current = openingWorkbook
+  const dispatchCommand = (command: string): void => {
+    if (command === 'format-cells') setShowFormatCells(true)
+    else if (command === 'row-height-open') setAxisSizeTarget('row')
+    else if (command === 'col-width-open') setAxisSizeTarget('col')
+    else if (command === 'link-open') setShowLinkDialog(true)
+    else if (command === 'sort-custom-open') setShowSortDialog(true)
+    else if (command === 'remove-duplicates-open') setShowDedupeDialog(true)
+    else if (command === 'name-manager-open') setShowNameManager(true)
+    else if (command === 'pivot-open') setShowPivotDialog(true)
+    else if (command === 'pivot-edit') setPivotEditSeed(onGetPivotEditSeed())
+    else if (command === 'insert-function-open') setInsertFunctionCat('All')
+    else if (command.startsWith('insert-function-open:'))
+      setInsertFunctionCat(command.slice('insert-function-open:'.length))
+    else if (command === 'goal-seek-open') setShowGoalSeek(true)
+    else if (command === 'subtotal-open') setShowSubtotalDialog(true)
+    else if (command === 'consolidate-open') setShowConsolidateDialog(true)
+    else if (command === 'goto-open') setShowGoTo(true)
+    else if (command === 'header-footer-open') setShowHeaderFooter(true)
+    else if (command === 'allow-edit-ranges-open') setShowAllowEditRanges(true)
+    else if (command === 'ai-open-panel') setIsCopilotOpen(true)
+    else if (command === 'ai-toggle-panel') setIsCopilotOpen((v) => !v)
+    else if (command === 'chart-element-title') setChartTextTarget('title')
+    else if (command === 'chart-element-axis-cat') setChartTextTarget('axis-category')
+    else if (command === 'chart-element-axis-val') setChartTextTarget('axis-value')
+    else if (command === 'formula-bar-toggle') toggleFormulaBarExpand()
+    else onCommand(command)
+  }
+  const dispatchCommandRef = useRef(dispatchCommand)
+  dispatchCommandRef.current = dispatchCommand
   useEffect(() => {
-    // Shortcuts that write to the sheet must not fire from a text field —
-    // neither app fields (AI chat, dialogs) nor Univer's own (find/replace,
-    // rule panels, formula bar), which are native inputs INSIDE the Univer
-    // container. isGridKeyTarget tells the grid's hidden focus host apart
-    // from all of those; only Univer knows whether a cell is being edited.
-    const canEditSheet = (event: KeyboardEvent): boolean =>
-      !onIsCellEditingRef.current() && isGridKeyTarget(event.target)
+    // Table + gating live in global-shortcuts.ts; text fields (AI chat,
+    // dialogs, Univer's find/replace and formula bar) never trigger these.
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key === '1') {
-        event.preventDefault()
-        setShowFormatCells(true)
+      if (openingWorkbookRef.current) return
+      const action = resolveGlobalShortcut(event, {
+        isMac: IS_MAC,
+        modalOpen: isModalOpen(),
+        cellEditing: onIsCellEditingRef.current(),
+        gridTarget: isGridKeyTarget(event.target),
+        formulaBarTarget: isFormulaBarKeyTarget(event.target),
+      })
+      if (!action) return
+      event.preventDefault()
+      if (action.kind === 'dialog') {
+        if (action.dialog === 'formatCells') setShowFormatCells(true)
+        else setShowGoTo(true)
+        return
       }
-      // Excel's Go To shortcut (⌘G / Ctrl+G).
-      if ((event.metaKey || event.ctrlKey) && event.key === 'g') {
-        event.preventDefault()
-        setShowGoTo(true)
-      }
-      // Excel's Show Formulas shortcut (⌘` / Ctrl+`).
-      if ((event.metaKey || event.ctrlKey) && event.key === '`') {
-        event.preventDefault()
-        onCommand('toggle-show-formulas')
-      }
-      // Excel's strikethrough toggle (⌘5 / Ctrl+5). While a cell is being
-      // edited the range-level toggle would hit the wrong target (Excel
-      // strikes the selected text instead), so it only acts on the grid.
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key === '5') {
-        if (canEditSheet(event)) {
-          event.preventDefault()
-          onCommand('strike')
-        }
-      }
-      // Excel's AutoSum (Alt+= / ⌥⌘= is reserved by macOS, Excel-mac uses ⇧⌘T;
-      // plain Alt+= covers win/linux and most mac keyboards).
-      if (event.altKey && !event.metaKey && !event.ctrlKey && event.key === '=') {
-        if (canEditSheet(event)) {
-          event.preventDefault()
-          onCommand('autofn:SUM')
-        }
-      }
-      // Excel's insert current date / time (Ctrl+; / Ctrl+Shift+;).
-      if ((event.metaKey || event.ctrlKey) && event.code === 'Semicolon') {
-        if (canEditSheet(event)) {
-          event.preventDefault()
-          onCommand(event.shiftKey ? 'insert-now:time' : 'insert-now:date')
-        }
-      }
-      // Excel's manual recalculation (F9 workbook, Shift+F9 active sheet).
-      if (event.key === 'F9' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if (!onIsCellEditingRef.current()) {
-          event.preventDefault()
-          onCommand(event.shiftKey ? 'calculate-sheet' : 'calculate-now')
-        }
-      }
-      // Excel's PageUp/PageDown; Alt+ pages horizontally. In-cell editing is
-      // checked in the command handler via the workbook's own editing state.
-      if (
-        (event.key === 'PageDown' || event.key === 'PageUp') &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.shiftKey &&
-        !event.defaultPrevented
-      ) {
-        if (isGridKeyTarget(event.target)) {
-          event.preventDefault()
-          const axis = event.altKey ? 'page-col' : 'page-row'
-          onCommand(`${axis}:${event.key === 'PageDown' ? 1 : -1}`)
-        }
-      }
+      dispatchCommandRef.current(action.command)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onCommand])
+  }, [])
   // Univer's shortcut dispatcher captures keydown and binds Backspace to
   // "delete-and-start-editing" (active cell only). Register on window
   // capture *here* (child effect runs before App creates Univer) so we
@@ -501,6 +533,7 @@ export function ExcelShell({
   // mounted once: re-binding after Univer starts would lose capture order.
   useEffect(() => {
     const onKeyDownCapture = (event: KeyboardEvent): void => {
+      if (openingWorkbookRef.current) return
       if (!shouldInterceptClearSelection(event, onIsCellEditingRef.current())) return
       event.preventDefault()
       event.stopImmediatePropagation()
@@ -559,7 +592,11 @@ export function ExcelShell({
   const saveAsTitle = `${t('appSaveAs')} (${platformShortcuts('⇧⌘S')})`
 
   return (
-    <main className={`app-shell ${isCopilotOpen ? '' : 'copilot-collapsed'}`}>
+    <main
+      className={`app-shell ${isCopilotOpen ? '' : 'copilot-collapsed'}`}
+      inert={openingWorkbook}
+      aria-busy={openingWorkbook}
+    >
       <header className={`excel-header ${collapse.rootClass}`} ref={collapse.rootRef}>
         <nav
           className={`ribbon-tabs ${IN_TAB ? '' : IS_MAC ? 'ribbon-tabs-mac' : 'ribbon-tabs-win'}`}
@@ -621,7 +658,8 @@ export function ExcelShell({
           <span className="qa-sep" aria-hidden="true" />
           {visibleTabs.map((tab) => (
             <button
-              className={`${tab === activeTab ? 'active' : ''} ${tab === 'Chart Design' ? 'contextual' : ''}`}
+              className={`${collapse.tabClass(tab === activeTab)} ${tab === 'Chart Design' ? 'contextual' : ''}`}
+              data-tip={collapse.tabTip(tab === activeTab)}
               key={tab}
               onClick={() => {
                 collapse.onTabPress(tab === activeTab)
@@ -640,6 +678,7 @@ export function ExcelShell({
         <Ribbon
           activeTab={activeTab}
           selectionFormat={selectionFormat}
+          formatPainterActive={formatPainterActive}
           sheetHasContent={sheetHasContent}
           sheetProtected={onGetSheetProtection()}
           workbookProtected={onGetWorkbookProtection()}
@@ -660,42 +699,13 @@ export function ExcelShell({
           calcManual={calcManual}
           onRefreshPivot={onRefreshPivot}
           onIsSelectionInPivot={onIsSelectionInPivot}
-          onCommand={(command) => {
-            if (command === 'format-cells') setShowFormatCells(true)
-            else if (command === 'row-height-open') setAxisSizeTarget('row')
-            else if (command === 'col-width-open') setAxisSizeTarget('col')
-            else if (command === 'link-open') setShowLinkDialog(true)
-            else if (command === 'sort-custom-open') setShowSortDialog(true)
-            else if (command === 'remove-duplicates-open') setShowDedupeDialog(true)
-            else if (command === 'name-manager-open') setShowNameManager(true)
-            else if (command === 'pivot-open') setShowPivotDialog(true)
-            else if (command === 'pivot-edit') setPivotEditSeed(onGetPivotEditSeed())
-            else if (command === 'insert-function-open') setInsertFunctionCat('All')
-            else if (command.startsWith('insert-function-open:'))
-              setInsertFunctionCat(command.slice('insert-function-open:'.length))
-            else if (command === 'goal-seek-open') setShowGoalSeek(true)
-            else if (command === 'subtotal-open') setShowSubtotalDialog(true)
-            else if (command === 'consolidate-open') setShowConsolidateDialog(true)
-            else if (command === 'goto-open') setShowGoTo(true)
-            else if (command === 'header-footer-open') setShowHeaderFooter(true)
-            else if (command === 'allow-edit-ranges-open') setShowAllowEditRanges(true)
-            else if (command === 'ai-open-panel') setIsCopilotOpen(true)
-            else if (command === 'ai-toggle-panel') setIsCopilotOpen((v) => !v)
-            else if (command === 'chart-element-title') setChartTextTarget('title')
-            else if (command === 'chart-element-axis-cat') setChartTextTarget('axis-category')
-            else if (command === 'chart-element-axis-val') setChartTextTarget('axis-value')
-            else onCommand(command)
-          }}
+          onCommand={dispatchCommand}
           onAiRun={(nextPrompt) => {
             setIsCopilotOpen(true)
             onSend(nextPrompt)
           }}
           aiOpen={isCopilotOpen}
           onAiToggle={() => setIsCopilotOpen((open) => !open)}
-        />
-        <RibbonCollapseButton
-          state={collapse}
-          labels={{ collapse: t('appRibbonCollapse'), pin: t('appRibbonPin') }}
         />
       </header>
 
@@ -732,6 +742,22 @@ export function ExcelShell({
         <div className="sheet-main">
           <section className="workbook-area">
             <div id="univer-container" className="spreadsheet" />
+            {emptyCsvNotice && (
+              <div className="csv-empty-notice" role="status">
+                <span>{t('appCsvEmpty')}</span>
+                <button type="button" onClick={onOpenWorkbook}>
+                  {t('appOpenWorkbookTitle')}
+                </button>
+                <button
+                  type="button"
+                  className="csv-empty-notice-close"
+                  aria-label={t('appClose')}
+                  onClick={onDismissEmptyCsvNotice}
+                >
+                  ×
+                </button>
+              </div>
+            )}
           </section>
           {aiSelectionAskAnchor && aiScopeRange && !aiBusy && (
             <AiSelectionAsk
@@ -746,11 +772,43 @@ export function ExcelShell({
           )}
 
           {/* Status bar spans the sheet column only — the AI dock keeps the full window height (unified with docs/slides). */}
-          <footer className="status-bar">
+          <footer className="status-bar" onContextMenu={openStatsMenu}>
             <div className="status-left">
               <span className="status-msg">{statusMessage}</span>
             </div>
             <div className="status-right">
+              {/* One-of-N view switcher, so it is a radiogroup rather than a
+                  second set of buttons named like the View tab's. */}
+              <div
+                className="view-switch"
+                role="radiogroup"
+                aria-label={t('appGroupWorkbookViews')}
+              >
+                <button
+                  className="view-btn"
+                  role="radio"
+                  data-tip={t('appNormalViewTip')}
+                  aria-label={t('appNormalViewTip')}
+                  aria-checked={pageLayout.pageBreakPreview !== true}
+                  onClick={() => {
+                    if (pageLayout.pageBreakPreview === true) onCommand('toggle-page-break-preview')
+                  }}
+                >
+                  ▦
+                </button>
+                <button
+                  className="view-btn"
+                  role="radio"
+                  data-tip={t('appPageBreakPreviewTip')}
+                  aria-label={t('appPageBreakPreviewTip')}
+                  aria-checked={pageLayout.pageBreakPreview === true}
+                  onClick={() => {
+                    if (pageLayout.pageBreakPreview !== true) onCommand('toggle-page-break-preview')
+                  }}
+                >
+                  ┆
+                </button>
+              </div>
               <button
                 className="zoom-btn"
                 data-tip={t('appZoomOut')}
@@ -762,9 +820,9 @@ export function ExcelShell({
               <input
                 className="zoom-slider"
                 type="range"
-                min={50}
-                max={400}
-                value={Math.min(400, Math.max(50, zoomPercent))}
+                min={SHEET_ZOOM_MIN}
+                max={SHEET_ZOOM_MAX}
+                value={clampZoomPercent(zoomPercent)}
                 onChange={(event) => onCommand(`zoom:${event.target.value}`)}
               />
               <button
@@ -775,9 +833,24 @@ export function ExcelShell({
               >
                 +
               </button>
-              <span className="zoom-value">{zoomPercent}%</span>
+              <button
+                className="zoom-value"
+                data-tip={t('appZoomLevel')}
+                aria-label={t('appZoomLevel')}
+                onClick={() => setShowZoomDialog(true)}
+              >
+                {zoomPercent}%
+              </button>
             </div>
           </footer>
+          {statsMenuAt && (
+            <StatusBarStatsMenu
+              at={statsMenuAt}
+              enabled={statusBarFuncs}
+              onToggle={onToggleStatusBarFunc}
+              onClose={() => setStatsMenuAt(null)}
+            />
+          )}
         </div>
       </div>
       {showFormatCells && (
@@ -891,6 +964,13 @@ export function ExcelShell({
           onClose={() => setShowConsolidateDialog(false)}
         />
       )}
+      {showZoomDialog && (
+        <ZoomDialog
+          zoomPercent={zoomPercent}
+          onCommand={onCommand}
+          onClose={() => setShowZoomDialog(false)}
+        />
+      )}
       {showGoTo && (
         <GoToDialog
           names={onListDefinedNames()}
@@ -956,11 +1036,13 @@ function SortDialog({
       previous.map((level, at) => (at === index ? { ...level, ...patch } : level)),
     )
   }
+  const modal = useModalDialog(onClose)
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div
         className="format-cells-dialog sort-dialog"
         role="dialog"
+        {...modal}
         aria-label={t('appCustomSort')}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1024,11 +1106,13 @@ function RemoveDuplicatesDialog({
 }): React.JSX.Element {
   const { t } = useI18n()
   const [hasHeader, setHasHeader] = useState(true)
+  const modal = useModalDialog(onClose)
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div
         className="format-cells-dialog sort-dialog"
         role="dialog"
+        {...modal}
         aria-label={t('appRemoveDuplicates')}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1081,11 +1165,13 @@ function ChartTextDialog({
     onCommand(`${command}:${value.trim()}`)
     onClose()
   }
+  const modal = useModalDialog(onClose)
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div
         className="format-cells-dialog link-dialog"
         role="dialog"
+        {...modal}
         aria-label={t(heading)}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1101,7 +1187,6 @@ function ChartTextDialog({
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') apply()
-                if (event.key === 'Escape') onClose()
               }}
             />
           </label>
@@ -1138,11 +1223,13 @@ function AxisSizeDialog({
     onCommand(`${axis === 'row' ? 'row-height' : 'col-width'}:${parsed}`)
     onClose()
   }
+  const modal = useModalDialog(onClose)
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div
         className="format-cells-dialog link-dialog"
         role="dialog"
+        {...modal}
         aria-label={t(axis === 'row' ? 'appRowHeight' : 'appColWidth')}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1158,7 +1245,6 @@ function AxisSizeDialog({
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') apply()
-                if (event.key === 'Escape') onClose()
               }}
             />
           </label>
@@ -1189,11 +1275,13 @@ function LinkDialog({
     if (value.trim()) onCommand(`link-set:${encodeURIComponent(value)}`)
     onClose()
   }
+  const modal = useModalDialog(onClose)
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div
         className="format-cells-dialog link-dialog"
         role="dialog"
+        {...modal}
         aria-label={t(currentTarget ? 'appEditLinkTitle' : 'appInsertLinkTitle')}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1209,7 +1297,6 @@ function LinkDialog({
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') apply()
-                if (event.key === 'Escape') onClose()
               }}
             />
           </label>
@@ -1238,6 +1325,7 @@ function LinkDialog({
 function Ribbon({
   activeTab,
   selectionFormat,
+  formatPainterActive,
   sheetHasContent,
   sheetProtected,
   workbookProtected,
@@ -1256,6 +1344,7 @@ function Ribbon({
 }: {
   readonly activeTab: RibbonTab
   readonly selectionFormat: SelectionFormat | null
+  readonly formatPainterActive: boolean
   readonly sheetHasContent: boolean
   readonly sheetProtected: boolean | null
   readonly workbookProtected: boolean | null
@@ -2628,9 +2717,13 @@ function Ribbon({
             <ToolSymbol symbol="⧉" />
           </button>
           <button
-            data-tip={t('appFormatPainter')}
+            data-tip={t('appFormatPainterTip')}
             aria-label={t('appFormatPainter')}
-            onClick={() => onCommand('format-painter')}
+            aria-pressed={formatPainterActive}
+            className={formatPainterActive ? 'is-active' : ''}
+            onClick={(event) =>
+              onCommand(event.detail >= 2 ? 'format-painter:dblclick' : 'format-painter')
+            }
           >
             <ToolSymbol symbol="🖌" />
           </button>
@@ -2885,21 +2978,21 @@ function Ribbon({
             <button
               data-tip={t('appCurrency')}
               aria-label={t('appCurrency')}
-              onClick={() => onCommand('format:$#,##0.00')}
+              onClick={() => onCommand(`format:${accountingStyle(RIBBON_CURRENCY_SYMBOL)}`)}
             >
               $
             </button>
             <button
               data-tip={t('appPercentTitle')}
               aria-label={t('appPercentTitle')}
-              onClick={() => onCommand('format:0.00%')}
+              onClick={() => onCommand(`format:${PERCENT_STYLE}`)}
             >
               %
             </button>
             <button
               data-tip={t('appThousands')}
               aria-label={t('appThousands')}
-              onClick={() => onCommand('format:#,##0')}
+              onClick={() => onCommand(`format:${COMMA_STYLE}`)}
             >
               ,
             </button>
@@ -3017,6 +3110,22 @@ function Ribbon({
               onClick={() => onCommand('delete-col-here')}
             >
               <ToolSymbol symbol="⇥" />
+            </button>
+            <button
+              data-tip={t('appInsertCells')}
+              data-tip-kbd={platformShortcuts('⇧⌘=')}
+              aria-label={t('appInsertCells')}
+              onClick={() => onCommand('insert-cells')}
+            >
+              <ToolSymbol symbol="⊞" />
+            </button>
+            <button
+              data-tip={t('appDeleteCells')}
+              data-tip-kbd={platformShortcuts('⌘-')}
+              aria-label={t('appDeleteCells')}
+              onClick={() => onCommand('delete-cells')}
+            >
+              <ToolSymbol symbol="⊟" />
             </button>
             <MenuSelect
               className="select-like compact"
@@ -3141,6 +3250,60 @@ function autoSumOptions(t: (key: StringKey) => string): { value: string; label: 
     { value: 'MAX', label: t('appFnMax') },
     { value: 'MIN', label: t('appFnMin') },
   ]
+}
+
+const STAT_LABEL: Record<StatusBarFunc, StringKey> = {
+  AVERAGE: 'appStatAverage',
+  COUNTA: 'appStatCount',
+  COUNT: 'appStatNumericalCount',
+  MIN: 'appStatMin',
+  MAX: 'appStatMax',
+  SUM: 'appStatSum',
+}
+
+/// Excel's status bar right-click menu: tick the aggregates the footer shows.
+function StatusBarStatsMenu({
+  at,
+  enabled,
+  onToggle,
+  onClose,
+}: {
+  readonly at: { x: number; y: number }
+  readonly enabled: readonly StatusBarFunc[]
+  readonly onToggle: (func: StatusBarFunc) => void
+  readonly onClose: () => void
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const ref = useRef<HTMLDivElement>(null)
+  useEscapeClose(true, onClose)
+  useEffect(() => {
+    const onPress = (event: MouseEvent): void => {
+      if (!ref.current?.contains(event.target as Node)) onClose()
+    }
+    window.addEventListener('mousedown', onPress)
+    return () => window.removeEventListener('mousedown', onPress)
+  }, [onClose])
+  // Flip up when the cursor sits near the bottom: the status bar always does.
+  const style: React.CSSProperties = {
+    left: Math.min(at.x, window.innerWidth - 200),
+    bottom: Math.max(8, window.innerHeight - at.y),
+  }
+  return (
+    <div ref={ref} className="status-stats-menu" role="menu" style={style}>
+      {STATUS_BAR_FUNCS.map((func) => (
+        <button
+          key={func}
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={enabled.includes(func)}
+          onClick={() => onToggle(func)}
+        >
+          <i className="check-box">{enabled.includes(func) ? '✓' : ''}</i>
+          {t(STAT_LABEL[func])}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 /// Escape-to-close for the ribbon dropdowns; outside-press / blur / shell

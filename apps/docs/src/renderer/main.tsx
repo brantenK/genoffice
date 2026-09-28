@@ -45,7 +45,7 @@ async function bootstrap(): Promise<void> {
   document.documentElement.lang = htmlLang(lang)
   applyTheme(theme)
   window.desktop?.onThemeChanged(applyTheme)
-  void window.desktop
+  await window.desktop
     ?.getAiPanelPrefs?.()
     .then(applyAiPanelPrefs)
     .catch(() => {})

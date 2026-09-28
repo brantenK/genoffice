@@ -730,11 +730,17 @@ export const workbookFileSchema = z
     /// Converted .xls import: the first save opens a Save As dialog,
     /// so background flows (AutoSave) must not trigger mode 'save'.
     needsSaveAs: z.boolean().optional(),
+    /// The shell's "New spreadsheet" before its first save: still needsSaveAs
+    /// for Ctrl+S, but AutoSave and the recovery copy keep running (a quiet
+    /// save writes the backing temp file in place, no dialog).
+    unsavedNew: z.boolean().optional(),
     /// CSV session: the original .csv on disk. Save keeps the CSV identity —
     /// the renderer sends csvContent with the save and the main process
     /// writes it back here. Background flows (AutoSave, crash recovery)
     /// stand down: silently flattening the file would lose data.
     csvPath: z.string().min(1).optional(),
+    /// The source CSV had no data rows; the renderer opens a blank grid with one notice.
+    emptyCsv: z.boolean().optional(),
     /// Session opened from a restored crash-recovery copy: Save silently
     /// writes back to the original file, and the 30s recovery writer stands
     /// down (it would overwrite the copy the sidecar is streaming from).
@@ -1726,6 +1732,9 @@ export const workbookSaveRequestSchema = z
     /// change is the workbook bytes themselves, so the request is valid with
     /// an otherwise empty payload (like an explicit Save As).
     restoreWriteBack: z.boolean().optional(),
+    /// Background save (AutoSave, AI-run autosave): an unsaved new workbook
+    /// then writes its backing file in place instead of asking where to save.
+    quiet: z.boolean().optional(),
     /// CSV session in-place save: the active sheet serialized as CSV text.
     /// Written back to the session's original .csv after the xlsx save.
     csvContent: z.string().max(MAX_CSV_EXPORT_CHARS).optional(),
@@ -2266,6 +2275,7 @@ const agentToolCallSchema = z
     id: z.string(),
     name: z.string(),
     input: z.record(z.string(), z.unknown()),
+    signature: z.string().optional(),
   })
   .strict()
 
