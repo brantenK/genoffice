@@ -503,10 +503,14 @@ export function SettingsView() {
 
         <div className="flex items-end gap-3">
           <div>
-            <label className="block text-xs font-semibold text-[#525252] mb-1">
+            <label
+              htmlFor="close-through-date"
+              className="block text-xs font-semibold text-[#525252] mb-1"
+            >
               Close through date
             </label>
             <input
+              id="close-through-date"
               type="date"
               value={closeThrough}
               onChange={(e) => setCloseThrough(e.target.value)}

@@ -398,7 +398,7 @@ test.describe('Zano Books flows: the other half of the product', () => {
 
       // ── 4) Closing the period on an empty ledger works ──────────────────
       await goto(books, 'Settings')
-      const closeThrough = books.locator('input[type="date"]').first()
+      const closeThrough = books.getByLabel('Close through date')
       await closeThrough.fill('2026-09-26')
       await books.getByRole('button', { name: /Close (Financial Year|Period)/i }).click()
       await books.waitForTimeout(1200)
