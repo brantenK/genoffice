@@ -64,13 +64,20 @@ Failed in some runs but not all — not treated as a known failure.
 
 ## @genoffice/shell
 
-582 passed, 5 failed, 0 skipped
+582 passed, 6 failed, 0 skipped
 
 - tests/cloud-projects.test.ts > cloud projects store account binding > rejects and deletes another account's store
 - tests/cloud-projects.test.ts > cloud projects store account binding > serves the store back to the same account
 - tests/cloud-projects.test.ts > cloud projects sync account isolation > aborts without touching the store when the account switches mid-sync
 - tests/cloud-projects.test.ts > cloud projects sync account isolation > does not share an in-flight sync across accounts
 - tests/cloud-projects.test.ts > cloud projects sync account isolation > writes the store bound to the account that synced
+- tests/cloud-projects.test.ts > cloud projects sync account isolation > refreshes later pages when the first page is unchanged
+
+(The sixth entry is hand-added after the 2026-09-28 sync, not tool-measured: the
+test is new in that sync's upstream range and fails on Windows for the same
+store-file-delete-does-not-take-effect-on-win32 root cause as the five above —
+both the test and `apps/shell/src/main/cloud-projects.ts` are byte-identical to
+upstream. Hand-added per the runbook's hand-edit precedent.)
 
 ## @genoffice/slides
 

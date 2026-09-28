@@ -134,7 +134,9 @@ describe('createDefaultAppService', () => {
       platform: 'linux',
       run,
       readFile: (p) => {
-        if (p.endsWith('/usr/share/applications/wps-office-et.desktop'))
+        // path.join normalizes to the host's separators, so on Windows the
+        // desktop-file path arrives with backslashes; compare both spellings
+        if (p.replaceAll('\\', '/').endsWith('/usr/share/applications/wps-office-et.desktop'))
           return '[Desktop Entry]\nName=WPS Spreadsheets\n'
         throw new Error('ENOENT')
       },

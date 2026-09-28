@@ -233,9 +233,10 @@ Still open:
   `packages/ai-search/src/genoffice-auth.ts`, `apps/shell/src/main/cloud-projects.ts`
   and the star-prompt IPC handlers are unreachable dead code (renderer UI
   removed) — deep removal is a follow-up, not worth the merge risk now.
-- 5 pre-existing Windows test failures (HEAD-identical): shell
-  `cloud-projects.test.ts` account-store binding/lifecycle — the store file
-  delete does not take effect on win32; candidate upstream Windows-CI PR.
+- 6 pre-existing Windows test failures (HEAD-identical; the sixth was added by
+  upstream's 2026-09-28 sync range and fails for the same root cause): shell
+  `cloud-projects.test.ts` account-store binding/lifecycle + page-refresh sync —
+  the store file delete does not take effect on win32; candidate upstream Windows-CI PR.
 - `apps/docs` has 2 load-flaky tests (`docx-encryption.test.ts`,
   `protect-dialog.test.ts`) that pass in isolation but time out in the full
   workspace run on this OneDrive-synced disk — see `fork/TRIAGE.md`.
