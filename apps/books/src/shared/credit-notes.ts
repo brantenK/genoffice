@@ -5,6 +5,7 @@
 
 import type {
   Account,
+  BankTransaction,
   Invoice,
   InvoiceStatus,
   JournalEntry,
@@ -12,7 +13,9 @@ import type {
   Party,
 } from './types'
 import {
+  createBankImportJournal,
   journalLineAmount,
+  nextJournalNumber,
   postedInvoiceAmounts,
   round2,
   toBaseAmount,
@@ -76,6 +79,7 @@ export function createCreditNoteJournal(
       id: `je-i-ar-cn-${Date.now()}-${randomSuffix}`,
       accountId: arAcc.id,
       accountName: arAcc.name,
+      invoiceId: invoice.id,
       partyId: invoice.partyId || party?.id,
       partyName: invoice.partyName || party?.name,
       debit: grandTotal < 0 ? absGrand : 0,
@@ -91,6 +95,7 @@ export function createCreditNoteJournal(
       id: `je-i-ap-cn-${Date.now()}-${randomSuffix}`,
       accountId: apAcc.id,
       accountName: apAcc.name,
+      invoiceId: invoice.id,
       partyId: invoice.partyId || party?.id,
       partyName: invoice.partyName || party?.name,
       debit: grandTotal >= 0 ? absGrand : 0,
@@ -175,6 +180,7 @@ export function createCreditNoteJournal(
         id: `je-i-cn-${grpIdx++}-${Date.now()}-${randomSuffix}`,
         accountId: grp.accountId,
         accountName: grp.accountName,
+        invoiceId: invoice.id,
         debit: onDebitSide ? absAmt : 0,
         credit: onDebitSide ? 0 : absAmt,
         remark: isNegative
@@ -194,6 +200,7 @@ export function createCreditNoteJournal(
       id: `je-i-cn-disc-${Date.now()}-${randomSuffix}`,
       accountId: first.accountId,
       accountName: first.accountName,
+      invoiceId: invoice.id,
       debit: onDebitSide ? absDiscount : 0,
       credit: onDebitSide ? 0 : absDiscount,
       remark: `Credit Note Discount Reversal - ${invoice.invoiceNumber}`,
@@ -220,6 +227,7 @@ export function createCreditNoteJournal(
       id: `je-i-vat-cn-${Date.now()}-${randomSuffix}`,
       accountId: vatAcc.id,
       accountName: vatAcc.name,
+      invoiceId: invoice.id,
       debit: onDebitSide ? absTax : 0,
       credit: onDebitSide ? 0 : absTax,
       remark: isSales
@@ -238,6 +246,7 @@ export function createCreditNoteJournal(
       id: `je-i-cn-round-${Date.now()}-${randomSuffix}`,
       accountId: primary.accountId,
       accountName: primary.accountName,
+      invoiceId: invoice.id,
       debit: onDebitSide ? absRoundOff : 0,
       credit: onDebitSide ? 0 : absRoundOff,
       remark: `Credit Note Round-off Reversal - ${invoice.invoiceNumber}`,
@@ -393,10 +402,171 @@ export function journalReferencesInvoice(journal: JournalEntry, invoiceNumber: s
  * posted invoice. Matching is by exact reference (see
  * `journalReferencesInvoice`), so a number that is merely a prefix of another
  * (INV-2026-001 vs INV-2026-0011) leaves the other invoice's journals alone.
+ *
+ * LEGACY helper: product paths now attribute journals structurally (see
+ * `journalOwnedByInvoice`) — remark text is not invoice identity, because
+ * statement descriptions ride inside remarks and would couple unrelated
+ * journals to this invoice's number. Retained for historical tooling and the
+ * helper's own suite.
  */
 export function reversalJournalRemoval(
   oldInvoiceNumber: string,
   journalEntries: JournalEntry[],
 ): JournalEntry[] {
   return (journalEntries || []).filter((je) => !journalReferencesInvoice(je, oldInvoiceNumber))
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Structural invoice attribution (findings F3/F6): an invoice's journals
+   are found by a structural key — JournalEntryItem.invoiceId, stamped by
+   every invoice-owned journal builder at posting time — never by matching
+   remark or description text. Statement text belongs to the STATEMENT.
+   ════════════════════════════════════════════════════════════════════ */
+
+/** Cash-side accounts are statement-owned and never carry invoice attribution. */
+const CASH_SIDE_ACCOUNTS = new Set(['acc-bank', 'acc-suspense'])
+
+/**
+ * True when the journal entry belongs to the given invoice, by structural
+ * attribution: a leg stamped with this invoice's id. Journals posted before
+ * the attribution key existed (legacy rows whose legs carry no invoiceId) fall
+ * back to ITEM remarks only — never the entry remark, which carries raw
+ * statement text — and never through a cash-side leg, whose remark embeds the
+ * statement description. This keeps legacy behaviour for the invoice's own
+ * posting/settlement legs while making import journals (whose only legs are
+ * cash-side) permanently immune to remark coupling.
+ */
+export function journalOwnedByInvoice(
+  journal: JournalEntry,
+  invoice: Pick<Invoice, 'id' | 'invoiceNumber'>,
+): boolean {
+  const reference = String(invoice.invoiceNumber || '').trim()
+  return (journal?.items || []).some((item) => {
+    if (item.invoiceId) return item.invoiceId === invoice.id
+    if (!reference) return false
+    return !CASH_SIDE_ACCOUNTS.has(item.accountId) && mentionsReference(item?.remark, reference)
+  })
+}
+
+/** The journals that belong to the given invoice, by structural attribution. */
+export function invoiceOwnedJournals(
+  invoice: Pick<Invoice, 'id' | 'invoiceNumber'>,
+  journalEntries: JournalEntry[],
+): JournalEntry[] {
+  return (journalEntries || []).filter((je) => journalOwnedByInvoice(je, invoice))
+}
+
+export interface InvoiceDeletionUnwind {
+  journalEntries: JournalEntry[]
+  bankTransactions: BankTransaction[]
+}
+
+/**
+ * THE coherent delete unwind for a posted invoice (findings F3/F6).
+ *
+ * Removes the invoice's OWN journals by structural attribution — the posting
+ * journal and every settlement journal allocated to it (payment settlements,
+ * reconciliation reclasses, unapplied-receipt rides). A reclass entry pairs an
+ * invoice-owned AR/AP leg with a statement-owned Suspense leg; removing the
+ * whole entry releases the statement's cash back to Suspense, which is exactly
+ * the "unallocated remainder" the deletion must leave behind.
+ *
+ * Every statement line the invoice touched is then restored to a coherent
+ * allocation state:
+ * - payment links owned by payments that died with the invoice are dropped;
+ * - the line stays reconciled while a LIVE allocation survives for it (a
+ *   sibling reclass of a split, or live payment links covering its full cash)
+ *   — un-reconciling it would invite a second allocation of cash another
+ *   invoice already holds;
+ * - otherwise the line is un-reconciled (no match against a dead invoice) so
+ *   the cash can be reconciled again, and — only when the line has NO import
+ *   journal of its own (its cash was posted by the now-removed settlement) —
+ *   one import journal is posted for the uncovered remainder, restoring the
+ *   bank movement. An existing import journal is never touched: it already
+ *   posts the line's bank truth, and its Suspense credit is what holds the
+ *   unallocated remainder.
+ *
+ * The over-payment credit ride (an unapplied receipt riding a settlement) is
+ * removed WITH the settlement it rode; the cash behind it returns to Suspense
+ * with the remainder, where it can be re-allocated later.
+ *
+ * Draft invoices post nothing and unwind to a no-op. Import journals are
+ * never attribution targets: they belong to the statement, so statement text
+ * naming this invoice can never pull them into the removal.
+ */
+export function unwindDeletedInvoice(
+  invoice: Pick<Invoice, 'id' | 'invoiceNumber' | 'status'>,
+  journalEntries: JournalEntry[],
+  bankTransactions: BankTransaction[],
+  accounts: Account[],
+  droppedPaymentIds: ReadonlySet<string>,
+): InvoiceDeletionUnwind {
+  if (String(invoice.status || '').toLowerCase() === 'draft') {
+    return { journalEntries, bankTransactions }
+  }
+  const owned = invoiceOwnedJournals(invoice, journalEntries)
+  if (owned.length === 0) {
+    return { journalEntries, bankTransactions }
+  }
+  const ownedSet = new Set(owned)
+  const journals = journalEntries.filter((je) => !ownedSet.has(je))
+
+  const reclassTxIds = new Set(
+    owned
+      .map((je) => String(je.id || ''))
+      .filter((id) => id.startsWith('je-reclass-'))
+      .map((id) => id.slice('je-reclass-'.length)),
+  )
+
+  const nextTxs: BankTransaction[] = []
+  for (const tx of bankTransactions || []) {
+    const links = tx.paymentLinks || []
+    const liveLinks = links.filter((link) => !droppedPaymentIds.has(link.paymentId))
+    const deadLinks = liveLinks.length !== links.length
+    const reclassRemoved = reclassTxIds.has(tx.id)
+    const matchDied = tx.matchedInvoiceId === invoice.id
+    if (!reclassRemoved && !matchDied && !deadLinks) {
+      nextTxs.push(tx)
+      continue
+    }
+
+    // Recompute the line's allocation state from what is still LIVE: the
+    // surviving payment links, and any sibling reclass of a split that is
+    // still holding its share of the cash.
+    const survivingReclass = journals.find((je) => je.id === `je-reclass-${tx.id}`)
+    const survivingInvoiceId = survivingReclass?.items.find((it) => it.invoiceId)?.invoiceId
+    const covered = round2(liveLinks.reduce((s, link) => s + round2(Number(link.amount) || 0), 0))
+    const txAbs = round2(Math.abs(Number(tx.amount) || 0))
+    const uncovered = round2(txAbs - covered)
+    const fullyCovered = txAbs > 0 && uncovered <= 0.005
+    const stillAllocated = Boolean(survivingReclass) || fullyCovered
+    const firstLive = liveLinks[0]
+    nextTxs.push({
+      ...tx,
+      paymentLinks: liveLinks.length > 0 ? liveLinks : undefined,
+      reconciled: stillAllocated,
+      matchedInvoiceId: stillAllocated
+        ? survivingInvoiceId ?? firstLive?.invoiceId
+        : undefined,
+      reconciledAt: stillAllocated ? tx.reconciledAt ?? new Date().toISOString() : undefined,
+    })
+
+    // The line's bank cash is posted exactly once. An existing import journal
+    // already carries it (and its Suspense credit holds the unallocated
+    // remainder), so it is left untouched. A line with NO import journal had
+    // its cash posted by the settlement that just died — restore it with one
+    // journal for the uncovered remainder.
+    const hasImportJournal = journals.some((je) => je.id === `je-import-${tx.id}`)
+    if (!hasImportJournal && !stillAllocated && uncovered > 0.005) {
+      journals.unshift(
+        createBankImportJournal(
+          { ...tx, amount: tx.amount > 0 ? uncovered : -uncovered },
+          accounts,
+          nextJournalNumber(journals, tx.date),
+        ),
+      )
+    }
+  }
+
+  return { journalEntries: journals, bankTransactions: nextTxs }
 }

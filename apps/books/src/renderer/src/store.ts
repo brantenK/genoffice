@@ -51,11 +51,11 @@ import {
 import { closePeriod, isDateLocked } from '../../shared/closing'
 import {
   createCreditNoteJournal,
-  journalReferencesInvoice,
+  journalOwnedByInvoice,
   mentionsReference,
   validateCreditNote,
   repostPlanForPartialSettlement,
-  reversalJournalRemoval,
+  unwindDeletedInvoice,
 } from '../../shared/credit-notes'
 
 /** A fresh, empty ledger — shown until the first-run setup wizard saves. */
@@ -657,7 +657,13 @@ function invoiceSaveMutation(
     if (wasPosted) {
       const oldNumber = oldInvoice.invoiceNumber
       const plan = repostPlanForPartialSettlement(oldInvoice, targetInvoice)
-      const removedJournals = nextJournals.filter((je) => journalReferencesInvoice(je, oldNumber))
+      // Structural attribution (F3): the journals reversed by this edit are the
+      // invoice's OWN posting and settlement journals, found through
+      // JournalEntryItem.invoiceId — never by matching the number against
+      // remark text, which statement descriptions ride in.
+      const removedJournals = nextJournals.filter((je) =>
+        journalOwnedByInvoice(je, oldInvoice),
+      )
 
       // Settlement guards. Both refuse BEFORE anything is reversed: re-deriving
       // the settled money movement on an edited invoice cannot be done safely
@@ -692,7 +698,7 @@ function invoiceSaveMutation(
       nextJournals.splice(
         0,
         nextJournals.length,
-        ...reversalJournalRemoval(oldNumber, nextJournals),
+        ...nextJournals.filter((je) => !journalOwnedByInvoice(je, oldInvoice)),
       )
 
       // C1: the payment journals die with the reversed posting, so the
@@ -1120,11 +1126,35 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       return
     }
 
-    // Reversal is journal-based: drop every entry that references this
-    // invoice, then recompute balances from the remaining journals.
+    // Reversal is attribution-based: the invoice's own posting and settlement
+    // journals are found by the structural key (JournalEntryItem.invoiceId),
+    // and every statement line the invoice touched is unwound to its
+    // un-allocated state — the import journal survives, Suspense re-balances
+    // to the unallocated remainder, and the line becomes re-allocatable
+    // (findings F3/F6).
     let nextJournals = [...data.journalEntries]
+    let nextBankTransactions = data.bankTransactions || []
     if (target.status !== 'Draft') {
-      nextJournals = reversalJournalRemoval(target.invoiceNumber, nextJournals)
+      const paymentsBefore = data.payments || []
+      const paymentsAfter = dropInvoiceFromPayments(
+        paymentsBefore,
+        target.id,
+        target.invoiceNumber,
+      )
+      const droppedPaymentIds = new Set(
+        paymentsBefore
+          .filter((payment) => !paymentsAfter.some((kept) => kept.id === payment.id))
+          .map((payment) => payment.id),
+      )
+      const unwind = unwindDeletedInvoice(
+        target,
+        nextJournals,
+        nextBankTransactions,
+        data.accounts,
+        droppedPaymentIds,
+      )
+      nextJournals = unwind.journalEntries
+      nextBankTransactions = unwind.bankTransactions
     }
 
     // C1: payment journals die with the reversed posting — the Payment
@@ -1147,6 +1177,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
           parties: nextParties,
           accounts: nextAccounts,
           journalEntries: nextJournals,
+          bankTransactions: nextBankTransactions,
           payments: nextPayments,
         },
         'invoice.delete',
@@ -1728,9 +1759,11 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     )
     for (const affected of affectedTxs) {
       // Drop all old import journals for this statement line; the remainder
-      // is recalculated below after removing the payment link.
+      // is recalculated below after removing the payment link. Matched by the
+      // import journal's structural id (je-import-<tx id>), never by remark
+      // text — statement descriptions ride in remarks.
       for (let i = nextJournals.length - 1; i >= 0; i--) {
-        if (mentionsReference(nextJournals[i].remarks, `Bank statement import: ${affected.id}`)) {
+        if (nextJournals[i].id === `je-import-${affected.id}`) {
           nextJournals.splice(i, 1)
         }
       }

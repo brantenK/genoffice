@@ -34,12 +34,15 @@
  *        invoices (F4). The walk deliberately aims edits at both, so the
  *        refusal path is exercised and the invariant holds for real through
  *        the refusal; a refused edit must leave the ledger untouched.
- *   F3 — statement descriptions never carry invoice numbers: the store removes
- *        journals by remark-text matching, so a number embedded in statement
- *        text couples unrelated journals to that invoice's edits/deletes.
- *   F5 — invoices that carry (or funded) an unapplied receipt are frozen
- *        against delete/edit: the unapplied legs are not attributed to their
- *        carrier by any remark, so removing either side strands the other.
+ *   F3/F6 — FIXED in the product: journal attribution is STRUCTURAL
+ *        (JournalEntryItem.invoiceId) and deletion unwinds affected statement
+ *        lines coherently (import journal survives, Suspense returns to the
+ *        unallocated remainder, lines re-allocatable). Statement text carries
+ *        invoice numbers again and the walk exercises the unwind.
+ *   F5 — still open: the unapplied-receipt legs of a split reconciliation
+ *        ride the last-funded invoice's journal while the credit rides the
+ *        carrier's outstanding; deleting or editing either strands the other,
+ *        so such invoices stay frozen against delete/edit in this walk.
  * Quotations are customer-party only (the product has no purchase-quote flow:
  * convertQuoteToInvoice always posts a Sales invoice).
  */
@@ -419,14 +422,13 @@ function buildCsv(f: Fuzz): string {
               ? round2(outstanding * (f.int(20, 90) / 100))
               : round2(outstanding + f.int(100, 50_000) / 100)
         if (f.chance(0.4)) description = `${inv.partyName} ${description}`
-        // Carve-out (findings F3/F5): statement text never carries invoice
-        // numbers in this walk. The store removes journals by REMARK-TEXT
-        // matching on reversalJournalRemoval, and a description that names any
-        // invoice number makes an edit/delete of that invoice destroy other
-        // invoices' settlement journals (or the bank import journal). Both
-        // product defects are reported with minimal reproductions; this walk
-        // keeps the reversal scope exact so the mandated invariants can be
-        // asserted strictly.
+        // Findings fixed: statement text now carries invoice numbers again.
+        // Journal attribution is STRUCTURAL (JournalEntryItem.invoiceId), so a
+        // number embedded in a statement description no longer couples that
+        // invoice's edits/deletes to unrelated journals or to the import
+        // journal (F3), and a reconciled line unwinds coherently on delete
+        // (F6). The walk exercises both on purpose.
+        if (f.chance(0.5)) description = `${description} ${inv.invoiceNumber}`
       }
     }
     amount = round2(Math.max(amount, 0.01))

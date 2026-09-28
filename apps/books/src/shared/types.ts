@@ -144,6 +144,16 @@ export interface JournalEntryItem {
   accountName: string
   partyId?: string
   partyName?: string
+  /**
+   * The invoice this leg was posted for, when the leg belongs to exactly one
+   * invoice's posting or settlement. THE structural attribution key: edits and
+   * deletions find an invoice's journals through this field and never by
+   * matching remark text (statement descriptions ride in remarks and would
+   * couple unrelated journals). Statement-owned legs (bank/suspense), manual
+   * entries and pre-attribution legacy rows carry no invoiceId — legacy rows
+   * fall back to item-remark matching that never crosses a cash-side leg.
+   */
+  invoiceId?: string
   debit: number
   credit: number
   remark?: string
