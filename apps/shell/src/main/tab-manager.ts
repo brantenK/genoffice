@@ -452,7 +452,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({ id, kind: 'crm', view, title: 'Zanostack CRM' })
     this.activateTab(id)
     return id
@@ -468,7 +468,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({ id, kind: 'tenders', view, title: 'Zanostack Tenders' })
     this.activateTab(id)
     return id
@@ -484,7 +484,7 @@ export class TabManager {
     const id = `t${this.nextId++}`
     this.shellWindow.contentView.addChildView(view)
     view.setVisible(false)
-    this.trackHtmlFullScreen(id, view)
+    this.trackHtmlFullScreen(view)
     this.tabs.push({ id, kind: 'books', view, title: 'Zano Books' })
     this.activateTab(id)
     return id

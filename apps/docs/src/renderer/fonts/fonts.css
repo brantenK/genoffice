@@ -286,7 +286,7 @@
 /* SimSun ASCII is half-width fixed pitch (Word PDF: 0.5em per character at
  * 12pt); the -Che face carries the same 0.5em advances. */
 @font-face {
-  font-family: 'GenOffice SimSun Latin';
+  font-family: 'Zanostack SimSun Latin';
   src: url('./GenOfficeCheLatinKR.woff2') format('woff2');
   unicode-range: U+0020-007E;
   font-weight: normal;
@@ -299,7 +299,7 @@
  * inside Korean runs 0.51-0.52em); .doc-hangul-space (styles.css) draws such
  * spaces from the -Che face's half-width space. */
 @font-face {
-  font-family: 'GenOffice Hangul Space';
+  font-family: 'Zanostack Hangul Space';
   src: url('./GenOfficeCheLatinKR.woff2') format('woff2');
   unicode-range: U+0020;
   font-weight: normal;
@@ -312,7 +312,7 @@
  * alias keeps digit-heavy cells wrapping like Word. A locally installed YaHei
  * precedes it in the chain. */
 @font-face {
-  font-family: 'GenOffice YaHei Latin';
+  font-family: 'Zanostack YaHei Latin';
   src: local('Helvetica'), local('ArialMT'), url('./LiberationSans-Regular.ttf');
   size-adjust: 106%;
   unicode-range: U+0020-007E;
@@ -321,7 +321,7 @@
   font-display: block;
 }
 @font-face {
-  font-family: 'GenOffice YaHei Latin';
+  font-family: 'Zanostack YaHei Latin';
   src: local('Helvetica-Bold'), local('Arial-BoldMT'), url('./LiberationSans-Bold.ttf');
   size-adjust: 108%;
   unicode-range: U+0020-007E;
@@ -1370,7 +1370,7 @@
  * (0.075). Registering weight-normal only makes Blink synthesize (0.082) instead of
  * selecting the anemic face, so bold TC headings read as bold like in Word. */
 @font-face {
-  font-family: 'GenOffice Songti TC';
+  font-family: 'Zanostack Songti TC';
   src: local('STSongti-TC-Regular'), local('Songti TC Regular');
   font-weight: normal;
   font-style: normal;

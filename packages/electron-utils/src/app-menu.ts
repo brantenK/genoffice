@@ -449,7 +449,7 @@ const LABELS: Record<string, Labels> = {
     zoomOut: 'Thu nhỏ',
     fullscreen: 'Toàn màn hình',
     help: 'Trợ giúp',
-    about: 'Giới thiệu GenOffice',
+    about: 'Giới thiệu Zanostack',
     checkUpdates: 'Kiểm tra bản cập nhật…',
     version: 'Phiên bản',
   },

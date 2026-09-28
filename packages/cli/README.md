@@ -124,7 +124,7 @@ claude mcp add --transport stdio genoffice -- genoffice mcp
 `genoffice mcp install <agent|all> [--dir <path>] [--force]` writes that entry
 for you, pointing at the absolute launcher path so it works without `genoffice`
 on the PATH (on Windows, where MCP clients spawn without a shell, the entry
-runs `GenOffice.exe` as Node on the bundled `genoffice.cjs` with
+runs `Zanostack.exe` as Node on the bundled `genoffice.cjs` with
 `ELECTRON_RUN_AS_NODE=1`, the same entry the app's Settings snippet shows): `~/.claude.json` (Claude Code, user scope; `CLAUDE_CONFIG_DIR`
 honoured), `~/.codex/config.toml` (`[mcp_servers.genoffice]`; `CODEX_HOME`),
 `~/.cursor/mcp.json`, `~/.gemini/settings.json`, `~/.copilot/mcp-config.json`

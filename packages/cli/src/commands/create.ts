@@ -83,7 +83,7 @@ export const createCommand: CommandDef = {
       name: 'render',
       value: 'dir',
       description:
-        'pptx: after writing, render one PNG per slide into <dir> (default: <output name>-previews beside the file) and list them in detail.previews; starts a hidden GenOffice process for a few seconds',
+        'pptx: after writing, render one PNG per slide into <dir> (default: <output name>-previews beside the file) and list them in detail.previews; starts a hidden Zanostack process for a few seconds',
     },
     {
       name: 'audit',

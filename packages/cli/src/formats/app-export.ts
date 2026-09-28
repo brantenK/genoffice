@@ -86,7 +86,7 @@ export async function exportViaApp(
   if (!envelope && (signal || code === null)) {
     throw new CliError(
       EXIT.app,
-      `GenOffice ${describeExit(code, signal)} while exporting ${input}${tail ? `: ${tail}` : ''}`,
+      `Zanostack ${describeExit(code, signal)} while exporting ${input}${tail ? `: ${tail}` : ''}`,
       { app: launch.command, exit_code: code, signal },
       {
         reason: 'app_crashed',

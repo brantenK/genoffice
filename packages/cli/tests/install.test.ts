@@ -97,7 +97,7 @@ describe('installCliLink', () => {
 
   it('owns only launchers shipped with the app, not any path ending in /cli/genoffice (genoffice#895)', () => {
     const dir = tempDir()
-    const launcher = join(dir, 'GenOffice.app', 'Contents', 'Resources', 'cli', 'genoffice')
+    const launcher = join(dir, 'Zanostack.app', 'Contents', 'Resources', 'cli', 'genoffice')
     mkdirSync(join(launcher, '..'), { recursive: true })
     writeFileSync(launcher, '#!/bin/sh\n')
     writeFileSync(join(launcher, '..', 'genoffice.cjs'), '')
@@ -127,7 +127,7 @@ describe('installCliLink', () => {
     )
     expect(readlinkSync(join(dead, 'genoffice'))).toBe(launcher)
 
-    const older = join(dir, 'opt', 'GenOffice', 'resources', 'cli', 'genoffice')
+    const older = join(dir, 'opt', 'Zanostack', 'resources', 'cli', 'genoffice')
     mkdirSync(join(older, '..'), { recursive: true })
     writeFileSync(older, '#!/bin/sh\n')
     writeFileSync(join(older, '..', 'genoffice.cjs'), '')
@@ -141,7 +141,7 @@ describe('installCliLink', () => {
     expect(readlinkSync(join(upgraded, 'genoffice'))).toBe(launcher)
 
     const alias = join(dir, 'Applications')
-    symlinkSync(join(dir, 'GenOffice.app'), alias, 'dir')
+    symlinkSync(join(dir, 'Zanostack.app'), alias, 'dir')
     const viaAlias = join(alias, 'Contents', 'Resources', 'cli', 'genoffice')
     expect(isOurLauncher(viaAlias, launcher)).toBe(true)
     const relative = join(dir, 'relative-bin')

@@ -50,7 +50,7 @@ export interface ToolSpec {
   readOnly?: boolean
   /** the call reaches the configured cloud provider (search, image, media) */
   openWorld?: boolean
-  /** needs the GenOffice window in front of the client, so not registered in http mode */
+  /** needs the Zanostack window in front of the client, so not registered in http mode */
   localOnly?: boolean
 }
 
@@ -193,7 +193,7 @@ export const TOOLS: ToolSpec[] = [
         key: 'render',
         kind: 'boolean',
         description:
-          'render one PNG per slide after writing and return them as images (detail.previews); starts a hidden GenOffice process for a few seconds',
+          'render one PNG per slide after writing and return them as images (detail.previews); starts a hidden Zanostack process for a few seconds',
       },
       {
         key: 'audit',
@@ -515,8 +515,8 @@ export const TOOLS: ToolSpec[] = [
     localOnly: true,
     readOnly: true,
     description:
-      "What the user currently has selected in the GenOffice editor showing this file: slide + element ids, a block range with its text, a sheet range, or a pdf page. The user's own pointer for 'this one' / 'here'; needs the file open in the app.",
-    positionals: [{ key: 'file', description: 'path of the document open in GenOffice' }],
+      "What the user currently has selected in the Zanostack editor showing this file: slide + element ids, a block range with its text, a sheet range, or a pdf page. The user's own pointer for 'this one' / 'here'; needs the file open in the app.",
+    positionals: [{ key: 'file', description: 'path of the document open in Zanostack' }],
   },
 ]
 

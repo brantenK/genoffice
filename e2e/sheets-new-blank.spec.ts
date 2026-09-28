@@ -37,7 +37,7 @@ test.describe('sheets: new blank workbook', () => {
       await app.evaluate(({ app: electronApp }, dir) => {
         electronApp.setPath('documents', dir)
       }, scratch)
-      const saveDir = join(scratch, 'GenOffice')
+      const saveDir = join(scratch, 'Zanostack')
       const workbook = join(saveDir, 'quick-create.xlsx')
       // the workbook has no file yet, so Save answers the Save As picker
       await app.evaluate(({ dialog }, target) => {

@@ -574,7 +574,7 @@ const tMain = createI18n({
     menuWindow: 'Cửa sổ',
     menuHelp: 'Trợ giúp',
     menuShortcuts: 'Phím tắt bàn phím',
-    menuDocsHelp: 'Trợ giúp GenOffice Docs',
+    menuDocsHelp: 'Trợ giúp Zanostack Docs',
   },
   ja: {
     dlgOpenDoc: '文書を開く',
