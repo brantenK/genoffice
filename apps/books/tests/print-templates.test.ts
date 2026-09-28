@@ -111,7 +111,12 @@ function decodedStreams(pdf: Uint8Array): string {
       (_m, hex: string) => ` ${Buffer.from(hex, 'hex').toString('latin1')} `,
     )}\n`
   }
-  return text.replace(/[\u00A0\u202F]/g, ' ')
+  // pdf-lib stamps /CreationDate and /ModDate (second granularity) inside the
+  // compressed object stream, so two builds made across a second boundary
+  // differ on metadata alone. These tests judge drawn output and structure,
+  // not wall-clock metadata — neutralise the stamps to keep the comparison
+  // deterministic.
+  return text.replace(/[\u00A0\u202F]/g, ' ').replace(/D:\d{14}Z?/g, 'D:FIXED')
 }
 
 const countOccurrences = (text: string, needle: string): number => text.split(needle).length - 1
