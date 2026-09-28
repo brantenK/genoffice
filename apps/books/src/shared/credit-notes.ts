@@ -107,12 +107,17 @@ export function createCreditNoteJournal(
   // Group line items by income/expense account on the same post-discount
   // `journalLineAmount` basis as the original posting, converted into the
   // ledger's base currency at the same rate, so per account the reversal
-  // cancels the invoice it credits.
+  // cancels the invoice it credits. Zero-effective lines are SKIPPED exactly
+  // like the invoice's own grouping (`groupLines`) — a line whose effective
+  // amount is 0.00 posts no leg on either side, so the reversal's residual
+  // legs (discount, round-off) land on the SAME first effective group the
+  // original booked them to, and original + credit note net per account.
   const groups = new Map<string, { accountId: string; accountName: string; amount: number }>()
 
   if (Array.isArray(invoice.items) && invoice.items.length > 0) {
     for (const it of invoice.items) {
       const lineAmt = toBaseAmount(journalLineAmount(it), rate)
+      if (lineAmt === 0) continue
       const accId = it.accountId || (isSales ? 'acc-sales' : 'acc-materials')
       const matched = accounts.find((a) => a.id === accId)
       const accName =
@@ -136,19 +141,21 @@ export function createCreditNoteJournal(
   // adjustment on the first group, so the reversal carries them back on the
   // same account. Subtracting them leaves the groups at the posted
   // VAT-exclusive subtotal; any leftover (an unrecorded difference) is
-  // absorbed by the last group. A negative subtotal posts no discount leg on
-  // the invoice either, so the mirror must not carry one back.
+  // absorbed by the last EFFECTIVE group. A line whose effective amount is
+  // 0.00 posts no group on either side, and when NO line is effective the
+  // fallback below is a LEAF account (never a group) — the same account the
+  // invoice's own fallback leg used — so the pair still nets per account.
   const bookedDiscount = round2(postedSubtotal >= 0 ? Math.min(discountTotal, postedSubtotal) : 0)
   const roundOff = toBaseAmount(Number(invoice.roundOff) || 0, rate)
   const groupTotal = round2(grandTotal - taxTotal + bookedDiscount - roundOff)
 
   if (groups.size === 0) {
     const fallback = isSales
-      ? accounts.find((a) => a.id === 'acc-sales' || a.accountType === 'Direct Income') || {
+      ? accounts.find((a) => (a.id === 'acc-sales' || a.accountType === 'Direct Income') && !a.isGroup) || {
           id: 'acc-sales',
           name: 'Tender & Commercial Contracting Sales',
         }
-      : accounts.find((a) => a.id === 'acc-materials' || a.accountType === 'Direct Expense') || {
+      : accounts.find((a) => (a.id === 'acc-materials' || a.accountType === 'Direct Expense') && !a.isGroup) || {
           id: 'acc-materials',
           name: 'Direct Project Materials & Subcontractors',
         }
@@ -158,13 +165,30 @@ export function createCreditNoteJournal(
       amount: groupTotal,
     })
   } else {
-    // Ensure the grouped amount equals the posted subtotal exactly
-    // (1-cent absorption).
+    // Ensure the grouped amount equals the posted VAT-exclusive subtotal
+    // exactly. The leftover is TWO mirrors applied to their original homes:
+    // the stored-subtotal/unrecorded-difference adjustment the original
+    // applied to its LAST group, and — only when the posted subtotal is
+    // NEGATIVE while a discount exists (a discount that books no leg) — the
+    // balancer residual the original absorbed on its PREFERRED account.
+    // Splitting them this way keeps original + credit note netting per
+    // account (finding F1 family) while unrecorded differences still land on
+    // the last group.
     const entries = Array.from(groups.values())
     const sumGroups = entries.reduce((s, e) => round2(s + e.amount), 0)
     const diff = round2(groupTotal - sumGroups)
-    if (diff !== 0 && entries.length > 0) {
-      entries[entries.length - 1].amount = round2(entries[entries.length - 1].amount + diff)
+    const absorbMirror = round2(postedSubtotal < 0 ? -discountTotal : 0)
+    const subtotalAdjustment = round2(diff - absorbMirror)
+    if (subtotalAdjustment !== 0 && entries.length > 0) {
+      entries[entries.length - 1].amount = round2(
+        entries[entries.length - 1].amount + subtotalAdjustment,
+      )
+    }
+    if (absorbMirror !== 0 && entries.length > 0) {
+      const preferredId = isSales ? 'acc-sales' : 'acc-materials'
+      const target =
+        entries.find((e) => e.accountId === preferredId) || entries[entries.length - 1]
+      target.amount = round2(target.amount + absorbMirror)
     }
   }
 

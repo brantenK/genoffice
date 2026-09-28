@@ -393,14 +393,20 @@ function groupLines(
   return groups
 }
 
-/** The account a journal falls back to when an invoice carries no usable line. */
+/** The account a journal falls back to when an invoice carries no usable line.
+ * Resolves to a LEAF account only (finding F1): a group account's balance is
+ * overwritten from its children by computeAccountBalances, so a leg posted to
+ * a group would silently vanish from the derived ledger. The leaf preference
+ * is the named id when it is a leaf, else the first leaf of the account type. */
 function defaultGroupAccount(
   accounts: Account[],
   id: string,
   accountType: Account['accountType'],
   name: string,
 ): { accountId: string; accountName: string } {
-  const matched = accounts.find((a) => a.id === id || a.accountType === accountType)
+  const matched =
+    accounts.find((a) => a.id === id && !a.isGroup) ||
+    accounts.find((a) => a.accountType === accountType && !a.isGroup)
   return { accountId: matched?.id || id, accountName: matched?.name || name }
 }
 
@@ -818,8 +824,12 @@ export function createPurchaseBillJournal(
 
   // Invoice-level discount: its own leg on the first expense account. A
   // positive discount takes the credit side (it reduces the expense); a
-  // negative stored discount takes the debit side.
-  const bookedDiscount = round2(subtotal < 0 ? 0 : discountTotal)
+  // negative stored discount takes the debit side. The discount is CLAMPED to
+  // the posted subtotal — the same rule the sales builder and the credit-note
+  // mirror apply — so a discount larger than the bill never posts an
+  // unclamped leg whose residual the balancer would absorb onto a different
+  // account than the mirror reverses (finding F1 family).
+  const bookedDiscount = round2(subtotal < 0 ? 0 : Math.min(discountTotal, subtotal))
   if (bookedDiscount !== 0) {
     const first = Array.from(expenseGroups.values())[0]
     items.push({

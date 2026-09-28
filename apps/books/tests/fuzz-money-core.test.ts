@@ -33,7 +33,6 @@ import {
   createPurchaseBillJournal,
   createSalesInvoiceJournal,
   invoiceExchangeRate,
-  journalLineAmount,
   round2,
   toBaseAmount,
 } from '../src/shared/accounting'
@@ -409,28 +408,21 @@ function runPurchaseChunk(chunk: number): void {
   }
 }
 
-/** A credit-noteable original: consistent stored totals, grandTotal > 0, and
- * every line resolving to a non-zero posted amount.
+/** A credit-noteable original: consistent stored totals, grandTotal > 0.
  *
- * The last condition is a documented carve-out (see the report, F1): when
- * EVERY line is effective-zero the sales builder falls back to
- * `defaultGroupAccount`, whose `find` matches `a.accountType` before
- * `a.id === 'acc-sales'` in chart order — landing the income/round-off leg on
- * the income GROUP account (acc-income), which computeAccountBalances ignores
- * (groups roll up children only). The credit note rebuilds its groups from the
- * lines themselves, so the reversal lands on a leaf and the pair stops netting
- * to zero. That product asymmetry is reported as F1; this slice fuzzes the
- * documented contract on the domain where the code intends it to hold.
+ * The wave-1 carve-out (all lines must be effective-nonzero, finding F1) is
+ * GONE: fallback legs now land on leaf accounts and the credit note mirrors
+ * the invoice's own grouping, so round-off-only originals and mixed
+ * zero/effective lines net to zero with their full credit note. The only
+ * remaining exclusions are the credit-noteability rules themselves
+ * (grandTotal > 0, consistent stored totals).
  */
 function genCreditNoteOriginal(f: Fuzz, index: number): Invoice {
   for (let attempt = 0; attempt < 16; attempt++) {
     const built = buildInvoice(f, f.chance(0.7) ? 'Sales' : 'Purchase', index, {
       forceConsistent: true,
     })
-    const linesNonZero =
-      built.invoice.items.length > 0 &&
-      built.invoice.items.every((it) => journalLineAmount(it) !== 0)
-    if (round2(Number(built.invoice.grandTotal) || 0) > 0 && linesNonZero) return built.invoice
+    if (round2(Number(built.invoice.grandTotal) || 0) > 0) return built.invoice
   }
   // Deterministic fallback so the slice always has a case.
   const line: InvoiceItem = {

@@ -544,7 +544,7 @@ export function applyReconciliation(
   // unapplied receipt rides on the last entry's legs.
   const journals = Array.isArray(booksData.journalEntries) ? [...booksData.journalEntries] : []
   const hasImportJournal = journals.some(
-    (je) => je.remarks && je.remarks.includes(`Bank statement import: ${tx.id}`),
+    (je) => je.id === `je-import-${tx.id}`,
   )
   let entryNumber = nextJournalNumber(journals, tx.date)
   const settlementEntryFor = (
@@ -582,21 +582,34 @@ export function applyReconciliation(
       unappliedAmount,
       partyFor(carrier.invoice),
     )
-    if (newEntries.length > 0) {
+    const lastFunded = newEntries[newEntries.length - 1]
+    const lastFundedInvoiceId = lastFunded?.items.find((item) => item.invoiceId)?.invoiceId
+    if (lastFunded && lastFundedInvoiceId === carrier.invoice.id) {
+      // Same-invoice excess: it rides the settlement entry — the established
+      // single-invoice shape (the entry's legs all belong to one invoice, so
+      // structural attribution still removes the whole journal with it).
       newEntries[newEntries.length - 1] = withUnappliedReceipt(
-        newEntries[newEntries.length - 1],
+        lastFunded,
         unappliedEntry,
         unappliedAmount,
         unappliedRemark,
       )
     } else {
-      // Nothing was settled (every target already in credit): the whole line
-      // is one unapplied receipt entry of its own. The base entry is built for
-      // the settled amount (zero), so only the receipt legs survive.
-      const emptyBase = settlementEntryFor(carrier.invoice, 0, partyFor(carrier.invoice))
-      newEntries.push(
-        withUnappliedReceipt(emptyBase, unappliedEntry, unappliedAmount, unappliedRemark),
-      )
+      // Cross-invoice ride (a split whose last target is in credit): the
+      // excess posts as its OWN balanced entry, structurally attributed to the
+      // carrier invoice — never merged into another invoice's settlement
+      // journal, so deleting or editing either side removes exactly its own
+      // legs and the survivor stays coherent (finding F5).
+      const standalone: JournalEntry = {
+        ...unappliedEntry,
+        remarks: unappliedRemark,
+        items: unappliedEntry.items.map((item) => ({
+          ...item,
+          remark:
+            item.debit !== 0 || item.credit !== 0 ? unappliedRemark : item.remark,
+        })),
+      }
+      newEntries.push(standalone)
     }
   }
   journals.unshift(...newEntries)

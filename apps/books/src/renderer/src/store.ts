@@ -46,7 +46,6 @@ import {
   createPaymentJournal,
   dropInvoiceFromPayments,
   linkPaymentToBankTransaction,
-  paymentCoverage,
 } from '../../shared/payments'
 import { closePeriod, isDateLocked } from '../../shared/closing'
 import {
@@ -1667,15 +1666,15 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     // C1: when the matched transaction already has an import journal (Flow B:
     // statement imported BEFORE the payment), the bank movement is already
     // booked — the payment leg must clear Suspense instead of moving Bank a
-    // second time, same as the reconciliation settlement leg.
+    // second time, same as the reconciliation settlement leg. Detected by the
+    // import journal's structural id (je-import-<tx id>), never by remark
+    // text (statement descriptions ride in remarks).
     const matchedTx = linked.matchedTransactionId
       ? (linked.bankTransactions.find((t) => t.id === linked.matchedTransactionId) ?? null)
       : null
     const hasImportJournal =
       matchedTx !== null &&
-      (data.journalEntries || []).some((je) =>
-        mentionsReference(je.remarks, `Bank statement import: ${matchedTx.id}`),
-      )
+      (data.journalEntries || []).some((je) => je.id === `je-import-${matchedTx.id}`)
 
     // Ledger-first: post the balanced payment journal, then derive balances.
     const journal = createPaymentJournal(
@@ -1770,8 +1769,29 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       const remainingLinks = (affected.paymentLinks || []).filter(
         (link) => link.paymentId !== payment.id,
       )
-      const covered = paymentCoverage({ ...affected, paymentLinks: remainingLinks })
-      const uncovered = round2(Math.abs(affected.amount) - covered)
+      // The replacement import journal covers the cash the line's LIVE
+      // allocations have NOT posted through Suspense: a bank-funded payment
+      // (recorded before the import existed) already moved Bank through its
+      // own journal, while a suspense-funded payment or a reconciliation
+      // reclass cleared the import's credit — so only BANK-funded live links
+      // shrink the remainder. Sizing it from all live links (the old rule)
+      // mis-sized the import when a line mixed pre-import and post-import
+      // payments, double-counting the suspense-funded cash.
+      const bankCovered = round2(
+        remainingLinks.reduce((sum, link) => {
+          const paymentJournal = nextJournals.find((je) =>
+            mentionsReference(je.remarks, `Payment ${link.paymentId}`),
+          )
+          // A payment whose journal cannot be found is treated as
+          // suspense-funded (deferred): the import then covers its cash and
+          // Bank is restored either way.
+          const suspenseFunded =
+            !paymentJournal ||
+            (paymentJournal.items || []).some((it) => it.accountId === 'acc-suspense')
+          return suspenseFunded ? sum : round2(sum + round2(link.amount || 0))
+        }, 0),
+      )
+      const uncovered = round2(Math.abs(affected.amount) - bankCovered)
       const fullyCovered = uncovered <= 0.005
       const firstLink = remainingLinks[0]
       nextBankTransactions = nextBankTransactions.map((t) =>

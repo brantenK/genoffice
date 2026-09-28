@@ -39,10 +39,10 @@
  *        lines coherently (import journal survives, Suspense returns to the
  *        unallocated remainder, lines re-allocatable). Statement text carries
  *        invoice numbers again and the walk exercises the unwind.
- *   F5 — still open: the unapplied-receipt legs of a split reconciliation
- *        ride the last-funded invoice's journal while the credit rides the
- *        carrier's outstanding; deleting or editing either strands the other,
- *        so such invoices stay frozen against delete/edit in this walk.
+ *   F5 — FIXED in the product: a cross-invoice unapplied ride posts as its own
+ *        entry attributed to the carrier (JournalEntryItem.invoiceId), so
+ *        deleting or editing either side removes exactly its own legs; the
+ *        walk no longer freezes such invoices.
  * Quotations are customer-party only (the product has no purchase-quote flow:
  * convertQuoteToInvoice always posts a Sales invoice).
  */
@@ -219,7 +219,6 @@ function editCandidate(f: Fuzz): Invoice | null {
     (inv) =>
       !inv.creditNote &&
       !multiSettled.has(inv.id) &&
-      !frozen.has(inv.id) &&
       round2(outstandingOf(inv)) >= 0 &&
       round2(outstandingOf(inv)) <= round2(inv.grandTotal),
   )
@@ -498,30 +497,15 @@ async function opReconcile(f: Fuzz): Promise<void> {
   for (const row of result.applied || []) {
     shadow.set(row.invoiceId, round2(row.remainingOutstanding))
   }
-  // Finding F5 (see the report): the unapplied-receipt legs of a split or
-  // standalone reconciliation ride the LAST FUNDED invoice's journal while the
-  // credit itself rides the LAST TARGET's outstanding — neither journal
-  // remark names the carrier, so deleting or editing either invoice strands
-  // the other's AR/AP movement. Freeze both from further delete/edit so the
-  // walk stays on the tied domain; the defect itself is reported separately.
-  if ((result.unappliedAmount || 0) > 0) {
-    const applied = result.applied || []
-    const carrier = applied[applied.length - 1]
-    if (carrier) frozen.add(carrier.invoiceId)
-    const lastFunded = [...applied].reverse().find((row) => row.settledAmount > 0)
-    if (lastFunded) frozen.add(lastFunded.invoiceId)
-  }
+  // Finding F5 is FIXED in the product: a cross-invoice unapplied ride posts
+  // as its own entry attributed to the carrier invoice, so deleting or editing
+  // either side removes exactly its own legs and the survivor stays coherent.
+  // The walk no longer freezes such invoices.
   tally.reconcile++
 }
 
-/** Invoice ids whose journals carry another invoice's unapplied receipt legs
- * (finding F5): excluded from delete/edit so the walk stays tied. */
-const frozen = new Set<string>()
-
 async function opDeleteInvoice(f: Fuzz): Promise<void> {
-  const invoices = data().invoices.filter(
-    (inv) => !frozen.has(inv.id) && round2(outstandingOf(inv)) >= 0,
-  )
+  const invoices = data().invoices.filter((inv) => round2(outstandingOf(inv)) >= 0)
   if (invoices.length === 0) return
   const target = f.pick(invoices)
   const beforeOut = round2(outstandingOf(target))
