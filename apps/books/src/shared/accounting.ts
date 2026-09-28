@@ -1,4 +1,5 @@
 import { DEFAULT_BANK_ACCOUNT_NAME } from './chart'
+import { localIsoDate, localIsoToday } from './dates'
 import type {
   Account,
   BankTransaction,
@@ -542,7 +543,7 @@ export function createSalesInvoiceJournal(
 
   const lines = journalLines(invoice)
 
-  const dateStr = invoice.date || new Date().toISOString().split('T')[0]
+  const dateStr = invoice.date || localIsoToday()
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const randomSuffix = Math.random().toString(36).slice(2, 7)
   const entryNum = jeNumber || `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
@@ -755,7 +756,7 @@ export function createPurchaseBillJournal(
 
   const lines = journalLines(bill)
 
-  const dateStr = bill.date || new Date().toISOString().split('T')[0]
+  const dateStr = bill.date || localIsoToday()
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const randomSuffix = Math.random().toString(36).slice(2, 7)
   const entryNum = jeNumber || `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`
@@ -989,7 +990,7 @@ export function createSettlementJournal(
     jeNumber = opts.jeNumber
     bankAccountId = opts.bankAccountId || 'acc-bank'
     remarks = opts.remarks
-    dateStr = opts.date || new Date().toISOString().split('T')[0]
+    dateStr = opts.date || localIsoToday()
   } else {
     invoice = invoiceOrOptions as Invoice
     accounts = accountsParam || []
@@ -998,7 +999,7 @@ export function createSettlementJournal(
     jeNumber = jeNumberParam
     bankAccountId = bankAccountIdParam || 'acc-bank'
     remarks = remarksParam
-    dateStr = new Date().toISOString().split('T')[0]
+    dateStr = localIsoToday()
   }
 
   const settledAmount = round2(
@@ -1231,7 +1232,7 @@ export function parseBankAmount(raw: string | number | null | undefined): number
  */
 export function normalizeDate(dateStr: string): string {
   if (!dateStr || typeof dateStr !== 'string') {
-    return new Date().toISOString().split('T')[0]
+    return localIsoToday()
   }
   const clean = dateStr.trim().replace(/['"]/g, '')
 
@@ -1258,7 +1259,8 @@ export function normalizeDate(dateStr: string): string {
 
   const parsed = new Date(clean)
   if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().split('T')[0]
+    // V8 parses non-ISO date-only forms as local midnight — format locally so the day is not shifted.
+    return localIsoDate(parsed)
   }
 
   return clean
@@ -1646,7 +1648,7 @@ export function createOpeningJournal(
   accounts: Account[],
   opts?: { date?: string; entryNumber?: string; remarks?: string },
 ): JournalEntry {
-  const dateStr = opts?.date || new Date().toISOString().split('T')[0]
+  const dateStr = opts?.date || localIsoToday()
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const entryNumber = opts?.entryNumber || `JE-OPENING-${year}`
 

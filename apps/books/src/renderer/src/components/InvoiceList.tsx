@@ -17,6 +17,7 @@ import { CreditNoteModal } from './CreditNoteModal'
 import { displayInvoiceStatus, invoiceMatchesStatusFilter } from './invoice-status'
 import { currencyTag } from './currencies'
 import { invoiceExchangeRate, toBaseAmount } from '../../../shared/accounting'
+import { localIsoToday } from '../../../shared/dates'
 import type { Invoice, InvoiceStatus, InvoiceType } from '../../../shared/types'
 
 interface InvoiceListProps {
@@ -31,7 +32,7 @@ export function InvoiceList({ type }: InvoiceListProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [creditNoteFor, setCreditNoteFor] = useState<Invoice | null>(null)
 
-  const asOf = new Date().toISOString().split('T')[0]
+  const asOf = localIsoToday()
   const invoices = data.invoices.filter((i) => i.type === type)
 
   // Mark-paid is a convenience settlement: the payment is BASE currency, while

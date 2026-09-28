@@ -38,6 +38,7 @@ import {
 import { appendAudit, createAuditEntry } from '../shared/audit'
 import { isDateLocked } from '../shared/closing'
 import { MAX_AUDIT_ENTRIES } from '../shared/audit'
+import { isoDaysFromToday, localIsoToday } from '../shared/dates'
 import type { EmptyLedgerReason } from '../shared/ipc'
 import type {
   Account,
@@ -1156,7 +1157,7 @@ export function issueSalesInvoiceInBooks(input: IssueSalesInvoiceInput): IssueSa
         booksData.parties.push(party)
       }
 
-      const today = input.date || new Date().toISOString().split('T')[0]
+      const today = input.date || localIsoToday()
       if (isDateLocked(booksData, today)) {
         return {
           data: booksData,
@@ -1167,7 +1168,7 @@ export function issueSalesInvoiceInBooks(input: IssueSalesInvoiceInput): IssueSa
         }
       }
       const dueDate =
-        input.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+        input.dueDate || isoDaysFromToday(30)
       // M2: an explicit 0 (zero-rated) must stay 0 — only a missing/NaN rate
       // falls back to the 15% default.
       const taxRate =

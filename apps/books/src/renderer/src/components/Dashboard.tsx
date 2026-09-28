@@ -17,12 +17,13 @@ import { DEFAULT_BANK_ACCOUNT_NAME } from '../../../shared/chart'
 import { displayInvoiceStatus } from './invoice-status'
 import { currencyTag } from './currencies'
 import { invoiceExchangeRate, toBaseAmount } from '../../../shared/accounting'
+import { localIsoToday } from '../../../shared/dates'
 import type { InvoiceStatus } from '../../../shared/types'
 
 export function Dashboard() {
   const { data, setActiveTab, setActiveInvoiceId, setPrintInvoice } = useBooksStore()
   const { invoices, accounts, settings } = data
-  const asOf = new Date().toISOString().split('T')[0]
+  const asOf = localIsoToday()
 
   const salesInvoices = invoices.filter((i) => i.type === 'Sales')
   // Receivable/payable aggregates are ledger figures: an invoice denominated

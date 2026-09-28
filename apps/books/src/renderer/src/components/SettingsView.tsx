@@ -18,6 +18,7 @@ import {
   LETTERHEAD_FOOTER_MAX,
   isValidInvoiceAccent,
 } from '../../../shared/chart'
+import { localIsoToday } from '../../../shared/dates'
 import type { CompanySettings, PrintTemplate } from '../../../shared/types'
 import type { BackupFileInfo, BackupResult } from '../../../shared/ipc'
 
@@ -65,7 +66,7 @@ export function SettingsView() {
   const [restoring, setRestoring] = useState<string | null>(null)
   const [restoreResult, setRestoreResult] = useState<{ ok: boolean; error?: string } | null>(null)
 
-  const [closeThrough, setCloseThrough] = useState(new Date().toISOString().split('T')[0])
+  const [closeThrough, setCloseThrough] = useState(localIsoToday())
   const [closing, setClosing] = useState(false)
   const [closeError, setCloseError] = useState<string | null>(null)
   const [closeResult, setCloseResult] = useState(false)

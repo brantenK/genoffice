@@ -13,6 +13,7 @@ import type {
 } from './types'
 import { round2, invoiceExchangeRate, toBaseAmount, fromBaseAmount } from './accounting'
 import { mentionsReference } from './credit-notes'
+import { localIsoToday } from './dates'
 
 /**
  * Payments engine (pure — no electron/react imports).
@@ -211,7 +212,7 @@ export function applyPayment(data: BooksData, input: ApplyPaymentInput): ApplyPa
     id: paymentId,
     partyId: party.id,
     partyName: party.name,
-    date: input.date || new Date().toISOString().split('T')[0],
+    date: input.date || localIsoToday(),
     type,
     method: input.method || undefined,
     reference: input.reference || undefined,

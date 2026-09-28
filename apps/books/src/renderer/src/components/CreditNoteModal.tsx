@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { RotateCcw, ShieldAlert } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { round2 } from '../../../shared/accounting'
+import { localIsoToday } from '../../../shared/dates'
 import type { Invoice, InvoiceItem } from '../../../shared/types'
 
 interface CreditNoteModalProps {
@@ -20,7 +21,7 @@ export function CreditNoteModal({ original, onClose }: CreditNoteModalProps) {
   const { settings } = data
 
   const [amount, setAmount] = useState(String(original.grandTotal))
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(localIsoToday())
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

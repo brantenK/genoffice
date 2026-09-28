@@ -17,6 +17,7 @@ import { displayQuoteStatus, quoteMatchesStatusFilter } from './quote-status'
 import { currencyTag, EXTRA_CURRENCIES } from './currencies'
 import type { InvoiceItem, Quotation, QuotationStatus } from '../../../shared/types'
 import { round2, calculateInvoiceTotals, effectiveLineAmount } from '../../../shared/accounting'
+import { isoDaysFromToday, localIsoToday } from '../../../shared/dates'
 
 type Mode = { kind: 'list' } | { kind: 'form'; quote: Quotation | null }
 
@@ -44,7 +45,7 @@ export function QuotesView() {
   const [statusFilter, setStatusFilter] = useState<'All' | QuotationStatus>('All')
   const [searchTerm, setSearchTerm] = useState('')
 
-  const asOf = new Date().toISOString().split('T')[0]
+  const asOf = localIsoToday()
   const quotes = data.quotes || []
 
   const formatMoney = (val: number) => {
@@ -296,9 +297,9 @@ function QuoteForm({ quote, onClose }: { quote: Quotation | null; onClose: () =>
   }
 
   const [partyId, setPartyId] = useState(quote?.partyId || customers[0]?.id || '')
-  const [date, setDate] = useState(quote?.date || new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(quote?.date || localIsoToday())
   const [validUntil, setValidUntil] = useState(
-    quote?.validUntil || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    quote?.validUntil || isoDaysFromToday(30),
   )
   const [notes, setNotes] = useState(quote?.notes || 'Quotation valid for 30 days.')
   const [discountTotal, setDiscountTotal] = useState(

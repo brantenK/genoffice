@@ -18,6 +18,7 @@ import {
   toBaseAmount,
   invoiceExchangeRate,
 } from './accounting'
+import { localIsoToday } from './dates'
 
 /**
  * Creates a balanced JournalEntry that REVERSES a previously posted sales
@@ -57,7 +58,7 @@ export function createCreditNoteJournal(
   const discountTotal = toBaseAmount(Number(invoice.discountTotal) || 0, rate)
   const isSales = invoice.type === 'Sales'
 
-  const dateStr = invoice.date || new Date().toISOString().split('T')[0]
+  const dateStr = invoice.date || localIsoToday()
   const year = new Date(dateStr).getFullYear() || new Date().getFullYear()
   const randomSuffix = Math.random().toString(36).slice(2, 7)
   const entryNum = entryNumber || `JE-${year}-${String(Date.now()).slice(-4)}-${randomSuffix}`

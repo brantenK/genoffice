@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { agingBuckets, taxRegister } from '../../../shared/reports'
+import { localIsoToday } from '../../../shared/dates'
 import { computeCashFlowStatement } from '../../../shared/cash-flow'
 import type { ReportType } from '../../../shared/types'
 
@@ -26,7 +27,7 @@ export function ReportsView() {
   const report = activeReport as ReportTab
   const setReportTab = (tab: ReportTab) => setActiveReport(tab as ReportType)
 
-  const asOf = new Date().toISOString().split('T')[0]
+  const asOf = localIsoToday()
   const agingRows = agingBuckets(invoices, parties, asOf, agingScope)
   const agingTotals = agingRows.reduce(
     (sum, r) => ({

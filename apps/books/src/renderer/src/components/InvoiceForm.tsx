@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Plus, Trash2, ArrowLeft, Save, Printer } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { DEFAULT_PAYMENT_TERMS_DAYS } from '../../../shared/chart'
+import { isoDaysFromToday, localIsoToday } from '../../../shared/dates'
 import type { InvoiceItem, InvoiceType } from '../../../shared/types'
 import {
   round2,
@@ -36,10 +37,10 @@ export function InvoiceForm({ type }: InvoiceFormProps) {
       : { id: 'acc-materials', name: 'Direct Project Materials & Subcontractors' })
 
   const [partyId, setPartyId] = useState(existing?.partyId || relevantParties[0]?.id || '')
-  const [date, setDate] = useState(existing?.date || new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(existing?.date || localIsoToday())
   const [dueDate, setDueDate] = useState(
     existing?.dueDate ||
-      new Date(Date.now() + DEFAULT_PAYMENT_TERMS_DAYS * 86400000).toISOString().split('T')[0],
+      isoDaysFromToday(30),
   )
   const [tenderRef, setTenderRef] = useState(existing?.tenderReference || '')
   const [notes, setNotes] = useState(

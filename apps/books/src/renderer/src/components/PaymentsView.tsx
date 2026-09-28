@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Banknote, Plus, Trash2, ArrowDownLeft, ArrowUpRight, CheckCircle2 } from 'lucide-react'
 import { useBooksStore } from '../store'
 import { invoiceExchangeRate, round2, toBaseAmount } from '../../../shared/accounting'
+import { localIsoToday } from '../../../shared/dates'
 import type { Payment } from '../../../shared/types'
 
 const PAYMENT_METHODS = ['Bank Transfer', 'Cash', 'Card', 'Other']
@@ -13,7 +14,7 @@ export function PaymentsView() {
   const [showModal, setShowModal] = useState(false)
   const [mode, setMode] = useState<'payment' | 'refund'>('payment')
   const [partyId, setPartyId] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(localIsoToday())
   const [method, setMethod] = useState('Bank Transfer')
   const [reference, setReference] = useState('')
   const [amounts, setAmounts] = useState<Record<string, string>>({})

@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useBooksStore } from '../store'
 import type { JournalEntryItem } from '../../../shared/types'
+import { localIsoToday } from '../../../shared/dates'
 
 export function JournalEntryList() {
   const { data, addJournalEntry } = useBooksStore()
   const { journalEntries, accounts, settings } = data
 
   const [showModal, setShowModal] = useState(false)
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(localIsoToday())
   const [remarks, setRemarks] = useState('')
   const dateInputRef = useRef<HTMLInputElement>(null)
 

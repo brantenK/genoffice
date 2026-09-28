@@ -16,6 +16,7 @@ import type {
 } from '../../shared/types'
 import { EMPTY_ACCOUNTS, DEFAULT_BOOK_SETTINGS } from '../../shared/chart'
 import { appendAudit, createAuditEntry } from '../../shared/audit'
+import { isoDaysFromToday, localIsoToday } from '../../shared/dates'
 import {
   isLoadDataResult,
   isSaveDataResult,
@@ -567,11 +568,11 @@ function invoiceSaveMutation(
     partyId: partial.partyId || oldInvoice?.partyId || '',
     partyName:
       partial.partyName || oldInvoice?.partyName || (type === 'Sales' ? 'Customer' : 'Supplier'),
-    date: partial.date || oldInvoice?.date || now.split('T')[0],
+    date: partial.date || oldInvoice?.date || localIsoToday(),
     dueDate:
       partial.dueDate ||
       oldInvoice?.dueDate ||
-      new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      isoDaysFromToday(30),
     items,
     subtotal: totals.subtotal,
     taxTotal: totals.taxTotal,
@@ -1032,7 +1033,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     // audit history, and deletion all behave exactly like a normal receipt.
     const result = await get().recordPayment({
       partyId: inv.partyId,
-      date: new Date().toISOString().split('T')[0],
+      date: localIsoToday(),
       method: 'Manual settlement',
       reference: `Marked paid: ${inv.invoiceNumber}`,
       allocations: [
@@ -1174,11 +1175,11 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         partial.quoteNumber || oldQuote?.quoteNumber || nextQuoteNumber(quotes, partial.date),
       partyId: partial.partyId || oldQuote?.partyId || '',
       partyName: partial.partyName || oldQuote?.partyName || 'Customer',
-      date: partial.date || oldQuote?.date || now.split('T')[0],
+      date: partial.date || oldQuote?.date || localIsoToday(),
       validUntil:
         partial.validUntil ||
         oldQuote?.validUntil ||
-        new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+        isoDaysFromToday(30),
       items,
       subtotal: totals.subtotal,
       taxTotal: totals.taxTotal,
@@ -1259,7 +1260,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       type: 'Sales',
       partyId: quote.partyId,
       partyName: quote.partyName,
-      date: new Date().toISOString().split('T')[0],
+      date: localIsoToday(),
       notes: quote.notes,
       items: quote.items,
       status: 'Unpaid',
@@ -1376,7 +1377,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       type: original.type,
       partyId: original.partyId,
       partyName: original.partyName,
-      date: input.date || now.split('T')[0],
+      date: input.date || localIsoToday(),
       dueDate: original.dueDate,
       items,
       subtotal: totals.subtotal,

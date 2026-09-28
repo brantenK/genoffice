@@ -21,6 +21,7 @@
 //   internal transfer with no flow at all.
 
 import { computeAccountBalances, round2 } from './accounting'
+import { localIsoToday } from './dates'
 import type { Account, CompanySettings, JournalEntry } from './types'
 
 export type CashFlowCategory = 'operating' | 'investing' | 'financing'
@@ -119,7 +120,7 @@ function resolvePeriod(
   fromOverride?: string,
   toOverride?: string,
 ): { from: string; to: string } {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localIsoToday()
   const to = isValidIsoDate(toOverride) ? toOverride : today
   const from = isValidIsoDate(fromOverride)
     ? fromOverride
