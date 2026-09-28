@@ -533,7 +533,7 @@ export function unwindDeletedInvoice(
     return { journalEntries, bankTransactions }
   }
   const ownedSet = new Set(owned)
-  const journals = journalEntries.filter((je) => !ownedSet.has(je))
+  let journals = journalEntries.filter((je) => !ownedSet.has(je))
 
   const reclassTxIds = new Set(
     owned
@@ -575,20 +575,42 @@ export function unwindDeletedInvoice(
       reconciledAt: stillAllocated ? tx.reconciledAt ?? new Date().toISOString() : undefined,
     })
 
-    // The line's bank cash is posted exactly once. An existing import journal
-    // already carries it (and its Suspense credit holds the unallocated
-    // remainder), so it is left untouched. A line with NO import journal had
-    // its cash posted by the settlement that just died — restore it with one
-    // journal for the uncovered remainder.
-    const hasImportJournal = journals.some((je) => je.id === `je-import-${tx.id}`)
-    if (!hasImportJournal && !stillAllocated && uncovered > 0.005) {
-      journals.unshift(
-        createBankImportJournal(
-          { ...tx, amount: tx.amount > 0 ? uncovered : -uncovered },
-          accounts,
-          nextJournalNumber(journals, tx.date),
-        ),
-      )
+    // The line's bank cash is posted exactly once. What the import layer must
+    // carry is the statement's cash MINUS what SURVIVING bank-funded payments
+    // already moved through their own journals — not merely "an import journal
+    // exists": a partially covered line's remainder-only import journal
+    // under-states Bank once the covered payment dies with its invoice (its
+    // journal is structurally owned and removed with it). A dead payment's
+    // link is dropped above, so its cash is re-imported here; a live
+    // suspense-funded link defers to the import (its own leg clears it).
+    const liveBankFunded = round2(
+      liveLinks.reduce((sum, link) => {
+        const paymentJournal = journals.find((je) =>
+          mentionsReference(je.remarks, `Payment ${link.paymentId}`),
+        )
+        const suspenseFunded =
+          !paymentJournal ||
+          (paymentJournal.items || []).some((it) => it.accountId === 'acc-suspense')
+        return suspenseFunded ? sum : round2(sum + round2(Number(link.amount) || 0))
+      }, 0),
+    )
+    const neededImport = round2(txAbs - liveBankFunded)
+    const survivingImport = round2(
+      journals
+        .filter((je) => je.id === `je-import-${tx.id}`)
+        .reduce((sum, je) => sum + round2(Math.abs(Number(je.totalDebit) || 0)), 0),
+    )
+    if (Math.abs(round2(survivingImport - neededImport)) > 0.005) {
+      journals = journals.filter((je) => je.id !== `je-import-${tx.id}`)
+      if (neededImport > 0.005) {
+        journals.unshift(
+          createBankImportJournal(
+            { ...tx, amount: tx.amount > 0 ? neededImport : -neededImport },
+            accounts,
+            nextJournalNumber(journals, tx.date),
+          ),
+        )
+      }
     }
   }
 

@@ -664,10 +664,20 @@ function invoiceSaveMutation(
         journalOwnedByInvoice(je, oldInvoice),
       )
 
-      // Settlement guards. Both refuse BEFORE anything is reversed: re-deriving
+      // Settlement guards. All refuse BEFORE anything is reversed: re-deriving
       // the settled money movement on an edited invoice cannot be done safely
       // in every case, and a wrong guess corrupts the control accounts.
       //
+      // A negative new total is its own refusal: the carried-portion message
+      // would read "0.00 is already settled … more than -50.00", which is
+      // nonsense for an invoice nothing was ever paid on. Credits belong to
+      // credit notes, which reverse the original posting properly.
+      if (targetInvoice.grandTotal < 0) {
+        const message = `Cannot edit ${oldNumber}: the new total of ${fmtAmount(targetInvoice.grandTotal)} is negative. Credit a negative amount with a credit note instead.`
+        console.warn(`[books-store] Refused edit to a negative total: ${oldNumber}`)
+        return { ok: false, error: message }
+      }
+
       // F2: the new total is below the already-settled portion. The carried
       // re-post below would settle MORE than the invoice is now worth — the
       // outstanding clamps at zero but the journals leave AR floating negative
@@ -681,15 +691,19 @@ function invoiceSaveMutation(
 
       // F4: part of the settled cash is suspense-funded — it arrived through a
       // bank-statement import (a reconciliation reclass, or a payment that
-      // linked to a statement line). Re-posting the carried portion would move
-      // it through Bank a second time and strand the import's Suspense leg,
-      // and a mixed payment/reconciliation portion has no single safe cash
-      // side, so the edit is refused rather than guessed.
+      // linked to a statement line). The refusal covers EVERY edit of this
+      // invoice, notes-only edits included: the carried re-post below runs
+      // from the invoice's own figures on every posted edit, so it would move
+      // that cash through Bank again and strand the import's Suspense leg no
+      // matter how little the edit changes. (Verified: a notes-only edit
+      // re-posts the full carried portion — plan.paidAmount is independent of
+      // what the edit touches.) "Re-reconcile the statement line" was the old
+      // guidance and a dead end: the line is already reconciled.
       const suspenseFunded = removedJournals.some((je) =>
         (je.items || []).some((it) => it.accountId === 'acc-suspense'),
       )
       if (suspenseFunded) {
-        const message = `Cannot edit ${oldNumber}: ${fmtAmount(plan.paidAmount)} of it was settled through bank-statement reconciliation (the cash was already booked by the statement import), so editing would re-post that cash against the bank account. Delete the invoice or re-reconcile the statement line instead.`
+        const message = `Cannot edit ${oldNumber}: ${fmtAmount(plan.paidAmount)} of it was settled through bank-statement reconciliation, and every edit of this invoice re-posts that settled cash against the bank account — including notes-only edits, because the carried settlement is re-posted from the invoice's own figures. Delete the invoice (its settlement unwinds with it) and create it again with the changes you need.`
         console.warn(`[books-store] Refused edit of suspense-settled invoice: ${oldNumber}`)
         return { ok: false, error: message }
       }
@@ -715,11 +729,18 @@ function invoiceSaveMutation(
       // above have bounded this re-post: the amount never exceeds the new
       // total, and its cash is bank-funded (never suspense).
       if (plan.paidAmount > 0) {
+        // The carried portion is re-posted in BASE: plan.paidAmount is the
+        // invoice's OWN-currency paid figure (oldGrandTotal − oldOutstanding)
+        // while createSettlementJournal posts base amounts — an FX invoice's
+        // carry must ride the invoice's stored rate or AR and Bank would
+        // mis-state by ×rate. The old invoice's rate is the truth of the cash:
+        // the removed journals posted at it.
+        const carryBase = toBaseAmount(plan.paidAmount, invoiceExchangeRate(oldInvoice))
         nextJournals.unshift(
           createSettlementJournal(
             targetInvoice,
             data.accounts,
-            plan.paidAmount,
+            carryBase,
             resolvedParty,
             nextJournalNumber(nextJournals, targetInvoice.date),
           ),
