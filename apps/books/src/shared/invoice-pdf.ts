@@ -125,6 +125,18 @@ export async function buildInvoicePdf(
   let page: PDFPage = pdfDoc.addPage([PAGE_W, PAGE_H])
 
   const symbol = settings.currencySymbol || 'R'
+  // The document prints in the INVOICE'S currency (the same contract the print
+  // preview implements, and what the ledger stores: the invoice's own totals
+  // stay in `currency` — that is what the printed document shows). A
+  // foreign-currency invoice's amounts are labelled with its ISO code — never
+  // the base symbol against foreign figures — and an FX note under the totals
+  // gives the base-currency equivalent at the invoice's stored rate.
+  const invoiceCurrencyCode = (invoice.currency || '').trim()
+  const baseCurrencyCode = (settings.currency || 'ZAR').trim().toUpperCase()
+  const isForeignCurrency =
+    Boolean(invoiceCurrencyCode) &&
+    invoiceCurrencyCode.toUpperCase() !== baseCurrencyCode
+  const moneySymbol = isForeignCurrency ? invoiceCurrencyCode.toUpperCase() : symbol
   const rightX = PAGE_W - MARGIN
   let y = PAGE_H - MARGIN
 
@@ -323,9 +335,9 @@ export async function buildInvoicePdf(
       9,
       qtyDescWidth,
     )
-    const rate = fitCell(formatMoney(Number(it.rate) || 0, symbol), regular, 9, colRate.width)
+    const rate = fitCell(formatMoney(Number(it.rate) || 0, moneySymbol), regular, 9, colRate.width)
     const tax = fitCell(`${Number(it.taxRate) || 0}%`, regular, 9, colTax.width)
-    const amount = fitCell(formatMoney(Number(it.amount) || 0, symbol), regular, 9, colAmount.width)
+    const amount = fitCell(formatMoney(Number(it.amount) || 0, moneySymbol), regular, 9, colAmount.width)
 
     draw(regular, desc.size, desc.text, colDesc, COLOR_DARK)
     draw(regular, qty.size, qty.text, colQty + 1, COLOR_DARK)
@@ -359,12 +371,12 @@ export async function buildInvoicePdf(
     down(size + 8)
   }
 
-  drawTotal('Subtotal', formatMoney(Number(invoice.subtotal) || 0, symbol))
-  drawTotal(`VAT / Tax (${taxLabelRate}%)`, formatMoney(Number(invoice.taxTotal) || 0, symbol))
+  drawTotal('Subtotal', formatMoney(Number(invoice.subtotal) || 0, moneySymbol))
+  drawTotal(`VAT / Tax (${taxLabelRate}%)`, formatMoney(Number(invoice.taxTotal) || 0, moneySymbol))
   if (invoice.roundOff !== undefined && round2(invoice.roundOff) !== 0) {
-    drawTotal('Round-off', formatMoney(round2(invoice.roundOff), symbol))
+    drawTotal('Round-off', formatMoney(round2(invoice.roundOff), moneySymbol))
   }
-  drawTotal('Grand Total', formatMoney(Number(invoice.grandTotal) || 0, symbol), {
+  drawTotal('Grand Total', formatMoney(Number(invoice.grandTotal) || 0, moneySymbol), {
     font: bold,
     size: 11,
     // modern emphasises the totals row in the accent; classic keeps its dark
@@ -372,11 +384,28 @@ export async function buildInvoicePdf(
     color: template === 'modern' ? accent : COLOR_DARK,
   })
   down(2)
-  drawTotal('Amount Due', formatMoney(Number(invoice.outstandingAmount) || 0, symbol), {
+  drawTotal('Amount Due', formatMoney(Number(invoice.outstandingAmount) || 0, moneySymbol), {
     font: bold,
     size: 11,
     color: template === 'modern' || accentChanged ? accent : COLOR_ACCENT,
   })
+
+  // FX note: a foreign-currency document carries its own-currency figures AND
+  // the base-currency equivalent at the invoice's stored rate, so the reader
+  // (and a VAT audit) can reconcile the document to the ledger's base posting.
+  if (isForeignCurrency) {
+    const rate = Number(invoice.exchangeRate)
+    const fxRate = Number.isFinite(rate) && rate > 0 ? rate : 1
+    down(2)
+    draw(
+      regular,
+      8,
+      `Exchange rate: 1 ${moneySymbol} = ${fxRate.toFixed(2)} ${baseCurrencyCode} · Base grand total: ${formatMoney(round2((Number(invoice.grandTotal) || 0) * fxRate), symbol)}`,
+      MARGIN,
+      COLOR_DARK,
+    )
+    down(14)
+  }
 
   // --- Notes ---
   down(10)

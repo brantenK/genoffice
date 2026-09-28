@@ -69,7 +69,7 @@ export function QuotesView() {
         )
       case 'Expired':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FFF7F7] text-[#E03636] border border-[#FCD7D7]">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FFF7F7] text-[#C22626] border border-[#FCD7D7]">
             <AlertCircle className="w-3 h-3" /> Expired
           </span>
         )

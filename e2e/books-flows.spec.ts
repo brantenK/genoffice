@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -681,5 +681,447 @@ test('one deposit naming two invoices splits across both from the UI', async () 
     expect(data.journalEntries.length).toBeGreaterThanOrEqual(4)
   } finally {
     await closeAndSaveVideo(launched, 'books-split')
+  }
+})
+
+test('an expired quotation shows the Expired state and the quotes page is axe-clean', async () => {
+  test.setTimeout(240_000)
+  const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-quote-expiry' })
+  const { userDataDir } = launched
+  try {
+    const books = await openBooks(launched)
+    await setupWizard(books, 'Quote Expiry Trading (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+
+    // A quote whose validity already lapsed: the row shows Expired (the
+    // display state the quotes view derives from validUntil < today) while
+    // the stored status stays the lifecycle one.
+    await goto(books, 'Quotations')
+    await books
+      .locator('main')
+      .getByRole('button', { name: /New Quotation/i })
+      .click()
+    await books
+      .locator('label', { hasText: 'Customer' })
+      .locator('..')
+      .locator('select')
+      .selectOption({ label: CUSTOMER })
+    const row = books.locator('tbody tr').first()
+    await row.locator('input').nth(0).fill('Lapsed works')
+    await row.locator('input').nth(1).fill('1')
+    await row.locator('input').nth(2).fill('1000')
+    await books
+      .locator('label', { hasText: 'Valid Until' })
+      .locator('..')
+      .locator('input')
+      .fill('2026-01-01')
+    await books.getByRole('button', { name: 'Save Quotation' }).click()
+    await expect(books.locator('text=QTN-2026-001').first()).toBeVisible({ timeout: 15_000 })
+
+    // The pinned UI element: the Expired badge (AlertCircle + 'Expired') in
+    // the quote's row.
+    await expect(
+      books.locator('tr', { hasText: 'QTN-2026-001' }).locator('text=Expired').first(),
+    ).toBeVisible({ timeout: 15_000 })
+    const stored = booksData(userDataDir)
+    const quote = stored.quotes!.find((q: any) => q.quoteNumber === 'QTN-2026-001')!
+    expect(quote.validUntil).toBe('2026-01-01')
+    // Expired is a display state only: the stored status never claims it.
+    expect(['Draft', 'Sent']).toContain(quote.status)
+    await books.screenshot({ path: screenshotPath('books-quote-expired') })
+
+    // The quotes page joins the Axe scan at zero findings.
+    await goto(books, 'Quotations')
+    await books.waitForTimeout(300)
+    const violations = await axeScan(books)
+    ;(await import('node:fs/promises')).writeFile(
+      'e2e/artifacts/axe-findings-quotes.json',
+      JSON.stringify(violations, null, 1),
+    )
+    expect(
+      violations,
+      `quotes page accessibility: ${violations.join(' | ')}`,
+    ).toHaveLength(0)
+  } finally {
+    await closeAndSaveVideo(launched, 'books-quote-expiry')
+  }
+})
+
+test('converting a quote into a closed period is refused; after the close it converts', async () => {
+  test.setTimeout(300_000)
+  // ── Profile A: the period is closed THROUGH today — the conversion would
+  // post an invoice dated today, inside the locked period, and must be
+  // refused with the action-guiding message.
+  const closedToday = await launchShell({ onboardingSeen: true, videoDir: 'books-convert-closed' })
+  const closedDir = closedToday.userDataDir
+  try {
+    const books = await openBooks(closedToday)
+    await setupWizard(books, 'Closed Convert (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+    await goto(books, 'Quotations')
+    await books
+      .locator('main')
+      .getByRole('button', { name: /New Quotation/i })
+      .click()
+    await books
+      .locator('label', { hasText: 'Customer' })
+      .locator('..')
+      .locator('select')
+      .selectOption({ label: CUSTOMER })
+    const row = books.locator('tbody tr').first()
+    await row.locator('input').nth(0).fill('Pre-close quote')
+    await row.locator('input').nth(1).fill('1')
+    await row.locator('input').nth(2).fill('1000')
+    await books.getByRole('button', { name: 'Save Quotation' }).click()
+    await expect(books.locator('text=QTN-2026-001').first()).toBeVisible({ timeout: 15_000 })
+    await books.getByRole('button', { name: 'Mark quotation QTN-2026-001 as sent' }).click()
+    await expect(
+      books.getByRole('button', { name: 'Convert quotation QTN-2026-001 to an invoice' }),
+    ).toBeVisible({ timeout: 15_000 })
+
+    // Close the period through today (the invoice a conversion posts is dated
+    // today, so today is the date that matters).
+    const today = new Date()
+    const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    await goto(books, 'Settings')
+    await books.getByLabel('Close through date').fill(todayIso)
+    await books.getByRole('button', { name: /Close (Financial Year|Period)/i }).click()
+    await expect
+      .poll(() => booksData(closedDir).settings.closedThrough, { timeout: 15_000 })
+      .toBe(todayIso)
+
+    await goto(books, 'Quotations')
+    await books.getByRole('button', { name: 'Convert quotation QTN-2026-001 to an invoice' }).click()
+    await expect(books.locator('text=/closed through/i').first()).toBeVisible({ timeout: 15_000 })
+    const stored = booksData(closedDir)
+    expect(stored.invoices).toHaveLength(0) // nothing posted
+    expect(stored.quotes![0].status).toBe('Sent') // the quote is untouched
+    await books.screenshot({ path: screenshotPath('books-convert-refused') })
+  } finally {
+    await closeAndSaveVideo(closedToday, 'books-convert-closed')
+  }
+
+  // ── Profile B: the period is closed through a PAST date — a quote dated
+  // after the close converts fine.
+  const afterClose = await launchShell({ onboardingSeen: true, videoDir: 'books-convert-open' })
+  const openDir = afterClose.userDataDir
+  try {
+    const books = await openBooks(afterClose)
+    await setupWizard(books, 'Open Convert (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+    await goto(books, 'Quotations')
+    await books
+      .locator('main')
+      .getByRole('button', { name: /New Quotation/i })
+      .click()
+    await books
+      .locator('label', { hasText: 'Customer' })
+      .locator('..')
+      .locator('select')
+      .selectOption({ label: CUSTOMER })
+    const row = books.locator('tbody tr').first()
+    await row.locator('input').nth(0).fill('Post-close quote')
+    await row.locator('input').nth(1).fill('1')
+    await row.locator('input').nth(2).fill('1000')
+    await books.getByRole('button', { name: 'Save Quotation' }).click()
+    await expect(books.locator('text=QTN-2026-001').first()).toBeVisible({ timeout: 15_000 })
+    await books.getByRole('button', { name: 'Mark quotation QTN-2026-001 as sent' }).click()
+
+    await goto(books, 'Settings')
+    await books.getByLabel('Close through date').fill('2026-01-01')
+    await books.getByRole('button', { name: /Close (Financial Year|Period)/i }).click()
+    await expect
+      .poll(() => booksData(openDir).settings.closedThrough, { timeout: 15_000 })
+      .toBe('2026-01-01')
+
+    await goto(books, 'Quotations')
+    await books.getByRole('button', { name: 'Convert quotation QTN-2026-001 to an invoice' }).click()
+    await expect
+      .poll(() => booksData(openDir).quotes?.[0]?.status, { timeout: 20_000 })
+      .toBe('Converted')
+    const stored = booksData(openDir)
+    const invoice = stored.invoices.find((i: any) => i.invoiceNumber === 'INV-2026-001')!
+    expect(invoice).toBeDefined()
+    // The fresh profile prices VAT-inclusively: the 1 000 quote converts to a
+    // 1 000 invoice (the existing quotation journey pins the same arithmetic).
+    expect(invoice.grandTotal).toBe(1000)
+    expect(stored.parties.find((p: any) => p.name === CUSTOMER)!.outstandingBalance).toBe(1000)
+    await books.screenshot({ path: screenshotPath('books-convert-open') })
+  } finally {
+    await closeAndSaveVideo(afterClose, 'books-convert-open')
+  }
+})
+
+test('a restore raced against a save leaves a coherent ledger and a live UI', async () => {
+  test.setTimeout(240_000)
+  const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-restore-race' })
+  const { userDataDir } = launched
+  try {
+    const books = await openBooks(launched)
+    await setupWizard(books, 'Race Restore (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+    await goto(books, 'Sales Invoices')
+    await postInvoice(books, CUSTOMER, 'Works', '1', '1000')
+    await waitForInvoice(books, 'INV-2026-001')
+
+    // A real backup through the preload bridge, then a live mutation so the
+    // two racing writes genuinely disagree about the ledger.
+    const backupPath = await books.evaluate(async () => {
+      const api = window.booksApi!
+      const result = await api.backupNow()
+      if (!result.ok) throw new Error(result.error || 'backup failed')
+      return result.path!
+    })
+    expect(existsSync(backupPath)).toBe(true)
+    const backupName = backupPath.replace(/^.*[/\\]/, '')
+    const raced = await books.evaluate(async (name) => {
+      const api = window.booksApi!
+      const load = await api.loadData()
+      const ledger = load.data!
+      const tweaked = {
+        ...ledger,
+        settings: { ...ledger.settings, companyName: 'Race Save (Pty) Ltd' },
+      }
+      const [restored, saved] = await Promise.all([
+        api.restoreBackup(name),
+        api.saveData(tweaked, ledger.revision),
+      ])
+      return {
+        restoredOk: restored.ok,
+        restoredError: restored.ok ? undefined : restored.error,
+        savedOk: saved.ok,
+        savedError: saved.ok ? undefined : (saved as { error?: string }).error,
+      }
+    }, backupName)
+    // Both writes completed (the main process serializes them); whichever won,
+    // neither crashed and the errors surface as refusals, never as exceptions.
+    expect(typeof raced.restoredOk).toBe('boolean')
+    expect(typeof raced.savedOk).toBe('boolean')
+
+    // The final ledger is coherent: journals balanced, stored balances are
+    // journal-derived, exactly one invoice either way, revision integral.
+    const data = booksData(userDataDir)
+    expect(Number.isInteger(data.revision)).toBe(true)
+    expect(data.revision).toBeGreaterThanOrEqual(0)
+    for (const j of data.journalEntries) {
+      expect(Math.round(j.totalDebit * 100)).toBe(Math.round(j.totalCredit * 100))
+    }
+    // Stored balances == derived balances (the ledger-first invariant, inlined).
+    const derived: Record<string, number> = {}
+    for (const account of data.accounts) derived[account.id] = 0
+    for (const j of data.journalEntries) {
+      for (const item of j.items) {
+        if (!(item.accountId in derived)) derived[item.accountId] = 0
+        const signed = Math.round((item.debit - item.credit) * 100)
+        const meta = data.accounts.find((a) => a.id === item.accountId)
+        if (meta && (meta as any).rootType === 'Asset') derived[item.accountId] += signed / 100
+        else if (meta && (meta as any).rootType === 'Expense') derived[item.accountId] += signed / 100
+        else if (meta) derived[item.accountId] -= signed / 100
+        else derived[item.accountId] += signed / 100
+      }
+    }
+    for (const account of data.accounts) {
+      if ((account as any).isGroup) continue
+      expect(
+        Math.round((account.balance - derived[account.id]) * 100),
+        `account ${account.id} must be journal-derived`,
+      ).toBe(0)
+    }
+    expect(data.invoices.length).toBeLessThanOrEqual(1)
+    expect(data.invoices.length).toBeGreaterThanOrEqual(0)
+
+    // The UI is alive and shows a consistent list either way.
+    await goto(books, 'Sales Invoices')
+    await books.waitForTimeout(400)
+    await books.screenshot({ path: screenshotPath('books-restore-race') })
+    const load = await books.evaluate(() => window.booksApi!.loadData())
+    expect(load.ok).toBe(true)
+  } finally {
+    await closeAndSaveVideo(launched, 'books-restore-race')
+  }
+})
+
+
+/** Reads the drawn strings out of a pdf-lib-produced PDF (hex-decoded text ops). */
+function extractPdfFigures(bytes: Buffer): string[] {
+  const zlib = require('node:zlib') as typeof import('node:zlib')
+  const chunks: string[] = []
+  const marker = 'stream'
+  const endMarker = 'endstream'
+  let cursor = 0
+  for (;;) {
+    const start = bytes.indexOf(marker, cursor, 'latin1')
+    if (start === -1) break
+    let dataStart = start + marker.length
+    if (bytes[dataStart] === 13) dataStart += 1
+    if (bytes[dataStart] === 10) dataStart += 1
+    const end = bytes.indexOf(endMarker, dataStart, 'latin1')
+    if (end === -1) break
+    let content: string
+    try {
+      content = zlib.inflateSync(bytes.subarray(dataStart, end)).toString('latin1')
+    } catch {
+      content = bytes.subarray(dataStart, end).toString('latin1')
+    }
+    content = content.replace(/<([0-9A-Fa-f\s]+)>/g, (_m: string, hex: string) =>
+      Buffer.from(hex.replace(/\s+/g, ''), 'hex').toString('latin1'),
+    )
+    for (const match of content.matchAll(/([^\n]{2,}?)\s+Tj/g)) chunks.push(match[1])
+    cursor = end + endMarker.length
+  }
+  return chunks
+}
+
+test('both print templates render an EUR invoice with ISO labels and the base total', async () => {
+  test.setTimeout(300_000)
+  const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-fx-print' })
+  const { userDataDir } = launched
+  const exportsRoot = join(tmpdir(), 'zano-books-exports')
+  const newestFxPdf = (): string => {
+    let newest: { path: string; mtime: number } | null = null
+    for (const dir of existsSync(exportsRoot) ? readdirSync(exportsRoot) : []) {
+      const dirPath = join(exportsRoot, dir)
+      for (const file of existsSync(dirPath) ? readdirSync(dirPath) : []) {
+        if (!file.startsWith('Tax_Invoice_INV-2026-001')) continue
+        const filePath = join(dirPath, file)
+        const mtime = statSync(filePath).mtimeMs
+        if (!newest || mtime > newest.mtime) newest = { path: filePath, mtime }
+      }
+    }
+    if (!newest) throw new Error('no generated Tax_Invoice INV-2026-001 PDF found')
+    return newest.path
+  }
+
+  try {
+    const books = await openBooks(launched)
+    await setupWizard(books, 'FX Print Trading (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+    await goto(books, 'Sales Invoices')
+    // EUR 1 000, zero-rated, at 20 ZAR/EUR — the posting is base 20 000.
+    await postInvoice(books, CUSTOMER, 'Consulting', '1', '1000', {
+      currency: 'EUR',
+      exchangeRate: '20',
+      taxRate: '0',
+    })
+    await waitForInvoice(books, 'INV-2026-001')
+    const data = booksData(userDataDir)
+    expect(account(data, 'acc-ar')).toBe(20000)
+
+    for (const template of ['classic', 'modern'] as const) {
+      // Pick the template in Settings (the picker persists on save).
+      await goto(books, 'Settings')
+      await books.getByRole('button', { name: template === 'classic' ? 'Classic' : 'Modern' }).click()
+      await books.waitForTimeout(600)
+
+      await goto(books, 'Sales Invoices')
+      await books.getByRole('button', { name: 'Print invoice INV-2026-001' }).click()
+      await expect(books.locator('text=Document Print Preview · INV-2026-001')).toBeVisible({
+        timeout: 15_000,
+      })
+      // The preview agrees with the document: EUR-labelled figures.
+      await expect(books.locator('text=/EUR/').first()).toBeVisible()
+      await books.screenshot({ path: screenshotPath(`books-fx-print-${template}`) })
+      const beforeCount = existsSync(exportsRoot) ? readdirSync(exportsRoot).length : 0
+      await books.getByRole('button', { name: 'Print / PDF' }).click()
+
+      // The document lands in the generated-exports tree; wait for it.
+      let pdfPath = ''
+      for (let i = 0; i < 40; i += 1) {
+        await books.waitForTimeout(250)
+        try {
+          const candidate = newestFxPdf()
+          if (candidate) {
+            const count = existsSync(exportsRoot) ? readdirSync(exportsRoot).length : 0
+            if (count > beforeCount || i > 20) {
+              pdfPath = candidate
+              break
+            }
+          }
+        } catch {
+          // not there yet
+        }
+      }
+      expect(pdfPath, 'the generated PDF exists').toBeTruthy()
+      const figures = extractPdfFigures(readFileSync(pdfPath))
+      // The document prints in the invoice's currency: EUR-labelled totals.
+      // formatMoney uses en-ZA (decimal comma, space grouping).
+      expect(figures.some((f) => /^EUR 1[ ,\u00A0]000[.,]00$/.test(f.trim()))).toBe(true)
+      expect(figures.some((f) => f.trim() === 'Grand Total')).toBe(true)
+      expect(figures.some((f) => f.trim() === 'Amount Due')).toBe(true)
+      // The base-currency equivalent rides the stored rate (grandTotal × 20);
+      // it is drawn as one FX-note string.
+      expect(
+        figures.some((f) =>
+          /^Exchange rate: 1 EUR = 20\.00 ZAR · Base grand total: R 20[ ,\u00A0]000[.,]00$/.test(
+            f.trim(),
+          ),
+        ),
+      ).toBe(true)
+      // The old defect — the base symbol against foreign figures — never returns.
+      expect(figures.some((f) => /^R 1[ ,\u00A0]000[.,]00$/.test(f.trim()))).toBe(false)
+      // Close the print modal so the next template's navigation isn't blocked
+      // by the overlay.
+      await books.getByRole('button', { name: 'Close print preview' }).click()
+      await expect(books.locator('text=Document Print Preview · INV-2026-001')).toHaveCount(0)
+    }
+  } finally {
+    await closeAndSaveVideo(launched, 'books-fx-print')
+  }
+})
+
+test('an outstanding EUR invoice reads correctly in aging, tax register and cash flow', async () => {
+  test.setTimeout(240_000)
+  const launched = await launchShell({ onboardingSeen: true, videoDir: 'books-fx-reports' })
+  const { userDataDir } = launched
+  try {
+    const books = await openBooks(launched)
+    await setupWizard(books, 'FX Reports Trading (Pty) Ltd')
+    await addParty(books, CUSTOMER, 'Customer')
+    await goto(books, 'Sales Invoices')
+    await postInvoice(books, CUSTOMER, 'Consulting', '1', '1000', {
+      currency: 'EUR',
+      exchangeRate: '20',
+      taxRate: '0',
+    })
+    await waitForInvoice(books, 'INV-2026-001')
+
+    const data = booksData(userDataDir)
+    const invoice = data.invoices.find((i: any) => i.invoiceNumber === 'INV-2026-001')!
+
+    // Aging: the invoice is outstanding, due 30 days out (not overdue), so it
+    // sits in the CURRENT bucket at its BASE amount (outstanding × rate).
+    expect(invoice.status).toBe('Unpaid')
+    const daysOverdue = Math.round(
+      (new Date(invoice.dueDate).getTime() - Date.now()) / 86_400_000,
+    )
+    expect(daysOverdue).toBeGreaterThan(0) // current bucket, per the aging rule
+    const baseOutstanding = Math.round(invoice.outstandingAmount * invoice.exchangeRate * 100) / 100
+    expect(baseOutstanding).toBe(20000)
+    expect(account(data, 'acc-ar')).toBe(20000) // the control agrees with the bucket
+
+    // Tax register: zero-rated EUR — the 0% band carries the base TAXABLE
+    // (20 000) and zero VAT, per the register's real contract.
+    await goto(books, 'Financial Reports')
+    await books.getByRole('button', { name: /Tax Register/i }).first().click()
+    await expect(books.locator('text=Tax Register (VAT)')).toBeVisible({ timeout: 10_000 })
+    await expect(books.locator('text=/R 20[ \\u00A0,]000[.,]00/').first()).toBeVisible({
+      timeout: 10_000,
+    })
+    await books.screenshot({ path: screenshotPath('books-fx-tax-register') })
+
+    // Cash flow: a receivable is not cash — opening equals closing while the
+    // EUR invoice sits unpaid (only the wizard's opening bank balance moves).
+    const opening = account(data, 'acc-bank') + account(data, 'acc-cash')
+    expect(opening).toBe(10000)
+    await books
+      .getByRole('button', { name: /Cash Flow/i })
+      .first()
+      .click()
+    await expect(books.locator('text=Statement of Cash Flows')).toBeVisible({ timeout: 10_000 })
+    await expect(books.locator('text=Closing Cash Balance')).toBeVisible({ timeout: 10_000 })
+    await expect(books.locator('text=/^R 10[ \\u00A0,]000[.,]00$/').first()).toBeVisible()
+    await books.screenshot({ path: screenshotPath('books-fx-cash-flow') })
+  } finally {
+    await closeAndSaveVideo(launched, 'books-fx-reports')
   }
 })

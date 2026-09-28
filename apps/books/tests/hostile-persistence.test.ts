@@ -74,8 +74,12 @@ afterEach(() => {
   session?.dispose()
 })
 
-function seedLedgerWithInvoice(): { envelope: BooksDataEnvelope; stored: BooksData; bytes: string } {
-  expect(session.saveData(emptyLedger())).resolves.toBe(true)
+async function seedLedgerWithInvoice(): Promise<{
+  envelope: BooksDataEnvelope
+  stored: BooksData
+  bytes: string
+}> {
+  await expect(session.saveData(emptyLedger())).resolves.toBe(true)
   const issued = session.modules.issueSalesInvoiceInBooks({
     booksDataPath: session.booksDataPath,
     partyName: 'Rand Water Authority',
@@ -103,7 +107,7 @@ function writeStaleTmp(): string {
 
 describe('hostile: crash mid-write (stale .tmp and other partial-state shapes)', () => {
   it('a stale .tmp beside a good ledger is ignored: load returns the last good ledger', async () => {
-    const { bytes } = seedLedgerWithInvoice()
+    const { bytes } = await seedLedgerWithInvoice()
     const stale = writeStaleTmp()
     // More partial-state shapes the atomic writer can leave behind: a
     // half-written safety copy tmp and an orphan forensic tmp.
@@ -123,7 +127,7 @@ describe('hostile: crash mid-write (stale .tmp and other partial-state shapes)',
   })
 
   it('saving over a crashed-write state still works and the store stays valid', async () => {
-    seedLedgerWithInvoice()
+    await seedLedgerWithInvoice()
     writeStaleTmp()
     const loaded = (await session.loadData())!
     const next: BooksDataEnvelope = {
@@ -139,7 +143,7 @@ describe('hostile: crash mid-write (stale .tmp and other partial-state shapes)',
   })
 
   it('a mid-write kill (tmp present, rename never ran) recovers to the pre-write ledger', async () => {
-    const { bytes } = seedLedgerWithInvoice()
+    const { bytes } = await seedLedgerWithInvoice()
     const loaded = (await session.loadData())!
     // The write starts: the tmp is fully written, then the process dies before
     // the rename. Next boot: the pre-write ledger, not the new one, not empty.
@@ -166,7 +170,7 @@ describe('hostile: crash mid-write (stale .tmp and other partial-state shapes)',
 
 describe('hostile: disk-full and permission failures', () => {
   it('ENOSPC on the atomic rename refuses the save and keeps the file byte-identical', async () => {
-    const { bytes, envelope } = seedLedgerWithInvoice()
+    const { bytes, envelope } = await seedLedgerWithInvoice()
     const before = readdirSync(session.booksDir).length
     fsFailure.renameFailure = ENOSPC
 
@@ -191,7 +195,7 @@ describe('hostile: disk-full and permission failures', () => {
   })
 
   it('ENOSPC on the tmp write itself refuses the save and leaves no partial tmp', async () => {
-    const { bytes, envelope } = seedLedgerWithInvoice()
+    const { bytes, envelope } = await seedLedgerWithInvoice()
     fsFailure.writeFailure = ENOSPC
     const save = await session.saveDataResult(
       { ...envelope, settings: { ...envelope.settings, companyName: 'No Tmp (Pty) Ltd' } },
@@ -204,7 +208,7 @@ describe('hostile: disk-full and permission failures', () => {
   })
 
   it('an EACCES rename is refused with a readable error and the ledger intact', async () => {
-    const { bytes, envelope } = seedLedgerWithInvoice()
+    const { bytes, envelope } = await seedLedgerWithInvoice()
     fsFailure.renameFailure = EACCES
     const save = await session.saveDataResult(
       { ...envelope, settings: { ...envelope.settings, companyName: 'Denied (Pty) Ltd' } },
@@ -218,7 +222,7 @@ describe('hostile: disk-full and permission failures', () => {
   })
 
   it('a disk-full backup refuses with an error; the ledger and its backups are untouched', async () => {
-    const { bytes } = seedLedgerWithInvoice()
+    const { bytes } = await seedLedgerWithInvoice()
     const backupsDir = join(session.booksDir, 'backups')
     fsFailure.writeFailure = ENOSPC
     const backup = await session.invoke<{ ok: boolean; error?: string }>(
@@ -232,7 +236,7 @@ describe('hostile: disk-full and permission failures', () => {
   })
 
   it('an EACCES restore is refused and the live ledger stays byte-identical', async () => {
-    const { bytes } = seedLedgerWithInvoice()
+    const { bytes } = await seedLedgerWithInvoice()
     const backup = await session.invoke<{ ok: boolean; path?: string }>(BOOKS_CHANNELS.backupNow)
     expect(backup.ok).toBe(true)
     fsFailure.renameFailure = EACCES
@@ -384,7 +388,7 @@ describe('hostile: concurrent writers on one store file', () => {
 
 describe('hostile: backup and restore under the above', () => {
   it('restore keeps the pre-restore safety copy restorable, and the undo restores back', async () => {
-    const { envelope } = seedLedgerWithInvoice()
+    const { envelope } = await seedLedgerWithInvoice()
     const beforeBytes = session.readBooksFile()
     const backup = await session.invoke<{ ok: true; path: string }>(BOOKS_CHANNELS.backupNow)
     expect(backup.ok).toBe(true)
@@ -418,7 +422,7 @@ describe('hostile: backup and restore under the above', () => {
   })
 
   it('restoring over a crashed/corrupt store recovers it and keeps the corrupt bytes restorable', async () => {
-    seedLedgerWithInvoice()
+    await seedLedgerWithInvoice()
     const backup = await session.invoke<{ ok: true; path: string }>(BOOKS_CHANNELS.backupNow)
     expect(backup.ok).toBe(true)
 
@@ -449,7 +453,7 @@ describe('hostile: backup and restore under the above', () => {
   })
 
   it('a corrupt backup is never restored and the live ledger is untouched', async () => {
-    const { bytes } = seedLedgerWithInvoice()
+    const { bytes } = await seedLedgerWithInvoice()
     const backupsDir = join(session.booksDir, 'backups')
     mkdirSync(backupsDir, { recursive: true })
     writeFileSync(join(backupsDir, 'books-backup-20260928-120000.json'), '{"nonsense":true}', 'utf8')
@@ -463,7 +467,7 @@ describe('hostile: backup and restore under the above', () => {
   })
 
   it('backups are never written empty — including after a crash-shaped store', async () => {
-    seedLedgerWithInvoice()
+    await seedLedgerWithInvoice()
     writeStaleTmp()
     const backup = await session.invoke<{ ok: true; path: string }>(BOOKS_CHANNELS.backupNow)
     expect(backup.ok).toBe(true)
