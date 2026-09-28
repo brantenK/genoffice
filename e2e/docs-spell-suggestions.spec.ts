@@ -194,6 +194,6 @@ test('context menu offers spelling suggestions and applies one', async () => {
     await editor.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
     await expect.poll(() => pageText(editor), POLL).toContain('jumsp')
   } finally {
-    await closeAndSaveVideo(launched)
+    await closeAndSaveVideo(launched, 'docs-spell-suggestions')
   }
 })

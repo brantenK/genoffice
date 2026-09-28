@@ -12,6 +12,7 @@ import type { HomeApi } from '../apps/shell/src/shared/home-api'
 import type { TabsApi } from '../apps/shell/src/shared/tabs-api'
 import type { TendersApi } from '../apps/tenders/src/shared/ipc'
 import type { BooksApi } from '../apps/books/src/shared/ipc'
+import type { PdfApi } from '../apps/pdf/src/shared/ipc'
 
 declare global {
   interface Window {
@@ -19,6 +20,8 @@ declare global {
     aiOffice: HomeApi
     /** shell preload: `exposeInMainWorld('aiOfficeTabs', tabsApi)` */
     aiOfficeTabs: TabsApi
+    /** pdf preload: `exposeInMainWorld('pdfApi', api)` */
+    pdfApi: PdfApi
     /** books preload: the real persistence bridge the books UI talks through */
     booksApi?: BooksApi
     /** tenders preload: `exposeInMainWorld('tendersApi', tendersApi)` — optional

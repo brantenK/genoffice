@@ -226,7 +226,16 @@ export function removeMcpEntry(id: AgentId, file: string): boolean {
   return true
 }
 
-const LAUNCHER_NAMES = new Set(['genoffice', 'genoffice.cmd', 'genoffice.exe'])
+const LAUNCHER_NAMES = new Set([
+  'genoffice',
+  'genoffice.cmd',
+  'genoffice.exe',
+  // the fork's own install names (names are compared lower-cased); older
+  // genoffice-named installs stay recognised so their entries still update
+  'zanostack',
+  'zanostack.cmd',
+  'zanostack.exe',
+])
 
 /**
  * Any genoffice launcher, whatever install it came from (an older app path is

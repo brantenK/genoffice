@@ -86,7 +86,7 @@ test('column border drag previews the width before mouseup', async () => {
       expect(await firstCellWidth()).toBeGreaterThan(before + 20)
     }
   } finally {
-    await closeAndSaveVideo(launched)
+    await closeAndSaveVideo(launched, 'docs-table-resize-live')
     rmSync(dir, { recursive: true, force: true })
   }
 })

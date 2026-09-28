@@ -25,7 +25,6 @@ for (const file of git.stdout.trim().split('\n')) {
   const isCode = /\.(ts|tsx|mjs|cjs|js|rs)$/.test(file)
   const isHashCode = /\.(py|sh)$/.test(file)
   const isDoc =
-  const isDoc =
     /\.(md|html?)$/.test(file) &&
     !file.includes('/ai/prompts/') &&
     !file.includes('/i18n/') &&

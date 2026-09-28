@@ -85,7 +85,7 @@ test.describe('docs paste split button', () => {
       expect(state.filter((r) => r.text.includes('web one')).pop()?.font).toBe('Arial')
       await expect(editorPage.locator('[data-testid="paste-options-chip"]')).toBeVisible()
     } finally {
-      await closeAndSaveVideo(launched)
+      await closeAndSaveVideo(launched, 'docs-paste-split-button')
     }
   })
 })

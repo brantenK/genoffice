@@ -60,10 +60,10 @@ async function pdfTextLefts(path: string): Promise<number[]> {
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     const content = await page.getTextContent()
-    const items = content.items.filter(
-      (it): it is { transform: number[]; str: string } =>
-        'transform' in it && 'str' in it && (it as { str: string }).str.trim().length > 0,
-    )
+    const items: { transform: number[] }[] = []
+    for (const it of content.items) {
+      if ('transform' in it && 'str' in it && it.str.trim().length > 0) items.push(it)
+    }
     lefts.push(Math.min(...items.map((it) => it.transform[4])))
   }
   return lefts

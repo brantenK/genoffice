@@ -28,6 +28,7 @@ const localeLoaders: Record<Lang, () => Promise<Record<string, string>>> = {
   he: () => import('./generated/he').then((m) => m.default),
   hi: () => import('./generated/hi').then((m) => m.default),
   'zh-TW': () => import('./generated/zh-TW').then((m) => m.default),
+  vi: () => import('./generated/vi').then((m) => m.default),
 }
 
 const loaded: Partial<Record<Lang, Record<string, string>>> = {}
