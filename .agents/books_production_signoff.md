@@ -128,3 +128,18 @@ again.
 workflow and hygiene gate green on a fresh build; no open critical/serious defect in books;
 no data-loss path found; packaging verified end-to-end including a live books journey on the
 packaged binary. The listed limitations are minor/boundary items with owners or next steps.
+
+## Post-sign-off product review (2026-09-28)
+
+A six-perspective independent review rated the module for real users (≈6/10 overall, every
+dimension "ready-with-caveats"): the engine and data layer hold, but product-surface gaps
+stand between this and outside users — VAT period reporting, buyer identity on printed tax
+invoices, automatic/off-machine backups, recovery-from-error-screen, delete confirmations,
+and a fixed trade-tuned chart of accounts. One additional **verified defect** was found:
+the main-process save guard refuses ANY change to `closedThrough` once set, so the first
+period close works but every subsequent close through the UI is refused (the pure engine
+supports sequential closes; no test ever exercised a second one).
+
+These are recorded, with severity, evidence citations and safe-use guidance, in
+`.agents/books_known_gaps.md` — read it before sending the app to outside users. They are
+product-surface gaps, not regressions of anything verified above.
