@@ -1,41 +1,18 @@
 # Test baseline
 
-Recorded at `5711775` on 2026-09-24 (unit only — re-run with --with-e2e), 2 runs each.
-
-## Re-measured entries
-
-Only **`@genoffice/tenders`** was re-measured. It was re-recorded by hand from a
-clean pair of runs rather than by a full re-record, so that **its pass total is
-now three remediation waves ahead** of the commit in the header above, while
-**every other workspace's entry is unchanged and was NOT re-recorded** — those
-figures still describe `5711775` on 2026-09-24 and should be read as such. The
-header's date and SHA, and the `e2e` lane, are also untouched: this round ran no
-e2e lane and no other workspace's suite.
+Recorded at `7297633f` on 2026-09-28 (unit + e2e), 2 runs each.
 
 These are the tests that already fail, so `npm run check:baseline` can tell a
 regression from the background noise. Refresh with
 `node fork/tools/baseline.mjs --write --with-e2e` once a fix has landed, and read
-this as "known-bad", not as "accepted". That tool rewrites **every** section from
-a fresh run of every workspace plus the e2e lane — it is the way to make this file
-whole again, and a hand-edit of one entry (as here) is deliberately narrower.
-
-## @genoffice/tenders
-
-1929 passed, 0 failed, 7 skipped — 59 test files, measured at `8f68cef`
-(review-pass-3 fix wave complete), `npm run test -w @genoffice/tenders`, one clean
-run on 2026-09-25 (also reproduced by the baseline tool's own measurement:
-`@genoffice/tenders … 1929 passed, 0 failed`). The figure recorded here before
-was `1854 passed` at `e634250` plus the uncommitted structural waves; the increase
-is the intervening waves' new tests (F1–F8 pins, overlay-isolation suite, perf
-pins), not a recovery from failures.
-
-- (nothing failing)
+this as "known-bad", not as "accepted".
 
 ## @genoffice/books
 
-265 passed, 0 failed, 0 skipped
+630 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/crm
 
@@ -43,17 +20,11 @@ pins), not a recovery from failures.
 
 - (nothing failing)
 
+
 ## @genoffice/docs
 
 2571 passed, 1 failed, 0 skipped
 
-- (nothing failing)
-
-## @genoffice/docs (flaky)
-
-Failed in some runs but not all — not treated as a known failure.
-
-- tests/docx-encryption.test.ts > password store > encrypts and decrypts recovery with the disk password after desired new or none
 - tests/protect-dialog.test.ts > ProtectDialog > setting a modify password produces verifiable writeProtection credentials
 
 ## @genoffice/html
@@ -62,11 +33,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/markdown
 
-559 passed, 0 failed, 0 skipped
+564 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/pdf
 
@@ -74,11 +47,20 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/sheets
 
-2835 passed, 0 failed, 3 skipped
+2835 passed, 2 failed, 3 skipped
 
 - (nothing failing)
+
+
+## @genoffice/sheets (flaky)
+
+Failed in some runs but not all — not treated as a known failure.
+
+- tests/xlsx-borders.test.ts > sidecar read side keeps styled blanks > returns value-less bordered/filled cells with their style index
+- tests/xlsx-save-edits.test.ts > text rotation and double underline save > clears a rotation with textRotation 0
 
 ## @genoffice/shell
 
@@ -98,9 +80,10 @@ Failed in some runs but not all — not treated as a known failure.
 
 ## @genoffice/tenders
 
-1068 passed, 0 failed, 7 skipped
+1929 passed, 0 failed, 7 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/agent-core
 
@@ -108,11 +91,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/ai-provider
 
 278 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/ai-search
 
@@ -120,17 +105,20 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/cli
 
 291 passed, 0 failed, 7 skipped
 
 - (nothing failing)
 
+
 ## @genoffice/docx-engine
 
-1444 passed, 1 failed, 1 skipped
+1445 passed, 0 failed, 1 skipped
 
-- tests/deep-nested-table.test.ts > deeply nested tables keep their content > caps the modeled depth but keeps every paragraph of a 2000-level table
+- (nothing failing)
+
 
 ## @genoffice/electron-utils
 
@@ -138,11 +126,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/file-parse
 
 75 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/font-metrics
 
@@ -150,11 +140,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/html2docx
 
 90 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/i18n
 
@@ -162,11 +154,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/pdf2docx
 
 757 passed, 0 failed, 7 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/pipelines
 
@@ -174,11 +168,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/pptx-engine
 
 1057 passed, 0 failed, 17 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/pptx-ops
 
@@ -186,11 +182,13 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/pptx-render
 
 348 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
 
 ## @genoffice/project-store
 
@@ -198,14 +196,32 @@ Failed in some runs but not all — not treated as a known failure.
 
 - (nothing failing)
 
+
 ## @genoffice/ui
 
 32 passed, 0 failed, 0 skipped
 
 - (nothing failing)
 
+
 ## @genoffice/xlsx-gateway
 
 82 passed, 0 failed, 0 skipped
 
 - (nothing failing)
+
+
+## e2e
+
+0 passed, 5 failed, 0 skipped
+
+- e2e\docs-spellcheck-reenable.spec.ts:51:5 › re-enabling spellcheck respells existing text without user input
+- e2e\html-tab.spec.ts:166:7 › html editor › saving without edits keeps BOM, CRLF and the missing trailing newline byte-identical
+- e2e\html-tab.spec.ts:276:7 › html editor › preview inspector: click selects, double-click edits text, toolbar deletes, Ask AI drafts
+- e2e\tenders-a11y-theme.spec.ts:1170:7 › Tenders a11y + theme (Phase 5 / WP-13) › 3: no critical/serious axe violations on core pages and overlays
+
+## e2e (flaky)
+
+Failed in some runs but not all — not treated as a known failure.
+
+- e2e\html-tab.spec.ts:46:7 › html editor › opens an .html file from argv, renders it in the preview, edits and saves it back
