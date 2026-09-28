@@ -51,6 +51,7 @@ import {
 import { closePeriod, isDateLocked } from '../../shared/closing'
 import {
   createCreditNoteJournal,
+  journalReferencesInvoice,
   mentionsReference,
   validateCreditNote,
   repostPlanForPartialSettlement,
@@ -461,6 +462,11 @@ export function setUnreadableForTesting(): void {
   unreadableStore('books-data.json could not be read')
 }
 
+/** An amount rendered the way rejection messages name it. */
+function fmtAmount(amount: number): string {
+  return round2(Number(amount) || 0).toFixed(2)
+}
+
 /**
  * The ONE invoice posting path, as a pure ledger transformation: it takes the
  * ledger the save applies to and returns the posted ledger (new invoice,
@@ -650,6 +656,39 @@ function invoiceSaveMutation(
     // then re-post with the new line items.
     if (wasPosted) {
       const oldNumber = oldInvoice.invoiceNumber
+      const plan = repostPlanForPartialSettlement(oldInvoice, targetInvoice)
+      const removedJournals = nextJournals.filter((je) => journalReferencesInvoice(je, oldNumber))
+
+      // Settlement guards. Both refuse BEFORE anything is reversed: re-deriving
+      // the settled money movement on an edited invoice cannot be done safely
+      // in every case, and a wrong guess corrupts the control accounts.
+      //
+      // F2: the new total is below the already-settled portion. The carried
+      // re-post below would settle MORE than the invoice is now worth — the
+      // outstanding clamps at zero but the journals leave AR floating negative
+      // with no party carrying it, and Bank receives cash the invoice never
+      // billed.
+      if (plan.paidAmount > targetInvoice.grandTotal) {
+        const message = `Cannot edit ${oldNumber}: ${fmtAmount(plan.paidAmount)} is already settled against it, which is more than the new total of ${fmtAmount(targetInvoice.grandTotal)}. Keep the total at or above the settled amount, or delete the invoice (which removes its settlements) instead.`
+        console.warn(`[books-store] Refused edit below the settled portion: ${oldNumber}`)
+        return { ok: false, error: message }
+      }
+
+      // F4: part of the settled cash is suspense-funded — it arrived through a
+      // bank-statement import (a reconciliation reclass, or a payment that
+      // linked to a statement line). Re-posting the carried portion would move
+      // it through Bank a second time and strand the import's Suspense leg,
+      // and a mixed payment/reconciliation portion has no single safe cash
+      // side, so the edit is refused rather than guessed.
+      const suspenseFunded = removedJournals.some((je) =>
+        (je.items || []).some((it) => it.accountId === 'acc-suspense'),
+      )
+      if (suspenseFunded) {
+        const message = `Cannot edit ${oldNumber}: ${fmtAmount(plan.paidAmount)} of it was settled through bank-statement reconciliation (the cash was already booked by the statement import), so editing would re-post that cash against the bank account. Delete the invoice or re-reconcile the statement line instead.`
+        console.warn(`[books-store] Refused edit of suspense-settled invoice: ${oldNumber}`)
+        return { ok: false, error: message }
+      }
+
       nextJournals.splice(
         0,
         nextJournals.length,
@@ -667,8 +706,9 @@ function invoiceSaveMutation(
       // editing a partially settled invoice would wipe the paid amount from
       // the ledger. This covers BOTH the Unpaid and the Paid-edit case: a
       // paid invoice edited to a larger amount is no longer fully paid, and
-      // only the amount actually received may hit Bank (I5).
-      const plan = repostPlanForPartialSettlement(oldInvoice, targetInvoice)
+      // only the amount actually received may hit Bank (I5). Both guards
+      // above have bounded this re-post: the amount never exceeds the new
+      // total, and its cash is bank-funded (never suspense).
       if (plan.paidAmount > 0) {
         nextJournals.unshift(
           createSettlementJournal(

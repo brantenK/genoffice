@@ -29,10 +29,11 @@
  * numbers only, no perf assertions.
  *
  * Generator carve-outs (each documented in the report with its own finding):
- *   F2 — the walk never edits a partially settled invoice DOWN below its
- *        already-paid portion: the store's reverse-and-repost re-posts the full
- *        paid portion as a settlement even when the new total is smaller,
- *        floating AR control away from the party balances.
+ *   F2/F4 — FIXED in the product as of this suite: the store refuses edits
+ *        below the settled portion (F2) and edits of suspense-settled
+ *        invoices (F4). The walk deliberately aims edits at both, so the
+ *        refusal path is exercised and the invariant holds for real through
+ *        the refusal; a refused edit must leave the ledger untouched.
  *   F3 — statement descriptions never carry invoice numbers: the store removes
  *        journals by remark-text matching, so a number embedded in statement
  *        text couples unrelated journals to that invoice's edits/deletes.
@@ -51,6 +52,7 @@ import {
 import { DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS } from '../src/shared/chart'
 import {
   allJournalsBalanced,
+  calculateInvoiceTotals,
   computeAccountBalances,
   postedInvoiceAmounts,
   recomputePartyBalances,
@@ -85,6 +87,7 @@ const tally = {
   addParty: 0,
   invoiceCreate: 0,
   invoiceEdit: 0,
+  editRefused: 0,
   payment: 0,
   paymentRefused: 0,
   markPaid: 0,
@@ -226,31 +229,52 @@ async function opInvoiceEdit(f: Fuzz): Promise<void> {
   if (!target) return
   const paid = round2(target.grandTotal - outstandingOf(target))
   const isDraft = target.status === 'Draft'
-  // The single generator carve-out (finding F2): never shrink below the paid
-  // portion. rate = paid + 100 keeps the new grand total strictly above it.
-  const newRate = round2(paid + f.money(1, 5000))
+  // Findings F2/F4 are FIXED in the product: the store refuses edits whose new
+  // total is below the settled portion (F2) and edits of invoices whose settled
+  // cash is suspense-funded (F4). The walk deliberately aims rates below the
+  // paid portion and at already-reconciled invoices, so the refusal path is
+  // exercised; a refused edit must leave the ledger — and this shadow model —
+  // untouched.
+  const newRate = round2(f.money(1, 5000))
+  const editItems = [
+    {
+      id: `it-edit-${opCounter}`,
+      itemCode: 'SOAK-1',
+      description: 'Edited soak line',
+      accountId: target.type === 'Sales' ? 'acc-sales' : 'acc-materials',
+      accountName: target.type === 'Sales' ? 'Sales' : 'Materials',
+      qty: 1,
+      rate: newRate,
+      taxRate: 15,
+      amount: newRate,
+    },
+  ]
+  const intendedGrand = round2(
+    calculateInvoiceTotals(editItems, { taxInclusive: false }).grandTotal,
+  )
   await state().saveInvoice({
     id: target.id,
     type: target.type,
     partyId: target.partyId,
     partyName: target.partyName,
     status: isDraft ? 'Draft' : 'Unpaid',
-    items: [
-      {
-        id: `it-edit-${opCounter}`,
-        itemCode: 'SOAK-1',
-        description: 'Edited soak line',
-        accountId: target.type === 'Sales' ? 'acc-sales' : 'acc-materials',
-        accountName: target.type === 'Sales' ? 'Sales' : 'Materials',
-        qty: 1,
-        rate: newRate,
-        taxRate: 15,
-        amount: newRate,
-      },
-    ],
+    items: editItems,
   })
   const saved = data().invoices.find((i) => i.id === target.id)!
   expect(saved, `soak#${opCounter} edited invoice exists`).toBeDefined()
+  if (round2(saved.grandTotal) !== intendedGrand) {
+    // The store refused the edit (F2/F4 guard): nothing may have moved.
+    expect(
+      round2(outstandingOf(saved)),
+      `soak#${opCounter} refused edit leaves the outstanding untouched`,
+    ).toBe(round2(outstandingOf(target)))
+    expect(
+      saved.status,
+      `soak#${opCounter} refused edit leaves the status untouched`,
+    ).toBe(target.status)
+    tally.editRefused++
+    return
+  }
   shadow.set(target.id, round2(saved.grandTotal - paid))
   tally.invoiceEdit++
   lastEditDebug = `op ${opCounter} edit ${target.invoiceNumber}: oldG=${target.grandTotal} oldOut=${outstandingOf(target)} oldStatus=${target.status} paid=${paid} newG=${saved.grandTotal} newOut=${outstandingOf(saved)} newStatus=${saved.status}`
