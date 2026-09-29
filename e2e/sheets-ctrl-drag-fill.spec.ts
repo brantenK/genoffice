@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { launchShell, closeAndSaveVideo, openAppFromHome, waitForPageWithUrl } from './helpers'
 
 // the preload exposes window.__genofficeDebug only under this env var; the
 // spec seeds cells and reads them back through Univer's Facade
@@ -97,8 +97,8 @@ test.describe('sheets: modifier-drag on the fill handle flips copy and series', 
         electronApp.setPath('documents', dir)
       }, scratch)
 
-      await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
-      await page.locator('.quick-card').nth(1).click()
+      // fork Home: the grouped sidebar launcher replaces upstream's .quick-card row
+      await openAppFromHome(page, 'xlsx')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
       await sheets.waitForFunction(() => document.body.textContent?.includes('Sheet1'), null, {

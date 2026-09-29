@@ -7,7 +7,7 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { PNG } from 'pngjs'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { launchShell, closeAndSaveVideo, openAppFromHome, waitForPageWithUrl } from './helpers'
 
 const POLL = { timeout: 15_000, intervals: [250, 500, 1000] }
 
@@ -73,7 +73,9 @@ test('context menu offers spelling suggestions and applies one', async () => {
   const launched = await launchShell({ onboardingSeen: true, videoDir: 'spell-suggestions' })
   const { app, page } = launched
   try {
-    await page.locator('.quick-card').first().click()
+    // fork Home: the grouped sidebar launcher (upstream's .quick-card row does not
+    // exist here — its sole .quick-card is the Open Local File browse button)
+    await openAppFromHome(page, 'docx')
     const editor = await waitForPageWithUrl(app, '://docs/')
     const docPage = editor.locator('.doc-page[contenteditable="true"][spellcheck="true"]')
     await docPage.waitFor()

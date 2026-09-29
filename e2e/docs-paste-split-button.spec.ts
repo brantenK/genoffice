@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { launchShell, closeAndSaveVideo, openAppFromHome, waitForPageWithUrl } from './helpers'
 
 /**
  * Home ▸ Paste split button (Word parity): the icon half pastes with the
@@ -23,8 +23,8 @@ test.describe('docs paste split button', () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'docs-paste-split' })
     const { app, page } = launched
     try {
-      await expect(page.locator('.quick-card').first()).toContainText('AI Docs')
-      await page.locator('.quick-card').first().click()
+      // fork Home: the grouped sidebar launcher replaces upstream's .quick-card row
+      await openAppFromHome(page, 'docx')
       const editorPage = await waitForPageWithUrl(app, '://docs/')
       await editorPage.waitForFunction(
         () => Boolean((window as unknown as AidocsWindow).__aidocs?.editor),

@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JSZip from 'jszip'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, type LaunchedApp } from './helpers'
+import { launchShell, closeAndSaveVideo, openAppFromHome, waitForPageWithUrl, type LaunchedApp } from './helpers'
 
 /**
  * One document session that chains the Word-aligned interactions (style
@@ -256,8 +256,8 @@ test.describe.serial('docs Word interaction smoke', () => {
     })
     app = launched.app
     const { page } = launched
-    await expect(page.locator('.quick-card').first()).toContainText('AI Docs')
-    await page.locator('.quick-card').first().click()
+    // fork Home: the grouped sidebar launcher replaces upstream's .quick-card row
+    await openAppFromHome(page, 'docx')
     editor = await waitForPageWithUrl(app, '://docs/')
     await editor.waitForFunction(
       () => Boolean((window as unknown as AidocsWindow).__aidocs?.editor),

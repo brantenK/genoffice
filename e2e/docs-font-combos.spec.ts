@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { launchShell, closeAndSaveVideo, openAppFromHome, waitForPageWithUrl } from './helpers'
 
 /**
  * Home font and size boxes follow Word: typing in the font box opens the list,
@@ -18,8 +18,8 @@ test.describe('docs font and size combos', () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'docs-font-combos' })
     const { app, page } = launched
     try {
-      await expect(page.locator('.quick-card').first()).toContainText('AI Docs')
-      await page.locator('.quick-card').first().click()
+      // fork Home: the grouped sidebar launcher replaces upstream's .quick-card row
+      await openAppFromHome(page, 'docx')
       const editorPage = await waitForPageWithUrl(app, '://docs/')
       await editorPage.waitForFunction(
         () => Boolean((window as unknown as AidocsWindow).__aidocs?.editor),

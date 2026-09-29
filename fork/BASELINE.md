@@ -226,6 +226,24 @@ upstream. Hand-added per the runbook's hand-edit precedent.)
 - e2e\html-tab.spec.ts:166:7 › html editor › saving without edits keeps BOM, CRLF and the missing trailing newline byte-identical
 - e2e\html-tab.spec.ts:276:7 › html editor › preview inspector: click selects, double-click edits text, toolbar deletes, Ask AI drafts
 - e2e\tenders-a11y-theme.spec.ts:1170:7 › Tenders a11y + theme (Phase 5 / WP-13) › 3: no critical/serious axe violations on core pages and overlays
+- e2e\open-focus-typing.spec.ts:205:5 › sheets: typing works when a spare view opens the next workbook
+
+(The fifth entry is hand-added after the 2026-09-28 sync. The test is new in
+that sync's upstream range and has never passed on the fork. Measured facts:
+the spare view is adopted, becomes visible+focused, and loads the workbook (A1
+reads the fixture, aria-busy clears, the range settles on A1), but character
+input never reaches the cell editor — insertText, real keydown typing and an
+explicit F2-into-edit-mode all leave editor text empty while Enter still moves
+the selection. Typing into a freshly created sheets view works (sheets-new-blank
+passes). The main-process spare machinery is byte-identical to upstream
+(`apps/shell/src/main/tab-manager.ts` openSheetsTab/activateTab diff empty), so
+the divergence is the fork renderer's adopted-view intake layer (App.tsx is a
+deliberate fork layer over upstream's). Real-user severity: moderate — a second
+workbook opened while a Sheets tab is warm may not accept typing until
+investigated; workaround: unknown, needs a dedicated root-cause pass in
+apps/sheets/src/renderer (candidate: the alive-view workbook intake blend).
+Not merge damage: the failure mode predates the sync and no pre-merge test
+exercised the path.)
 
 ## e2e (flaky)
 

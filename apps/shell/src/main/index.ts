@@ -3550,9 +3550,11 @@ function createShellWindow(): void {
   }
 
   // idle warm-up: once the shell (Home) has painted, pre-render a hidden docs
-  // module so the first docs tab opens near-instantly (TabManager.prewarmDocs)
+  // module so the first docs tab opens near-instantly (TabManager.prewarmDocs).
+  // Skipped when this launch opened a document tab: the opened tab serves the
+  // docs module, and a second hidden ://docs/ webContents would race it.
   win.webContents.once('did-finish-load', () => {
-    setTimeout(() => manager.prewarmDocs(), 800)
+    if (!launchOpenedADocument) setTimeout(() => manager.prewarmDocs(), 800)
     const ssPath = !automationMode.enabled ? process.env.GENOFFICE_SCREENSHOT_PATH : undefined
     if (!automationMode.enabled && ssPath) {
       if (process.env.OPEN_CRM_ON_START) {
@@ -5970,6 +5972,8 @@ async function installMainProcessProxy(): Promise<void> {
 // ---- lifecycle (the shell is the only owner) ----
 
 let pendingLaunchPaths = automationMode.enabled ? [] : collectLaunchPaths(process.argv)
+/** whether this launch opened a document tab (disables the idle docs pre-warm) */
+let launchOpenedADocument = false
 let controlServer: ControlServer | null = null
 
 // show() does not un-minimize, and on macOS ⌘W destroys the shell window while the
@@ -5997,6 +6001,7 @@ app.on('open-file', (event, filePath) => {
     if (!pendingLaunchPaths.includes(filePath)) pendingLaunchPaths.push(filePath)
     return
   }
+  launchOpenedADocument = true
   revealShellWindow()
   openLaunchPaths([filePath])
 })
@@ -6311,9 +6316,14 @@ app.whenReady().then(async () => {
     })
   }
 
+  const launchedWithPaths = pendingLaunchPaths.length > 0
+  launchOpenedADocument = launchedWithPaths
   openLaunchPaths(pendingLaunchPaths)
   pendingLaunchPaths = []
   for (const recoverAs of pendingUnsavedNewRecoveries()) void newSheetTab(recoverAs)
+  // A launch path opening a document tab makes the idle docs pre-warm redundant
+  // (and a second hidden docs renderer would race the opened tab as the first
+  // ://docs/ webContents), so createShellWindow's warm-up checks the flag.
 
   startControlServer(
     app.getPath('userData'),

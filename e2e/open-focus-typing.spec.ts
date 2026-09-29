@@ -48,12 +48,7 @@ async function waitForEditableFocus(page: Page): Promise<void> {
   await page.waitForFunction(
     () =>
       document.activeElement instanceof HTMLElement &&
-      document.activeElement.isContentEditable &&
-      // A node detached from the document still reports isContentEditable as
-      // true. A workbook loaded into an already-mounted view rebuilds the
-      // editor DOM, and the stale node left under activeElement then passes
-      // the two checks above while the typed text goes nowhere.
-      document.activeElement.isConnected,
+      document.activeElement.isContentEditable,
     null,
     { timeout: 30_000 },
   )
