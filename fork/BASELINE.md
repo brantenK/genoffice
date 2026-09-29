@@ -227,6 +227,19 @@ upstream. Hand-added per the runbook's hand-edit precedent.)
 - e2e\html-tab.spec.ts:276:7 › html editor › preview inspector: click selects, double-click edits text, toolbar deletes, Ask AI drafts
 - e2e\tenders-a11y-theme.spec.ts:1170:7 › Tenders a11y + theme (Phase 5 / WP-13) › 3: no critical/serious axe violations on core pages and overlays
 - e2e\open-focus-typing.spec.ts:205:5 › sheets: typing works when a spare view opens the next workbook
+- e2e\docs-spell-suggestions.spec.ts:71:5 › context menu offers spelling suggestions and applies one
+
+(The sixth entry is hand-added after the 2026-09-28 sync. The spec is new in
+that sync's upstream range (`0a1,201` vs the pre-sync tree — it never existed
+on the fork) and depends on Windows' native spellchecker painting squiggle
+markers on demand. Measured: the FIRST misspelled word's marker appears and the
+test proceeds; the marker under the SECOND word never appears within the spec's
+window — 4/4 attempts across a full run and two isolation runs. Same native
+spellchecker-scheduling family as the recorded `docs-spellcheck-reenable`
+defect (fork/COMPLIANCE.md: "full recovery, ~8.5 s delay, or never"). Test-only
+severity: the product's spellcheck surfaces markers and menus; a sibling test
+(`docs-spellcheck-reenable.spec.ts:105` toggling never scrolls) passes. Not
+merge damage: the feature code is upstream's, unchanged by the fork.)
 
 (The fifth entry is hand-added after the 2026-09-28 sync. The test is new in
 that sync's upstream range and has never passed on the fork. Measured facts:
