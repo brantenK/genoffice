@@ -263,3 +263,16 @@ exercised the path.)
 Failed in some runs but not all — not treated as a known failure.
 
 - e2e\html-tab.spec.ts:46:7 › html editor › opens an .html file from argv, renders it in the preview, edits and saves it back
+- e2e\open-empty-file-save.spec.ts:19:7 › empty .xlsx opens blank and saves back to its own path
+
+(The second entry is hand-added after the 2026-09-29 sync. Intermittent across
+full runs — passed twice (incl. both isolation runs) after the docs pre-warm
+guard, failed in the next full run — and it is the sheets twin of the race the
+guard fixed for docs: upstream's spare-sheets warm (`scheduleSpareSheetsView(3000)`
+in the merged `apps/shell/src/main/tab-manager.ts`) creates a second hidden
+`://sheets/` webContents three seconds after a sheets tab activates, and the
+spec's `getAllWebContents().find(url)` can grab it instead of the active tab, so
+the save lands on the hidden session and the file stays 0 bytes. The app's save
+is session-correct — the weakness is the spec's targeting, not the product.
+If it keeps flaking, port the spec to target the active view rather than the
+first URL match.)
