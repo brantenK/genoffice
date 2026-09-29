@@ -9,19 +9,23 @@ vi.mock('../src/gsk', () => ({
   hasGskAuth: vi.fn(() => true),
 }))
 
-import { generateImageTool, GSK_RMBG_MODEL } from '../src/media-tools'
-import { gskGenerateImage } from '../src/gsk'
+import { generateImageTool, analyzeMediaTool, GSK_RMBG_MODEL } from '../src/media-tools'
+import { gskGenerateImage, gskAnalyzeMedia } from '../src/gsk'
 
 const gskGen = vi.mocked(gskGenerateImage)
+const gskAnalyze = vi.mocked(gskAnalyzeMedia)
 // The Genspark route is opt-in in this fork — cloud tools default OFF — so the
-// fixture has to turn them on to reach it. `providers` must be present for the
-// stored settings to be honoured at all: resolveAiSettings() early-returns the
-// defaults when it is absent, which would drop the flag. With no BYOK media
-// provider configured either, the tool still resolves to the Genspark path.
+// fixture has to turn them on to reach it (a nonexistent settings file resolves
+// to the fork's defaults, which would leave the gate off). `providers` must be
+// present for the stored settings to be honoured at all: resolveAiSettings()
+// early-returns the defaults when it is absent, which would drop the flag.
+// With no BYOK media provider configured either, the tool still resolves to
+// the Genspark path.
 let SETTINGS: string
 
 beforeEach(() => {
   gskGen.mockReset()
+  gskAnalyze.mockReset()
   const dir = mkdtempSync(join(tmpdir(), 'genoffice-media-tools-'))
   SETTINGS = join(dir, 'ai-settings.json')
   writeFileSync(SETTINGS, JSON.stringify({ providers: {}, gskToolsEnabled: true }), 'utf8')
@@ -102,5 +106,17 @@ describe('generateImageTool reference budget (Genspark route)', () => {
     const r = await generateImageTool(SETTINGS, { prompt: 'red podcast icon', referenceImageUrls })
     expect(r).toEqual({ url: 'https://cdn/x/out.png' })
     expect(gskGen).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('analyzeMediaTool media budget (Genspark route)', () => {
+  it('rejects too many media URLs with the BYOK wording, before calling the CLI', async () => {
+    gskAnalyze.mockResolvedValueOnce('done')
+    const mediaUrls = Array.from({ length: 13 }, (_, i) => `https://cdn/x/${i}.png`)
+    const r = await analyzeMediaTool(SETTINGS, { mediaUrls, requirements: 'describe these' })
+    expect(r).toEqual({
+      error: 'Too many media items in one request (13, limit 12); analyze them in smaller batches',
+    })
+    expect(gskAnalyze).not.toHaveBeenCalled()
   })
 })
