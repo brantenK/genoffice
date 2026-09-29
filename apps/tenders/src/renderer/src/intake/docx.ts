@@ -302,8 +302,10 @@ function docxFailure(error: unknown): DocxPreflightError {
   const message = error instanceof Error ? error.message : String(error)
   // Which of the three `DOCX_ZIP_LIMITS` was exceeded is named in the message;
   // `actual`/`limit` stay null because the engine's throw carries no number this
-  // layer can attribute with certainty.
-  if (message.startsWith('docx rejected:')) {
+  // layer can attribute with certainty. The shared gate's prefix is `zip rejected:`
+  // since upstream's 2026-09-29 range (#1386) moved the gate into `@genoffice/zip-gate`;
+  // the old `docx rejected:` spelling is gone from the engine.
+  if (message.startsWith('zip rejected:')) {
     return new DocxPreflightError('ZIP_BOMB', null, null, ZIP_BOMB_MESSAGE)
   }
   if (message.startsWith('not a docx:') || message.startsWith('OpenDocument file')) {
