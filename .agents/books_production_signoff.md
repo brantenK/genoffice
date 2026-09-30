@@ -143,3 +143,35 @@ supports sequential closes; no test ever exercised a second one).
 These are recorded, with severity, evidence citations and safe-use guidance, in
 `.agents/books_known_gaps.md` — read it before sending the app to outside users. They are
 product-surface gaps, not regressions of anything verified above.
+
+## Addendum — 2026-09-30 (post-sync re-verification + packaged 0.11.0 installer)
+
+Two upstream sync rounds landed after this sign-off (round-1 merge `e1f31016` + rebrand sweep
+`78a754ba`; round-2 merge `4ebd2043`, flake record `0374dd5d`). `apps/books`, both books e2e
+specs, the playwright config and the shared e2e helpers are byte-identical to `7552cb6b`
+(empty log/diff for those paths).
+
+Fresh gate at HEAD `0374dd5d`, 2026-09-30, on a fresh build: `tsc` 0 errors; vitest **48 files
+/ 630 tests, all green** (5m19s); **13/13 books journeys** (`books-flows` + `books-smoke`)
+through the newly merged shell host; `tools/verify-suite-workflows.mjs` **56/56** (file
+unedited). The 0.10.0 packaged-version citation above is stale — the shell is now **0.11.0**.
+
+Packaged installer re-verification (0.11.0, unsigned local build):
+- `npm run dist:win` exit 0 (~7 min). Artifact: `apps/shell/release/Zanostack Setup 0.11.0.exe`
+  (156,448,387 bytes) + blockmap; version 0.11.0 confirmed inside the packaged asar;
+  `resources/modules/books/{main,preload,renderer}` present with all 9 modules + xlsx-sidecar.
+- Shell-level packaged smoke over the app's own automation protocol (isolated session
+  user-data): `app.status` → 0.11.0/win32; first-run welcome modal rendered; a docs tab created
+  and rendered via `files.open`.
+- Books UI in the packaged app (PowerShell UIA over the accessibility tree): the `Books` nav
+  item was invoked; the **"Set up Zano Books"** wizard rendered with all six editable fields
+  matching `SetupWizard.tsx`; the company field accepted typed input (UIA `ValuePattern`
+  SetValue, value read back) and `Continue` advanced to step 2 ("Business bank account" /
+  "Start using Zano Books"). Wizard not completed; the real profile snapshot was byte-identical
+  before/after the run.
+- Known quirk (observed, not fixed): the automation protocol's `screenshots.capture` verb
+  fails (HTTP 400 INTERNAL_ERROR) for module tabs (WebContentsView); home-tab captures work.
+  Does not affect normal app use.
+
+Verdict unchanged: **PRODUCTION READY** — re-verified on the merged host and on the packaged
+0.11.0 installer.
