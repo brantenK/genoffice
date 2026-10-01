@@ -83,3 +83,24 @@ Fork-side operational doc, sibling to `RUNBOOK.md` (upstream syncs) and
 - Backups are manual — "Backup Now" is the only `books-backup-*.json` producer.
 - Never run an older build over data written by a newer one: newer schema versions are
   refused by older builds (safely, with an error — never corruption).
+
+## 7. Repository layout (2026-10-01)
+
+- **`brantenK/zanostack` (private)** — the product source home; local remote `origin`
+  (full `product` history pushed 2026-10-01). All future code work and pushes go here.
+- **`brantenK/zanostack-releases` (public)** — binaries only (installer, blockmap,
+  `latest.yml`); hosts the update feed going forward. No product code lives here, so it
+  stays public even after the source goes private.
+- **`brantenK/genoffice` (public fork)** — legacy: still hosts the v0.12.0 release whose
+  URL is baked into the 0.12.0 installer, and remains the visible fork of upstream for
+  syncing. Once the **next release (0.13.0+)** is published on `zanostack-releases` (with
+  the new feed URL baked in), this fork can be deleted — the update feed and the code are
+  independent of it by then. Deleting a fork cannot be undone; do it from the web UI.
+- **`genspark-ai/genoffice` (upstream)** — sync source only; syncing works by fetching
+  this public repo directly (a fork is not required).
+
+Feed transition plan: 0.12.0 reads the fork's releases; 0.13.0+ reads
+`https://github.com/brantenK/zanostack-releases/releases/latest/download`. Publish every
+future release to `zanostack-releases` only (upload the installer + blockmap + the
+generated `latest.yml`; GitHub's download endpoint resolves both spaced and dotted asset
+names — verified 2026-10-01).
