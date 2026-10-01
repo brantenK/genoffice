@@ -1,0 +1,201 @@
+import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import type { RecorderApi, RecorderStatus } from '../../shared/recorder-api'
+import { useI18n } from './locale'
+
+declare global {
+  interface Window {
+    aiOfficeRecorder: RecorderApi
+  }
+}
+
+/** mm:ss for the recording timer */
+function formatElapsed(seconds: number): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`
+}
+
+/** getUserMedia constraints for the desktop stream main resolved a source id for */
+function desktopStreamConstraints(sourceId: string): MediaStreamConstraints {
+  const video = {
+    mandatory: {
+      chromeMediaSource: 'desktop',
+      chromeMediaSourceId: sourceId,
+    },
+  }
+  return { video: video as unknown as MediaTrackConstraints, audio: false }
+}
+
+/**
+ * The REC pill at the strip's trailing end: click to record the shell window
+ * itself to a .webm (a click-ripple overlay is injected into the visible
+ * content), click again to pick a destination and save. The pill mirrors the
+ * main-process state machine via recorder status pushes; the capture itself
+ * (getUserMedia + MediaRecorder + accumulated chunks) lives in this renderer.
+ */
+export function RecorderPill() {
+  const { t } = useI18n()
+  const [status, setStatus] = useState<RecorderStatus>({ state: 'idle' })
+  const statusRef = useRef(status)
+  statusRef.current = status
+  const [elapsed, setElapsed] = useState(0)
+  const streamRef = useRef<MediaStream | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+
+  const releaseCapture = (): void => {
+    recorderRef.current = null
+    const stream = streamRef.current
+    streamRef.current = null
+    stream?.getTracks().forEach((track) => track.stop())
+  }
+
+  useEffect(() => {
+    void window.aiOfficeRecorder.status().then(setStatus)
+    return window.aiOfficeRecorder.onChanged((next) => {
+      // the capture is gone whenever the state leaves the recording/saving
+      // pair — an abort, a finished save, or an error
+      if (next.state !== 'recording' && next.state !== 'saving') releaseCapture()
+      setStatus(next)
+    })
+  }, [])
+
+  // nothing outlives the pill itself
+  useEffect(() => () => releaseCapture(), [])
+
+  useEffect(() => {
+    if (status.state !== 'recording') {
+      setElapsed(0)
+      return
+    }
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [status.state])
+
+  const startRecording = async (): Promise<void> => {
+    try {
+      const started = await window.aiOfficeRecorder.start()
+      if (!started.ok) return
+      // a prior session's capture may still be alive (track ended mid-take)
+      releaseCapture()
+      const stream = await navigator.mediaDevices.getUserMedia(
+        desktopStreamConstraints(started.sourceId),
+      )
+      // Codec choice: Electron 43's Chromium reports isTypeSupported=true for
+      // VP9, but its VP9 encoder emits an empty stream (110-byte header only —
+      // verified by the e2e codec probe), so VP8 is the reliable default.
+      const mimeType = ['video/webm;codecs=vp8', 'video/webm'].find((candidate) =>
+        MediaRecorder.isTypeSupported(candidate),
+      )
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      const chunks: Blob[] = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data)
+      }
+      stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+        // the system ended the capture under us — abort the armed recording
+        void window.aiOfficeRecorder.stop({ abort: true })
+      })
+      recorder.start(1000)
+      streamRef.current = stream
+      recorderRef.current = recorder
+      chunksRef.current = chunks
+    } catch {
+      // stream or encoder unavailable: back out of the armed recording
+      await window.aiOfficeRecorder.stop({ abort: true })
+    }
+  }
+
+  const stopRecording = async (): Promise<void> => {
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state === 'inactive') {
+      // a renderer reload remounted the pill without the live capture — there
+      // is nothing to save, so abort instead of sending empty bytes
+      await window.aiOfficeRecorder.stop({ abort: true })
+      return
+    }
+    await window.aiOfficeRecorder.stop()
+    await new Promise<void>((resolve) => {
+      recorder.addEventListener('stop', () => resolve(), { once: true })
+      recorder.stop()
+    })
+    const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+    releaseCapture()
+    await window.aiOfficeRecorder.save(new Uint8Array(await blob.arrayBuffer()))
+  }
+
+  const onPillClick = (): void => {
+    const current = statusRef.current
+    if (current.state === 'idle') void startRecording()
+    else if (current.state === 'recording') void stopRecording()
+    else if (current.state === 'saved' && current.path) void window.aiOfficeRecorder.reveal(current.path)
+  }
+
+  const state = status.state
+  let content: ReactNode
+  let title: string
+  let ariaLabel: string
+  if (state === 'recording') {
+    content = (
+      <>
+        <span className="rec-pill-dot" aria-hidden="true" />
+        <span className="rec-pill-timer" data-rec-timer="">
+          {formatElapsed(elapsed)}
+        </span>
+      </>
+    )
+    title = t('recTooltipRecording')
+    ariaLabel = t('recTutorialStop')
+  } else if (state === 'acquiring' || state === 'saving') {
+    content = <span className="rec-pill-spinner" aria-hidden="true" />
+    title = state === 'acquiring' ? t('recTooltipIdle') : t('recTutorialSaving')
+    ariaLabel = title
+  } else if (state === 'saved') {
+    content = (
+      <>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M4.5 12.5L9.5 17.5L19.5 7"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span className="rec-pill-label">{t('recTutorialSaved')}</span>
+      </>
+    )
+    title = t('recTutorialSaved')
+    ariaLabel = title
+  } else if (state === 'error') {
+    content = <span className="rec-pill-dot rec-pill-dot-error" aria-hidden="true" />
+    title = t(status.error ?? 'recTutorialSaveFailed')
+    ariaLabel = title
+  } else {
+    content = (
+      <>
+        <span className="rec-pill-dot" aria-hidden="true" />
+        <span className="rec-pill-label">{t('recTutorialRecord')}</span>
+      </>
+    )
+    title = t('recTooltipIdle')
+    ariaLabel = title
+  }
+
+  return (
+    <button
+      type="button"
+      className={`rec-pill ${state === 'recording' ? 'recording' : ''}`}
+      data-rec-pill=""
+      data-state={state}
+      title={title}
+      aria-label={ariaLabel}
+      onClick={onPillClick}
+    >
+      {content}
+    </button>
+  )
+}

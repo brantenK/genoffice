@@ -320,6 +320,76 @@ body.overlay-title-bar .tab-bar-drag-spacer {
   background: rgba(0, 0, 0, 0.08);
 }
 
+/* REC pill: records the shell window itself (see RecorderPill.tsx). Lives in
+   the 40px strip because module WebContentsViews paint over the shell DOM
+   below it; no-drag so the click lands while the strip is a drag region. */
+.rec-pill {
+  -webkit-app-region: no-drag;
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  margin: 0 10px 0 2px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--tabstrip-text);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rec-pill:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.rec-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.rec-pill.recording .rec-pill-dot {
+  background: #e5484d;
+  animation: rec-pill-pulse 1.6s ease-in-out infinite;
+}
+
+.rec-pill-dot-error {
+  background: #e5484d;
+}
+
+.rec-pill-timer {
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-pill-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: rec-pill-spin 0.9s linear infinite;
+}
+
+@keyframes rec-pill-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes rec-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app-frame-content {
   padding-top: 40px;
 }
@@ -345,6 +415,10 @@ body.overlay-title-bar .tab-bar-drag-spacer {
   background: rgba(255, 255, 255, 0.12);
 }
 
+[data-theme='dark'] .rec-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 [data-theme='dark'] .tab-new-btn:hover,
 [data-theme='dark'] .tab-overflow-btn:hover,
 [data-theme='dark'] .tab-app-menu-btn:hover {
@@ -367,6 +441,9 @@ body.overlay-title-bar .tab-bar-drag-spacer {
   }
   :root:not([data-theme='light']):not([data-theme='dark']) .tab-close:hover {
     background: rgba(255, 255, 255, 0.12);
+  }
+  :root:not([data-theme='light']):not([data-theme='dark']) .rec-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
   }
   :root:not([data-theme='light']):not([data-theme='dark']) .tab-new-btn:hover,
   :root:not([data-theme='light']):not([data-theme='dark']) .tab-overflow-btn:hover,

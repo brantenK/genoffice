@@ -19,6 +19,7 @@ import {
   BrowserWindow,
   Menu,
   app,
+  desktopCapturer,
   dialog,
   ipcMain,
   nativeImage,
@@ -82,6 +83,7 @@ import { controlHandler } from './control-handlers'
 import { installCliLinkBestEffort } from './cli-link'
 import { createDefaultAppService, execFileRunner } from './default-app'
 import { registerIntegrationsIpc } from './integrations-ipc'
+import { registerRecorderIpc, type TutorialRecorder } from './tutorial-recorder'
 import {
   ANALYTICS_ENABLED_KEY,
   analyticsEnabledFrom,
@@ -858,6 +860,7 @@ async function fetchGithubStars(): Promise<number | null> {
 
 const tMain = createI18n({
   zh: {
+    dlgRecTitle: '保存教程录制',
     dlgAddFolderRoot: '添加文件夹到首页',
     watchdogTitle: '文档占用资源过高',
     watchdogBody:
@@ -950,6 +953,7 @@ const tMain = createI18n({
     errSaveDirUnusable: '所选文件夹不可写，无法用作默认保存位置',
   },
   en: {
+    dlgRecTitle: 'Save Tutorial Recording',
     dlgAddFolderRoot: 'Add Folder to Home',
     watchdogTitle: 'Document is using too many resources',
     watchdogBody:
@@ -1050,6 +1054,7 @@ const tMain = createI18n({
       'The selected folder is not writable and cannot be used as the default save location',
   },
   vi: {
+    dlgRecTitle: 'Lưu bản ghi hướng dẫn',
     dlgAddFolderRoot: 'Thêm thư mục vào Trang chủ',
     watchdogTitle: 'Tài liệu đang dùng quá nhiều tài nguyên',
     watchdogBody:
@@ -1150,6 +1155,7 @@ const tMain = createI18n({
     errSaveDirUnusable: 'Thư mục đã chọn không thể ghi và không thể dùng làm vị trí lưu mặc định',
   },
   ja: {
+    dlgRecTitle: 'チュートリアル録画を保存',
     dlgAddFolderRoot: 'フォルダーをホームに追加',
     watchdogTitle: 'ドキュメントのリソース使用量が過大です',
     watchdogBody:
@@ -1250,6 +1256,7 @@ const tMain = createI18n({
       '選択したフォルダーは書き込みできないため、既定の保存先として使用できません',
   },
   ko: {
+    dlgRecTitle: '튜토리얼 녹화 저장',
     dlgAddFolderRoot: '홈에 폴더 추가',
     watchdogTitle: '문서가 리소스를 과도하게 사용하고 있습니다',
     watchdogBody:
@@ -1349,6 +1356,7 @@ const tMain = createI18n({
     errSaveDirUnusable: '선택한 폴더에 쓸 수 없어 기본 저장 위치로 사용할 수 없습니다',
   },
   fr: {
+    dlgRecTitle: 'Enregistrer le tutoriel',
     dlgAddFolderRoot: "Ajouter un dossier à l'accueil",
     watchdogTitle: 'Le document consomme trop de ressources',
     watchdogBody:
@@ -1450,6 +1458,7 @@ const tMain = createI18n({
       "Le dossier sélectionné n'est pas accessible en écriture et ne peut pas servir d'emplacement d'enregistrement par défaut",
   },
   de: {
+    dlgRecTitle: 'Tutorial-Aufnahme speichern',
     dlgAddFolderRoot: 'Ordner zur Startseite hinzufügen',
     watchdogTitle: 'Dokument beansprucht zu viele Ressourcen',
     watchdogBody:
@@ -1551,6 +1560,7 @@ const tMain = createI18n({
       'Der ausgewählte Ordner ist nicht beschreibbar und kann nicht als Standard-Speicherort verwendet werden',
   },
   es: {
+    dlgRecTitle: 'Guardar grabación del tutorial',
     dlgAddFolderRoot: 'Añadir carpeta al inicio',
     watchdogTitle: 'El documento consume demasiados recursos',
     watchdogBody:
@@ -1652,6 +1662,7 @@ const tMain = createI18n({
       'La carpeta seleccionada no admite escritura y no puede usarse como ubicación de guardado predeterminada',
   },
   th: {
+    dlgRecTitle: 'บันทึกการอัดบทเรียน',
     dlgAddFolderRoot: 'เพิ่มโฟลเดอร์ไปยังหน้าแรก',
     watchdogTitle: 'เอกสารใช้ทรัพยากรมากเกินไป',
     watchdogBody:
@@ -1749,6 +1760,7 @@ const tMain = createI18n({
     errSaveDirUnusable: 'โฟลเดอร์ที่เลือกไม่สามารถเขียนได้ จึงใช้เป็นตำแหน่งบันทึกเริ่มต้นไม่ได้',
   },
   id: {
+    dlgRecTitle: 'Simpan Rekaman Tutorial',
     dlgAddFolderRoot: 'Tambahkan Folder ke Beranda',
     watchdogTitle: 'Dokumen menggunakan terlalu banyak sumber daya',
     watchdogBody:
@@ -1850,6 +1862,7 @@ const tMain = createI18n({
       'Folder yang dipilih tidak dapat ditulis dan tidak bisa digunakan sebagai lokasi penyimpanan default',
   },
   ru: {
+    dlgRecTitle: 'Сохранить запись туториала',
     dlgAddFolderRoot: 'Добавить папку на главную',
     watchdogTitle: 'Документ потребляет слишком много ресурсов',
     watchdogBody:
@@ -1951,6 +1964,7 @@ const tMain = createI18n({
       'Выбранная папка недоступна для записи и не может использоваться как папка сохранения по умолчанию',
   },
   ar: {
+    dlgRecTitle: 'حفظ تسجيل الدليل التطبيقي',
     dlgAddFolderRoot: 'إضافة مجلد إلى الصفحة الرئيسية',
     watchdogTitle: 'المستند يستهلك موارد كثيرة جدًا',
     watchdogBody:
@@ -2048,6 +2062,7 @@ const tMain = createI18n({
     errSaveDirUnusable: 'المجلد المحدد غير قابل للكتابة ولا يمكن استخدامه كموقع حفظ افتراضي',
   },
   pt: {
+    dlgRecTitle: 'Salvar gravação do tutorial',
     dlgAddFolderRoot: 'Adicionar pasta à página inicial',
     watchdogTitle: 'O documento está a consumir demasiados recursos',
     watchdogBody:
@@ -2149,6 +2164,7 @@ const tMain = createI18n({
       'A pasta selecionada não permite gravação e não pode ser usada como local de salvamento padrão',
   },
   it: {
+    dlgRecTitle: 'Salva registrazione tutorial',
     dlgAddFolderRoot: 'Aggiungi cartella alla Home',
     watchdogTitle: 'Il documento sta usando troppe risorse',
     watchdogBody:
@@ -2250,6 +2266,7 @@ const tMain = createI18n({
       'La cartella selezionata non è scrivibile e non può essere usata come posizione di salvataggio predefinita',
   },
   pl: {
+    dlgRecTitle: 'Zapisz nagranie samouczka',
     dlgAddFolderRoot: 'Dodaj folder do strony głównej',
     watchdogTitle: 'Dokument zużywa zbyt dużo zasobów',
     watchdogBody:
@@ -2351,6 +2368,7 @@ const tMain = createI18n({
       'Wybrany folder nie pozwala na zapis i nie może być domyślną lokalizacją zapisu',
   },
   cs: {
+    dlgRecTitle: 'Uložit nahrávku tutoriálu',
     dlgAddFolderRoot: 'Přidat složku na domovskou stránku',
     watchdogTitle: 'Dokument spotřebovává příliš mnoho prostředků',
     watchdogBody:
@@ -2450,6 +2468,7 @@ const tMain = createI18n({
       'Do vybrané složky nelze zapisovat a nelze ji použít jako výchozí umístění pro ukládání',
   },
   nl: {
+    dlgRecTitle: 'Tutorial-opname opslaan',
     dlgAddFolderRoot: 'Map toevoegen aan startpagina',
     watchdogTitle: 'Document gebruikt te veel systeembronnen',
     watchdogBody:
@@ -2551,6 +2570,7 @@ const tMain = createI18n({
       'De geselecteerde map is niet beschrijfbaar en kan niet als standaard opslaglocatie worden gebruikt',
   },
   ms: {
+    dlgRecTitle: 'Simpan Rakaman Tutorial',
     dlgAddFolderRoot: 'Tambah Folder ke Laman Utama',
     watchdogTitle: 'Dokumen menggunakan terlalu banyak sumber',
     watchdogBody:
@@ -2651,6 +2671,7 @@ const tMain = createI18n({
       'Folder yang dipilih tidak boleh ditulis dan tidak dapat digunakan sebagai lokasi simpanan lalai',
   },
   he: {
+    dlgRecTitle: 'שמירת סרטון ההדרכה',
     dlgAddFolderRoot: 'הוספת תיקייה לדף הבית',
     watchdogTitle: 'המסמך צורך יותר מדי משאבים',
     watchdogBody:
@@ -2749,6 +2770,7 @@ const tMain = createI18n({
       'התיקייה שנבחרה אינה ניתנת לכתיבה ולא ניתן להשתמש בה כמיקום שמירה כברירת מחדל',
   },
   hi: {
+    dlgRecTitle: 'ट्यूटोरियल रिकॉर्डिंग सहेजें',
     dlgAddFolderRoot: 'होम में फ़ोल्डर जोड़ें',
     watchdogTitle: 'दस्तावेज़ बहुत अधिक संसाधन ले रहा है',
     watchdogBody:
@@ -2850,6 +2872,7 @@ const tMain = createI18n({
       'चयनित फ़ोल्डर में लिखा नहीं जा सकता, इसलिए इसे डिफ़ॉल्ट सहेजने के स्थान के रूप में उपयोग नहीं किया जा सकता',
   },
   'zh-TW': {
+    dlgRecTitle: '儲存教學錄製',
     dlgAddFolderRoot: '將資料夾加入首頁',
     watchdogTitle: '文件佔用資源過高',
     watchdogBody:
@@ -2951,6 +2974,7 @@ const tm = (key: Parameters<typeof tMain>[1], params?: Parameters<typeof tMain>[
 let shellWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
 let automationServer: AutomationServer | null = null
+let tutorialRecorder: TutorialRecorder | null = null
 
 async function startAutomationServerWhenReady(): Promise<void> {
   if (!automationMode.enabled || automationServer || !tabManager) return
@@ -3291,11 +3315,19 @@ function createShellWindow(): void {
     tabManager?.refreshActiveTargets()
     tabManager?.focusActiveView()
   })
+  // a window close (or app quit) mid-recording aborts silently — no save
+  // dialog mid-teardown; the pill's state is dropped with the window
+  win.on('closed', () => {
+    tutorialRecorder?.dispose()
+  })
 
   const manager = new TabManager(
     win,
     () => {
       win.webContents.send(TABS_CHANNELS.changed, manager.list())
+      // while a recording is live, its ripple overlay must follow the surface
+      // that just became visible (a module view, or the shell chrome for Home)
+      tutorialRecorder?.onTabManagerChanged()
       publishOpenDocumentsIfOwner([...manager.openFilePaths(), ...detachedFilePaths()])
     },
     applyMenuFor,
@@ -6043,6 +6075,17 @@ if (!invalidAutomationLaunch) {
   })
   registerTabsIpc()
   registerDroppedFilesIpc()
+  // REC pill in the tab strip: records the shell window itself to webm
+  tutorialRecorder = registerRecorderIpc({
+    getWindow: () => shellWindow,
+    getTabManager: () => tabManager,
+    saveDialogTitle: () => tm('dlgRecTitle'),
+    defaultDir: () => app.getPath('videos'),
+    showSaveDialog: (parent, options, fallbackDir) =>
+      showSaveDialogWithMemory(dialog, parent, options, fallbackDir),
+    getSources: (options) => desktopCapturer.getSources(options),
+    now: () => new Date(),
+  })
 
   // sheets' project:resolveChat goes through the handler registered by docs-main; the sessionId reverse lookup hooks in here
   setSessionPathResolver(resolveSheetsSessionPath)

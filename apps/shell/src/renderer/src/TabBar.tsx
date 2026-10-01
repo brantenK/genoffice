@@ -4,6 +4,7 @@ import type { TabsApi, TabSummary } from '../../shared/tabs-api'
 import { TEAR_OFF_SLACK, insertionIndexForX, isBeyondBand } from '../../shared/tab-drag-geometry'
 import { notifyFilesChanged } from './file-events'
 import { useI18n } from './locale'
+import { RecorderPill } from './RecorderPill'
 
 declare global {
   interface Window {
@@ -658,6 +659,7 @@ export function TabBar() {
           />
         </svg>
       </button>
+      <RecorderPill />
       <div className="tab-bar-caption-spacer" />
     </div>
   )

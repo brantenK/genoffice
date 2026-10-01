@@ -35,6 +35,13 @@ import type {
 } from '../shared/integrations-api'
 import type { TabsApi, TabSummary } from '../shared/tabs-api'
 import { TABS_CHANNELS } from '../shared/tabs-api'
+import type {
+  RecorderApi,
+  RecorderSaveResult,
+  RecorderStartResult,
+  RecorderStatus,
+} from '../shared/recorder-api'
+import { RECORDER_CHANNELS } from '../shared/recorder-api'
 
 const UI_LANGUAGES: readonly UiLanguage[] = [
   'zh',
@@ -631,6 +638,31 @@ const tabsApi: TabsApi = {
 }
 
 contextBridge.exposeInMainWorld('aiOfficeTabs', tabsApi)
+
+const recorderApi: RecorderApi = {
+  async start() {
+    return (await ipcRenderer.invoke(RECORDER_CHANNELS.start)) as RecorderStartResult
+  },
+  async stop(options) {
+    await ipcRenderer.invoke(RECORDER_CHANNELS.stop, options)
+  },
+  async save(bytes) {
+    return (await ipcRenderer.invoke(RECORDER_CHANNELS.save, bytes)) as RecorderSaveResult
+  },
+  async reveal(path) {
+    await ipcRenderer.invoke(RECORDER_CHANNELS.reveal, path)
+  },
+  async status() {
+    return (await ipcRenderer.invoke(RECORDER_CHANNELS.status)) as RecorderStatus
+  },
+  onChanged(handler) {
+    const listener = (_event: IpcRendererEvent, status: RecorderStatus) => handler(status)
+    ipcRenderer.on(RECORDER_CHANNELS.changed, listener)
+    return () => ipcRenderer.removeListener(RECORDER_CHANNELS.changed, listener)
+  },
+}
+
+contextBridge.exposeInMainWorld('aiOfficeRecorder', recorderApi)
 
 // open documents dragged from the OS anywhere over Home or the tab strip
 installDropOpenBridge()
