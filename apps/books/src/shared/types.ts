@@ -72,6 +72,10 @@ export interface Invoice {
   notes?: string
   tenderReference?: string
   crmDealId?: string
+  /** The party's printed address, stamped from the party record at save time. */
+  partyAddress?: string
+  /** The party's printed tax ID, stamped from the party record at save time. */
+  partyTaxId?: string
   /** True for a credit note: reverses a previously posted invoice. */
   creditNote?: boolean
   /** For credit notes: the id of the invoice being credited. */
@@ -123,6 +127,10 @@ export interface Quotation {
   /** Invoice-level discount (VAT-exclusive), applied before tax. */
   discountTotal?: number
   notes?: string
+  /** The party's printed address, stamped from the party record at save time. */
+  partyAddress?: string
+  /** The party's printed tax ID, stamped from the party record at save time. */
+  partyTaxId?: string
   /**
    * Currency the quotation is denominated in (ISO code, e.g. 'EUR'). Absent or
    * blank means the company's base currency (`settings.currency`) — the same
@@ -192,6 +200,10 @@ export interface CompanySettings {
   letterheadFooter?: string
   /** Invoice PDF accent colour as a #RRGGBB literal. */
   invoiceAccent?: string
+  /** Company registration number printed under the VAT Reg line. */
+  registrationNumber?: string
+  /** Letterhead logo as a PNG/JPEG data URL (validated and capped in migration). */
+  logoDataUrl?: string
 }
 
 /** The invoice print templates the PDF builder and the print preview support. */

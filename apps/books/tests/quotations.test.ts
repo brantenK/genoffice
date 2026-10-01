@@ -33,6 +33,7 @@ function fakeBooksApi(overrides: Partial<BooksApi> = {}): BooksApi {
     onDataChanged: () => () => undefined,
     exportToSheets: async () => ({ ok: true }),
     openInPdf: async () => ({ ok: true }),
+    openQuotePdf: async () => ({ ok: true }),
     openInCrm: async () => false,
     openInTenders: async () => false,
     importBankStatementCsv: async () => ({ ok: true, importedCount: 0 }),

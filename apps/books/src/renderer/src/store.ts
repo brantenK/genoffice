@@ -15,6 +15,7 @@ import type {
   ReportType,
 } from '../../shared/types'
 import { EMPTY_ACCOUNTS, DEFAULT_BOOK_SETTINGS } from '../../shared/chart'
+import { DEFAULT_INVOICE_NOTES } from '../../shared/print'
 import { appendAudit, createAuditEntry } from '../../shared/audit'
 import { isoDaysFromToday, localIsoToday } from '../../shared/dates'
 import {
@@ -94,6 +95,8 @@ interface BooksState {
   invoiceStatusFilter: 'All' | InvoiceStatus
   activeReport: ReportType
   printInvoice: Invoice | null
+  /** The quotation currently shown in its print preview (null = closed). */
+  printQuote: Quotation | null
   searchTerm: string
 
   // Actions
@@ -102,6 +105,7 @@ interface BooksState {
   setInvoiceStatusFilter: (status: 'All' | InvoiceStatus) => void
   setActiveReport: (report: ReportType) => void
   setPrintInvoice: (invoice: Invoice | null) => void
+  setPrintQuote: (quote: Quotation | null) => void
   setSearchTerm: (term: string) => void
   clearError: () => void
   completeSetup: (ledger: BooksData) => Promise<void>
@@ -591,7 +595,7 @@ function invoiceSaveMutation(
     notes:
       partial.notes !== undefined
         ? partial.notes
-        : oldInvoice?.notes || 'Payment due within 30 days.',
+        : oldInvoice?.notes || DEFAULT_INVOICE_NOTES,
     tenderReference:
       partial.tenderReference !== undefined ? partial.tenderReference : oldInvoice?.tenderReference,
     crmDealId: partial.crmDealId !== undefined ? partial.crmDealId : oldInvoice?.crmDealId,
@@ -649,6 +653,12 @@ function invoiceSaveMutation(
   } else if (resolvedParty && !targetInvoice.partyId) {
     targetInvoice.partyId = resolvedParty.id
   }
+
+  // The party's printed details ride the invoice so the printed document (PDF
+  // and preview alike) can show them without a party lookup: the resolved
+  // party's current values, else whatever the previous row carried.
+  targetInvoice.partyAddress = resolvedParty?.address || oldInvoice?.partyAddress
+  targetInvoice.partyTaxId = resolvedParty?.taxId || oldInvoice?.partyTaxId
 
   if (isPosting) {
     // Editing a previously posted invoice: reverse its old entries first,
@@ -803,6 +813,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   invoiceStatusFilter: 'All',
   activeReport: 'profit-loss',
   printInvoice: null,
+  printQuote: null,
   searchTerm: '',
 
   setActiveTab: (tab) => set({ activeTab: tab, activeInvoiceId: null }),
@@ -810,6 +821,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   setInvoiceStatusFilter: (status) => set({ invoiceStatusFilter: status }),
   setActiveReport: (report) => set({ activeReport: report }),
   setPrintInvoice: (invoice) => set({ printInvoice: invoice }),
+  setPrintQuote: (quote) => set({ printQuote: quote }),
   setSearchTerm: (term) => set({ searchTerm: term }),
   clearError: () => {
     lastFailureKey = null
@@ -1292,6 +1304,13 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       ? quotes.map((q) => (q.id === targetQuote.id ? targetQuote : q))
       : [targetQuote, ...quotes]
 
+    // The printed party lines ride the quotation like they ride an invoice.
+    const quoteParty =
+      data.parties.find((p) => p.id === targetQuote.partyId) ||
+      data.parties.find((p) => p.name.toLowerCase() === targetQuote.partyName.toLowerCase())
+    targetQuote.partyAddress = quoteParty?.address || oldQuote?.partyAddress
+    targetQuote.partyTaxId = quoteParty?.taxId || oldQuote?.partyTaxId
+
     set({
       data: appendAuditEntry(
         { ...data, quotes: nextQuotes },
@@ -1482,6 +1501,9 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       status: 'Unpaid',
       creditNote: true,
       creditedInvoiceId: original.id,
+      // The printed party lines carry over from the credited invoice.
+      ...(original.partyAddress !== undefined ? { partyAddress: original.partyAddress } : {}),
+      ...(original.partyTaxId !== undefined ? { partyTaxId: original.partyTaxId } : {}),
       notes:
         input.notes !== undefined ? input.notes : `Credit note against ${original.invoiceNumber}`,
       createdAt: now,

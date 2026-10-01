@@ -2,7 +2,8 @@
  * FX statement contract: a foreign-currency invoice's produced document is
  * labelled with the invoice's OWN currency ISO code (the same rule the print
  * preview implements) and carries the base-currency equivalent at the stored
- * rate — never the base symbol against foreign figures.
+ * rate — never the base symbol against foreign figures. The quotation PDF
+ * builder follows the identical discipline.
  *
  * Regression: buildInvoicePdf drew every amount with the company's BASE symbol
  * (settings.currencySymbol), so an EUR 1 000 invoice at 20 ZAR/EUR printed
@@ -11,9 +12,9 @@
  */
 import { inflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { buildInvoicePdf, formatMoney } from '../src/shared/invoice-pdf'
+import { buildInvoicePdf, buildQuotationPdf, formatMoney } from '../src/shared/invoice-pdf'
 import { DEFAULT_BOOK_SETTINGS } from '../src/shared/chart'
-import type { CompanySettings, Invoice } from '../src/shared/types'
+import type { CompanySettings, Invoice, Quotation } from '../src/shared/types'
 
 const settings: CompanySettings = {
   ...DEFAULT_BOOK_SETTINGS,
@@ -48,6 +49,37 @@ const eurInvoice: Invoice = {
   grandTotal: 1000,
   outstandingAmount: 1000,
   status: 'Unpaid',
+  currency: 'EUR',
+  exchangeRate: 20,
+  createdAt: '2026-09-01T00:00:00.000Z',
+  updatedAt: '2026-09-01T00:00:00.000Z',
+}
+
+/** The quotation analog of `eurInvoice`: an EUR offer at the same rate. */
+const eurQuote: Quotation = {
+  id: 'quote-fx',
+  quoteNumber: 'QTN-2026-001',
+  partyId: 'party-fx',
+  partyName: 'Euro Trader BV',
+  date: '2026-09-01',
+  validUntil: '2026-10-01',
+  items: [
+    {
+      id: 'it-1',
+      itemCode: 'CONS',
+      description: 'Consulting',
+      accountId: 'acc-sales',
+      accountName: 'Sales',
+      qty: 1,
+      rate: 1000,
+      taxRate: 0,
+      amount: 1000,
+    },
+  ],
+  subtotal: 1000,
+  taxTotal: 0,
+  grandTotal: 1000,
+  status: 'Sent',
   currency: 'EUR',
   exchangeRate: 20,
   createdAt: '2026-09-01T00:00:00.000Z',
@@ -134,6 +166,44 @@ describe('FX statement print contract (buildInvoicePdf)', () => {
     const bytes = await buildInvoicePdf(zarInvoice, settings)
     const { text } = extractPdf(bytes)
     expect(text).toContain(formatMoney(zarInvoice.grandTotal, 'R'))
+    expect(text).not.toContain('Exchange rate:')
+    expect(text).not.toContain('EUR')
+  })
+})
+
+describe('FX statement print contract (buildQuotationPdf)', () => {
+  it.each(['classic', 'modern'] as const)(
+    '%s: an EUR quotation is labelled EUR with its base equivalent, never the base symbol',
+    async template => {
+      const bytes = await buildQuotationPdf(eurQuote, { ...settings, printTemplate: template })
+      const { text, drawn } = extractPdf(bytes)
+
+      // The quotation's own-currency figures are labelled with the ISO code.
+      expect(text).toContain(formatMoney(eurQuote.grandTotal, 'EUR'))
+      // The base-currency equivalent rides the stored rate.
+      expect(text).toContain(formatMoney(round2(1000 * 20), 'R'))
+      expect(text).toContain('Exchange rate: 1 EUR = 20.00 ZAR')
+      // The old defect: base-symbol-labelled foreign figures must not return —
+      // asserted per drawn string (the base figure never appears as a
+      // stand-alone draw).
+      for (const figure of drawn) {
+        expect(
+          figure,
+          `a drawn figure must never be the base-symbol foreign amount: ${figure}`,
+        ).not.toBe(formatMoney(eurQuote.grandTotal, 'R'))
+      }
+    },
+  )
+
+  it('a base-currency quotation keeps the company symbol and carries no FX note', async () => {
+    const zarQuote: Quotation = {
+      ...eurQuote,
+      currency: undefined,
+      exchangeRate: undefined,
+    }
+    const bytes = await buildQuotationPdf(zarQuote, settings)
+    const { text } = extractPdf(bytes)
+    expect(text).toContain(formatMoney(zarQuote.grandTotal, 'R'))
     expect(text).not.toContain('Exchange rate:')
     expect(text).not.toContain('EUR')
   })

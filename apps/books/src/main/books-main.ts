@@ -18,13 +18,14 @@ import {
   validateCsvString,
   validateInvoicePayload,
   validateNonEmptyString,
+  validateQuotationPayload,
   validateRestoreName,
   validateRevision,
   validateSaveIntent,
   type LoadDataResult,
   type SaveDataResult,
 } from '../shared/ipc'
-import type { BooksData, BooksDataEnvelope, CompanySettings, Invoice } from '../shared/types'
+import type { BooksData, BooksDataEnvelope, CompanySettings, Invoice, Quotation } from '../shared/types'
 import { validateClosedPeriodMutation } from '../shared/closing'
 import {
   exportBackup,
@@ -56,7 +57,7 @@ import {
 export * from '../shared/accounting'
 import { round2 } from '../shared/accounting'
 import { CORE_ACCOUNTS, DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS } from '../shared/chart'
-import { buildInvoicePdf } from '../shared/invoice-pdf'
+import { buildInvoicePdf, buildQuotationPdf } from '../shared/invoice-pdf'
 
 // Re-exported for callers/tests that historically imported them from here.
 export { CORE_ACCOUNTS, DEFAULT_BOOK_SETTINGS, EMPTY_ACCOUNTS }
@@ -312,6 +313,23 @@ function safeFileStem(raw: unknown, fallback: string): string {
   return stem || fallback
 }
 
+/**
+ * The company details a generated document prints: the books store's settings,
+ * or the passed company name against the defaults when the store is
+ * unreachable. Every generated-document channel resolves them the same way.
+ */
+function resolveBooksSettings(companyName: unknown): CompanySettings {
+  const fallbackName =
+    typeof companyName === 'string' && companyName.trim()
+      ? companyName
+      : DEFAULT_BOOK_SETTINGS.companyName
+  try {
+    const stored = readBooksStoreStrict(getStoragePath(), { forensic: false })
+    if (stored.ok && stored.data) return stored.data.settings
+  } catch {}
+  return { ...DEFAULT_BOOK_SETTINGS, companyName: fallbackName }
+}
+
 /** Writes generated output through a temporary file so readers never see a
  *  half-written report, and so two windows cannot interleave their bytes. */
 function writeGeneratedFile(targetPath: string, content: string | Uint8Array): void {
@@ -468,32 +486,7 @@ export function registerBooksIpc(): void {
     // the same number after the shell renamed the first file — never share a
     // path, and the file name stays the one the shell titles the tab with.
     const targetPath = uniqueGeneratedPath(`Tax_Invoice_${invoiceNo}`, '.pdf')
-
-    // Company details come from the books store; fall back to the passed
-    // name only when the store is unreachable.
-    let settings: CompanySettings
-    try {
-      const stored = readBooksStoreStrict(getStoragePath(), { forensic: false })
-      if (!stored.ok || !stored.data) {
-        settings = {
-          ...DEFAULT_BOOK_SETTINGS,
-          companyName:
-            typeof companyName === 'string' && companyName.trim()
-              ? companyName
-              : DEFAULT_BOOK_SETTINGS.companyName,
-        }
-      } else {
-        settings = stored.data.settings
-      }
-    } catch {
-      settings = {
-        ...DEFAULT_BOOK_SETTINGS,
-        companyName:
-          typeof companyName === 'string' && companyName.trim()
-            ? companyName
-            : DEFAULT_BOOK_SETTINGS.companyName,
-      }
-    }
+    const settings = resolveBooksSettings(companyName)
 
     const result = await writeInvoicePdf(validated.value, settings, targetPath)
     if (result.ok && runtime.openGeneratedPath) {
@@ -501,6 +494,27 @@ export function registerBooksIpc(): void {
     }
     return result
   })
+
+  // Cross-App: Print a quotation in PDF — the quotation mirror of the invoice
+  // channel above: the same validation discipline, the same per-export
+  // directory and the same company-settings resolution.
+  ipcMain.handle(
+    BOOKS_CHANNELS.openQuotePdf,
+    async (_e, quotation: unknown, companyName: unknown) => {
+      if (_e?.sender) registerBooksWebContents(_e.sender)
+      const validated = validateQuotationPayload(quotation)
+      if (!validated.ok) return { ok: false, error: validated.error }
+      const quoteNo = safeFileStem(validated.value.quoteNumber, 'QTN-0001')
+      const targetPath = uniqueGeneratedPath(`Quotation_${quoteNo}`, '.pdf')
+      const settings = resolveBooksSettings(companyName)
+
+      const result = await writeQuotationPdf(validated.value, settings, targetPath)
+      if (result.ok && runtime.openGeneratedPath) {
+        runtime.openGeneratedPath(targetPath)
+      }
+      return result
+    },
+  )
 
   // Cross-App: Open CRM
   ipcMain.handle(BOOKS_CHANNELS.openInCrm, (_e) => {
@@ -682,6 +696,26 @@ export async function writeInvoicePdf(
     return { ok: true, path: targetPath }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'Failed to generate invoice PDF' }
+  }
+}
+
+/**
+ * Generates a real PDF for a quotation via buildQuotationPdf and writes it to
+ * disk — the quotation mirror of `writeInvoicePdf`, exported for the same
+ * reason (tests exercise the openQuotePdf generation path without an electron
+ * runtime). The write is atomic like every generated file.
+ */
+export async function writeQuotationPdf(
+  quotation: Quotation,
+  settings: CompanySettings,
+  targetPath: string,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  try {
+    const pdfBytes = await buildQuotationPdf(quotation, settings)
+    writeGeneratedFile(targetPath, pdfBytes)
+    return { ok: true, path: targetPath }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'Failed to generate quotation PDF' }
   }
 }
 

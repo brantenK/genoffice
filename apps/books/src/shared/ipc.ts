@@ -5,6 +5,7 @@ import type {
   Invoice,
   InvoiceStatus,
   Payment,
+  Quotation,
   QuotationStatus,
   SettlementSuggestion,
 } from './types'
@@ -16,6 +17,7 @@ export const BOOKS_CHANNELS = {
   DATA_CHANGED: 'books:data-changed',
   exportToSheets: 'books:export-to-sheets',
   openInPdf: 'books:open-in-pdf',
+  openQuotePdf: 'books:open-quote-pdf',
   openInCrm: 'books:open-in-crm',
   openInTenders: 'books:open-in-tenders',
   importBankStatementCsv: 'books:import-bank-statement-csv',
@@ -184,6 +186,10 @@ export interface BooksApi {
   ) => Promise<{ ok: boolean; path?: string; error?: string }>
   openInPdf: (
     invoice: Invoice,
+    companyName: string,
+  ) => Promise<{ ok: boolean; path?: string; error?: string }>
+  openQuotePdf: (
+    quotation: Quotation,
     companyName: string,
   ) => Promise<{ ok: boolean; path?: string; error?: string }>
   openInCrm: () => Promise<boolean>
@@ -553,6 +559,13 @@ export function validateInvoicePayload(raw: unknown): ValidationResult<Invoice> 
   const problem = invoicePayloadError(raw)
   if (problem) return invalid(problem)
   return { ok: true, value: raw as Invoice }
+}
+
+/** Guard for the `books:open-quote-pdf` payload: a whole stored quotation. */
+export function validateQuotationPayload(raw: unknown): ValidationResult<Quotation> {
+  const problem = quotationError(raw)
+  if (problem) return invalid(problem)
+  return { ok: true, value: raw as Quotation }
 }
 
 /**

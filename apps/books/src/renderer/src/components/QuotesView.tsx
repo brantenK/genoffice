@@ -8,6 +8,7 @@ import {
   XCircle,
   Send,
   Pencil,
+  Printer,
   Receipt,
   ArrowLeft,
   Save,
@@ -39,6 +40,7 @@ export function QuotesView() {
     deleteQuote,
     setActiveTab,
     setActiveInvoiceId,
+    setPrintQuote,
   } = useBooksStore()
 
   const [mode, setMode] = useState<Mode>({ kind: 'list' })
@@ -117,6 +119,9 @@ export function QuotesView() {
   if (mode.kind === 'form') {
     return <QuoteForm quote={mode.quote} onClose={() => setMode({ kind: 'list' })} />
   }
+
+  /** The quote's print button mirrors the invoice rows': it opens the preview. */
+  const printQuoteRow = (q: Quotation) => setPrintQuote(q)
 
   return (
     <div className="flex-1 overflow-y-auto custom-scroll p-8 bg-[#FBFBFB]">
@@ -209,6 +214,15 @@ export function QuotesView() {
                   <td className="px-6 py-3.5">{getStatusBadge(q)}</td>
                   <td className="px-6 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button
+                        title="Print / Export PDF"
+                        aria-label={`Print quotation ${q.quoteNumber}`}
+                        onClick={() => printQuoteRow(q)}
+                        className="p-1.5 text-[#6B6B6B] hover:text-[#1E293B] hover:bg-[#F3F3F3] rounded-md transition-colors"
+                      >
+                        <Printer className="w-4 h-4" />
+                      </button>
+
                       {(q.status === 'Sent' || q.status === 'Accepted') && (
                         <button
                           title="Convert to Invoice"
@@ -287,7 +301,7 @@ export function QuotesView() {
 
 /** The quotation editor. It writes to `quotes` only — nothing here posts. */
 function QuoteForm({ quote, onClose }: { quote: Quotation | null; onClose: () => void }) {
-  const { data, saveQuote } = useBooksStore()
+  const { data, saveQuote, setPrintQuote } = useBooksStore()
 
   const customers = data.parties.filter((p) => p.type === 'Customer')
   const relevantAccounts = data.accounts.filter((a) => !a.isGroup && a.rootType === 'Income')
@@ -436,13 +450,25 @@ function QuoteForm({ quote, onClose }: { quote: Quotation | null; onClose: () =>
           </div>
         </div>
 
-        <button
-          onClick={handleSave}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#1E293B] hover:bg-[#0F172A] shadow-xs transition-colors"
-        >
-          <Save className="w-4 h-4" />
-          Save Quotation
-        </button>
+        <div className="flex items-center gap-2">
+          {quote && (
+            <button
+              onClick={() => setPrintQuote(quote)}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-[#1E293B] bg-white border border-[#EDEDED] hover:bg-[#F8F8F8] transition-colors"
+            >
+              <Printer className="w-4 h-4" />
+              Print / PDF
+            </button>
+          )}
+
+          <button
+            onClick={handleSave}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#1E293B] hover:bg-[#0F172A] shadow-xs transition-colors"
+          >
+            <Save className="w-4 h-4" />
+            Save Quotation
+          </button>
+        </div>
       </div>
 
       {/* Form Fields Card */}

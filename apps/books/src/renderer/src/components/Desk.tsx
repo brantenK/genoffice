@@ -36,6 +36,7 @@ import { ChartOfAccounts } from './ChartOfAccounts'
 import { JournalEntryList } from './JournalEntryList'
 import { ReportsView } from './ReportsView'
 import { InvoicePrintModal } from './InvoicePrintModal'
+import { QuotationPrintModal } from './QuotationPrintModal'
 import { BOOKS_VERSION } from '../../../shared/app-version'
 import type { BooksNavigationTab } from '../../../shared/types'
 
@@ -338,6 +339,7 @@ export function Desk() {
 
       {/* Document Print Modal */}
       <InvoicePrintModal />
+      <QuotationPrintModal />
     </div>
   )
 }

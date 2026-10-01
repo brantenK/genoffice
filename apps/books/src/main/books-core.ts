@@ -33,7 +33,9 @@ import {
   DEFAULT_INVOICE_ACCENT,
   EMPTY_ACCOUNTS,
   LETTERHEAD_FOOTER_MAX,
+  REGISTRATION_NUMBER_MAX,
   isValidInvoiceAccent,
+  isValidLogoDataUrl,
 } from '../shared/chart'
 import { appendAudit, createAuditEntry } from '../shared/audit'
 import { isDateLocked } from '../shared/closing'
@@ -178,9 +180,11 @@ export function normalizeLedger(data: BooksDataEnvelope): BooksDataEnvelope {
 /**
  * Print & letterhead defaults (additive and optional, like the invoice
  * currency fields — no schema-version bump): the template defaults to
- * classic, a malformed accent is repaired to the default teal, and the
- * footer is a trimmed string capped at the shared maximum. Applied to every
- * envelope the migration emits so a fresh ledger carries the same defaults.
+ * classic, a malformed accent is repaired to the default teal, the footer is
+ * a trimmed string capped at the shared maximum, the registration number a
+ * trimmed string capped at its own maximum, and the logo rides only a valid,
+ * in-cap PNG/JPEG data URL. Applied to every envelope the migration emits so
+ * a fresh ledger carries the same defaults.
  */
 function sanitizePrintSettings(settings: CompanySettings): CompanySettings {
   settings.printTemplate = settings.printTemplate === 'modern' ? 'modern' : 'classic'
@@ -192,6 +196,15 @@ function sanitizePrintSettings(settings: CompanySettings): CompanySettings {
     settings.letterheadFooter = rawFooter.trim().slice(0, LETTERHEAD_FOOTER_MAX)
   } else {
     delete settings.letterheadFooter
+  }
+  const rawRegistration = settings.registrationNumber
+  if (typeof rawRegistration === 'string' && rawRegistration.trim()) {
+    settings.registrationNumber = rawRegistration.trim().slice(0, REGISTRATION_NUMBER_MAX)
+  } else {
+    delete settings.registrationNumber
+  }
+  if (!isValidLogoDataUrl(settings.logoDataUrl)) {
+    delete settings.logoDataUrl
   }
   return settings
 }

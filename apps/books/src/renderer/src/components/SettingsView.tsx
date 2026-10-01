@@ -16,7 +16,10 @@ import {
   DEFAULT_INVOICE_ACCENT,
   INVOICE_ACCENT_SWATCHES,
   LETTERHEAD_FOOTER_MAX,
+  MAX_LOGO_DATA_URL_CHARS,
+  REGISTRATION_NUMBER_MAX,
   isValidInvoiceAccent,
+  isValidLogoDataUrl,
 } from '../../../shared/chart'
 import { localIsoToday } from '../../../shared/dates'
 import type { CompanySettings, PrintTemplate } from '../../../shared/types'
@@ -35,6 +38,9 @@ export function SettingsView() {
 
   const [companyName, setCompanyName] = useState(settings.companyName || '')
   const [taxNumber, setTaxNumber] = useState(settings.taxNumber || '')
+  const [registrationNumber, setRegistrationNumber] = useState(settings.registrationNumber || '')
+  const [logoDataUrl, setLogoDataUrl] = useState(settings.logoDataUrl || '')
+  const [logoError, setLogoError] = useState<string | null>(null)
   const [address, setAddress] = useState(settings.address || '')
   const [email, setEmail] = useState(settings.email || '')
   const [phone, setPhone] = useState(settings.phone || '')
@@ -97,6 +103,29 @@ export function SettingsView() {
     setCurrency(code)
   }
 
+  /** Reads the picked PNG/JPEG as a data URL, refusing anything over the cap. */
+  const handleLogoFile = (file: File | undefined) => {
+    setLogoError(null)
+    if (!file) return
+    const reader = new FileReader()
+    reader.onerror = () => setLogoError('Could not read that file. Try the image again.')
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      if (!isValidLogoDataUrl(dataUrl)) {
+        setLogoError('Logo must be a PNG or JPEG image.')
+        return
+      }
+      if (dataUrl.length > MAX_LOGO_DATA_URL_CHARS) {
+        setLogoError(
+          `That image is too large (over ${Math.round(MAX_LOGO_DATA_URL_CHARS / 1024)} KB as stored). Pick a smaller one.`,
+        )
+        return
+      }
+      setLogoDataUrl(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -108,6 +137,10 @@ export function SettingsView() {
     const patch: Partial<CompanySettings> = {
       companyName: companyName.trim(),
       taxNumber: taxNumber.trim(),
+      registrationNumber: registrationNumber.trim(),
+      // An emptied logo field removes the stored one; an untouched field
+      // re-sends the current logo.
+      logoDataUrl: logoDataUrl.trim() ? logoDataUrl : undefined,
       address: address.trim(),
       email: email.trim(),
       phone: phone.trim(),
@@ -279,15 +312,26 @@ export function SettingsView() {
                 />
               </div>
               <div>
-                <label className={labelCls}>Phone</label>
+                <label className={labelCls}>Company registration number</label>
                 <input
-                  type="tel"
+                  type="text"
                   className={inputCls}
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+27 11 555 0192"
+                  value={registrationNumber}
+                  onChange={(e) => setRegistrationNumber(e.target.value)}
+                  maxLength={REGISTRATION_NUMBER_MAX}
+                  placeholder="e.g. 2016/123456/07"
                 />
               </div>
+            </div>
+            <div>
+              <label className={labelCls}>Phone</label>
+              <input
+                type="tel"
+                className={inputCls}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+27 11 555 0192"
+              />
             </div>
             <div>
               <label className={labelCls}>Email</label>
@@ -437,6 +481,48 @@ export function SettingsView() {
               <p className="text-[11px] text-[#6B6B6B] mt-1">
                 Prints on every invoice and credit note you issue.
               </p>
+            </div>
+
+            <div>
+              <label className={labelCls}>Company logo</label>
+              <div className="flex items-center gap-3">
+                {logoDataUrl ? (
+                  <img
+                    src={logoDataUrl}
+                    alt="Company logo preview"
+                    className="h-14 w-14 rounded-lg border border-[#E2E8F0] bg-white object-contain p-1"
+                  />
+                ) : (
+                  <div className="h-14 w-14 rounded-lg border border-dashed border-[#E2E8F0] bg-[#F8F8F8]" />
+                )}
+                <div className="flex flex-col gap-1.5">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={(e) => handleLogoFile(e.target.files?.[0])}
+                    className="block w-full text-xs text-[#525252] file:mr-3 file:rounded-lg file:border-0 file:bg-[#F8F8F8] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#1E293B] hover:file:bg-[#F3F3F3]"
+                  />
+                  {logoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLogoDataUrl('')
+                        setLogoError(null)
+                      }}
+                      className="self-start text-xs font-semibold text-[#E03636] hover:underline"
+                    >
+                      Remove logo
+                    </button>
+                  )}
+                </div>
+              </div>
+              {logoError ? (
+                <p className="text-[11px] text-[#E03636] mt-1">{logoError}</p>
+              ) : (
+                <p className="text-[11px] text-[#6B6B6B] mt-1">
+                  A PNG or JPEG printed in the top-right corner of the letterhead (up to ~512 KB).
+                </p>
+              )}
             </div>
 
             <div>

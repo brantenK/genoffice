@@ -101,6 +101,7 @@ const API_MEMBERS = [
   'onDataChanged',
   'exportToSheets',
   'openInPdf',
+  'openQuotePdf',
   'openInCrm',
   'openInTenders',
   'importBankStatementCsv',

@@ -1,9 +1,15 @@
-import { inflateSync } from 'node:zlib'
+import { deflateSync, inflateSync } from 'node:zlib'
+import { PDFDocument } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
-import { buildInvoicePdf } from '../src/shared/invoice-pdf'
+import { buildInvoicePdf, buildQuotationPdf } from '../src/shared/invoice-pdf'
 import { migrateAndValidateBooks } from '../src/main/books-core'
-import { DEFAULT_INVOICE_ACCENT, isValidInvoiceAccent } from '../src/shared/chart'
-import type { CompanySettings, Invoice } from '../src/shared/types'
+import {
+  DEFAULT_INVOICE_ACCENT,
+  isValidInvoiceAccent,
+  isValidLogoDataUrl,
+} from '../src/shared/chart'
+import { DEFAULT_INVOICE_NOTES } from '../src/shared/print'
+import type { CompanySettings, Invoice, Quotation } from '../src/shared/types'
 
 /**
  * Locks for the print templates + letterhead feature:
@@ -365,3 +371,531 @@ describe('migration stamps and repairs the print settings', () => {
     expect(isValidInvoiceAccent(fresh.settings.invoiceAccent)).toBe(true)
   })
 })
+
+/** A quotation carrying one discounted line and an invoice-level discount. */
+function makeQuote(overrides: Partial<Quotation> = {}): Quotation {
+  return {
+    id: 'quote-1',
+    quoteNumber: 'QTN-2026-007',
+    partyId: 'party-1',
+    partyName: 'Rand Water Authority',
+    date: '2026-09-01',
+    validUntil: '2026-10-31',
+    items: [
+      {
+        id: 'qi1',
+        itemCode: 'C-1',
+        description: 'Water infrastructure consulting',
+        accountId: 'acc-sales',
+        accountName: 'Sales',
+        qty: 2,
+        rate: 2500,
+        taxRate: 15,
+        amount: 5000,
+      },
+    ],
+    subtotal: 5000,
+    taxTotal: 750,
+    grandTotal: 5750,
+    status: 'Sent',
+    notes: 'Quotation valid for 30 days.',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+describe('the VAT totals row labels the rate the lines actually carry', () => {
+  it('a 0% invoice prints a bare VAT label, never the fallback 15%', async () => {
+    const zeroRated = makeInvoice({
+      items: [
+        {
+          id: 'z1',
+          itemCode: 'C-1',
+          description: 'Zero-rated export',
+          accountId: 'acc-sales',
+          accountName: 'Sales',
+          qty: 1,
+          rate: 1000,
+          taxRate: 0,
+          amount: 1000,
+        },
+      ],
+      subtotal: 1000,
+      taxTotal: 0,
+      grandTotal: 1000,
+      outstandingAmount: 1000,
+    })
+    const text = decodedStreams(await buildInvoicePdf(zeroRated, SETTINGS))
+    expect(text).toContain('VAT / Tax')
+    expect(text).not.toContain('(15%)')
+  })
+
+  it('a mixed-rate invoice prints a bare VAT label too', async () => {
+    const mixed = makeInvoice({
+      items: [
+        {
+          id: 'm1',
+          itemCode: 'C-1',
+          description: 'Standard-rated works',
+          accountId: 'acc-sales',
+          accountName: 'Sales',
+          qty: 1,
+          rate: 1000,
+          taxRate: 15,
+          amount: 1000,
+        },
+        {
+          id: 'm2',
+          itemCode: 'C-2',
+          description: 'Zero-rated export',
+          accountId: 'acc-sales',
+          accountName: 'Sales',
+          qty: 1,
+          rate: 500,
+          taxRate: 0,
+          amount: 500,
+        },
+      ],
+      subtotal: 1500,
+      taxTotal: 150,
+      grandTotal: 1650,
+      outstandingAmount: 1650,
+    })
+    const text = decodedStreams(await buildInvoicePdf(mixed, SETTINGS))
+    expect(text).toContain('VAT / Tax')
+    expect(text).not.toContain('(15%)')
+  })
+
+  it('a single non-zero rate keeps its labelled VAT row', async () => {
+    const text = decodedStreams(await buildInvoicePdf(makeInvoice(), SETTINGS))
+    expect(text).toContain('VAT / Tax (15%)')
+  })
+
+  it('a quotation follows the same label semantics', async () => {
+    const zero = decodedStreams(
+      await buildQuotationPdf(
+        makeQuote({
+          items: [
+            {
+              id: 'qz1',
+              itemCode: 'C-1',
+              description: 'Zero-rated export',
+              accountId: 'acc-sales',
+              accountName: 'Sales',
+              qty: 1,
+              rate: 1000,
+              taxRate: 0,
+              amount: 1000,
+            },
+          ],
+          subtotal: 1000,
+          taxTotal: 0,
+          grandTotal: 1000,
+        }),
+        SETTINGS,
+      ),
+    )
+    expect(zero).toContain('VAT / Tax')
+    expect(zero).not.toContain('(15%)')
+
+    expect(decodedStreams(await buildQuotationPdf(makeQuote(), SETTINGS))).toContain(
+      'VAT / Tax (15%)',
+    )
+  })
+})
+
+describe('the printed totals carry the discount the engine booked', () => {
+  it('a discounted invoice prints a Discount row between Subtotal and VAT', async () => {
+    // 5 000 − 500 discount, 15% VAT on the discounted base: 4 500 + 675 = 5 175.
+    const discounted = makeInvoice({
+      items: [
+        {
+          id: 'd1',
+          itemCode: 'C-1',
+          description: 'Discounted works',
+          accountId: 'acc-sales',
+          accountName: 'Sales',
+          qty: 2,
+          rate: 2500,
+          taxRate: 15,
+          amount: 5000,
+        },
+      ],
+      subtotal: 5000,
+      taxTotal: 675,
+      grandTotal: 5175,
+      outstandingAmount: 5175,
+      discountTotal: 500,
+    })
+    const text = decodedStreams(await buildInvoicePdf(discounted, SETTINGS))
+    expect(text).toContain('Discount')
+    expect(text).toContain('-R 500,00')
+    expect(text).toContain('R 5 000,00')
+    expect(text).toContain('R 5 175,00')
+    // The rows tie: Subtotal − Discount + VAT = Grand Total.
+    expect(5000 - 500 + 675).toBe(5175)
+  })
+
+  it('a line discount shows in the row amounts, not only in the totals', async () => {
+    const lineDiscounted = makeInvoice({
+      items: [
+        {
+          id: 'ld1',
+          itemCode: 'C-1',
+          description: 'Line-discounted works',
+          accountId: 'acc-sales',
+          accountName: 'Sales',
+          qty: 2,
+          rate: 2500,
+          taxRate: 15,
+          amount: 5000,
+          discountRate: 10,
+        },
+      ],
+      subtotal: 4500,
+      taxTotal: 675,
+      grandTotal: 5175,
+      outstandingAmount: 5175,
+    })
+    const text = decodedStreams(await buildInvoicePdf(lineDiscounted, SETTINGS))
+    expect(text).toContain('R 4 500,00')
+    expect(text).not.toContain('R 5 000,00')
+  })
+
+  it('no Discount row is drawn when the invoice carries none', async () => {
+    const text = decodedStreams(await buildInvoicePdf(makeInvoice(), SETTINGS))
+    expect(text).not.toContain('Discount')
+  })
+
+  it('a discounted quotation prints the same Discount row', async () => {
+    const discounted = makeQuote({
+      subtotal: 4500,
+      taxTotal: 675,
+      grandTotal: 5175,
+      discountTotal: 500,
+    })
+    const text = decodedStreams(await buildQuotationPdf(discounted, SETTINGS))
+    expect(text).toContain('Discount')
+    expect(text).toContain('-R 500,00')
+    expect(text).toContain('R 5 175,00')
+  })
+})
+
+describe('the document title follows the payload direction', () => {
+  it('a purchase bill prints PURCHASE BILL in the title and the metadata', async () => {
+    const bill = makeInvoice({ type: 'Purchase', invoiceNumber: 'BILL-2026-0031' })
+    const pdf = await buildInvoicePdf(bill, SETTINGS)
+    const text = decodedStreams(pdf)
+    expect(text).toContain('PURCHASE BILL')
+    expect(text).not.toContain('TAX INVOICE')
+
+    const loaded = await PDFDocument.load(pdf)
+    expect(loaded.getTitle()).toBe('Purchase Bill BILL-2026-0031')
+  })
+
+  it('a sale still prints TAX INVOICE and a credit note CREDIT NOTE', async () => {
+    const sale = decodedStreams(await buildInvoicePdf(makeInvoice(), SETTINGS))
+    expect(sale).toContain('TAX INVOICE')
+
+    const credit = decodedStreams(
+      await buildInvoicePdf(makeInvoice({ creditNote: true, invoiceNumber: 'CN-2026-0001' }), SETTINGS),
+    )
+    expect(credit).toContain('CREDIT NOTE')
+  })
+})
+
+describe('a blank note renders the shared default in the PDF', () => {
+  it('prints the one default note, not a builder-specific fallback', async () => {
+    const blankNotes = makeInvoice({ notes: undefined })
+    const text = decodedStreams(await buildInvoicePdf(blankNotes, SETTINGS))
+    expect(text).toContain(DEFAULT_INVOICE_NOTES)
+    expect(text).not.toContain('Net 30 days upon invoice receipt')
+    expect(text).not.toContain('FNB')
+  })
+})
+
+describe('the quotation PDF mirrors the invoice pipeline', () => {
+  it('carries QUOTATION, the quote number, the valid-until date and the status', async () => {
+    for (const template of ['classic', 'modern'] as const) {
+      const pdf = await buildQuotationPdf(makeQuote(), { ...SETTINGS, printTemplate: template })
+      const text = decodedStreams(pdf)
+      expect(text).toContain('QUOTATION')
+      expect(text).toContain('QTN-2026-007')
+      expect(text).toContain('Valid Until: 2026-10-31')
+      expect(text).toContain('Status: SENT')
+      expect(text).toContain('Rand Water Authority')
+      expect(text).toContain('R 5 750,00')
+      expect(text).toContain('Billed To: Rand Water Authority')
+      expect(text).toContain('Generated via Zano Books')
+    }
+  })
+
+  it('has no due-date, round-off or amount-due rows to invent', async () => {
+    const text = decodedStreams(await buildQuotationPdf(makeQuote(), SETTINGS))
+    expect(text).not.toContain('Due:')
+    expect(text).not.toContain('Round-off')
+    expect(text).not.toContain('Amount Due')
+  })
+
+  it('respects the modern template accent like the invoice PDF does', async () => {
+    const modernRed = decodedStreams(
+      await buildQuotationPdf(makeQuote(), {
+        ...SETTINGS,
+        printTemplate: 'modern',
+        invoiceAccent: '#C22626',
+      }),
+    )
+    // The band, the tinted table header and the emphasised grand total.
+    expect(countOccurrences(modernRed, accentFillToken('#C22626'))).toBeGreaterThanOrEqual(2)
+    expect(modernRed).toContain('1 1 1 rg')
+  })
+
+  it('documents itself as Quotation in the metadata', async () => {
+    const loaded = await PDFDocument.load(await buildQuotationPdf(makeQuote(), SETTINGS))
+    expect(loaded.getTitle()).toBe('Quotation QTN-2026-007')
+    expect(loaded.getAuthor()).toBe('Zano Consulting (Pty) Ltd')
+  })
+})
+
+describe('migration stamps and repairs the letterhead extras', () => {
+  const migrate = (settings: Record<string, unknown>) =>
+    migrateAndValidateBooks({
+      version: 1,
+      revision: 0,
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      settings: { ...SETTINGS, ...settings },
+      accounts: [],
+      parties: [],
+      invoices: [],
+      journalEntries: [],
+    })
+
+  it('keeps a valid logo data URL and a trimmed registration number', () => {
+    const png = makeTinyPngDataUrl()
+    const migrated = migrate({ logoDataUrl: png, registrationNumber: '  2016/123456/07  ' })
+    expect(migrated.settings.logoDataUrl).toBe(png)
+    expect(migrated.settings.registrationNumber).toBe('2016/123456/07')
+  })
+
+  it('strips a logo with a wrong prefix, a non-string logo and one over the cap', () => {
+    for (const bad of [
+      'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+      'data:image/jpeg+xml;base64,whatever',
+      'data:text/html;base64,PGh0bWw+',
+      'not a data url at all',
+      42,
+      null,
+    ]) {
+      const migrated = migrate({ logoDataUrl: bad })
+      expect(
+        migrated.settings.logoDataUrl,
+        `logo ${String(bad).slice(0, 40)} must be stripped`,
+      ).toBeUndefined()
+    }
+
+    const oversize = migrate({ logoDataUrl: `data:image/png;base64,${'A'.repeat(700_001)}` })
+    expect(oversize.settings.logoDataUrl).toBeUndefined()
+  })
+
+  it('caps the registration number and drops a blank one', () => {
+    const capped = migrate({ registrationNumber: 'x'.repeat(500) })
+    expect(capped.settings.registrationNumber).toHaveLength(120)
+
+    const blank = migrate({ registrationNumber: '   ' })
+    expect(blank.settings.registrationNumber).toBeUndefined()
+    expect(JSON.parse(JSON.stringify(blank.settings)).registrationNumber).toBeUndefined()
+  })
+
+  it('round-trips a populated ledger with the extras unchanged', () => {
+    const ledger = migrateAndValidateBooks({
+      version: 1,
+      revision: 2,
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      settings: {
+        ...SETTINGS,
+        logoDataUrl: makeTinyPngDataUrl(),
+        registrationNumber: '2016/123456/07',
+      },
+      accounts: [],
+      parties: [],
+      invoices: [
+        makeInvoice({
+          partyAddress: '18 River Street, Sandton',
+          partyTaxId: 'VAT 4990314821',
+        }),
+      ],
+      journalEntries: [],
+    })
+    expect(ledger.settings.registrationNumber).toBe('2016/123456/07')
+    expect(isValidLogoDataUrl(ledger.settings.logoDataUrl)).toBe(true)
+    // The envelope shape is untouched otherwise.
+    expect(ledger.invoices[0].partyAddress).toBe('18 River Street, Sandton')
+    expect(ledger.invoices[0].partyTaxId).toBe('VAT 4990314821')
+    expect(ledger.quotes).toEqual([])
+    expect(ledger.version).toBe(1)
+    expect(ledger.revision).toBe(2)
+  })
+})
+
+describe('the letterhead logo and registration line reach the drawn PDF', () => {
+  it('draws the logo as an image operator on both templates', async () => {
+    for (const template of ['classic', 'modern'] as const) {
+      const pdf = await buildInvoicePdf(makeInvoice(), {
+        ...SETTINGS,
+        printTemplate: template,
+        logoDataUrl: makeTinyPngDataUrl(),
+      })
+      expect(Buffer.from(pdf).toString('latin1')).toMatch(/Subtype\s*\/Image/)
+      const pageStream = pageContentStreams(pdf)
+      expect(pageStream.some((stream) => /\bDo\b/.test(stream)), template).toBe(true)
+    }
+  })
+
+  it('a corrupt logo payload skips cleanly instead of failing the build', async () => {
+    const corrupt = await buildInvoicePdf(makeInvoice(), {
+      ...SETTINGS,
+      logoDataUrl: 'data:image/png;base64,notARealPngPayload',
+    })
+    expect(Buffer.from(corrupt).toString('latin1')).not.toMatch(/Subtype\s*\/Image/)
+  })
+
+  it('without a logo or registration the classic layout stays as it always was', async () => {
+    const plain = await buildInvoicePdf(makeInvoice(), SETTINGS)
+    const explicitBlank = await buildInvoicePdf(makeInvoice(), {
+      ...SETTINGS,
+      registrationNumber: '',
+    })
+    const text = decodedStreams(plain)
+    expect(decodedStreams(explicitBlank)).toBe(text)
+    // Exactly one 'Reg: ' — the VAT Reg draw — so no registration line was
+    // added, and no party lines or image were drawn either.
+    expect(countOccurrences(text, 'Reg: ')).toBe(1)
+    expect(text).not.toContain('VAT / Tax ID:')
+    // No image XObject and no image operator when nothing was set.
+    expect(Buffer.from(plain).toString('latin1')).not.toMatch(/Subtype\s*\/Image/)
+    expect(pageContentStreams(plain).some((stream) => /\bDo\b/.test(stream))).toBe(false)
+  })
+
+  it('prints the Reg line when a registration number is set', async () => {
+    const text = decodedStreams(
+      await buildInvoicePdf(makeInvoice(), {
+        ...SETTINGS,
+        registrationNumber: '2016/123456/07',
+      }),
+    )
+    // The VAT Reg draw plus the new registration line.
+    expect(countOccurrences(text, 'Reg: ')).toBe(2)
+    expect(text).toContain('Reg: 2016/123456/07')
+  })
+
+  it('prints the party address and tax-ID lines when the payload carries them', async () => {
+    const withParty = decodedStreams(
+      await buildInvoicePdf(
+        makeInvoice({
+          partyAddress: '18 River Street, Sandton',
+          partyTaxId: 'VAT 4990314821',
+        }),
+        SETTINGS,
+      ),
+    )
+    expect(withParty).toContain('18 River Street, Sandton')
+    expect(withParty).toContain('VAT / Tax ID: VAT 4990314821')
+
+    // A party without them prints no stray labels.
+    const withoutParty = decodedStreams(await buildInvoicePdf(makeInvoice(), SETTINGS))
+    expect(withoutParty).not.toContain('VAT / Tax ID:')
+  })
+
+  it('the quotation PDF inherits the logo, Reg line and party lines', async () => {
+    const pdf = await buildQuotationPdf(
+      makeQuote({
+        partyAddress: '18 River Street, Sandton',
+        partyTaxId: 'VAT 4990314821',
+      }),
+      { ...SETTINGS, registrationNumber: '2016/123456/07', logoDataUrl: makeTinyPngDataUrl() },
+    )
+    expect(Buffer.from(pdf).toString('latin1')).toMatch(/Subtype\s*\/Image/)
+    const text = decodedStreams(pdf)
+    expect(text).toContain('Reg: 2016/123456/07')
+    expect(text).toContain('18 River Street, Sandton')
+    expect(text).toContain('VAT / Tax ID: VAT 4990314821')
+  })
+})
+
+/**
+ * A minimal valid 4x2 RGB PNG, assembled by hand (zlib IDAT + correct CRCs),
+ * so the embed tests exercise a real image without a binary fixture.
+ */
+function makeTinyPngDataUrl(): string {
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const typeBuf = Buffer.from(type, 'ascii')
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])))
+    return Buffer.concat([len, typeBuf, data, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(4, 0)
+  ihdr.writeUInt32BE(2, 4)
+  ihdr[8] = 8 // bit depth
+  ihdr[9] = 2 // colour type: truecolour RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(4 * 3, 0x7f)])
+  const idat = deflateSync(Buffer.concat([row, row]))
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', idat),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+  return `data:image/png;base64,${png.toString('base64')}`
+}
+
+const CRC_TABLE: number[] = []
+for (let n = 0; n < 256; n++) {
+  let c = n
+  for (let k = 0; k < 8; k++) {
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+  }
+  CRC_TABLE[n] = c >>> 0
+}
+
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff
+  for (const byte of buf) {
+    crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8)
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+/** The inflated content stream of each page that draws the document title. */
+function pageContentStreams(pdf: Uint8Array): string[] {
+  const buf = Buffer.from(pdf)
+  const raw = buf.toString('latin1')
+  const streams: string[] = []
+  const streamRe = /stream\r?\n/g
+  let match: RegExpExecArray | null
+  while ((match = streamRe.exec(raw)) !== null) {
+    const start = match.index + match[0].length
+    const end = raw.indexOf('endstream', start)
+    if (end === -1) continue
+    let content: string
+    try {
+      content = inflateSync(buf.subarray(start, end)).toString('latin1')
+    } catch {
+      continue
+    }
+    // pdf-lib emits text as `<hex> Tj` tokens (see decodedStreams) — decode
+    // them in place before matching the title, leaving operators like `Do`
+    // untouched so the logo assertion can ride the same streams.
+    const decoded = content.replace(
+      /<([0-9a-fA-F]+)>\s*Tj/g,
+      (_m, hex: string) => ` ${Buffer.from(hex, 'hex').toString('latin1')} `,
+    )
+    if (decoded.includes('TAX INVOICE') || decoded.includes('QUOTATION')) {
+      streams.push(decoded)
+    }
+  }
+  return streams
+}

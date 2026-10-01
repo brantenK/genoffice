@@ -54,6 +54,7 @@ function bridgeTo(session: BooksE2ESession): BooksApi {
     onDataChanged: () => () => undefined,
     exportToSheets: async () => ({ ok: true }),
     openInPdf: async () => ({ ok: true }),
+    openQuotePdf: async () => ({ ok: true }),
     openInCrm: async () => false,
     openInTenders: async () => false,
     importBankStatementCsv: unsupported,

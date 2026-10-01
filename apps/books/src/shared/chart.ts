@@ -15,6 +15,7 @@ export const DEFAULT_BOOK_SETTINGS: CompanySettings = {
   phone: '',
   defaultTaxRate: 15,
   taxInclusive: true,
+  registrationNumber: '',
 }
 
 /**
@@ -45,6 +46,26 @@ export const INVOICE_ACCENT_SWATCHES: { label: string; value: string }[] = [
 
 /** Hard cap for the letterhead footer text, enforced by migration and UI. */
 export const LETTERHEAD_FOOTER_MAX = 200
+
+/** Hard cap for the company registration number, enforced by migration and UI. */
+export const REGISTRATION_NUMBER_MAX = 120
+
+/**
+ * Hard cap for the letterhead logo's data-URL text: a ~512 KB image encodes to
+ * just under 700k base64 characters, so the cap bounds what a settings payload
+ * — and the PDF embedder — may carry.
+ */
+export const MAX_LOGO_DATA_URL_CHARS = 700_000
+
+/** True for a PNG/JPEG data URL inside the logo cap (the only accepted shape). */
+export function isValidLogoDataUrl(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_LOGO_DATA_URL_CHARS &&
+    /^data:image\/(png|jpeg);base64,/.test(value)
+  )
+}
 
 /** True for a literal #RRGGBB accent colour (the only accepted shape). */
 export function isValidInvoiceAccent(value: unknown): value is string {

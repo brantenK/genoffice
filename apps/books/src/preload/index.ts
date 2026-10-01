@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { BOOKS_CHANNELS, type BooksApi, type SaveIntent } from '../shared/ipc'
-import type { BooksData, Invoice } from '../shared/types'
+import type { BooksData, Invoice, Quotation } from '../shared/types'
 
 const booksApi: BooksApi = {
   loadData: () => ipcRenderer.invoke(BOOKS_CHANNELS.loadData),
@@ -14,6 +14,8 @@ const booksApi: BooksApi = {
     ipcRenderer.invoke(BOOKS_CHANNELS.exportToSheets, reportName, csvContent),
   openInPdf: (invoice: Invoice, companyName: string) =>
     ipcRenderer.invoke(BOOKS_CHANNELS.openInPdf, invoice, companyName),
+  openQuotePdf: (quotation: Quotation, companyName: string) =>
+    ipcRenderer.invoke(BOOKS_CHANNELS.openQuotePdf, quotation, companyName),
   openInCrm: () => ipcRenderer.invoke(BOOKS_CHANNELS.openInCrm),
   openInTenders: () => ipcRenderer.invoke(BOOKS_CHANNELS.openInTenders),
   importBankStatementCsv: (csvContent: string) =>

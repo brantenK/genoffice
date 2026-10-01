@@ -6,7 +6,6 @@ import { DEFAULT_INVOICE_ACCENT, isValidInvoiceAccent } from '../../../shared/ch
 import {
   DEFAULT_INVOICE_NOTES,
   bookedInvoiceDiscount,
-  invoiceDocumentTitle,
   vatTaxLabel,
 } from '../../../shared/print'
 import { isBaseCurrency } from './currencies'
@@ -20,13 +19,17 @@ function withAlpha(hex: string, alpha: number): string {
 /** The footer text the PDF builder draws when no letterhead footer is set. */
 const PDF_DEFAULT_FOOTER = 'Generated via Zano Books — Sovereign Financial Management'
 
-export function InvoicePrintModal() {
-  const { printInvoice, setPrintInvoice, data } = useBooksStore()
+/**
+ * The quotation print preview — the invoice preview's mirror: same templates,
+ * same letterhead, same totals discipline (booked discount, shared VAT label),
+ * with the quotation's own meta (quote number, valid-until date) and no
+ * round-off, due date or balance due.
+ */
+export function QuotationPrintModal() {
+  const { printQuote, setPrintQuote, data } = useBooksStore()
   const { settings } = data
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
-  // The preview agrees with the PDF builder: same template, same accent, same
-  // letterhead footer treatment.
   const template = settings.printTemplate === 'modern' ? 'modern' : 'classic'
   const accent = isValidInvoiceAccent(settings.invoiceAccent)
     ? settings.invoiceAccent
@@ -34,45 +37,39 @@ export function InvoicePrintModal() {
   const letterhead = (settings.letterheadFooter || '').trim()
 
   useEffect(() => {
-    if (!printInvoice) return
+    if (!printQuote) return
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPrintInvoice(null)
+      if (event.key === 'Escape') setPrintQuote(null)
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [printInvoice, setPrintInvoice])
+  }, [printQuote, setPrintQuote])
 
   useEffect(() => {
-    if (printInvoice) closeButtonRef.current?.focus()
-  }, [printInvoice])
+    if (printQuote) closeButtonRef.current?.focus()
+  }, [printQuote])
 
-  if (!printInvoice) return null
+  if (!printQuote) return null
 
-  // The document prints in the INVOICE'S currency (its totals are its own
-  // figures): a foreign-currency invoice is labelled with its ISO code, a
-  // base-currency one keeps the company's symbol.
-  const invoiceCurrencyLabel = isBaseCurrency(printInvoice, settings.currency)
+  // The preview agrees with the quotation PDF: the document prints in the
+  // quotation's currency — its ISO code for a foreign document, the company
+  // symbol for a base-currency one.
+  const quoteCurrencyLabel = isBaseCurrency(printQuote, settings.currency)
     ? settings.currencySymbol
-    : printInvoice.currency!.trim().toUpperCase()
+    : printQuote.currency!.trim().toUpperCase()
 
   const formatMoney = (val: number) => {
-    return `${invoiceCurrencyLabel} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return `${quoteCurrencyLabel} ${val.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
   const handleOpenPdf = async () => {
-    if (window.booksApi?.openInPdf) {
-      await window.booksApi.openInPdf(printInvoice, settings.companyName)
+    if (window.booksApi?.openQuotePdf) {
+      await window.booksApi.openQuotePdf(printQuote, settings.companyName)
     }
   }
 
-  // The VAT label and the discount row agree with the PDF builder: the rate is
-  // shown only when every line carries the same non-zero rate and the document
-  // charges VAT, and the discount is the engine's booked figure.
-  const vatLabel = vatTaxLabel(printInvoice.items, printInvoice.taxTotal, 'VAT')
-  const bookedDiscount = bookedInvoiceDiscount(
-    printInvoice.subtotal,
-    printInvoice.discountTotal ?? 0,
-  )
+  const vatLabel = vatTaxLabel(printQuote.items, printQuote.taxTotal, 'VAT')
+  const bookedDiscount = bookedInvoiceDiscount(printQuote.subtotal, printQuote.discountTotal ?? 0)
 
   return (
     <div className="print-root fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -80,7 +77,7 @@ export function InvoicePrintModal() {
         {/* Top Control Bar */}
         <div className="print-chrome px-6 py-4 bg-[#F8F8F8] border-b border-[#EDEDED] flex items-center justify-between">
           <span className="text-xs font-bold text-[#1E293B] uppercase tracking-wider">
-            Document Print Preview · {printInvoice.invoiceNumber}
+            Document Print Preview · {printQuote.quoteNumber}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -98,7 +95,7 @@ export function InvoicePrintModal() {
               Print
             </button>
             <button
-              onClick={() => setPrintInvoice(null)}
+              onClick={() => setPrintQuote(null)}
               ref={closeButtonRef}
               aria-label="Close print preview"
               title="Close (Esc)"
@@ -139,13 +136,13 @@ export function InvoicePrintModal() {
                   />
                 )}
                 <span className="text-2xl font-black text-white uppercase tracking-wider">
-                  {invoiceDocumentTitle(printInvoice)}
+                  QUOTATION
                 </span>
                 <p className="font-mono text-sm font-bold text-white mt-1">
-                  {printInvoice.invoiceNumber}
+                  {printQuote.quoteNumber}
                 </p>
                 <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 bg-white/15 text-white">
-                  {printInvoice.status.toUpperCase()}
+                  {printQuote.status.toUpperCase()}
                 </span>
               </div>
             </div>
@@ -173,19 +170,13 @@ export function InvoicePrintModal() {
                   />
                 )}
                 <span className="text-2xl font-black text-[#1E293B] uppercase tracking-wider">
-                  {invoiceDocumentTitle(printInvoice)}
+                  QUOTATION
                 </span>
                 <p className="font-mono text-sm font-bold text-[#1E293B] mt-1">
-                  {printInvoice.invoiceNumber}
+                  {printQuote.quoteNumber}
                 </p>
-                <span
-                  className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 ${
-                    printInvoice.status === 'Paid'
-                      ? 'bg-[#F3FCF5] text-[#30A66D]'
-                      : 'bg-[#FDFAED] text-[#B45309]'
-                  }`}
-                >
-                  {printInvoice.status.toUpperCase()}
+                <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold mt-2 bg-[#FDFAED] text-[#B45309]">
+                  {printQuote.status.toUpperCase()}
                 </span>
               </div>
             </div>
@@ -197,27 +188,22 @@ export function InvoicePrintModal() {
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B6B6B]">
                 Billed To:
               </span>
-              <p className="text-sm font-bold text-[#1E293B] mt-1">{printInvoice.partyName}</p>
-              {printInvoice.partyAddress && (
-                <p className="text-xs text-[#6B6B6B] mt-1">{printInvoice.partyAddress}</p>
+              <p className="text-sm font-bold text-[#1E293B] mt-1">{printQuote.partyName}</p>
+              {printQuote.partyAddress && (
+                <p className="text-xs text-[#6B6B6B] mt-1">{printQuote.partyAddress}</p>
               )}
-              {printInvoice.partyTaxId && (
-                <p className="text-xs text-[#6B6B6B]">VAT / Tax ID: {printInvoice.partyTaxId}</p>
-              )}
-              {printInvoice.tenderReference && (
-                <p className="text-xs font-medium mt-1" style={{ color: accent }}>
-                  Contract / Tender: {printInvoice.tenderReference}
-                </p>
+              {printQuote.partyTaxId && (
+                <p className="text-xs text-[#6B6B6B]">VAT / Tax ID: {printQuote.partyTaxId}</p>
               )}
             </div>
             <div className="text-right space-y-1">
               <div>
-                <span className="text-[#6B6B6B]">Invoice Date: </span>
-                <span className="font-semibold text-[#1E293B]">{printInvoice.date}</span>
+                <span className="text-[#6B6B6B]">Quote Date: </span>
+                <span className="font-semibold text-[#1E293B]">{printQuote.date}</span>
               </div>
               <div>
-                <span className="text-[#6B6B6B]">Payment Due: </span>
-                <span className="font-semibold text-[#1E293B]">{printInvoice.dueDate}</span>
+                <span className="text-[#6B6B6B]">Valid Until: </span>
+                <span className="font-semibold text-[#1E293B]">{printQuote.validUntil}</span>
               </div>
             </div>
           </div>
@@ -237,19 +223,15 @@ export function InvoicePrintModal() {
                   <th className="px-4 py-2.5 w-12 text-center">#</th>
                   <th className="px-4 py-2.5">Description</th>
                   <th className="px-4 py-2.5 text-right w-16">Qty</th>
-                  <th className="px-4 py-2.5 text-right w-28">Rate</th>
-                  <th className="px-4 py-2.5 text-right w-20">VAT</th>
                   <th className="px-4 py-2.5 text-right w-28">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#EDEDED]">
-                {printInvoice.items.map((it, idx) => (
+                {printQuote.items.map((it, idx) => (
                   <tr key={it.id}>
                     <td className="px-4 py-2.5 text-center text-[#6B6B6B]">{idx + 1}</td>
                     <td className="px-4 py-2.5 font-medium text-[#1E293B]">{it.description}</td>
                     <td className="px-4 py-2.5 text-right font-mono">{it.qty}</td>
-                    <td className="px-4 py-2.5 text-right font-mono">{formatMoney(it.rate)}</td>
-                    <td className="px-4 py-2.5 text-right">{it.taxRate}%</td>
                     <td className="px-4 py-2.5 text-right font-mono font-semibold text-[#1E293B]">
                       {formatMoney(effectiveLineAmount(it))}
                     </td>
@@ -264,9 +246,7 @@ export function InvoicePrintModal() {
             <div className="w-64 space-y-2 border-t border-[#EDEDED] pt-3">
               <div className="flex justify-between text-[#6B6B6B]">
                 <span>Subtotal (excl):</span>
-                <span className="font-mono text-[#1E293B]">
-                  {formatMoney(printInvoice.subtotal)}
-                </span>
+                <span className="font-mono text-[#1E293B]">{formatMoney(printQuote.subtotal)}</span>
               </div>
               {bookedDiscount > 0 && (
                 <div className="flex justify-between text-[#6B6B6B]">
@@ -276,9 +256,7 @@ export function InvoicePrintModal() {
               )}
               <div className="flex justify-between text-[#6B6B6B]">
                 <span>{vatLabel}:</span>
-                <span className="font-mono text-[#1E293B]">
-                  {formatMoney(printInvoice.taxTotal)}
-                </span>
+                <span className="font-mono text-[#1E293B]">{formatMoney(printQuote.taxTotal)}</span>
               </div>
               <div
                 className="flex justify-between font-bold text-sm pt-2 border-t border-[#EDEDED]"
@@ -292,30 +270,19 @@ export function InvoicePrintModal() {
                     template === 'modern' ? undefined : 'text-[#1E293B]'
                   }`}
                 >
-                  {formatMoney(printInvoice.grandTotal)}
+                  {formatMoney(printQuote.grandTotal)}
                 </span>
-              </div>
-              <div
-                className="flex justify-between font-bold text-xs pt-1"
-                style={{ color: accent }}
-              >
-                <span>Balance Due:</span>
-                <span className="font-mono">{formatMoney(printInvoice.outstandingAmount)}</span>
               </div>
             </div>
           </div>
 
-          {/* Notes & Banking Details */}
+          {/* Notes */}
           <div className="pt-6 border-t border-[#EDEDED] text-[11px] text-[#6B6B6B] space-y-1">
-            <span className="font-bold uppercase tracking-wider text-[#525252]">
-              Payment Instructions:
-            </span>
-            <p>{printInvoice.notes || DEFAULT_INVOICE_NOTES}</p>
+            <span className="font-bold uppercase tracking-wider text-[#525252]">Notes:</span>
+            <p>{printQuote.notes || DEFAULT_INVOICE_NOTES}</p>
           </div>
 
-          {/* Letterhead footer — classic appends it to the PDF's generated-by
-              line (shown only when set, as the PDF draws it), modern replaces
-              the generated-by text with it. */}
+          {/* Letterhead footer — same treatment as the invoice preview. */}
           {template === 'modern' || letterhead ? (
             <div className="pt-4 border-t border-[#EDEDED] text-[10px] text-[#6B6B6B]">
               {template === 'modern'

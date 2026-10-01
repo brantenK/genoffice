@@ -1,12 +1,34 @@
 /**
- * The A4 tax-invoice / credit-note PDF builder (pdf-lib). Kept in its own
- * module so only the main process — the only place a PDF is ever built —
- * pays for the dependency, and the renderer bundle does not.
+ * The A4 print PDF builders (pdf-lib) — tax invoice / credit note and
+ * quotation. Kept in their own module so only the main process — the only
+ * place a PDF is ever built — pays for the dependency, and the renderer bundle
+ * does not. Both builders share the letterhead pieces (template palette, logo
+ * embed, registration line, party lines, footer furniture) through the
+ * module-level helpers below.
  */
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from 'pdf-lib'
-import { round2 } from './accounting'
-import { DEFAULT_INVOICE_ACCENT, isValidInvoiceAccent } from './chart'
-import type { CompanySettings, Invoice, PrintTemplate } from './types'
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+  type RGB,
+} from 'pdf-lib'
+import { effectiveLineAmount, round2 } from './accounting'
+import {
+  DEFAULT_INVOICE_ACCENT,
+  isValidInvoiceAccent,
+  isValidLogoDataUrl,
+} from './chart'
+import {
+  DEFAULT_INVOICE_NOTES,
+  bookedInvoiceDiscount,
+  invoiceDocumentMetaTitle,
+  invoiceDocumentTitle,
+  vatTaxLabel,
+} from './print'
+import type { CompanySettings, Invoice, PrintTemplate, Quotation } from './types'
 const PAGE_W = 595.28 // A4 portrait, points
 const PAGE_H = 841.89
 const MARGIN = 48
@@ -25,6 +47,16 @@ const MODERN_BAND_H = 64
 const MODERN_TINT_OPACITY = 0.14
 /** The footer line every template draws when no letterhead footer is set. */
 const DEFAULT_FOOTER_TEXT = 'Generated via Zano Books — Sovereign Financial Management'
+/**
+ * The letterhead logo is drawn about 90pt wide with the aspect preserved; the
+ * classic template caps its height at the same bound, and inside the modern
+ * band it must fit the band's height with room to spare.
+ */
+const LOGO_DRAW_WIDTH = 90
+const CLASSIC_LOGO_MAX_HEIGHT = 90
+const MODERN_LOGO_MAX_HEIGHT = MODERN_BAND_H - 16
+/** Gap between the logo's left edge and the meta column it pushes aside. */
+const LOGO_META_GAP = 12
 
 /** A #RRGGBB literal as pdf-lib RGB. */
 function hexToRgb(hex: string): RGB {
@@ -109,6 +141,195 @@ interface PdfColumn {
   width: number
 }
 
+/** The text-drawing closure both builders define over their own page cursor. */
+type DrawText = (
+  font: PDFFont,
+  size: number,
+  text: string,
+  x: number,
+  color: RGB,
+  align?: 'left' | 'right',
+  rightEdge?: number,
+) => void
+
+/** The template, accent and letterhead footer a print document draws with. */
+interface PrintPalette {
+  template: PrintTemplate
+  accent: RGB
+  /** True when the user picked a colour other than the built-in teal. */
+  accentChanged: boolean
+  letterhead: string
+}
+
+/**
+ * Resolves the palette both builders share: classic keeps its historical
+ * palette byte-for-byte (the built-in accent constant stays in play until the
+ * user picks a different colour, and the letterhead footer only extends the
+ * existing footer line), modern draws the settings accent everywhere.
+ */
+function resolvePrintPalette(settings: CompanySettings): PrintPalette {
+  const template: PrintTemplate = settings.printTemplate === 'modern' ? 'modern' : 'classic'
+  const accentChanged =
+    isValidInvoiceAccent(settings.invoiceAccent) &&
+    settings.invoiceAccent.toUpperCase() !== DEFAULT_INVOICE_ACCENT.toUpperCase()
+  const accent =
+    template === 'modern' || accentChanged
+      ? hexToRgb(
+          isValidInvoiceAccent(settings.invoiceAccent)
+            ? settings.invoiceAccent
+            : DEFAULT_INVOICE_ACCENT,
+        )
+      : COLOR_ACCENT
+  const letterhead = (settings.letterheadFooter || '').trim()
+  return { template, accent, accentChanged, letterhead }
+}
+
+/** An embedded letterhead logo and its natural pixel size. */
+interface LetterheadLogo {
+  image: PDFImage
+  width: number
+  height: number
+}
+
+/**
+ * Embeds the company logo when the settings carry a valid PNG/JPEG data URL
+ * (the migration guarantees the shape; a corrupt payload is skipped cleanly —
+ * pdf-lib does the decoding, so nothing here parses image bytes).
+ */
+async function embedLetterheadLogo(
+  pdfDoc: PDFDocument,
+  settings: CompanySettings,
+): Promise<LetterheadLogo | null> {
+  const dataUrl = settings.logoDataUrl
+  if (!isValidLogoDataUrl(dataUrl)) return null
+  try {
+    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+    const image = dataUrl.startsWith('data:image/png;base64,')
+      ? await pdfDoc.embedPng(base64)
+      : await pdfDoc.embedJpg(base64)
+    return { image, width: image.width, height: image.height }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The drawn size of the embedded logo: `LOGO_DRAW_WIDTH` wide with the aspect
+ * preserved, never upscaled and capped at `maxHeight`. A degenerate image is
+ * not drawn at all.
+ */
+function logoDrawSize(
+  logo: LetterheadLogo,
+  maxHeight: number,
+): { width: number; height: number } | null {
+  const scale = Math.min(LOGO_DRAW_WIDTH / logo.width, maxHeight / logo.height, 1)
+  if (!Number.isFinite(scale) || scale <= 0) return null
+  return { width: Math.max(1, logo.width * scale), height: Math.max(1, logo.height * scale) }
+}
+
+/**
+ * Draws the issuer registration line under the VAT Reg line — one
+ * implementation for every print document, blank settings draw nothing.
+ */
+function drawRegistrationLine(
+  draw: DrawText,
+  down: (gap: number) => void,
+  regular: PDFFont,
+  settings: CompanySettings,
+): void {
+  const registration = (settings.registrationNumber || '').trim()
+  if (!registration) return
+  draw(regular, 9, `Reg: ${registration}`, MARGIN, COLOR_GRAY)
+  down(15)
+}
+
+/**
+ * Draws the Billed To block both builders share: the party name, then the
+ * party lines the document payload carries (its stamped address and tax id).
+ * A party without them prints nothing beyond the name — no stray labels.
+ */
+function drawPartyLines(
+  draw: DrawText,
+  down: (gap: number) => void,
+  bold: PDFFont,
+  regular: PDFFont,
+  rightEdge: number,
+  party: Pick<Invoice, 'partyName' | 'partyAddress' | 'partyTaxId'>,
+): void {
+  draw(bold, 9, `Billed To: ${party.partyName || '-'}`, rightEdge, COLOR_DARK, 'right', rightEdge)
+  down(14)
+  const address = (party.partyAddress || '').trim()
+  if (address) {
+    draw(regular, 9, address, rightEdge, COLOR_GRAY, 'right', rightEdge)
+    down(14)
+  }
+  const taxId = (party.partyTaxId || '').trim()
+  if (taxId) {
+    draw(regular, 9, `VAT / Tax ID: ${taxId}`, rightEdge, COLOR_GRAY, 'right', rightEdge)
+    down(14)
+  }
+}
+
+/** The FX note a foreign-currency document draws under its totals. */
+function exchangeRateNote(
+  documentTotal: number,
+  moneySymbol: string,
+  exchangeRate: number | undefined,
+  baseCurrencyCode: string,
+  symbol: string,
+): string {
+  const rate = Number(exchangeRate)
+  const fxRate = Number.isFinite(rate) && rate > 0 ? rate : 1
+  return `Exchange rate: 1 ${moneySymbol} = ${fxRate.toFixed(2)} ${baseCurrencyCode} · Base grand total: ${formatMoney(round2((Number(documentTotal) || 0) * fxRate), symbol)}`
+}
+
+/**
+ * The footer rule, footer text and 'Page N of M' marker drawn on every page of
+ * a document. The letterhead footer rides the existing footer line: classic
+ * appends it after the generated-by text, modern replaces that text with it.
+ * The line is clipped so it can never run into the right-aligned marker.
+ */
+function drawPageFooters(
+  pdfDoc: PDFDocument,
+  regular: PDFFont,
+  template: PrintTemplate,
+  letterhead: string,
+): void {
+  const rightX = PAGE_W - MARGIN
+  const footerText =
+    template === 'modern'
+      ? letterhead || DEFAULT_FOOTER_TEXT
+      : letterhead
+        ? `${DEFAULT_FOOTER_TEXT}  ·  ${letterhead}`
+        : DEFAULT_FOOTER_TEXT
+  const pageCount = pdfDoc.getPageCount()
+  for (let index = 0; index < pageCount; index++) {
+    const footerPage = pdfDoc.getPage(index)
+    footerPage.drawLine({
+      start: { x: MARGIN, y: 56 },
+      end: { x: rightX, y: 56 },
+      thickness: 0.75,
+      color: COLOR_LINE,
+    })
+    const marker = `Page ${index + 1} of ${pageCount}`
+    const markerWidth = regular.widthOfTextAtSize(marker, 8)
+    footerPage.drawText(clipText(footerText, regular, 8, rightX - MARGIN - markerWidth - 12), {
+      x: MARGIN,
+      y: 40,
+      size: 8,
+      font: regular,
+      color: COLOR_GRAY,
+    })
+    footerPage.drawText(marker, {
+      x: rightX - markerWidth,
+      y: 40,
+      size: 8,
+      font: regular,
+      color: COLOR_GRAY,
+    })
+  }
+}
+
 /**
  * Builds a real A4 PDF tax invoice / credit note with pdf-lib. Multi-page
  * documents repeat the line-items header and carry the footer and a
@@ -140,33 +361,16 @@ export async function buildInvoicePdf(
   const rightX = PAGE_W - MARGIN
   let y = PAGE_H - MARGIN
 
-  // --- Template & accent resolution ---
-  // classic keeps its historical palette byte-for-byte: the built-in accent
-  // constant stays in play until the user picks a different colour, and the
-  // letterhead footer only extends the existing footer line. modern draws the
-  // settings accent everywhere (the default `#0F766E` when none is stored).
-  const template: PrintTemplate = settings.printTemplate === 'modern' ? 'modern' : 'classic'
-  const accentChanged =
-    isValidInvoiceAccent(settings.invoiceAccent) &&
-    settings.invoiceAccent.toUpperCase() !== DEFAULT_INVOICE_ACCENT.toUpperCase()
-  const accent =
-    template === 'modern' || accentChanged
-      ? hexToRgb(
-          isValidInvoiceAccent(settings.invoiceAccent)
-            ? settings.invoiceAccent
-            : DEFAULT_INVOICE_ACCENT,
-        )
-      : COLOR_ACCENT
-  const letterhead = (settings.letterheadFooter || '').trim()
+  const { template, accent, accentChanged, letterhead } = resolvePrintPalette(settings)
 
-  const draw = (
-    font: PDFFont,
-    size: number,
-    text: string,
-    x: number,
-    color: RGB,
-    align: 'left' | 'right' = 'left',
-    rightEdge: number = rightX,
+  const draw: DrawText = (
+    font,
+    size,
+    text,
+    x,
+    color,
+    align = 'left',
+    rightEdge = rightX,
   ): void => {
     const width = font.widthOfTextAtSize(text, size)
     page.drawText(text, {
@@ -247,8 +451,19 @@ export async function buildInvoicePdf(
   }
 
   // --- Header: issuer (left) + document title/meta (right) ---
-  const title = invoice.creditNote ? 'CREDIT NOTE' : 'TAX INVOICE'
+  const title = invoiceDocumentTitle(invoice)
   const companyName = settings.companyName || 'Company Name'
+  const letterheadLogo = await embedLetterheadLogo(pdfDoc, settings)
+  const logoDraw = letterheadLogo
+    ? logoDrawSize(
+        letterheadLogo,
+        template === 'modern' ? MODERN_LOGO_MAX_HEIGHT : CLASSIC_LOGO_MAX_HEIGHT,
+      )
+    : null
+  // A letterhead logo owns the top-right corner: the title and every meta row
+  // it aligns with are right-aligned short of it, never overlapping the image.
+  // Without a logo nothing moves.
+  let rightAlign = rightX
   if (template === 'modern') {
     // The modern template opens with a full-width accent band carrying the
     // issuer and the document title in white; the meta block starts below it.
@@ -259,6 +474,15 @@ export async function buildInvoicePdf(
       height: MODERN_BAND_H,
       color: accent,
     })
+    if (logoDraw) {
+      page.drawImage(letterheadLogo!.image, {
+        x: rightX - logoDraw.width,
+        y: PAGE_H - MODERN_BAND_H + (MODERN_BAND_H - logoDraw.height) / 2,
+        width: logoDraw.width,
+        height: logoDraw.height,
+      })
+      rightAlign = rightX - logoDraw.width - LOGO_META_GAP
+    }
     page.drawText(companyName, {
       x: MARGIN,
       y: PAGE_H - 40,
@@ -267,44 +491,56 @@ export async function buildInvoicePdf(
       color: COLOR_WHITE,
     })
     page.drawText(title, {
-      x: rightX - bold.widthOfTextAtSize(title, 16),
+      x: rightAlign - bold.widthOfTextAtSize(title, 16),
       y: PAGE_H - 40,
       size: 16,
       font: bold,
       color: COLOR_WHITE,
     })
     y = PAGE_H - MODERN_BAND_H - 14
+    // The logo is confined to the band, so the meta column below keeps the
+    // full page edge.
+    rightAlign = rightX
   } else {
+    if (logoDraw) {
+      page.drawImage(letterheadLogo!.image, {
+        x: rightX - logoDraw.width,
+        y: PAGE_H - MARGIN - logoDraw.height,
+        width: logoDraw.width,
+        height: logoDraw.height,
+      })
+      rightAlign = rightX - logoDraw.width - LOGO_META_GAP
+    }
     draw(bold, 18, companyName, MARGIN, COLOR_DARK)
-    draw(bold, 16, title, rightX, COLOR_DARK, 'right')
+    draw(bold, 16, title, rightAlign, COLOR_DARK, 'right', rightAlign)
     down(26)
   }
 
   draw(regular, 9, `VAT Reg: ${settings.taxNumber || '-'}`, MARGIN, COLOR_GRAY)
-  draw(bold, 11, invoice.invoiceNumber || '', rightX, COLOR_DARK, 'right')
+  draw(bold, 11, invoice.invoiceNumber || '', rightAlign, COLOR_DARK, 'right', rightAlign)
   down(15)
+  drawRegistrationLine(draw, down, regular, settings)
 
   if (settings.address) {
     draw(regular, 9, settings.address, MARGIN, COLOR_GRAY)
   }
-  draw(regular, 9, `Date: ${invoice.date || '-'}`, rightX, COLOR_GRAY, 'right')
+  draw(regular, 9, `Date: ${invoice.date || '-'}`, rightAlign, COLOR_GRAY, 'right', rightAlign)
   down(14)
 
   const contact = [settings.email, settings.phone].filter(Boolean).join('  ·  ')
   if (contact) {
     draw(regular, 9, contact, MARGIN, COLOR_GRAY)
   }
-  draw(regular, 9, `Due: ${invoice.dueDate || '-'}`, rightX, COLOR_GRAY, 'right')
+  draw(regular, 9, `Due: ${invoice.dueDate || '-'}`, rightAlign, COLOR_GRAY, 'right', rightAlign)
   down(14)
 
-  draw(regular, 9, `Status: ${(invoice.status || '').toUpperCase()}`, rightX, COLOR_GRAY, 'right')
+  draw(regular, 9, `Status: ${(invoice.status || '').toUpperCase()}`, rightAlign, COLOR_GRAY, 'right', rightAlign)
   down(14)
 
-  draw(bold, 9, `Billed To: ${invoice.partyName || '-'}`, rightX, COLOR_DARK, 'right')
-  down(14)
+  drawPartyLines(draw, down, bold, regular, rightAlign, invoice)
 
   if (invoice.tenderReference) {
-    draw(regular, 9, `Reference: ${invoice.tenderReference}`, rightX, COLOR_DARK, 'right')
+    draw(regular, 9, `Reference: ${invoice.tenderReference}`, rightAlign, COLOR_DARK, 'right', rightAlign)
     down(14)
   }
 
@@ -337,7 +573,14 @@ export async function buildInvoicePdf(
     )
     const rate = fitCell(formatMoney(Number(it.rate) || 0, moneySymbol), regular, 9, colRate.width)
     const tax = fitCell(`${Number(it.taxRate) || 0}%`, regular, 9, colTax.width)
-    const amount = fitCell(formatMoney(Number(it.amount) || 0, moneySymbol), regular, 9, colAmount.width)
+    // The printed line amount is the engine's post-discount figure, the same
+    // one the preview shows and the totals engine taxed.
+    const amount = fitCell(
+      formatMoney(effectiveLineAmount(it), moneySymbol),
+      regular,
+      9,
+      colAmount.width,
+    )
 
     draw(regular, desc.size, desc.text, colDesc, COLOR_DARK)
     draw(regular, qty.size, qty.text, colQty + 1, COLOR_DARK)
@@ -354,7 +597,10 @@ export async function buildInvoicePdf(
   down(18)
 
   // --- Totals block ---
-  const taxLabelRate = Number(items[0]?.taxRate) || settings.defaultTaxRate || 15
+  // The rate beside the VAT total is printed only when every line carries the
+  // same non-zero rate and the document charges VAT — a 0% or mixed-rate
+  // document prints a bare label (the preview's rule).
+  const taxLabel = vatTaxLabel(items, Number(invoice.taxTotal) || 0, 'VAT / Tax')
   const drawTotal = (
     label: string,
     value: string,
@@ -372,7 +618,16 @@ export async function buildInvoicePdf(
   }
 
   drawTotal('Subtotal', formatMoney(Number(invoice.subtotal) || 0, moneySymbol))
-  drawTotal(`VAT / Tax (${taxLabelRate}%)`, formatMoney(Number(invoice.taxTotal) || 0, moneySymbol))
+  // The discount row mirrors the engine's booked discount, so Subtotal −
+  // Discount + VAT + Round-off ties to the grand total the engine stored.
+  const bookedDiscount = bookedInvoiceDiscount(
+    Number(invoice.subtotal) || 0,
+    invoice.discountTotal ?? 0,
+  )
+  if (bookedDiscount > 0) {
+    drawTotal('Discount', `-${formatMoney(bookedDiscount, moneySymbol)}`)
+  }
+  drawTotal(taxLabel, formatMoney(Number(invoice.taxTotal) || 0, moneySymbol))
   if (invoice.roundOff !== undefined && round2(invoice.roundOff) !== 0) {
     drawTotal('Round-off', formatMoney(round2(invoice.roundOff), moneySymbol))
   }
@@ -394,13 +649,11 @@ export async function buildInvoicePdf(
   // the base-currency equivalent at the invoice's stored rate, so the reader
   // (and a VAT audit) can reconcile the document to the ledger's base posting.
   if (isForeignCurrency) {
-    const rate = Number(invoice.exchangeRate)
-    const fxRate = Number.isFinite(rate) && rate > 0 ? rate : 1
     down(2)
     draw(
       regular,
       8,
-      `Exchange rate: 1 ${moneySymbol} = ${fxRate.toFixed(2)} ${baseCurrencyCode} · Base grand total: ${formatMoney(round2((Number(invoice.grandTotal) || 0) * fxRate), symbol)}`,
+      exchangeRateNote(invoice.grandTotal, moneySymbol, invoice.exchangeRate, baseCurrencyCode, symbol),
       MARGIN,
       COLOR_DARK,
     )
@@ -411,59 +664,346 @@ export async function buildInvoicePdf(
   down(10)
   draw(bold, 9, 'Notes & Payment Terms', MARGIN, COLOR_DARK)
   down(14)
-  const notes = wrapText(
-    invoice.notes || 'Payment terms: Net 30 days upon invoice receipt.',
-    regular,
-    9,
-    CONTENT_W,
-  )
+  const notes = wrapText(invoice.notes || DEFAULT_INVOICE_NOTES, regular, 9, CONTENT_W)
   for (const noteLine of notes) {
     ensureRoom(12)
     draw(regular, 9, noteLine, MARGIN, COLOR_GRAY)
     down(12)
   }
 
-  // --- Footer & page numbers on every page ---
-  // The letterhead footer rides the existing footer line: classic appends it
-  // after the generated-by text, modern replaces that text with it. The line
-  // is clipped so it can never run into the right-aligned page marker.
-  const footerText =
-    template === 'modern'
-      ? letterhead || DEFAULT_FOOTER_TEXT
-      : letterhead
-        ? `${DEFAULT_FOOTER_TEXT}  ·  ${letterhead}`
-        : DEFAULT_FOOTER_TEXT
-  const pageCount = pdfDoc.getPageCount()
-  for (let index = 0; index < pageCount; index++) {
-    const footerPage = pdfDoc.getPage(index)
-    footerPage.drawLine({
-      start: { x: MARGIN, y: 56 },
-      end: { x: rightX, y: 56 },
-      thickness: 0.75,
-      color: COLOR_LINE,
-    })
-    const marker = `Page ${index + 1} of ${pageCount}`
-    const markerWidth = regular.widthOfTextAtSize(marker, 8)
-    footerPage.drawText(clipText(footerText, regular, 8, rightX - MARGIN - markerWidth - 12), {
-      x: MARGIN,
-      y: 40,
-      size: 8,
-      font: regular,
-      color: COLOR_GRAY,
-    })
-    footerPage.drawText(marker, {
-      x: rightX - markerWidth,
-      y: 40,
-      size: 8,
-      font: regular,
-      color: COLOR_GRAY,
-    })
-  }
+  drawPageFooters(pdfDoc, regular, template, letterhead)
 
   // Document metadata (viewers show this in the title bar).
-  pdfDoc.setTitle(
-    `${invoice.creditNote ? 'Credit Note' : 'Tax Invoice'} ${invoice.invoiceNumber || ''}`.trim(),
+  pdfDoc.setTitle(`${invoiceDocumentMetaTitle(invoice)} ${invoice.invoiceNumber || ''}`.trim())
+  pdfDoc.setAuthor(settings.companyName || '')
+
+  return pdfDoc.save()
+}
+
+/**
+ * Builds a real A4 quotation PDF — the invoice builder's letterhead (palette,
+ * logo, registration line, party lines, footer furniture) with the
+ * quotation's own meta: quote number, valid-until date, status and a
+ * three-column items table. A quotation is a commercial offer, not an
+ * accounting event: no due date, no round-off, no amount due. Pure: returns
+ * the PDF bytes; never writes to disk.
+ */
+export async function buildQuotationPdf(
+  quotation: Quotation,
+  settings: CompanySettings,
+): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create()
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+  const regular = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  let page: PDFPage = pdfDoc.addPage([PAGE_W, PAGE_H])
+
+  // The quotation prints in its OWN currency under the same contract the
+  // invoice PDF implements: a foreign-currency quote is labelled with its ISO
+  // code — never the base symbol against foreign figures — and an FX note
+  // under the totals gives the base-currency equivalent at the stored rate.
+  const symbol = settings.currencySymbol || 'R'
+  const quoteCurrencyCode = (quotation.currency || '').trim()
+  const baseCurrencyCode = (settings.currency || 'ZAR').trim().toUpperCase()
+  const isForeignCurrency =
+    Boolean(quoteCurrencyCode) && quoteCurrencyCode.toUpperCase() !== baseCurrencyCode
+  const moneySymbol = isForeignCurrency ? quoteCurrencyCode.toUpperCase() : symbol
+  const rightX = PAGE_W - MARGIN
+  let y = PAGE_H - MARGIN
+
+  const { template, accent, accentChanged, letterhead } = resolvePrintPalette(settings)
+
+  const draw: DrawText = (
+    font,
+    size,
+    text,
+    x,
+    color,
+    align = 'left',
+    rightEdge = rightX,
+  ): void => {
+    const width = font.widthOfTextAtSize(text, size)
+    page.drawText(text, {
+      x: align === 'right' ? rightEdge - width : x,
+      y: y - size,
+      size,
+      font,
+      color,
+    })
+  }
+  const down = (gap: number): void => {
+    y -= gap
+  }
+  const divider = (color: RGB = COLOR_LINE): void => {
+    page.drawLine({
+      start: { x: MARGIN, y },
+      end: { x: rightX, y },
+      thickness: 0.75,
+      color,
+    })
+    y -= 1
+  }
+
+  // --- Items table geometry (description / qty / amount) ---
+  const colDesc = MARGIN
+  const colQty: PdfColumn = { right: 400, width: 60 }
+  const colAmount: PdfColumn = { right: 547.28, width: 110 }
+  const descWidth = colQty.right - colQty.width - colDesc - 8
+  const HEADER_ROW_H = 26
+
+  /** Draws the quotation's items table header row at the current `y`. */
+  const drawTableHeader = (): void => {
+    if (template === 'modern') {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - 15,
+        width: CONTENT_W,
+        height: 16,
+        color: accent,
+        opacity: MODERN_TINT_OPACITY,
+      })
+    } else {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - 15,
+        width: CONTENT_W,
+        height: 16,
+        color: COLOR_LIGHT,
+      })
+    }
+    draw(bold, 8.5, 'Description', colDesc, COLOR_GRAY)
+    draw(regular, 8.5, 'Qty', colQty.right, COLOR_GRAY, 'right', colQty.right)
+    draw(regular, 8.5, 'Amount', colAmount.right, COLOR_GRAY, 'right', colAmount.right)
+    down(18)
+  }
+
+  const ensureRoom = (needed: number): void => {
+    if (y - needed < 60) {
+      page = pdfDoc.addPage([PAGE_W, PAGE_H])
+      y = PAGE_H - MARGIN
+    }
+  }
+
+  /** Breaks to a new page when the next table row would not fit, repeating the header. */
+  const ensureRowRoom = (): void => {
+    if (y - HEADER_ROW_H < 60) {
+      page = pdfDoc.addPage([PAGE_W, PAGE_H])
+      y = PAGE_H - MARGIN
+      drawTableHeader()
+    }
+  }
+
+  // --- Header: issuer (left) + document title/meta (right) ---
+  const title = 'QUOTATION'
+  const companyName = settings.companyName || 'Company Name'
+  const letterheadLogo = await embedLetterheadLogo(pdfDoc, settings)
+  const logoDraw = letterheadLogo
+    ? logoDrawSize(
+        letterheadLogo,
+        template === 'modern' ? MODERN_LOGO_MAX_HEIGHT : CLASSIC_LOGO_MAX_HEIGHT,
+      )
+    : null
+  let rightAlign = rightX
+  if (template === 'modern') {
+    page.drawRectangle({
+      x: 0,
+      y: PAGE_H - MODERN_BAND_H,
+      width: PAGE_W,
+      height: MODERN_BAND_H,
+      color: accent,
+    })
+    if (logoDraw) {
+      page.drawImage(letterheadLogo!.image, {
+        x: rightX - logoDraw.width,
+        y: PAGE_H - MODERN_BAND_H + (MODERN_BAND_H - logoDraw.height) / 2,
+        width: logoDraw.width,
+        height: logoDraw.height,
+      })
+      rightAlign = rightX - logoDraw.width - LOGO_META_GAP
+    }
+    page.drawText(companyName, {
+      x: MARGIN,
+      y: PAGE_H - 40,
+      size: 18,
+      font: bold,
+      color: COLOR_WHITE,
+    })
+    page.drawText(title, {
+      x: rightAlign - bold.widthOfTextAtSize(title, 16),
+      y: PAGE_H - 40,
+      size: 16,
+      font: bold,
+      color: COLOR_WHITE,
+    })
+    y = PAGE_H - MODERN_BAND_H - 14
+    rightAlign = rightX
+  } else {
+    if (logoDraw) {
+      page.drawImage(letterheadLogo!.image, {
+        x: rightX - logoDraw.width,
+        y: PAGE_H - MARGIN - logoDraw.height,
+        width: logoDraw.width,
+        height: logoDraw.height,
+      })
+      rightAlign = rightX - logoDraw.width - LOGO_META_GAP
+    }
+    draw(bold, 18, companyName, MARGIN, COLOR_DARK)
+    draw(bold, 16, title, rightAlign, COLOR_DARK, 'right', rightAlign)
+    down(26)
+  }
+
+  draw(regular, 9, `VAT Reg: ${settings.taxNumber || '-'}`, MARGIN, COLOR_GRAY)
+  draw(bold, 11, quotation.quoteNumber || '', rightAlign, COLOR_DARK, 'right', rightAlign)
+  down(15)
+  drawRegistrationLine(draw, down, regular, settings)
+
+  if (settings.address) {
+    draw(regular, 9, settings.address, MARGIN, COLOR_GRAY)
+  }
+  draw(regular, 9, `Date: ${quotation.date || '-'}`, rightAlign, COLOR_GRAY, 'right', rightAlign)
+  down(14)
+
+  const contact = [settings.email, settings.phone].filter(Boolean).join('  ·  ')
+  if (contact) {
+    draw(regular, 9, contact, MARGIN, COLOR_GRAY)
+  }
+  draw(
+    regular,
+    9,
+    `Valid Until: ${quotation.validUntil || '-'}`,
+    rightAlign,
+    COLOR_GRAY,
+    'right',
+    rightAlign,
   )
+  down(14)
+
+  draw(
+    regular,
+    9,
+    `Status: ${(quotation.status || '').toUpperCase()}`,
+    rightAlign,
+    COLOR_GRAY,
+    'right',
+    rightAlign,
+  )
+  down(14)
+
+  drawPartyLines(draw, down, bold, regular, rightAlign, {
+    partyName: quotation.partyName,
+    partyAddress: quotation.partyAddress,
+    partyTaxId: quotation.partyTaxId,
+  })
+
+  down(10)
+  divider()
+  down(22)
+
+  // --- Line items table ---
+  drawTableHeader()
+
+  const items = Array.isArray(quotation.items) ? quotation.items : []
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i]
+    ensureRowRoom()
+    if (i % 2 === 1) {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - 13,
+        width: CONTENT_W,
+        height: 14,
+        color: COLOR_LIGHT,
+      })
+    }
+    const desc = fitCell(it.description || `Item ${i + 1}`, regular, 9, descWidth)
+    const qty = fitCell(
+      Number(it.qty).toLocaleString('en-ZA', { maximumFractionDigits: 2 }),
+      regular,
+      9,
+      colQty.width,
+    )
+    // The printed line amount is the engine's post-discount figure — the same
+    // one the totals engine taxed and the preview shows.
+    const amount = fitCell(
+      formatMoney(effectiveLineAmount(it), moneySymbol),
+      regular,
+      9,
+      colAmount.width,
+    )
+
+    draw(regular, desc.size, desc.text, colDesc, COLOR_DARK)
+    draw(regular, qty.size, qty.text, colQty.right, COLOR_DARK, 'right', colQty.right)
+    draw(regular, amount.size, amount.text, colAmount.right, COLOR_DARK, 'right', colAmount.right)
+    down(20)
+  }
+
+  down(8)
+  divider(template === 'modern' || accentChanged ? accent : COLOR_LINE)
+  down(18)
+
+  // --- Totals block: Subtotal → Discount (when booked) → VAT → Grand Total ---
+  const taxLabel = vatTaxLabel(items, Number(quotation.taxTotal) || 0, 'VAT / Tax')
+  const drawTotal = (
+    label: string,
+    value: string,
+    opts: { font?: PDFFont; color?: RGB; size?: number } = {},
+  ): void => {
+    const font = opts.font || regular
+    const size = opts.size || 9
+    const color = opts.color || COLOR_DARK
+    const labelWidth = rightX - size * 17 - MARGIN
+    draw(font, size, fitCell(label, font, size, labelWidth).text, MARGIN, color)
+    draw(font, size, fitCell(value, font, size, size * 17).text, rightX, color, 'right')
+    down(size + 8)
+  }
+
+  drawTotal('Subtotal', formatMoney(Number(quotation.subtotal) || 0, moneySymbol))
+  const bookedDiscount = bookedInvoiceDiscount(
+    Number(quotation.subtotal) || 0,
+    quotation.discountTotal ?? 0,
+  )
+  if (bookedDiscount > 0) {
+    drawTotal('Discount', `-${formatMoney(bookedDiscount, moneySymbol)}`)
+  }
+  drawTotal(taxLabel, formatMoney(Number(quotation.taxTotal) || 0, moneySymbol))
+  drawTotal('Grand Total', formatMoney(Number(quotation.grandTotal) || 0, moneySymbol), {
+    font: bold,
+    size: 11,
+    color: template === 'modern' ? accent : COLOR_DARK,
+  })
+
+  if (isForeignCurrency) {
+    down(2)
+    draw(
+      regular,
+      8,
+      exchangeRateNote(
+        quotation.grandTotal,
+        moneySymbol,
+        quotation.exchangeRate,
+        baseCurrencyCode,
+        symbol,
+      ),
+      MARGIN,
+      COLOR_DARK,
+    )
+    down(14)
+  }
+
+  // --- Notes ---
+  down(10)
+  draw(bold, 9, 'Notes & Payment Terms', MARGIN, COLOR_DARK)
+  down(14)
+  const notes = wrapText(quotation.notes || DEFAULT_INVOICE_NOTES, regular, 9, CONTENT_W)
+  for (const noteLine of notes) {
+    ensureRoom(12)
+    draw(regular, 9, noteLine, MARGIN, COLOR_GRAY)
+    down(12)
+  }
+
+  drawPageFooters(pdfDoc, regular, template, letterhead)
+
+  // Document metadata (viewers show this in the title bar).
+  pdfDoc.setTitle(`Quotation ${quotation.quoteNumber || ''}`.trim())
   pdfDoc.setAuthor(settings.companyName || '')
 
   return pdfDoc.save()
