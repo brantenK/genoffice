@@ -25,6 +25,9 @@ test.describe('tutorial recorder', () => {
       onboardingSeen: true,
       videoDir: 'tutorial-recorder',
     })
+    launched.page.on('console', (m) => {
+      if (m.text().includes('[rec-diag]')) console.log('REC-DIAG', m.text())
+    })
     try {
       // deterministic save destination only — the capture path stays real
       await launched.app.evaluate(({ dialog }, filePath) => {
@@ -39,19 +42,26 @@ test.describe('tutorial recorder', () => {
       await expect(pill).toHaveAttribute('data-state', 'recording')
       await expect(launched.page.locator('[data-rec-timer]')).toHaveText(/^\d{2}:\d{2}$/)
 
-      // the visible surface (the books view) got the click-ripple overlay
-      const injected = await books.evaluate(
-        () => Boolean((window as { __zanoRecRipple?: unknown }).__zanoRecRipple),
-      )
-      expect(injected).toBe(true)
+      // the visible surface (the books view) got the click-ripple overlay —
+      // the injection runs after the capture is confirmed live, so allow a
+      // short wait before asserting
+      await expect
+        .poll(
+          () =>
+            books.evaluate(
+              () => Boolean((window as { __zanoRecRipple?: unknown }).__zanoRecRipple),
+            ),
+          { timeout: 8_000 },
+        )
+        .toBe(true)
 
       // real clicks in the content: harmless here, and the ripple layer is live
       await books.getByText('Set up Zano Books').first().click()
       await expect(books.locator('#zano-rec-ripple-layer')).toBeAttached()
 
-      // real desktop frames accumulate; the pill's pulsing indicator alone
-      // keeps the encoder fed while the window is otherwise static
-      await launched.page.waitForTimeout(2500)
+      // real desktop frames accumulate; the fallback (screen source) takes
+      // ~2s to engage when the window surface is starved, so record longer
+      await launched.page.waitForTimeout(4000)
 
       await pill.click()
       await expect(pill).toHaveAttribute('data-state', 'saved')

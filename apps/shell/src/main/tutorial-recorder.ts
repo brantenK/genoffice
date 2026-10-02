@@ -141,8 +141,17 @@ export class TutorialRecorder {
     // the renderer opens the stream + MediaRecorder now; main treats the armed
     // capture as recording (a failure there aborts back to idle via stop)
     this.set({ state: 'recording' })
-    this.injectIntoActiveSurface()
-    return { ok: true, sourceId: source.sourceId, width: source.width, height: source.height }
+    // the ripple injection is deferred: the pill calls inject() once its
+    // capture is confirmed live — injecting between getSources and the
+    // capture start can starve the capture session (verified via the
+    // e2e capture probe)
+    return {
+      ok: true,
+      sourceId: source.sourceId,
+      fallbackSourceId: source.fallbackSourceId,
+      width: source.width,
+      height: source.height,
+    }
   }
 
   async stop(options?: { abort?: boolean }): Promise<void> {
@@ -217,6 +226,7 @@ export class TutorialRecorder {
    */
   private async resolveSource(): Promise<{
     sourceId: string
+    fallbackSourceId?: string
     width: number
     height: number
   } | null> {
@@ -228,12 +238,21 @@ export class TutorialRecorder {
       fetchWindowIcons: false,
     })
     const selfId = win.getMediaSourceId()
-    const matched =
-      sources.find((source) => source.id === selfId) ??
-      sources.find((source) => source.id.startsWith('window:'))
+    const selfMatch = sources.find((source) => source.id === selfId)
+    const matched = selfMatch ?? sources.find((source) => source.id.startsWith('window:'))
     if (!matched) return null
+    // When a module view covers the window, Electron's window capture surface
+    // can be starved of frames on Windows — the screen source is the recorder's
+    // self-healing fallback (the renderer retries with it if the window
+    // produces no frames).
+    const screenFallback = sources.find((source) => source.id.startsWith('screen:'))
     const bounds = win.getContentBounds()
-    return { sourceId: matched.id, width: bounds.width, height: bounds.height }
+    return {
+      sourceId: matched.id,
+      fallbackSourceId: screenFallback?.id,
+      width: bounds.width,
+      height: bounds.height,
+    }
   }
 
   /** the surface currently on screen: the active tab's view, or the shell
@@ -244,15 +263,25 @@ export class TutorialRecorder {
     return this.deps.getWindow()?.webContents ?? null
   }
 
-  private injectIntoActiveSurface(): void {
+  private injectIntoActiveSurface(): number | null {
     const target = this.activeWebContents()
-    if (!target || target.isDestroyed()) return
-    if (this.injected.has(target.id)) return
+    if (!target || target.isDestroyed()) return null
+    if (this.injected.has(target.id)) return target.id
     this.injected.add(target.id)
-    void target.executeJavaScript(RIPPLE_SCRIPT, false).catch(() => {
-      // dropped (navigation / crash mid-injection): a later change can retry
-      this.injected.delete(target.id)
-    })
+    void target
+      .executeJavaScript(RIPPLE_SCRIPT, false)
+      .catch((err) => {
+        // dropped (navigation / crash mid-injection): a later change can retry
+        console.log('[rec-diag-main] inject failed on', target.id, String(err))
+        this.injected.delete(target.id)
+      })
+    return target.id
+  }
+
+  /** public hook for the pill: run the ripple injection once the capture is
+   *  confirmed live (see start() for why the injection is deferred) */
+  injectNow(): number | null {
+    return this.injectIntoActiveSurface()
   }
 
   /** run the ripple cleanup in every surface that got it; each is best-effort
@@ -312,6 +341,9 @@ export function registerRecorderIpc(deps: TutorialRecorderDeps): TutorialRecorde
   })
   ipcMain.handle(RECORDER_CHANNELS.save, (_event, bytes: unknown) => {
     return recorder.save(bytes instanceof Uint8Array ? bytes : new Uint8Array(0))
+  })
+  ipcMain.handle(RECORDER_CHANNELS.inject, () => {
+    return recorder.injectNow()
   })
   ipcMain.handle(RECORDER_CHANNELS.reveal, (_event, path: unknown) => {
     // scoped to the file this recorder just saved: a compromised renderer

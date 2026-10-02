@@ -7,7 +7,7 @@
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { sanitizeAiSettings, validCliPath } from '../src/ai-settings-guard'
@@ -145,12 +145,17 @@ describe('sanitizeAiSettings', () => {
   })
 
   it('keeps Windows-style paths with spaces and non-ASCII (reviewer case: C:\\Users\\Ana María\\codex.exe)', () => {
-    // on POSIX the reviewer's string cannot name a real file, so exercise the
-    // same shape (backslashes, dot, space, í) as a literal file name; on
-    // Windows the exact reviewer string is stat'd directly and behaves the same
+    // POSIX can materialize the reviewer's literal string (backslashes are
+    // legal filename characters there). Windows cannot embed a mid-path drive
+    // colon in a filename, so materialize the same properties — spaces,
+    // non-ASCII, .exe, backslash separators — under the temp dir instead.
     const dir = mkdtempSync(join(tmpdir(), 'genoffice-ai-guard-'))
     tempDirs.push(dir)
-    const cliPath = join(dir, 'C:\\Users\\Ana María\\codex.exe')
+    const cliPath =
+      process.platform === 'win32'
+        ? join(dir, 'Ana María', 'codex.exe')
+        : join(dir, 'C:\\Users\\Ana María\\codex.exe')
+    mkdirSync(dirname(cliPath), { recursive: true })
     writeFileSync(cliPath, 'bin\n')
     expect(validCliPath(cliPath)).toBe(true)
   })

@@ -14,7 +14,13 @@ export interface RecorderStatus {
 }
 
 export type RecorderStartResult =
-  | { ok: true; sourceId: string; width: number; height: number }
+  | {
+    ok: true
+    sourceId: string
+    fallbackSourceId?: string
+    width: number
+    height: number
+  }
   | { ok: false; error?: RecorderErrorKey }
 
 export type RecorderSaveResult = { saved: boolean; path?: string }
@@ -34,6 +40,10 @@ export interface RecorderApi {
   stop(options?: { abort?: boolean }): Promise<void>
   /** deliver the accumulated webm bytes; main runs the save dialog + write */
   save(bytes: Uint8Array): Promise<RecorderSaveResult>
+  /** run the click-ripple injection into the active surface; the pill calls
+   *  this only after the capture is confirmed live — injecting earlier can
+   *  starve the capture session (verified via the e2e capture probe) */
+  inject(): Promise<void>
   /** open the saved recording in its OS default player */
   reveal(path: string): Promise<void>
   /** current status (the pill's initial mirror before the first push) */
@@ -47,6 +57,7 @@ export const RECORDER_CHANNELS = {
   stop: 'recorder:stop',
   save: 'recorder:save',
   reveal: 'recorder:reveal',
+  inject: 'recorder:inject',
   status: 'recorder:status',
   changed: 'recorder:changed',
 } as const

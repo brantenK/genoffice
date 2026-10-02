@@ -652,6 +652,9 @@ const recorderApi: RecorderApi = {
   async reveal(path) {
     await ipcRenderer.invoke(RECORDER_CHANNELS.reveal, path)
   },
+  async inject() {
+    await ipcRenderer.invoke(RECORDER_CHANNELS.inject)
+  },
   async status() {
     return (await ipcRenderer.invoke(RECORDER_CHANNELS.status)) as RecorderStatus
   },
