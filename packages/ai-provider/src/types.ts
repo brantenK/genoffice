@@ -11,12 +11,15 @@ export type AiProviderId =
   | 'glm'
   | 'qwen'
   | 'doubao'
+  | 'mimo'
+  | 'hunyuan'
   | 'minimax'
   | 'xai'
   | 'mistral'
   | 'openrouter'
   | 'requesty'
   | 'opper'
+  | 'cheaperinference'
   | 'opencode-zen'
   | 'opencode-go'
   | 'custom'
@@ -114,7 +117,8 @@ export interface AiMediaSettings {
 }
 
 /** web/image search backends; Parallel supports both a user key and free keyless search */
-export type AiSearchProviderId = 'genspark' | 'serper' | 'serply' | 'tavily' | 'parallel'
+export type AiSearchProviderId =
+  'genspark' | 'serper' | 'serply' | 'tavily' | 'parallel' | 'exa' | 'firecrawl'
 
 export interface AiSearchProviderMeta {
   id: AiSearchProviderId
