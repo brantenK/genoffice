@@ -220,7 +220,12 @@ upstream. Hand-added — the tool cannot measure a test that did not exist at re
 
 ## e2e
 
-0 passed, 5 failed, 0 skipped (tool-run count at `7297633f`; two entries below are hand-added after that run, and the e2e pass count is not captured by the tool)
+0 passed, 3 failed, 9 skipped (tool-run count at `894dc39d`, 2026-10-02 — Playwright
+serial mode skips tests after a failure in the same group, so the skip count varies
+with the failure set; the e2e pass count is not captured by the tool. The three
+failures are the known set below; two additional entries in the original 09-28 list
+(docs-spellcheck-reenable:51, html:166) passed this run and remain flaky/known.
+The tutorial-recorder journeys (2) pass as of the 0.13.1 recorder fixes.)
 
 - e2e\docs-spellcheck-reenable.spec.ts:51:5 › re-enabling spellcheck respells existing text without user input
 - e2e\html-tab.spec.ts:166:7 › html editor › saving without edits keeps BOM, CRLF and the missing trailing newline byte-identical
@@ -228,6 +233,7 @@ upstream. Hand-added — the tool cannot measure a test that did not exist at re
 - e2e\tenders-a11y-theme.spec.ts:1170:7 › Tenders a11y + theme (Phase 5 / WP-13) › 3: no critical/serious axe violations on core pages and overlays
 - e2e\open-focus-typing.spec.ts:205:5 › sheets: typing works when a spare view opens the next workbook
 - e2e\docs-spell-suggestions.spec.ts:71:5 › context menu offers spelling suggestions and applies one
+- e2e\docs-spell-suggestions.spec.ts:71:5 › context menu offers spelling suggestions and applies one (retry #1)
 
 (The sixth entry is hand-added after the 2026-09-28 sync. The spec is new in
 that sync's upstream range (`0a1,201` vs the pre-sync tree — it never existed
