@@ -32,15 +32,17 @@ upstream/main  ──fast-forward──> main
 | Remote / branch            | Role                                                                                                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `upstream`                 | The original project: `https://github.com/genspark-ai/genoffice.git`. Fetch from it to track upstream.                               |
-| `origin`                   | Our GitHub fork: `https://github.com/brantenK/genoffice.git`. Normal Zanostack pushes go here.                                       |
+| `origin`                   | The Zanostack product repository: `https://github.com/brantenK/zanostack.git` (private). Normal Zanostack pushes go here.             |
+| `genoffice-fork`           | Legacy public fork `https://github.com/brantenK/genoffice.git`. Publishes the `main` mirror and hosts the 0.12.0-era releases; not a product push target. |
 | `main`                     | Pure mirror of `upstream/main`. **Never commit fork work to it.** Its ordinary update is fast-forward only.                          |
 | `product`                  | Zanostack development and release branch. All fork changes live here.                                                                |
 | `integration/*`            | Short-lived isolated branches for a conflict-heavy upstream integration. They must be reviewed and validated before `product` moves. |
 | `backup/*`, `checkpoint/*` | Named recovery points. Keep them until the related work is accepted and running.                                                     |
 
-`main` usually tracks `origin/main` locally because that is the fork's published
-mirror. The synchronization source of truth remains `upstream/main`. Do not
-change tracking configuration merely because those two names differ.
+`main` tracks `upstream/main` locally; its published mirror lives on
+`genoffice-fork/main` (the legacy public fork). The synchronization source of
+truth remains `upstream/main`. Do not change tracking configuration merely
+because those names differ.
 
 ## Non-negotiable safety rules
 
@@ -144,7 +146,7 @@ npm run sync:upstream
 ```
 
 The helper fetches upstream, fast-forwards the mirror, pushes the mirror to
-`origin/main`, then merges the mirror into the branch that was active when the
+`genoffice-fork/main`, then merges the mirror into the branch that was active when the
 command started. Therefore, start it from `product`, not from an experimental
 or temporary branch.
 
@@ -165,7 +167,7 @@ Use an integration branch when the update is large, changes core code, or would
 conflict with Zanostack branding, providers, modules, packaging, or policy.
 
 1. Preserve `product` with a named checkpoint/backup branch.
-2. Fast-forward `main` from `upstream/main` and publish it to `origin/main`.
+2. Fast-forward `main` from `upstream/main` and publish it to `genoffice-fork/main`.
 3. Create `integration/<description>` from the mirror or the intended merge
    base in a separate worktree.
 4. Merge `product` and the mirror as appropriate, resolve conflicts in reviewable
@@ -188,7 +190,7 @@ Use these only when the helper is unsuitable and you understand why:
 git checkout main
 git fetch upstream
 git merge --ff-only upstream/main
-git push origin main
+git push genoffice-fork main
 
 git checkout product
 git merge main
@@ -237,30 +239,21 @@ they stop reappearing as new failures):
 node fork/tools/baseline.mjs --write --with-e2e --repeat 2
 ```
 
-Both lanes are stale, and this paragraph used to quote counts that were never re-measured.
-What is verifiable without running a suite: **HEAD is `d24ead6`** with **two in-flight waves** on
-top of it — the structural wave (the `main/` composition-root split and the `ipc/` domain split,
-`shared/demo-seed.ts`, the e2e timing contract, and these documents) and a concurrent `apps/books`
-workstream — so `check:baseline` reports both lanes as changed until it is re-recorded. The old
-claim here ("the Tenders unit suite is green: 1011 passed / 0 failed / 7 skipped") is withdrawn
-rather than restated.
+**Snapshot status (updated 2026-10-02):** the 09-29 narrative below described drift at
+`d24ead6`; since then the ledger was re-measured and the product released. Current
+facts: HEAD is `894dc39d` (v0.13.0 release commit); books measures **48 files / 658
+tests, all green**, shell **718 passed / 6 failed / 3 skipped** with the six failures
+being exactly the known cloud-projects set recorded in `fork/BASELINE.md`; 13 books
+journeys plus 2 tutorial-recorder journeys are green on the real shell. Treat these as
+dated observations too — the standing rule is unchanged: re-record the ledger with the
+command above at the pre-merge commit of the next sync.
 
-**`fork/BASELINE.md`'s Tenders entry has been re-measured.** It said
-`1068 passed, 0 failed, 7 skipped`; it now records **1854 passed / 0 failed / 7 skipped over
-58 test files**, taken from two clean identical runs (`npx vitest run` from `apps/tenders`,
-104 s and 103 s) at `e634250` plus the uncommitted structural wave. **That was not the last
-movement either:** the remediation wave that landed as `d24ead6` measured **1890 passing /
-7 skipped / 0 failing**, and the `ipc/` domain split arrived after that — so treat 1854 and 1890
-both as dated observations and re-record before the next sync. The two earlier figures in
-this section are superseded and kept only as a caution: `1604 passed / 8 failed / 7 skipped`
-over 58 files was measured while the tree was being edited by two other agents (a `main/` split
-and a `shared/demo-seed.ts` extraction landing mid-run, and an in-flight
-`tests/components/__probe.test.tsx` that rewrites a fixture module on disk), and three of those
-failures — `adversarial-stress.test.ts`, `ai-e2e-contract.test.ts` and
-`renderer-display-locale.test.ts` — **passed when run alone (61 passed / 61)**. They were
-concurrent-edit noise, and on a quiet tree there were none. `fork/BASELINE.md` now says which
-sections were re-measured and which were not; the tool command in its guidance is unchanged and
-remains the way to re-record the file whole.
+Historical caution, kept on purpose: a `1604 passed / 8 failed / 7 skipped` run over
+58 files was once measured while the tree was being edited by two other agents, and
+three of those failures — `adversarial-stress.test.ts`, `ai-e2e-contract.test.ts` and
+`renderer-display-locale.test.ts` — passed when run alone (61/61). They were
+concurrent-edit noise, not product failures; always re-run a suspicious suite on a
+quiet tree before believing it.
 
 Before the _next_ sync, re-record it at the pre-merge commit. That comparison is
 the single highest-value thing this runbook asks for: in the 2026-09-22 sync it

@@ -74,12 +74,14 @@ try {
   process.exit(1)
 }
 
-// Optional: push updated main to origin
+// Optional: push updated main to the public fork mirror.
+// `origin` is the private product repo (zanostack) — the upstream mirror is
+// published on `genoffice-fork` so no mirror branch lands in the private repo.
 try {
-  console.log('\n📤 Pushing updated main to origin...')
-  run('git push origin main')
+  console.log('\n📤 Pushing updated main to genoffice-fork...')
+  run('git push genoffice-fork main')
 } catch {
-  console.log('ℹ️ (Could not push main to origin; continuing with local sync)')
+  console.log('ℹ️ (Could not push main to genoffice-fork; continuing with local sync)')
 }
 
 // 5. Merge into product branch

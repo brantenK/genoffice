@@ -276,3 +276,15 @@ the save lands on the hidden session and the file stays 0 bytes. The app's save
 is session-correct — the weakness is the spec's targeting, not the product.
 If it keeps flaking, port the spec to target the active view rather than the
 first URL match.)
+
+## Re-measure note — 2026-10-01
+
+Unit totals moved since the 09-28/09-29 records above; the failure identities are
+unchanged. Books: **48 files / 658 tests, all green** (the 0.12.0 print batch added
+~28 tests: quotation PDF, letterhead logo/registration, print parity). Shell:
+**718 passed / 6 failed / 3 skipped** — the 6 are exactly the cloud-projects entries
+listed in the shell section (byte-identical to upstream; environment-independent,
+verified with a clean HOME). Journeys: 13 books-flows/books-smoke green + 2 new
+tutorial-recorder journeys green (real-capture path). A full ledger replacement
+should still go through `node fork/tools/baseline.mjs --write --with-e2e --repeat 2`
+at the next pre-merge point.

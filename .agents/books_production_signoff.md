@@ -175,3 +175,36 @@ Packaged installer re-verification (0.11.0, unsigned local build):
 
 Verdict unchanged: **PRODUCTION READY** — re-verified on the merged host and on the packaged
 0.11.0 installer.
+
+## Addendum — 2026-10-02 (print batch + releases 0.12.0 → 0.13.0)
+
+Shipped on top of the 09-30 addendum:
+
+- **Print batch** (commit `7a8c6419`): quotations now print as real QUOTATION documents
+  (`buildQuotationPdf`, per-row + form print buttons); `CompanySettings` gained
+  `logoDataUrl` (embedded into the PDF letterhead, both templates) and
+  `registrationNumber` (seller `Reg:` line); a Billed-To block prints party name +
+  stamped address + `VAT / Tax ID`; print parity fixes — the VAT row label honours
+  0%/mixed rates (`shared/print.ts` `vatTaxLabel`), invoice-level discounts print as a
+  Discount row with effective line amounts, purchase bills title PURCHASE BILL, and
+  blank notes render one shared default (`DEFAULT_INVOICE_NOTES`). The ledger migration
+  normalizes and size-caps the logo payload. Books suite re-measured: **48 files / 658
+  tests, all green** (teeth red-green proven for the five parity fixes; 13 books journeys
+  green).
+- **Releases**: v0.12.0 (+ v0.12.0-r2 re-publish with normalized asset names) on the
+  legacy fork, then **v0.13.0 on `brantenK/zanostack-releases`** with the new feed baked
+  in — the 0.11.0 packaged record above is superseded; **0.13.0 is current** (verified:
+  baked `app-update.yml` plus public feed URLs resolve without authentication).
+  Repository layout moved to private-source/public-binaries — see `fork/DISTRIBUTION.md`
+  §7.
+- **Boundary item narrowed**: the 09-28 "SARS registration details absent" boundary is
+  largely closed — seller registration line, letterhead logo and buyer identity (address
+  + VAT/Tax ID) now print on invoices, quotes and previews. What remains: `VAT Reg: -`
+  renders when no tax number is set, rows saved before 2026-10-01 print name-only (no
+  backfill migration), structured banking-details fields are still free text, and
+  zero-rated/exempt distinction plus a VAT201-style period report remain open (see
+  `books_known_gaps.md`, updated the same date).
+- The closedThrough first-close-only defect remains open and documented.
+
+Verdict unchanged: **PRODUCTION READY** — now with quotation printing and a branded
+letterhead in the shipped 0.13.0 build.

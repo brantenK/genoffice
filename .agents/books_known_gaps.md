@@ -1,6 +1,9 @@
 # Zano Books — Known Gaps & Safe-Use Guide (pre-release)
 
-Date: 2026-09-28 · Branch `product` @ `29ec88c`
+Date: 2026-09-28 · Branch `product` @ `29ec88c` · **Updated 2026-10-02 @ `894dc39d`**
+(quotation printing, letterhead logo/registration and buyer-identity printing landed in
+the 0.12.0 print batch — the affected entries below carry dated notes; line numbers
+re-checked against the current tree where flagged).
 Audience: anyone evaluating or trialing the module before it is sent to outside users.
 Companion to `.agents/books_production_signoff.md`, which proves what IS solid (money core,
 data durability, journeys, packaging). This document records where the app LACKS for real
@@ -28,13 +31,13 @@ Full details and every fix commit: see the sign-off.
 
 | # | Gap | Evidence | What a user experiences | Workaround today |
 |---|-----|----------|--------------------------|------------------|
-| 1 | **Year-2+ period closes are refused (verified bug)** | `closing.ts:44-49` + `books-main.ts:423` refuse ANY change to `closedThrough` once one exists; the pure engine supports sequential closes (`closing.test.ts:275-279`) but the main-process save guard blocks them, and no test/journey ever closed twice | First Close Period works; every later close fails with "cannot be changed through a raw save" — no in-app way forward | Close at most once; undo via backup restore |
+| 1 | **Year-2+ period closes are refused (verified bug)** | `shared/closing.ts:44-52` + `books-main.ts:441` refuse ANY change to `closedThrough` once one exists; the pure engine supports sequential closes (`closing.test.ts:275-279`) but the main-process save guard blocks them, and no test/journey ever closed twice | First Close Period works; every later close fails with "cannot be changed through a raw save" — no in-app way forward | Close at most once; undo via backup restore |
 | 2 | **No VAT201-style period reporting** | `reports.ts:143` — the tax register is whole-ledger only; `ReportsView.tsx:43,594-646` has no period picker; register CSV has no dates | When the bi-monthly VAT201 is due, the user must hand-pivot output/input VAT from the general-ledger CSV — transcription risk on a statutory return | Export CSVs and pivot manually per period |
-| 3 | **Printed tax invoice omits buyer identity** | `invoice-pdf.ts:303` prints only the party name; buyer address + VAT number exist in the model (`types.ts:36-37`) but are never drawn; unset seller VAT number prints as `VAT Reg: -` (`invoice-pdf.ts:283`). SARS (s16/IN31) requires buyer name AND address on invoices over R5,000 incl. VAT | Most B2B invoices are not compliant tax invoices on their face; a buyer's input-VAT claim can be refused | Issue statutory invoices through another channel; keep the app as the books of record |
-| 4 | **No automatic or off-machine backups** | Backup is a manual button only (`books-main.ts:605-618`), 10 kept + single-generation `.bak` (`books-core.ts:918-924`); restore accepts only files already inside the module's backups dir (`books-main.ts:641-654`); no file dialog exists in the module | Machine loss or ransomware = books loss; backups on a USB stick or from support cannot be restored through the UI | Click "Backup now" weekly; copy the backups folder to OneDrive/USB manually |
-| 5 | **Restore unreachable when the store is broken** | The read-error screen offers only "Try again" (`Desk.tsx:66-116`); the desk (and Settings, where restore lives) never renders; no restore path accepts an external file | A corrupt store leaves a non-technical user stuck until support walks them through Explorer surgery in `%APPDATA%\Zanostack\books` | Manual rename of `books-data.json.bak` / forensic copies |
+| 3 | **Tax-invoice identity printing: mostly landed, residue remains** (updated 2026-10-02) | The Billed-To block now draws party name + stamped address + `VAT / Tax ID` (`invoice-pdf.ts:247-277`), and the seller letterhead carries the `Reg:` line and an embedded logo (`invoice-pdf.ts:231-243`); stamped at save time (`store.ts:660-661`). Residue: an unset seller VAT number prints `VAT Reg: -` (`invoice-pdf.ts:519,854`); rows saved before 2026-10-01 have no stamp (no backfill migration); structured banking-details fields are still free text; no zero-rated/exempt distinction | Newly saved invoices and quotes carry full buyer/seller identity; legacy rows print name-only and a missing VAT number shows a dash | Re-save old invoices to stamp them; fill the Tax/VAT number in Settings and on the party |
+| 4 | **No automatic or off-machine backups** | Backup is a manual button only (`books-main.ts:617+`), 10 kept + single-generation `.bak` (`books-core.ts:918-924`); restore accepts only files already inside the module's backups dir (`books-main.ts:641-654`); no file dialog exists in the module | Machine loss or ransomware = books loss; backups on a USB stick or from support cannot be restored through the UI | Click "Backup now" weekly; copy the backups folder to OneDrive/USB manually |
+| 5 | **Restore unreachable when the store is broken** | The read-error screen offers only "Try again" (`Desk.tsx:112`); the desk (and Settings, where restore lives) never renders; no restore path accepts an external file | A corrupt store leaves a non-technical user stuck until support walks them through Explorer surgery in `%APPDATA%\Zanostack\books` | Manual rename of `books-data.json.bak` / forensic copies |
 | 6 | **One-click delete without confirmation** | `InvoiceList.tsx:285-292` (invoices) and `QuotesView.tsx:266-275` (quotes) call delete directly; payments and restores DO confirm | One stray click on a busy list deletes a posted invoice AND its settlement journals; only the audit log remains | Careful clicking; recover via backup restore |
-| 7 | **Fixed, trade-tuned chart of accounts and a single hard-branded bank account** | `chart.ts` pins 28 accounts named for tender/contracting; `BankingView.tsx:229` hard-brands "FNB Business Cheque Account"; new invoices default to engineering descriptions at R50,000 (`InvoiceForm.tsx:97-105`) | Correct for Branten Solutions' trade; any other business must post through misnamed accounts; a second bank account cannot exist | None |
+| 7 | **Fixed, trade-tuned chart of accounts and a single hard-branded bank account** | `chart.ts` pins 28 accounts named for tender/contracting; `BankingView.tsx:229` hard-brands "FNB Business Cheque Account"; new invoices default to engineering descriptions at R50,000 (`InvoiceForm.tsx:95-105`) | Correct for Branten Solutions' trade; any other business must post through misnamed accounts; a second bank account cannot exist | None |
 
 ## High-value gaps for real users (not statutory-blocking)
 
@@ -54,8 +57,15 @@ Full details and every fix commit: see the sign-off.
   invoices paid by multi-invoice payments refuse edits entirely (`store.ts:490-502`). The
   remedy is delete-and-recreate.
 - **Reports are fixed-scope**: P&L YTD only, balance sheet and aging as-of-today; no date
-  ranges or comparatives (`ReportsView.tsx:30-31,339`). Quotes cannot be printed/PDF'd at all
-  (`QuotesView.tsx:117-285`).
+  ranges or comparatives (`ReportsView.tsx:30-31,339`). (Updated 2026-10-02: quotations now
+  print to PDF via the row/form print buttons → `QuotationPrintModal` /
+  `buildQuotationPdf`; the remaining quotation gap is the custom sections below.)
+- **No structured banking-details fields** — payment instructions are a per-invoice
+  free-text note ("Terms & Banking Details") printed under Notes & Payment Terms; there is
+  no bank/holder/account-number/type/branch-code block the app fills for you.
+- **No quotation custom sections** — the quotation PDF prints number, dates, items,
+  discounts and totals, but the rich sections real quotations carry (payment options,
+  care plans, warranty, acceptance/signature block) have no home yet.
 - **Parties are add-only** — no edit or delete (`PartyList.tsx:33-50`); a typo'd contact is
   permanent. Single bank account; one ledger per OS user (no multi-company switcher).
 - **Accessibility beyond the Axe gate**: the zero-critical scan covers only four list
@@ -64,9 +74,9 @@ Full details and every fix commit: see the sign-off.
   focus traps; the error banner is not `role="alert"` — screen-reader users are never
   announced refusals or errors.
 - **VAT mechanics assume a vendor**: pre-set 15% default (`chart.ts:16`), no zero-rated vs
-  exempt distinction on the invoice form, no non-vendor mode, and drafts print titled
-  "TAX INVOICE" (`invoice-pdf.ts:250,300`). Mixed-rate invoices print one VAT line labelled
-  with the FIRST item's rate (`invoice-pdf.ts:357,375`).
+  exempt distinction on the invoice form, no non-vendor mode. (Fixed 2026-10-02: 0%/mixed
+  invoices no longer mislabel the VAT row — `shared/print.ts` `vatTaxLabel`; drafts still
+  print titled "TAX INVOICE" via `invoiceDocumentTitle`, `invoice-pdf.ts:454`.)
 - **Restore bypasses the period lock** — `restoreBackup` has no
   `validateClosedPeriodMutation` check (`backup-restore.ts:238-355`); audited, but a restore
   can un-post a closed period.
@@ -86,7 +96,7 @@ Full details and every fix commit: see the sign-off.
 - Integrity checking is JSON-parse only — bit rot that still parses loads silently.
 - Backups pruned beyond 10; `.bak` holds only the immediately-previous save.
 - The books→tenders bridge writes the tenders store via a non-atomic `writeFileSync`
-  fallback (`books-main.ts:786-791`).
+  fallback (`books-main.ts:823`).
 - No CSP meta and no will-navigate lock on the books renderer (`books-main.ts:852-872`).
 - i18n pending locale data; en-ZA formatting is hardcoded.
 - Posting with no party selected silently creates a party named "Customer"
@@ -101,9 +111,10 @@ Full details and every fix commit: see the sign-off.
    stick after any significant session.
 2. Close a period at most once; don't close until you actually need the lock.
 3. Don't edit invoices that are already paid or statement-settled — delete-and-recreate.
-4. If VAT-registered, treat printed invoices as internal documents and issue statutory
-   invoices elsewhere; if not VAT-registered, ignore the VAT fields (everything presets to
-   15% / VAT-inclusive).
+4. VAT labelling on documents is now honest (0%/mixed print a bare VAT row), but the app
+   still has no zero-rated/exempt distinction and no VAT201 report — if VAT-registered,
+   cross-check statutory invoices against the VAT201 pivot until gap 2 closes; if not
+   VAT-registered, ignore the VAT fields (everything presets to 15% / VAT-inclusive).
 5. Remember the audit log and "immutable" wording are history, not forensic evidence.
 
 ## Alternatives considered
@@ -123,4 +134,7 @@ are each a small, targeted build inside `apps/books`.
 3. Automatic backups + export/import to a chosen folder (machine moves, off-machine copies)
 4. Recovery actions on the read-error screen (restore + reveal data folder)
 5. VAT period report (date-scoped register, VAT201-style layout)
-6. Buyer address + VAT number on printed invoices (plus VAT-vendor configuration)
+6. VAT-vendor configuration: zero-rated/exempt distinction and clear handling of the
+   `VAT Reg: -` fallback (buyer/seller identity printing landed 2026-10-01)
+7. Structured banking-details fields + quotation custom sections (payment options,
+   warranty, acceptance/signature)
