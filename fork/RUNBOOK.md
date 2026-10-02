@@ -147,7 +147,9 @@ npm run sync:upstream
 
 The helper fetches upstream, fast-forwards the mirror, pushes the mirror to
 `genoffice-fork/main`, then merges the mirror into the branch that was active when the
-command started. Therefore, start it from `product`, not from an experimental
+command started. The helper then runs the rebrand sweep, the locale rebuild and
+the brand check itself; a failed mirror push is logged and non-fatal. It also
+supports --dry-run. Therefore, start it from `product`, not from an experimental
 or temporary branch.
 
 After the helper completes:
@@ -215,7 +217,8 @@ matters, so nobody has to remember the sequence:
 4. only if all of those pass: `build:all`, then e2e.
 
 `--fast` stops after step 3 (`fork/tools/verify-sync.mjs` reads that flag; there is no
-`--skip-heavy`). Heavy steps are skipped for **either** reason, and the tool says which: a cheap
+`--skip-heavy`). (`--no-e2e` also exists: run the build but skip e2e.)
+Heavy steps are skipped for **either** reason, and the tool says which: a cheap
 gate that failed (`Skipping build:all and e2e: N cheap gate(s) failed.`), or the flag
 (`Skipping build:all and e2e (--fast).`) — so a broken tree does not cost a 20-minute e2e run.
 
@@ -228,9 +231,9 @@ needs to `e2e/env.d.ts`, never a cast.
 ### Compare against the baseline, always
 
 `fork/BASELINE.md` records the tests that are _already_ failing, and
-`npm run check:baseline` fails only on failures the baseline does not list. It
-records failing test **IDs**, not counts, because a count can match while the set
-of failures changes underneath it.
+`npm run check:baseline` fails only on failures the baseline does not list. The
+comparison is by failing-test **IDs**, not just counts, because a count can match
+while the set of failures changes underneath it.
 
 Refresh it after a fix lands (`--repeat 2` files genuinely flaky tests under "(flaky)" so
 they stop reappearing as new failures):
@@ -240,8 +243,9 @@ node fork/tools/baseline.mjs --write --with-e2e --repeat 2
 ```
 
 **Snapshot status (updated 2026-10-02):** the 09-29 narrative below described drift at
-`d24ead6`; since then the ledger was re-measured and the product released. Current
-facts: HEAD is `894dc39d` (v0.13.0 release commit); books measures **48 files / 658
+`d24ead6`; since then the ledger was re-measured and the product released. The
+v0.13.0 release commit is `894dc39d`; the documentation pass that added this note
+sits on top of it; books measures **48 files / 658
 tests, all green**, shell **718 passed / 6 failed / 3 skipped** with the six failures
 being exactly the known cloud-projects set recorded in `fork/BASELINE.md`; 13 books
 journeys plus 2 tutorial-recorder journeys are green on the real shell. Treat these as
@@ -402,9 +406,10 @@ five shapes, and each has a cheap decisive test. Run the test; do not reason abo
    source guards that pin multi-line string anchors against LF **fail on the checkout
    rather than on the component**, and an agent reviewing that tree will report real-
    looking source defects that exist nowhere else. Seen concretely:
-   `tests/components/error-boundary.test.tsx`'s hook-order guard read the real
-   `Workspace.tsx` through two LF anchors; on CRLF both `indexOf` calls returned
-   `-1`, the slice came back empty, and the assertion that fired blamed the
+   `apps/tenders/tests/components/error-boundary.test.tsx`'s hook-order guard
+   read the real `apps/tenders/src/renderer/src/components/Workspace.tsx`
+   through two LF anchors; on CRLF both `indexOf` calls returned `-1`, the
+   slice came back empty, and the assertion that fired blamed the
    component. **If the tree you are reviewing is CRLF, that is itself the finding —
    fix the checkout before scoring anything read from source.**
 2. **Two agents in one tree.** A pass run while another agent is splitting a file
@@ -448,9 +453,10 @@ real, the spec is what changes.
 
 ## Rare exception: owner-authorized mirror repair
 
-The only acceptable reason to force-update `origin/main` is an explicit owner
+The only acceptable reason to force-update `genoffice-fork/main` is an explicit owner
 instruction to restore `main` as an exact upstream mirror after it was
-accidentally polluted. This is a remote-facing, exceptional operation.
+accidentally polluted. This is a remote-facing, exceptional operation. The
+private product repo (`origin`) must never gain a mirror branch.
 
 Before doing it:
 
@@ -462,7 +468,7 @@ Before doing it:
    `main`** with **that exact upstream SHA**.
 4. Use `--force-with-lease` pinned to the observed old main SHA, never plain
    `--force`.
-5. Fetch and verify afterward that `main`, `origin/main`, and `upstream/main`
+5. Fetch and verify afterward that `main`, `genoffice-fork/main`, and `upstream/main`
    have the same SHA, and that `product` did not move.
 
 If any condition is missing, stop. Do not infer authorization from a general
@@ -494,8 +500,9 @@ which branches actually matter.
 | `product`              | Zanostack development and release                                           |
 | at most one `backup/*` | short-lived undo point, deleted once the app has been used without problems |
 
-After an accepted sync, delete the temporary branches — locally **and** on
-`origin`:
+After an accepted sync, delete each temporary branch — locally, and on the
+remote it actually tracks (`git branch -vv` tells you which — in this checkout
+backup branches have lived on `genoffice-fork`):
 
 ```bash
 # first prove nothing unique would be lost

@@ -23,7 +23,10 @@ All suites below ran on a fresh build (`npx electron-vite build` in apps/books, 
 ## Final gate results (fresh build, 2026-09-28)
 
 - `npx tsc --noEmit` (apps/books): **0 errors**
-- `npx vitest run` (apps/books): **47 files / 630 tests, all green** (baseline was 36 files / 555)
+- `npx vitest run` (apps/books): **47 files / 625 tests, all green** (total corrected
+  2026-10-02: the 5-test final-review file landed between the two gates, so 625 at
+  `190828e` + 5 = 630 at `0374dd5d`, matching the 09-30 gate and 630 + 28 = 658 today)
+  (baseline was 36 files / 555)
 - `npx playwright test books-flows books-smoke`: **13/13 journeys**, Axe zero critical findings
 - `npx tsx tools/verify-suite-workflows.mjs`: **56 / 56** (file unedited)
 - Hygiene: `format:check`, `check:theme-colors`, `check:english-comments`, `check:brand` **PASS**;
@@ -101,9 +104,9 @@ again.
 
 ## Known limitations (with severity)
 
-- **[boundary]** Repo-wide `lint` has 81 pre-existing problems — all in crm/docs/pdf/sheets/
-  shell/slides/tenders, none in books; per the module boundary this run did not touch those
-  modules (a parallel session owns tenders). Books-scoped eslint is clean.
+- **[boundary]** Repo-wide `lint` had 81 pre-existing problems (as measured 2026-09-28) — all
+  in crm/docs/pdf/sheets/shell/slides/tenders, none in books; per the module boundary this
+  run did not touch those modules (a parallel session owns tenders). Books-scoped eslint is clean.
 - **[minor, perf]** Every save re-serializes the whole ledger for the change hash — O(ledger)
   per operation (522ms at 5k invoices; the 10k-op soak shows superlinear chunk growth). Fine
   at the stated scale; an incremental hashing layer is the natural next step if ledgers grow
@@ -138,11 +141,13 @@ invoices, automatic/off-machine backups, recovery-from-error-screen, delete conf
 and a fixed trade-tuned chart of accounts. One additional **verified defect** was found:
 the main-process save guard refuses ANY change to `closedThrough` once set, so the first
 period close works but every subsequent close through the UI is refused (the pure engine
-supports sequential closes; no test ever exercised a second one).
+supports sequential closes (`closing.test.ts:275-279`); no test through the main-process
+save guard and no real-UI journey ever exercises a second close).
 
 These are recorded, with severity, evidence citations and safe-use guidance, in
-`.agents/books_known_gaps.md` — read it before sending the app to outside users. They are
-product-surface gaps, not regressions of anything verified above.
+`.agents/books_known_gaps.md` — read it before sending the app to outside users. The six
+review gaps are product-surface items; the `closedThrough` finding is a verified functional
+defect (pre-existing, not a regression of anything verified above).
 
 ## Addendum — 2026-09-30 (post-sync re-verification + packaged 0.11.0 installer)
 
@@ -194,7 +199,8 @@ Shipped on top of the 09-30 addendum:
 - **Releases**: v0.12.0 (+ v0.12.0-r2 re-publish with normalized asset names) on the
   legacy fork, then **v0.13.0 on `brantenK/zanostack-releases`** with the new feed baked
   in — the 0.11.0 packaged record above is superseded; **0.13.0 is current** (verified:
-  baked `app-update.yml` plus public feed URLs resolve without authentication).
+  baked `app-update.yml` plus public feed URLs resolve without authentication). (a v0.12.0
+  mirror also exists on `brantenK/zanostack-releases` from the transition day).
   Repository layout moved to private-source/public-binaries — see `fork/DISTRIBUTION.md`
   §7.
 - **Boundary item narrowed**: the 09-28 "SARS registration details absent" boundary is
@@ -206,5 +212,6 @@ Shipped on top of the 09-30 addendum:
   `books_known_gaps.md`, updated the same date).
 - The closedThrough first-close-only defect remains open and documented.
 
-Verdict unchanged: **PRODUCTION READY** — now with quotation printing and a branded
-letterhead in the shipped 0.13.0 build.
+Verdict unchanged: **PRODUCTION READY** within the boundary — now with quotation printing
+and a branded letterhead in the shipped 0.13.0 build; the `closedThrough` first-close-only
+blocker and the product-surface gaps remain tracked in `books_known_gaps.md`.

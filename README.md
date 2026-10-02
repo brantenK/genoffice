@@ -14,8 +14,8 @@ Word, Excel, PowerPoint and PDF files, edited by you and your AI, saved back in 
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/brantenK/genoffice" alt="License: Apache-2.0"></a>
-  <a href="https://github.com/brantenK/genoffice/releases/latest"><img src="https://img.shields.io/github/v/release/brantenK/genoffice" alt="Latest release"></a>
-  <a href="https://github.com/brantenK/genoffice/releases"><img src="https://img.shields.io/github/downloads/brantenK/genoffice/total" alt="Downloads"></a>
+  <a href="https://github.com/brantenK/zanostack-releases/releases/latest"><img src="https://img.shields.io/github/v/release/brantenK/zanostack-releases" alt="Latest release"></a>
+  <a href="https://github.com/brantenK/zanostack-releases/releases"><img src="https://img.shields.io/github/downloads/brantenK/zanostack-releases/total" alt="Downloads"></a>
   <a href="https://github.com/brantenK/genoffice/stargazers"><img src="https://img.shields.io/github/stars/brantenK/genoffice?style=flat" alt="GitHub stars"></a>
 </p>
 
@@ -51,18 +51,16 @@ file, makes the change, and shows you exactly what it touched.
   HTML files from a local SQLite index, CJK included. Optionally, the top hits
   are reranked by **[TypeSafe Jev](https://typesafe.ai/)**, the System One
   judgment model, so the file that answers your question comes first.
-- **Your keys or none.** Sign in with Genspark and skip keys, or bring your own
-  key for Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax,
-  Grok, Mistral, OpenRouter, Requesty, Opper, or any OpenAI-compatible endpoint, local
-  servers included.
+- **Your keys or none.** Bring your own key for Claude, OpenAI, Gemini and
+  more — or use custom OpenAI-compatible endpoints.
 - **Scriptable and agent-ready.** The app ships a `genoffice` command line and
   a skill for Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, OpenCode
   and Windsurf, so a coding agent can create, convert, read and edit real
   Office files on your machine without opening a window.
 
-**Get it:** [macOS](https://github.com/brantenK/genoffice/releases/latest) (Apple Silicon and Intel) ·
-[Windows](https://github.com/brantenK/genoffice/releases/latest) (x64 and Arm) ·
-[Linux](https://github.com/brantenK/genoffice/releases/latest) (deb, rpm, AppImage) —
+**Get it:** [macOS](https://github.com/brantenK/zanostack-releases/releases/latest) (Apple Silicon and Intel) ·
+[Windows](https://github.com/brantenK/zanostack-releases/releases/latest) (x64 and Arm) ·
+[Linux](https://github.com/brantenK/zanostack-releases/releases/latest) (deb, rpm, AppImage) —
 details and requirements in [Download](#download).
 
 ## Demo
@@ -208,7 +206,7 @@ same engines as the apps, without opening a window.
 </tr>
 <tr>
 <td><b>One prompt to your agent</b> — "Build an eight-slide deck about the Solar System." The agent reads the skill, writes a style sheet, an outline and one page spec per slide, generates the two photos with <code>genoffice image</code>, and lets <code>genoffice slides check</code> reject anything that overflows or overlaps before <code>genoffice create</code> assembles the <code>.pptx</code> and <code>slides render</code> hands back a PNG per slide to look at.</td>
-<td><b>Install once, from Settings → Integrations</b> — Zanostack lists the coding agents it finds on this computer and writes the skill into each one you pick. Or download the skill as a zip, or run <code>npx skills add genspark-ai/genoffice</code>. Commands and the full workflow are in <a href="#command-line-and-agent-skill">Command line and agent skill</a>.</td>
+<td><b>Install once, from Settings → Integrations</b> — Zanostack lists the coding agents it finds on this computer and writes the skill into each one you pick. Or download the skill as a zip, or run <code>npx skills add brantenK/genoffice</code>. Commands and the full workflow are in <a href="#command-line-and-agent-skill">Command line and agent skill</a>.</td>
 </tr>
 </table>
 
@@ -216,7 +214,7 @@ same engines as the apps, without opening a window.
 
 Every `genoffice` command is also an MCP tool. Claude Code, Claude Desktop,
 Cursor and any other MCP client can start `genoffice mcp` themselves, with no
-skill to install and no window open, and get 29 tools plus the op references
+skill to install and no window open, and get 32 tools (30 over HTTP) plus the op references
 as resources. A second, HTTP server inside the app lets an agent build a Word
 document in a visible editor tab while you watch.
 
@@ -244,8 +242,7 @@ document in a visible editor tab while you watch.
   formulas and charts in Sheets, slides drawn onto the canvas, every AI turn a
   snapshot you can roll back.
 - **Your model, your key.** Bring a key for Claude, OpenAI, Gemini, DeepSeek and
-  more, local servers and any OpenAI-compatible endpoint included; a Genspark
-  sign-in is optional, never required.
+  more, local servers and any OpenAI-compatible endpoint included.
 - **Business apps included.** CRM, Tenders and double-entry Books share a local
   workflow layer, so won deals and contract milestones invoice straight into the
   ledger.
@@ -264,8 +261,8 @@ document in a visible editor tab while you watch.
 
 **Bring your own key — the default.** Settings → AI lists Claude, OpenAI,
 Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax, Grok, Mistral, OpenRouter,
-Requesty, Opper and OpenCode Zen/Go, plus a custom slot for any OpenAI-compatible
-endpoint (base URL + key), including local model servers. Search and media have
+Requesty, Opper, Codex CLI and OpenCode Zen/Go, plus a custom slot for any
+OpenAI-compatible endpoint (base URL + key), including local model servers. Search and media have
 their own per-capability providers under **AI Media & Search**: Serper, Serply,
 Tavily or Parallel for web search, and OpenAI, Gemini, Doubao/Seedream, GLM, Grok, Qwen,
 MiniMax or any OpenAI-compatible images endpoint for image generation and
@@ -320,7 +317,7 @@ through the [MCP server](#mcp-server), Claude Desktop and every MCP client.
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Settings → Integrations** in the app | Lists the agents found on this computer; one click writes the skill into each one you choose. An **Update** button appears when a Zanostack release ships a newer skill. |
 | **Download as zip** on the same page   | The layout claude.ai, the Claude desktop apps and other assistants accept as an uploaded skill.                                                                          |
-| `npx skills add genspark-ai/genoffice` | Installs from this repository into any skills-compatible agent.                                                                                                          |
+| `npx skills add brantenK/genoffice`    | Installs from this repository into any skills-compatible agent.                                                                                                          |
 
 Then start a new chat and ask for a document. The skill teaches the agent when
 to reach for `genoffice`, how to read a file before editing it, and how to
@@ -444,18 +441,18 @@ the provider configured in Zanostack.
 
 ## Download
 
-| Platform                             | Requirements                                          | Download                                                                               |
-| ------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **macOS** — Apple Silicon (arm64)    | macOS 11+                                             | [Latest `.dmg` (arm64)](https://github.com/brantenK/genoffice/releases/latest)         |
-| **macOS** — Intel (x64)              | macOS 11+                                             | [Latest `.dmg` (x64)](https://github.com/brantenK/genoffice/releases/latest)           |
-| **Windows** (x64, most PCs)          | Windows 10+, Intel/AMD                                | [Latest `-x64.exe` installer](https://github.com/brantenK/genoffice/releases/latest)   |
-| **Windows** on Arm (ARM64)           | Windows 11 on Arm (Snapdragon X and similar)          | [Latest `-arm64.exe` installer](https://github.com/brantenK/genoffice/releases/latest) |
-| **Linux** — Debian / Ubuntu          | x86_64, glibc 2.34+ (Ubuntu 22.04 or newer)           | [Latest `.deb`](https://github.com/brantenK/genoffice/releases/latest)                 |
-| **Linux** — Fedora / RHEL / openSUSE | x86_64, glibc 2.34+ (Fedora 35+, RHEL 9+, Leap 15.6+) | [Latest `.rpm`](https://github.com/brantenK/genoffice/releases/latest)                 |
-| **Linux** — other distributions      | x86_64, glibc 2.34+, FUSE 2                           | [Latest `.AppImage`](https://github.com/brantenK/genoffice/releases/latest)            |
+| Platform                             | Requirements                                          | Download                                                                                        |
+| ------------------------------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **macOS** — Apple Silicon (arm64)    | macOS 11+                                             | [Latest `.dmg` (arm64)](https://github.com/brantenK/zanostack-releases/releases/latest)         |
+| **macOS** — Intel (x64)              | macOS 11+                                             | [Latest `.dmg` (x64)](https://github.com/brantenK/zanostack-releases/releases/latest)           |
+| **Windows** (x64, most PCs)          | Windows 10+, Intel/AMD                                | [Latest `-x64.exe` installer](https://github.com/brantenK/zanostack-releases/releases/latest)   |
+| **Windows** on Arm (ARM64)           | Windows 11 on Arm (Snapdragon X and similar)          | [Latest `-arm64.exe` installer](https://github.com/brantenK/zanostack-releases/releases/latest) |
+| **Linux** — Debian / Ubuntu          | x86_64, glibc 2.34+ (Ubuntu 22.04 or newer)           | [Latest `.deb`](https://github.com/brantenK/zanostack-releases/releases/latest)                 |
+| **Linux** — Fedora / RHEL / openSUSE | x86_64, glibc 2.34+ (Fedora 35+, RHEL 9+, Leap 15.6+) | [Latest `.rpm`](https://github.com/brantenK/zanostack-releases/releases/latest)                 |
+| **Linux** — other distributions      | x86_64, glibc 2.34+, FUSE 2                           | [Latest `.AppImage`](https://github.com/brantenK/zanostack-releases/releases/latest)            |
 
-All builds come from `main`; the macOS and Windows installers are signed.
-Older versions are on the [Releases](https://github.com/brantenK/genoffice/releases) page.
+All builds come from `product`; the macOS and Windows installers are signed.
+Older versions are on the [Releases](https://github.com/brantenK/zanostack-releases/releases) page.
 
 <details>
 <summary><b>Installing on Linux</b></summary>
@@ -464,14 +461,14 @@ The deb installs with apt — it pulls in the dependencies and adds Zanostack
 to the applications menu:
 
 ```bash
-sudo apt install ./genoffice_<version>_amd64.deb
+sudo apt install ./zanostack_<version>_amd64.deb
 ```
 
 On Fedora / RHEL-family / openSUSE, install the rpm instead:
 
 ```bash
-sudo dnf install ./genoffice-<version>.x86_64.rpm     # Fedora / RHEL family
-sudo zypper install ./genoffice-<version>.x86_64.rpm  # openSUSE
+sudo dnf install ./zanostack-<version>.x86_64.rpm     # Fedora / RHEL family
+sudo zypper install ./zanostack-<version>.x86_64.rpm  # openSUSE
 ```
 
 The AppImage runs in place: install the FUSE 2 runtime
@@ -487,8 +484,8 @@ chmod +x Zanostack-<version>.AppImage
 
 ## How it works
 
-Seven Electron apps — Docs, Sheets, Slides, PDF, Markdown, HTML and the
-tabbed shell — share one engine layer of pure TypeScript packages plus a Rust
+Ten Electron apps — Docs, Sheets, Slides, PDF, Markdown, HTML, CRM, Tenders,
+Books and the tabbed shell — share one engine layer of pure TypeScript packages plus a Rust
 sidecar for `.xlsx`. The original file is always the source of truth: edits
 are applied as narrow patches, and everything the editor did not touch
 survives the round trip untouched.
@@ -514,7 +511,7 @@ npm install
 npm run fixtures     # generate test .docx fixtures
 npm test             # engine + app unit tests (docs/sheets/slides need no display)
 npm run typecheck    # tsc --noEmit across every workspace
-npm run dev          # all six editors + shell against Vite dev servers
+npm run dev          # all editors + shell against Vite dev servers
 npm run dev:docs     # a single app (same pattern works per workspace)
 npm run dist:mac     # package macOS dmg (regenerates third-party notices)
 npm run dist:win     # package Windows nsis installer
@@ -568,8 +565,7 @@ back byte-for-byte, so documents keep working in Microsoft Office.
 
 Document editing is fully local — files never leave your machine to be
 opened, edited, saved or converted. The AI features (agents, search, image
-tools) need a network connection, with either a Genspark sign-in or your own
-model API key.
+tools) need a network connection, with your own model API key.
 
 </details>
 
@@ -594,7 +590,7 @@ convert to editable text rather than a page image.
 <details>
 <summary><b>Can I use my own AI model or API key?</b></summary>
 
-Yes. Besides the keyless Genspark sign-in, Zanostack supports bring your own
+Yes. Zanostack supports bring your own
 key for Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax,
 Grok, Mistral, OpenRouter, Requesty, Opper and OpenCode Zen/Go, plus any OpenAI-compatible
 endpoint — including local model servers. Search, image generation and
@@ -655,8 +651,9 @@ and Tenders (milestone billing) automatically.
 
 **How does the cross-app invoicing work?**
 When you mark a CRM deal as won and click "Create Invoice in Zano Books", an
-`IPC` call fires from the CRM main process to the Books main process. Books
-creates a sales invoice, posts a balanced double-entry journal entry
+IPC call fires from the CRM window to the CRM main process, which posts the
+invoice through the Books engine in the same shell process. Books creates a
+sales invoice, posts a balanced double-entry journal entry
 (DR acc-ar / CR acc-sales + acc-vat), updates the CRM deal with the invoice
 reference, and switches the shell tab to Zano Books — all without leaving the
 app. The Tenders milestone billing works the same way.
@@ -728,8 +725,8 @@ MIT/Apache-2.0/BSD-3-Clause/OFL.
 
 Zanostack is licensed under the [Apache License 2.0](LICENSE), with one
 exception: the `ee/` directory is reserved for future enterprise modules and
-is covered by the [Zanostack Enterprise License](ee/LICENSE).
+is covered by the enterprise license in [`ee/LICENSE`](ee/LICENSE).
 
-The Zanostack and Genspark names and logos are trademarks of Mainfunc, Inc.
+The Genspark name and logos are trademarks of Mainfunc, Inc.
 The Apache-2.0 license does not grant permission to use them (see section 6);
 forks should use their own branding.

@@ -13,6 +13,7 @@ of the product architecture, not as a suggestion:
 | `origin`   | The Zanostack GitHub repository. Normal fork pushes go here.                 |
 | `main`     | Read-only, fast-forward-only mirror of `upstream/main`.                      |
 | `product`  | Zanostack development and release branch. Fork work belongs here.            |
+| `genoffice-fork` | Legacy public fork (`brantenK/genoffice`). Publishes the `main` mirror and hosts old releases; not a product push target. See `fork/RUNBOOK.md`. |
 
 ### Normal work and pushes
 
@@ -95,8 +96,8 @@ system mode).
    the authored color stays the real declaration, the remapped twin lives in
    a screen-only `--dk-*` / `.page-dark` layer, and print/export never see it.
 5. **Canvas-drawn UI affordances go through a constants table.** Konva/canvas
-   editing chrome (selection frames, guides, handles) reads from the app's
-   canvas color table (e.g. `canvas-colors.ts`) keyed by the current theme —
+   editing chrome (selection frames, guides, handles) reads from a theme-keyed
+   color table in the app's renderer —
    no inline hex in draw calls.
 
 ## Build gotchas
@@ -119,4 +120,4 @@ system mode).
   defines the key set). Add a new key to `zh.ts` and to every sibling shard;
   the `satisfies Record<keyof typeof zh, string>` on each shard turns a
   missing or extra key into a type error. Never grow the aggregator back into
-  a single 19-locale object.
+  a single monolithic locale object.

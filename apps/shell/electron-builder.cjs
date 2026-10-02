@@ -622,10 +622,13 @@ const config = {
     // deb control metadata; values match the manually published 0.5.149 deb
     // so apt sees the new packages as the same lineage. electron-builder takes
     // the control Homepage field from package.json "homepage", which the fork
-    // no longer sets (it pointed at upstream's repository) — so the field is
-    // simply absent until the fork has a public product URL of its own. The
-    // Package field is pinned in the deb block below (packageName is a
-    // per-target option, rejected here by the schema).
+    // no longer sets (it pointed at upstream's repository) — and with no
+    // resolvable homepage/repository, app-builder-lib's getRepositoryInfo()
+    // returns null and the deb/rpm FpmTarget throws "Please specify project
+    // homepage": a dist:linux build fails until the fork sets an explicit
+    // homepage (it never emits an upstream Homepage; NSIS writes no info
+    // URLs). The Package field is pinned in the deb block below (packageName
+    // is a per-target option, rejected here by the schema).
     maintainer: 'Zanostack <team@zanostack.com>',
     vendor: 'Zanostack <team@zanostack.com>',
     category: 'Office',

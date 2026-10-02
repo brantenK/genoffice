@@ -1,6 +1,6 @@
 # Zano Books — Known Gaps & Safe-Use Guide (pre-release)
 
-Date: 2026-09-28 · Branch `product` @ `29ec88c` · **Updated 2026-10-02 @ `894dc39d`**
+Date: 2026-09-28 · Branch `product` @ `29ec88c` · **Updated 2026-10-02 @ `c0bf8a63`**
 (quotation printing, letterhead logo/registration and buyer-identity printing landed in
 the 0.12.0 print batch — the affected entries below carry dated notes; line numbers
 re-checked against the current tree where flagged).
@@ -31,13 +31,13 @@ Full details and every fix commit: see the sign-off.
 
 | # | Gap | Evidence | What a user experiences | Workaround today |
 |---|-----|----------|--------------------------|------------------|
-| 1 | **Year-2+ period closes are refused (verified bug)** | `shared/closing.ts:44-52` + `books-main.ts:441` refuse ANY change to `closedThrough` once one exists; the pure engine supports sequential closes (`closing.test.ts:275-279`) but the main-process save guard blocks them, and no test/journey ever closed twice | First Close Period works; every later close fails with "cannot be changed through a raw save" — no in-app way forward | Close at most once; undo via backup restore |
+| 1 | **Year-2+ period closes are refused (verified bug)** | `shared/closing.ts:44-52` + `books-main.ts:441` refuse ANY change to `closedThrough` once one exists; the pure engine supports sequential closes (`closing.test.ts:275-279`) but the main-process save guard blocks them, and no test through that guard and no real-UI journey ever exercises a second close | First Close Period works; every later close fails with "cannot be changed through a raw save" — no in-app way forward | Close at most once; undo via backup restore |
 | 2 | **No VAT201-style period reporting** | `reports.ts:143` — the tax register is whole-ledger only; `ReportsView.tsx:43,594-646` has no period picker; register CSV has no dates | When the bi-monthly VAT201 is due, the user must hand-pivot output/input VAT from the general-ledger CSV — transcription risk on a statutory return | Export CSVs and pivot manually per period |
-| 3 | **Tax-invoice identity printing: mostly landed, residue remains** (updated 2026-10-02) | The Billed-To block now draws party name + stamped address + `VAT / Tax ID` (`invoice-pdf.ts:247-277`), and the seller letterhead carries the `Reg:` line and an embedded logo (`invoice-pdf.ts:231-243`); stamped at save time (`store.ts:660-661`). Residue: an unset seller VAT number prints `VAT Reg: -` (`invoice-pdf.ts:519,854`); rows saved before 2026-10-01 have no stamp (no backfill migration); structured banking-details fields are still free text; no zero-rated/exempt distinction | Newly saved invoices and quotes carry full buyer/seller identity; legacy rows print name-only and a missing VAT number shows a dash | Re-save old invoices to stamp them; fill the Tax/VAT number in Settings and on the party |
-| 4 | **No automatic or off-machine backups** | Backup is a manual button only (`books-main.ts:617+`), 10 kept + single-generation `.bak` (`books-core.ts:918-924`); restore accepts only files already inside the module's backups dir (`books-main.ts:641-654`); no file dialog exists in the module | Machine loss or ransomware = books loss; backups on a USB stick or from support cannot be restored through the UI | Click "Backup now" weekly; copy the backups folder to OneDrive/USB manually |
+| 3 | **Tax-invoice identity printing: mostly landed, residue remains** (updated 2026-10-02) | The Billed-To block now draws party name + stamped address + `VAT / Tax ID` (`invoice-pdf.ts:247-277`), and the seller letterhead carries the `Reg:` line (`invoice-pdf.ts:231-243`) and an embedded logo (`invoice-pdf.ts:199-228`, drawn at 456-512); stamped at save time (`store.ts:660-661`). Residue: an unset seller VAT number prints `VAT Reg: -` (`invoice-pdf.ts:519,854`); rows saved before 2026-10-01 have no stamp (no backfill migration); structured banking-details fields are still free text; no zero-rated/exempt distinction | Newly saved invoices and quotes carry full buyer/seller identity; legacy rows print name-only and a missing VAT number shows a dash | Re-save old invoices to stamp them; fill the Tax/VAT number in Settings and on the party |
+| 4 | **No automatic or off-machine backups** | Backup is a manual button only (`books-main.ts:617+`), 10 kept (`books-main.ts:627`) + single-generation `.bak` (`books-core.ts:931-937`); restore accepts only files already inside the module's backups dir (`books-main.ts:641-654`); no file dialog exists in the module | Machine loss or ransomware = books loss; backups on a USB stick or from support cannot be restored through the UI | Click "Backup now" weekly; copy the backups folder to OneDrive/USB manually |
 | 5 | **Restore unreachable when the store is broken** | The read-error screen offers only "Try again" (`Desk.tsx:112`); the desk (and Settings, where restore lives) never renders; no restore path accepts an external file | A corrupt store leaves a non-technical user stuck until support walks them through Explorer surgery in `%APPDATA%\Zanostack\books` | Manual rename of `books-data.json.bak` / forensic copies |
-| 6 | **One-click delete without confirmation** | `InvoiceList.tsx:285-292` (invoices) and `QuotesView.tsx:266-275` (quotes) call delete directly; payments and restores DO confirm | One stray click on a busy list deletes a posted invoice AND its settlement journals; only the audit log remains | Careful clicking; recover via backup restore |
-| 7 | **Fixed, trade-tuned chart of accounts and a single hard-branded bank account** | `chart.ts` pins 28 accounts named for tender/contracting; `BankingView.tsx:229` hard-brands "FNB Business Cheque Account"; new invoices default to engineering descriptions at R50,000 (`InvoiceForm.tsx:95-105`) | Correct for Branten Solutions' trade; any other business must post through misnamed accounts; a second bank account cannot exist | None |
+| 6 | **One-click delete without confirmation** | `InvoiceList.tsx:285-292` (invoices) and `QuotesView.tsx:280-288` (quotes) call delete directly; payments and restores DO confirm | One stray click on a busy list deletes a posted invoice AND its settlement journals; only the audit log remains | Careful clicking; recover via backup restore |
+| 7 | **Fixed, trade-tuned chart of accounts and a single hard-branded bank account** | `chart.ts` pins 31 accounts (23 leaf posting accounts under 8 groups) named for the trade; `BankingView.tsx:229` hard-brands "FNB Business Cheque Account"; new invoices default to engineering descriptions at R50,000 (`InvoiceForm.tsx:95-105`) | Correct for Branten Solutions' trade; any other business must post through misnamed accounts; a second bank account cannot exist | None |
 
 ## High-value gaps for real users (not statutory-blocking)
 
@@ -53,7 +53,7 @@ Full details and every fix commit: see the sign-off.
   person at the machine sees client names and full financials; the ledger can be edited
   outside the app and loads as gospel.
 - **Edit refusals on settled invoices** (by design — every posted edit re-posts the settled
-  cash): suspense-settled invoices refuse every edit including notes-only (`store.ts:705-708`);
+  cash): suspense-settled invoices refuse every edit including notes-only (`store.ts:712-719`);
   invoices paid by multi-invoice payments refuse edits entirely (`store.ts:490-502`). The
   remedy is delete-and-recreate.
 - **Reports are fixed-scope**: P&L YTD only, balance sheet and aging as-of-today; no date
@@ -69,8 +69,9 @@ Full details and every fix commit: see the sign-off.
 - **Parties are add-only** — no edit or delete (`PartyList.tsx:33-50`); a typo'd contact is
   permanent. Single bank account; one ledger per OS user (no multi-company switcher).
 - **Accessibility beyond the Axe gate**: the zero-critical scan covers only four list
-  screens; form-heavy surfaces are never scanned; no label is programmatically associated
-  with any input anywhere in the renderer (zero `htmlFor`); modals lack `role="dialog"` and
+  screens; form-heavy surfaces are never scanned; only 2 `htmlFor` exist module-wide
+  (`SettingsView.tsx:469,594` — letterhead footer, close-through date); every other label
+  is adjacency-only; modals lack `role="dialog"` and
   focus traps; the error banner is not `role="alert"` — screen-reader users are never
   announced refusals or errors.
 - **VAT mechanics assume a vendor**: pre-set 15% default (`chart.ts:16`), no zero-rated vs
@@ -84,7 +85,7 @@ Full details and every fix commit: see the sign-off.
 ## Minor / polish
 
 - Invoice PDFs and report CSVs are written to `%TEMP%\zano-books-exports\<stamp>\` and never
-  cleaned (`books-main.ts:345-355`).
+  cleaned (`books-main.ts:352-373`).
 - No diagnostics surface for support: main-process errors go to `console.error` only; the
   packaged app writes no log file.
 - ~600MB installed footprint / ~148MB installer for the whole shell; no books-only option.
@@ -94,16 +95,18 @@ Full details and every fix commit: see the sign-off.
 - "Rate (excl)" column header contradicts the default "Prices are VAT-inclusive" setting
   (`InvoiceForm.tsx:356`) — label-only, but VAT-misstatement prone.
 - Integrity checking is JSON-parse only — bit rot that still parses loads silently.
+- No fsync before rename — saves survive process kill and disk-full (verified), but a
+  power-loss can lose the most recent save(s).
 - Backups pruned beyond 10; `.bak` holds only the immediately-previous save.
 - The books→tenders bridge writes the tenders store via a non-atomic `writeFileSync`
   fallback (`books-main.ts:823`).
-- No CSP meta and no will-navigate lock on the books renderer (`books-main.ts:852-872`).
+- No CSP meta and no will-navigate lock anywhere in the books renderer.
 - i18n pending locale data; en-ZA formatting is hardcoded.
 - Posting with no party selected silently creates a party named "Customer"
   (`store.ts:639-651`); a draft dated before a close becomes permanently unpostable after
   the close (`closing.ts:129`).
 - Base currency and financial-year start can be changed with posted data and no guard
-  (`SettingsView.tsx:335-374`), silently re-reading every posted figure.
+  (`SettingsView.tsx:379-420`), silently re-reading every posted figure.
 
 ## Safe-use guide until the blockers close
 
@@ -138,3 +141,6 @@ are each a small, targeted build inside `apps/books`.
    `VAT Reg: -` fallback (buyer/seller identity printing landed 2026-10-01)
 7. Structured banking-details fields + quotation custom sections (payment options,
    warranty, acceptance/signature)
+
+(Blocker 7 — fixed chart + branded bank account — is deliberately not listed: it is a
+product decision, not a build item.)

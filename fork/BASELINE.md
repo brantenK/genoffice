@@ -52,7 +52,7 @@ this as "known-bad", not as "accepted".
 
 2835 passed, 2 failed, 3 skipped
 
-- (nothing failing)
+- (nothing failing deterministically; the 2 failed appear under (flaky) below)
 
 
 ## @genoffice/sheets (flaky)
@@ -77,7 +77,7 @@ Failed in some runs but not all — not treated as a known failure.
 test is new in that sync's upstream range and fails on Windows for the same
 store-file-delete-does-not-take-effect-on-win32 root cause as the five above —
 both the test and `apps/shell/src/main/cloud-projects.ts` are byte-identical to
-upstream. Hand-added per the runbook's hand-edit precedent.)
+upstream. Hand-added — the tool cannot measure a test that did not exist at record time.)
 
 ## @genoffice/slides
 
@@ -220,7 +220,7 @@ upstream. Hand-added per the runbook's hand-edit precedent.)
 
 ## e2e
 
-0 passed, 5 failed, 0 skipped
+0 passed, 5 failed, 0 skipped (tool-run count at `7297633f`; two entries below are hand-added after that run, and the e2e pass count is not captured by the tool)
 
 - e2e\docs-spellcheck-reenable.spec.ts:51:5 › re-enabling spellcheck respells existing text without user input
 - e2e\html-tab.spec.ts:166:7 › html editor › saving without edits keeps BOM, CRLF and the missing trailing newline byte-identical
@@ -250,8 +250,9 @@ explicit F2-into-edit-mode all leave editor text empty while Enter still moves
 the selection. Typing into a freshly created sheets view works (sheets-new-blank
 passes). The main-process spare machinery is byte-identical to upstream
 (`apps/shell/src/main/tab-manager.ts` openSheetsTab/activateTab diff empty), so
-the divergence is the fork renderer's adopted-view intake layer (App.tsx is a
-deliberate fork layer over upstream's). Real-user severity: moderate — a second
+the divergence is the sheets renderer's adopted-view intake layer
+(`apps/sheets/src/renderer/App.tsx` is a deliberate fork layer over
+upstream's). Real-user severity: moderate — a second
 workbook opened while a Sheets tab is warm may not accept typing until
 investigated; workaround: unknown, needs a dedicated root-cause pass in
 apps/sheets/src/renderer (candidate: the alive-view workbook intake blend).

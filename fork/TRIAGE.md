@@ -2,6 +2,8 @@
 
 Date: 2026-08-27 · Branch: `product` @ 5806e14 · Upstream: genspark-ai/genoffice@main (v0.8.440 era)
 
+(Dated 2026-08-27 report at `product@5806e14`; several 'still open' items below were resolved within days — `fork/COMPLIANCE.md` holds the current status.)
+
 ## What was verified on this Windows machine
 
 | Step | Result |
@@ -10,8 +12,8 @@ Date: 2026-08-27 · Branch: `product` @ 5806e14 · Upstream: genspark-ai/genoffi
 | Rust xlsx sidecar `cargo build --release` | ✅ 8.5 MB exe, 10m51s |
 | `npm run fixtures` | ✅ zero drift vs committed fixtures (rebrand sweep is generator-safe) |
 | `npm run build:all` (all 6 apps) | ✅ exit 0 |
-| `npm run typecheck` (19 workspaces) | ✅ exit 0 — includes the 551-string rebrand sweep |
-| Unit tests, all 19 workspaces | ✅ green after fixes below (see "slides flake") |
+| `npm run typecheck` (19 workspaces) | ✅ exit 0 (run after the rebrand sweep was applied) |
+| Unit tests, all 18 test workspaces | ✅ green after fixes below (see "slides flake") |
 | `npm run test:e2e` (Playwright-Electron, 37 specs) | ✅ 37/37 after fixes below |
 
 ## Issues found and fixed in this session (all committed on `product`)
@@ -43,11 +45,11 @@ hardcode brand strings again:
    `UNTITLED_DOCS_TAB_TITLE` from `tab-manager.ts`.
 
 **Re-runnable:** the full suite is green per-workspace. The chained
-`npm test` run showed 7 slides failures (save-streaming, copy-paste,
-group-edit, chart round-trip, slide-size) that **all pass in isolation** —
+`npm test` run showed 7 slides failures across five areas: save-streaming, copy-paste,
+group-edit, chart round-trip, slide-size that **all pass in isolation** —
 load/timeout flakes when slides runs right after the heavy sheets/shell
 suites on a OneDrive-synced disk. Watch for recurrence; if persistent,
-raise the 90s per-test timeout or run slides first.
+raise slides' 20s per-test `testTimeout` (`apps/slides/vitest.config.ts`) or run slides first (the 90s figure belongs to the e2e Playwright config).
 
 ## Upstream bugs to work first (from genspark-ai/genoffice issues)
 
@@ -135,7 +137,7 @@ sheets tab ~4s. Applied:
    slides 4.6->3.8MB, docs 5.4->4.7MB.
 3. Tooling: `fork/perf-probe.cjs` (startup + tab-open latency probe).
 
-Still open (ranked): lazy i18n per locale (sheets strings-app.ts 1.5MB,
+Still open (ranked): lazy i18n per locale — DONE in `99f06750` (generated per-locale chunks) (sheets strings-app.ts 1.5MB,
 docs/slides strings-ribbon ~700KB each are statically parsed), warm sidecar
 across workbook opens, paint-gated window show. Re-measure on the PACKAGED
 installer before deeper work — dev runs on a OneDrive folder are pessimistic.

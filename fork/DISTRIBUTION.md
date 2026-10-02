@@ -37,10 +37,12 @@ Fork-side operational doc, sibling to `RUNBOOK.md` (upstream syncs) and
 ## 3. Code signing — what's free, what isn't
 
 - **Free, built in**: `GENOFFICE_WIN_SIGN_MODE=test` — the builder's signing dispatch
-  (`electron-builder.cjs:725-742`) shells out to `scripts/win-sign.cjs`, whose two modes
+  (`electron-builder.cjs:725-755`) shells out to `scripts/win-sign.cjs`, whose two modes
   are documented there ("test" = self-signed PFX, "production" = DigiCert KeyLocker).
-  **Note:** `scripts/win-sign.cjs` does not exist in this repository (it lives in
-  upstream's CI) — enabling either sign mode today fails at the signing step until the
+  **Note:** `scripts/win-sign.cjs` does not exist in this repository
+  (`scripts/win-sign.cjs` belongs to upstream's separate release automation —
+  upstream's public repo and CI don't contain it, and it was never committed here) —
+  enabling either sign mode today fails at the signing step until the
   script is restored/committed. Unset (the default) packages unsigned, which is what all
   releases so far have used.
 - **Real signing (removes the warning) is never free** — since 2023 all genuine certs live
@@ -55,13 +57,14 @@ Fork-side operational doc, sibling to `RUNBOOK.md` (upstream syncs) and
 - Recommendation: stay unsigned while testing; buy the cheapest managed signing when
   distributing publicly.
 
-## 4. In-app auto-updates (live since 0.13.0)
+## 4. In-app auto-updates (current feed live since 0.13.0)
 
 1. The feed is `https://github.com/brantenK/zanostack-releases/releases/latest/download`
    (baked into 0.13.0+ installers; the 0.12.0-era installers read the legacy fork's
    releases instead — see §7).
-2. A release must publish THREE files with matching names: the installer `.exe`, the
-   `.blockmap`, and electron-builder's `latest.yml`. The updater checks the feed, asks the
+2. A release publishes three files with matching names: the installer `.exe`, the
+   `.blockmap`, and electron-builder's `latest.yml` (the blockmap is not fetched by the
+   updater — full-package policy — but ship it anyway). The updater checks the feed, asks the
    user before downloading (`autoDownload: false`), and installs on quit
    (`autoInstallOnAppQuit: true`; `updater.ts:616-619`). `allowDowngrade: false`.
 3. Release flow: bump version → `dist:win` with the feed URL set → publish the three
@@ -84,14 +87,16 @@ Fork-side operational doc, sibling to `RUNBOOK.md` (upstream syncs) and
   AI is sold through your own gateway.
 - AI is **fully BYOK** today (keys pasted by users in Settings, stored in
   `userData/ai-settings.json`, traffic direct to providers) — nothing of yours is exposed,
-  and no baked keys exist anywhere (audited 2026-09-30).
+  and no baked keys exist anywhere (the OpenAI/Anthropic/etc. editor paths are strictly
+  user-pasted; the dormant genspark provider can additionally use a per-machine gsk
+  login key when one exists — `packages/ai-search/src/gsk.ts`) (audited 2026-09-30).
 - Before commercializing, re-check the upstream project's license terms.
 
 ## 6. Data-safety facts worth repeating to users
 
 - Books data: `%APPDATA%\Zanostack\books\books-data.json` (atomic writes, `.bak` sibling,
   `backups/` rotation, restore safety copies). Survives updates and reinstalls.
-- Backups are manual — "Backup Now" is the only `books-backup-*.json` producer.
+- Backups are manual — "Backup now" is the only `books-backup-*.json` producer.
 - Never run an older build over data written by a newer one: newer schema versions are
   refused by older builds (safely, with an error — never corruption).
 
