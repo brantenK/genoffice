@@ -1263,9 +1263,8 @@ export function AiPanel({
         aria-label={t('aiPanelTitle')}
       />
       <div className="ai-panel-header">
-        <span className="ai-panel-title">
+        <span className="ai-panel-title" role="img" aria-label={t('aiPanelTitle')}>
           <ZanoMark size={22} />
-          {t('aiPanelTitle')}
         </span>
         <div className="ai-panel-header-actions">
           <AiPanelSideButton

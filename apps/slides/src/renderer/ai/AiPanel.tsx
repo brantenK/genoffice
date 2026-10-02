@@ -2029,7 +2029,6 @@ export function AiPanel({
       <div className="ai-panel-header">
         <span className="ai-panel-title">
           <ZanoMark size={22} />
-          {t('aiPanelTitle')}
         </span>
         <div className="ai-panel-header-actions">
           <AiPanelSideButton

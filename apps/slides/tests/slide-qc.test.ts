@@ -14,7 +14,7 @@ import {
   qcSlidePage,
   settingsSupportVision,
 } from '../src/renderer/ai/slide-qc'
-import { defaultAiSettings, type AiProviderId } from '@genoffice/ai-provider'
+import { defaultAiSettings, type AiProviderId, type AiSettings } from '@genoffice/ai-provider'
 import type { DeckAccess } from '../src/renderer/ai/slides-skill'
 
 const access: DeckAccess = {
@@ -115,10 +115,14 @@ describe('vision capability fallback', () => {
   })
 
   it('does not send screenshots to text-only models under a vision-capable provider', () => {
-    const settings = defaultAiSettings()
-    settings.providers.genspark.model = 'deep-seek-v4-flash'
+    // Fork divergence: upstream defaults to its own provider; this fork defaults
+    // to anthropic, so pick a vision-capable provider that defaultAiSettings()
+    // actually seeds (deepseek) — the vision-capability check reads the ACTIVE
+    // provider's model.
+    const settings = { ...defaultAiSettings(), provider: 'deepseek' } as AiSettings
+    settings.providers.deepseek.model = 'deep-seek-v4-flash'
     expect(settingsSupportVision(settings)).toBe(false)
-    settings.providers.genspark.model = 'claude-opus-4-7'
+    settings.providers.deepseek.model = 'claude-opus-4-7'
     expect(settingsSupportVision(settings)).toBe(true)
   })
 
